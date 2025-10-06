@@ -26,10 +26,10 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A pipeline that returns the input video without any processing that is useful for testing and debugging.",
     category: "video-input",
   },
-  vod: {
-    name: "VOD",
-    about:
-      "A pipeline that returns a static video file without any processing that is useful for testing and debugging.",
-    category: "no-video-input",
-  },
+  // vod: {
+  //   name: "VOD",
+  //   about:
+  //     "A pipeline that returns a static video file without any processing that is useful for testing and debugging.",
+  //   category: "no-video-input",
+  // },
 };
