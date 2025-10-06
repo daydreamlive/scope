@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 
+# FPS calculation constants
+MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
+MAX_FPS = 60.0  # Maximum FPS cap
+DEFAULT_FPS = 30.0  # Default FPS
+
 
 class FrameProcessor:
     def __init__(
@@ -50,10 +55,9 @@ class FrameProcessor:
         self.processing_timestamps = deque(maxlen=30)  # Keep last 30 processing timestamps for averaging
         self.last_fps_update = time.time()
         self.fps_update_interval = 0.5  # Update FPS every 0.5 seconds
-        self.min_fps = 1.0  # Minimum FPS to prevent division by zero
-        self.max_fps = 60.0  # Maximum FPS cap
-        self.current_pipeline_fps = 30.0  # Default FPS
-        self.is_first_processing = True  # Skip first processing for FPS calculation
+        self.min_fps = MIN_FPS
+        self.max_fps = MAX_FPS
+        self.current_pipeline_fps = DEFAULT_FPS
 
     def start(self):
         if self.running:
@@ -125,14 +129,8 @@ class FrameProcessor:
         if processing_time <= 0 or num_frames <= 0:
             return self.current_pipeline_fps  # Return current FPS if invalid data
 
-        # Skip first processing as it includes pipeline warmup time
-        current_time = time.time()
-        if self.is_first_processing:
-            self.is_first_processing = False
-            logger.debug("Skipping first processing cycle for FPS calculation (pipeline warmup)")
-            return self.current_pipeline_fps
-
         # Store timestamp for averaging
+        current_time = time.time()
         self.processing_timestamps.append(current_time)
 
         # Update FPS if enough time has passed

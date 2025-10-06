@@ -35,13 +35,6 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.input_task = None
         self.input_task_running = False
 
-
-    def get_current_fps(self) -> float:
-        """Get the current dynamically calculated FPS"""
-        if self.frame_processor:
-            return self.frame_processor.get_current_pipeline_fps()
-        return self.fps
-
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
         while self.input_task_running:
