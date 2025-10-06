@@ -24,6 +24,7 @@ export interface SettingsState {
     height: number;
     width: number;
   };
+  seed?: number;
 }
 
 export type PipelineCategory = "video-input" | "no-video-input";

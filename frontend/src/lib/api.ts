@@ -19,6 +19,7 @@ export interface PassthroughLoadParams extends PipelineLoadParams {
 export interface LongLiveLoadParams extends PipelineLoadParams {
   height?: number;
   width?: number;
+  seed?: number;
 }
 
 export interface PipelineLoadRequest {

@@ -22,7 +22,15 @@ logger = logging.getLogger(__name__)
 
 
 class InferencePipeline(torch.nn.Module):
-    def __init__(self, config, generator, text_encoder, vae, low_memory: bool = False):
+    def __init__(
+        self,
+        config,
+        generator,
+        text_encoder,
+        vae,
+        low_memory: bool = False,
+        seed: int = 42,
+    ):
         super().__init__()
 
         # The height and width must be divisible by SCALE_SIZE
@@ -35,6 +43,7 @@ class InferencePipeline(torch.nn.Module):
         self.text_encoder = text_encoder
         self.vae = vae
         self.low_memory = low_memory
+        self.seed = seed
         self.scheduler = self.generator.get_scheduler()
         self.denoising_step_list = torch.tensor(
             config.denoising_step_list, dtype=torch.long
@@ -149,6 +158,10 @@ class InferencePipeline(torch.nn.Module):
         latent_height = self.height // VAE_SPATIAL_DOWNSAMPLE_FACTOR
         latent_width = self.width // VAE_SPATIAL_DOWNSAMPLE_FACTOR
         generator_param = next(self.generator.model.parameters())
+
+        # Create generator from seed for reproducible generation
+        rng = torch.Generator(device=generator_param.device).manual_seed(self.seed)
+
         noise = torch.randn(
             [
                 self.batch_size,
@@ -159,6 +172,7 @@ class InferencePipeline(torch.nn.Module):
             ],
             device=generator_param.device,
             dtype=generator_param.dtype,
+            generator=rng,
         )
 
         for index, current_timestep in enumerate(self.denoising_step_list):
@@ -181,9 +195,17 @@ class InferencePipeline(torch.nn.Module):
                     current_start=self.current_start * self.frame_seq_length,
                 )
                 next_timestep = self.denoising_step_list[index + 1]
+                # Create noise with same shape and properties as denoised_pred
+                flattened_pred = denoised_pred.flatten(0, 1)
+                random_noise = torch.randn(
+                    flattened_pred.shape,
+                    device=flattened_pred.device,
+                    dtype=flattened_pred.dtype,
+                    generator=rng,
+                )
                 noise = self.scheduler.add_noise(
-                    denoised_pred.flatten(0, 1),
-                    torch.randn_like(denoised_pred.flatten(0, 1)),
+                    flattened_pred,
+                    random_noise,
                     next_timestep
                     * torch.ones(
                         [self.batch_size * self.num_frame_per_block],

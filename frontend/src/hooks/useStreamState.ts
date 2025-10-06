@@ -22,6 +22,7 @@ export function useStreamState() {
 
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "longlive",
+    seed: 42,
   });
 
   const [promptData, setPromptData] = useState<PromptData>({

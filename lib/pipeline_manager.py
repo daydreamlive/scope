@@ -249,12 +249,15 @@ class PipelineManager:
 
             height = 320
             width = 576
+            seed = 42
             if load_params:
                 height = load_params.get("height", 320)
                 width = load_params.get("width", 576)
+                seed = load_params.get("seed", 42)
 
             config["height"] = height
             config["width"] = width
+            config["seed"] = seed
 
             pipeline = LongLivePipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16

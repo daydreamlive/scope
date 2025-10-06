@@ -57,8 +57,10 @@ class LongLivePipeline(Pipeline):
         vae = WanVAEWrapper(model_dir=model_dir)
         print(f"Loaded VAE in {time.time() - start:.3f}s")
 
+        seed = getattr(config, "seed", 42)
+
         self.stream = InferencePipeline(
-            config, generator, text_encoder, vae, low_memory
+            config, generator, text_encoder, vae, low_memory, seed
         ).to(device=device, dtype=dtype)
 
         self.prompts = None

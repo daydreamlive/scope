@@ -114,6 +114,10 @@ export function StreamPage() {
     updateSettings({ resolution });
   };
 
+  const handleSeedChange = (seed: number) => {
+    updateSettings({ seed });
+  };
+
   const handleStartStream = async () => {
     if (isStreaming) {
       stopStream();
@@ -134,13 +138,14 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${videoResolution.width}x${videoResolution.height}`
         );
-      } else if (settings.pipelineId === "longlive" && settings.resolution) {
+      } else if (settings.pipelineId === "longlive") {
         loadParams = {
-          height: settings.resolution.height,
-          width: settings.resolution.width,
+          height: settings.resolution?.height ?? 320,
+          width: settings.resolution?.width ?? 576,
+          seed: settings.seed ?? 42,
         };
         console.log(
-          `Loading with resolution: ${settings.resolution.width}x${settings.resolution.height}`
+          `Loading with resolution: ${loadParams.width}x${loadParams.height}, seed: ${loadParams.seed}`
         );
       }
 
@@ -243,6 +248,8 @@ export function StreamPage() {
             isStreaming={isStreaming}
             resolution={settings.resolution || { height: 320, width: 576 }}
             onResolutionChange={handleResolutionChange}
+            seed={settings.seed ?? 42}
+            onSeedChange={handleSeedChange}
           />
         </div>
       </div>

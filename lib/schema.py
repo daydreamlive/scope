@@ -75,6 +75,7 @@ class LongLiveLoadParams(PipelineLoadParams):
 
     height: int = Field(default=320, description="Target video height", ge=16, le=2048)
     width: int = Field(default=576, description="Target video width", ge=16, le=2048)
+    seed: int = Field(default=42, description="Random seed for generation", ge=0)
 
 
 class PipelineLoadRequest(BaseModel):

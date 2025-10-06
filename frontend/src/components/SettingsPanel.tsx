@@ -31,6 +31,8 @@ interface SettingsPanelProps {
     width: number;
   };
   onResolutionChange?: (resolution: { height: number; width: number }) => void;
+  seed?: number;
+  onSeedChange?: (seed: number) => void;
 }
 
 export function SettingsPanel({
@@ -40,6 +42,8 @@ export function SettingsPanel({
   isStreaming = false,
   resolution = { height: 320, width: 576 },
   onResolutionChange,
+  seed = 42,
+  onSeedChange,
 }: SettingsPanelProps) {
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -70,6 +74,24 @@ export function SettingsPanel({
     const minValue = pipelineId === "longlive" ? MIN_DIMENSION_LONGLIVE : 1;
     const newValue = Math.max(minValue, resolution[dimension] - 1);
     handleResolutionChange(dimension, newValue);
+  };
+
+  const handleSeedChange = (value: number) => {
+    const minValue = 0;
+    const maxValue = 2147483647; // Max 32-bit signed integer
+    onSeedChange?.(Math.max(minValue, Math.min(maxValue, value)));
+  };
+
+  const incrementSeed = () => {
+    const maxValue = 2147483647;
+    const newValue = Math.min(maxValue, seed + 1);
+    handleSeedChange(newValue);
+  };
+
+  const decrementSeed = () => {
+    const minValue = 0;
+    const newValue = Math.max(minValue, seed - 1);
+    handleSeedChange(newValue);
   };
 
   const currentPipeline = PIPELINES[pipelineId];
@@ -244,6 +266,41 @@ export function SettingsPanel({
                       size="icon"
                       className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                       onClick={() => incrementResolution("width")}
+                      disabled={isStreaming}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-foreground w-14">Seed:</label>
+                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={decrementSeed}
+                      disabled={isStreaming}
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </Button>
+                    <Input
+                      type="number"
+                      value={seed}
+                      onChange={e =>
+                        handleSeedChange(parseInt(e.target.value) || 0)
+                      }
+                      disabled={isStreaming}
+                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      min={0}
+                      max={2147483647}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={incrementSeed}
                       disabled={isStreaming}
                     >
                       <Plus className="h-3.5 w-3.5" />
