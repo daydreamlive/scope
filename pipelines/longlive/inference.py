@@ -43,7 +43,7 @@ class InferencePipeline(torch.nn.Module):
         self.text_encoder = text_encoder
         self.vae = vae
         self.low_memory = low_memory
-        self.seed = seed
+        self.base_seed = seed
         self.scheduler = self.generator.get_scheduler()
         self.denoising_step_list = torch.tensor(
             config.denoising_step_list, dtype=torch.long
@@ -160,7 +160,9 @@ class InferencePipeline(torch.nn.Module):
         generator_param = next(self.generator.model.parameters())
 
         # Create generator from seed for reproducible generation
-        rng = torch.Generator(device=generator_param.device).manual_seed(self.seed)
+        # Derive unique seed per block of latents using current_start as offset
+        frame_seed = self.base_seed + self.current_start
+        rng = torch.Generator(device=generator_param.device).manual_seed(frame_seed)
 
         noise = torch.randn(
             [
