@@ -97,11 +97,11 @@ export function SettingsPanel({
   const currentPipeline = PIPELINES[pipelineId];
 
   return (
-    <Card className={`h-full ${className}`}>
-      <CardHeader>
+    <Card className={`h-full flex flex-col ${className}`}>
+      <CardHeader className="flex-shrink-0">
         <CardTitle className="text-base font-medium">Settings</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Pipeline ID</h3>
           <Select
