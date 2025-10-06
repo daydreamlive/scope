@@ -52,7 +52,9 @@ class FrameProcessor:
         self.notification_callback = notification_callback
 
         # FPS tracking variables
-        self.processing_timestamps = deque(maxlen=30)  # Keep last 30 processing timestamps for averaging
+        self.processing_timestamps = deque(
+            maxlen=30
+        )  # Keep last 30 processing timestamps for averaging
         self.last_fps_update = time.time()
         self.fps_update_interval = 0.5  # Update FPS every 0.5 seconds
         self.min_fps = MIN_FPS
@@ -139,7 +141,10 @@ class FrameProcessor:
                 # Calculate average time between processing cycles
                 time_diffs = []
                 for i in range(1, len(self.processing_timestamps)):
-                    time_diff = self.processing_timestamps[i] - self.processing_timestamps[i - 1]
+                    time_diff = (
+                        self.processing_timestamps[i]
+                        - self.processing_timestamps[i - 1]
+                    )
                     if time_diff > 0:  # Only consider positive time differences
                         time_diffs.append(time_diff)
 
@@ -147,7 +152,11 @@ class FrameProcessor:
                     avg_cycle_interval = sum(time_diffs) / len(time_diffs)
                     # Calculate FPS: frames per cycle * cycles per second
                     # This gives us the actual frames per second output
-                    estimated_fps = (num_frames / avg_cycle_interval) if avg_cycle_interval > 0 else self.current_pipeline_fps
+                    estimated_fps = (
+                        (num_frames / avg_cycle_interval)
+                        if avg_cycle_interval > 0
+                        else self.current_pipeline_fps
+                    )
 
                     # Clamp to reasonable bounds
                     estimated_fps = max(self.min_fps, min(self.max_fps, estimated_fps))
@@ -156,9 +165,13 @@ class FrameProcessor:
                     if abs(estimated_fps - self.current_pipeline_fps) > 0.1:
                         old_fps = self.current_pipeline_fps
                         self.current_pipeline_fps = estimated_fps
-                        logger.info(f"Pipeline FPS updated: {old_fps:.1f} -> {self.current_pipeline_fps:.1f}")
+                        logger.debug(
+                            f"Pipeline FPS updated: {old_fps:.1f} -> {self.current_pipeline_fps:.1f}"
+                        )
                     else:
-                        logger.debug(f"Pipeline FPS change too small ({abs(estimated_fps - self.current_pipeline_fps):.2f}), not updating")
+                        logger.debug(
+                            f"Pipeline FPS change too small ({abs(estimated_fps - self.current_pipeline_fps):.2f}), not updating"
+                        )
 
             self.last_fps_update = current_time
 
