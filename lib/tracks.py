@@ -2,7 +2,6 @@ import asyncio
 import fractions
 import logging
 import time
-from collections import deque
 
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
@@ -28,73 +27,19 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.pipeline_manager = pipeline_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
-        # Dynamic FPS calculation variables
+        # FPS variables (will be updated from FrameProcessor)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
-        self.frame_timestamps = deque(
-            maxlen=30
-        )  # Keep last 30 frame timestamps for averaging
-        self.last_frame_time = None
-        self.fps_update_interval = 0.5  # Update FPS every 0.5 seconds
-        self.last_fps_update = time.time()
-        self.min_fps = 1.0  # Minimum FPS to prevent division by zero
-        self.max_fps = 60.0  # Maximum FPS cap
 
         self.frame_processor = None
         self.input_task = None
         self.input_task_running = False
 
-    def _calculate_dynamic_fps(self):
-        """Calculate FPS based on recent frame timestamps"""
-        if len(self.frame_timestamps) < 2:
-            logger.debug(
-                f"Not enough frame timestamps ({len(self.frame_timestamps)}), returning current FPS: {self.fps}"
-            )
-            return self.fps  # Not enough data, return current FPS
-
-        # Calculate average time between frames
-        time_diffs = []
-        for i in range(1, len(self.frame_timestamps)):
-            time_diff = self.frame_timestamps[i] - self.frame_timestamps[i - 1]
-            if time_diff > 0:  # Only consider positive time differences
-                time_diffs.append(time_diff)
-
-        if not time_diffs:
-            logger.debug("No valid time differences found, returning current FPS")
-            return self.fps  # No valid time differences
-
-        avg_frame_interval = sum(time_diffs) / len(time_diffs)
-        calculated_fps = 1.0 / avg_frame_interval
-
-        # Clamp FPS to reasonable bounds
-        calculated_fps = max(self.min_fps, min(self.max_fps, calculated_fps))
-
-        logger.debug(
-            f"Calculated FPS: {calculated_fps:.2f} (from {len(time_diffs)} intervals, avg interval: {avg_frame_interval:.4f}s)"
-        )
-        return calculated_fps
-
-    def _update_fps_if_needed(self):
-        """Update FPS and frame_ptime if enough time has passed"""
-        current_time = time.time()
-        if current_time - self.last_fps_update >= self.fps_update_interval:
-            new_fps = self._calculate_dynamic_fps()
-            logger.debug(
-                f"FPS update check: current={self.fps:.2f}, calculated={new_fps:.2f}, diff={abs(new_fps - self.fps):.2f}"
-            )
-            if abs(new_fps - self.fps) > 0.1:  # Only update if significant change
-                old_fps = self.fps
-                self.fps = new_fps
-                self.frame_ptime = 1.0 / self.fps
-                logger.debug(f"Dynamic FPS updated: {old_fps:.1f} -> {self.fps:.1f}")
-            else:
-                logger.debug(
-                    f"FPS change too small ({abs(new_fps - self.fps):.2f}), not updating"
-                )
-            self.last_fps_update = current_time
 
     def get_current_fps(self) -> float:
         """Get the current dynamically calculated FPS"""
+        if self.frame_processor:
+            return self.frame_processor.get_current_pipeline_fps()
         return self.fps
 
     async def input_loop(self):
@@ -161,12 +106,10 @@ class VideoProcessingTrack(MediaStreamTrack):
                     frame.pts = pts
                     frame.time_base = time_base
 
-                    # Track frame timing for dynamic FPS calculation (output frames)
-                    current_time = time.time()
-                    self.frame_timestamps.append(current_time)
-
-                    # Update FPS dynamically based on recent output frame rate
-                    self._update_fps_if_needed()
+                    # Update FPS from FrameProcessor
+                    if self.frame_processor:
+                        self.fps = self.frame_processor.get_current_pipeline_fps()
+                        self.frame_ptime = 1.0 / self.fps
 
                     return frame
 

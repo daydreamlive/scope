@@ -46,6 +46,15 @@ class FrameProcessor:
         # Callback to notify when frame processor stops
         self.notification_callback = notification_callback
 
+        # FPS tracking variables
+        self.processing_timestamps = deque(maxlen=30)  # Keep last 30 processing timestamps for averaging
+        self.last_fps_update = time.time()
+        self.fps_update_interval = 0.5  # Update FPS every 0.5 seconds
+        self.min_fps = 1.0  # Minimum FPS to prevent division by zero
+        self.max_fps = 60.0  # Maximum FPS cap
+        self.current_pipeline_fps = 30.0  # Default FPS
+        self.is_first_processing = True  # Skip first processing for FPS calculation
+
     def start(self):
         if self.running:
             return
@@ -106,6 +115,54 @@ class FrameProcessor:
             return self.output_queue.get_nowait()
         except queue.Empty:
             return None
+
+    def get_current_pipeline_fps(self) -> float:
+        """Get the current dynamically calculated pipeline FPS"""
+        return self.current_pipeline_fps
+
+    def _calculate_pipeline_fps(self, processing_time: float, num_frames: int):
+        """Calculate FPS based on processing time and number of frames created"""
+        if processing_time <= 0 or num_frames <= 0:
+            return self.current_pipeline_fps  # Return current FPS if invalid data
+
+        # Skip first processing as it includes pipeline warmup time
+        current_time = time.time()
+        if self.is_first_processing:
+            self.is_first_processing = False
+            logger.debug("Skipping first processing cycle for FPS calculation (pipeline warmup)")
+            return self.current_pipeline_fps
+
+        # Store timestamp for averaging
+        self.processing_timestamps.append(current_time)
+
+        # Update FPS if enough time has passed
+        if current_time - self.last_fps_update >= self.fps_update_interval:
+            if len(self.processing_timestamps) >= 2:
+                # Calculate average time between processing cycles
+                time_diffs = []
+                for i in range(1, len(self.processing_timestamps)):
+                    time_diff = self.processing_timestamps[i] - self.processing_timestamps[i - 1]
+                    if time_diff > 0:  # Only consider positive time differences
+                        time_diffs.append(time_diff)
+
+                if time_diffs:
+                    avg_cycle_interval = sum(time_diffs) / len(time_diffs)
+                    # Calculate FPS: frames per cycle * cycles per second
+                    # This gives us the actual frames per second output
+                    estimated_fps = (num_frames / avg_cycle_interval) if avg_cycle_interval > 0 else self.current_pipeline_fps
+
+                    # Clamp to reasonable bounds
+                    estimated_fps = max(self.min_fps, min(self.max_fps, estimated_fps))
+
+                    # Only update if significant change
+                    if abs(estimated_fps - self.current_pipeline_fps) > 0.1:
+                        old_fps = self.current_pipeline_fps
+                        self.current_pipeline_fps = estimated_fps
+                        logger.info(f"Pipeline FPS updated: {old_fps:.1f} -> {self.current_pipeline_fps:.1f}")
+                    else:
+                        logger.debug(f"Pipeline FPS change too small ({abs(estimated_fps - self.current_pipeline_fps):.2f}), not updating")
+
+            self.last_fps_update = current_time
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
@@ -188,6 +245,9 @@ class FrameProcessor:
             logger.debug(
                 f"Processed pipeline in {processing_time:.4f}s, {num_frames} frames"
             )
+
+            # Update FPS calculation based on processing time and frame count
+            self._calculate_pipeline_fps(processing_time, num_frames)
 
             # Normalize to [0, 255] and convert to uint8
             output = (
