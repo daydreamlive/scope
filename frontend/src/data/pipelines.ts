@@ -27,7 +27,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support streaming.",
     modified: true,
     category: "video-input",
-    defaultPrompt: "A cat walking in a circle",
+    defaultPrompt: "A dog in the grass looking around, photorealistic",
   },
   passthrough: {
     name: "Passthrough",
