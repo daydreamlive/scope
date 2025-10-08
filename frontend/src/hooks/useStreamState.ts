@@ -21,7 +21,7 @@ export function useStreamState() {
   });
 
   const [settings, setSettings] = useState<SettingsState>({
-    pipelineId: "longlive",
+    pipelineId: "streamdiffusionv2",
     seed: 42,
   });
 
