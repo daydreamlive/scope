@@ -1,9 +1,8 @@
 model_name: wan
 generator_name: causal_wan
 denoising_step_list:
-- 1000
-- 600
-- 300
+- 700
+- 500
 - 0
 num_frame_per_block: 1
 num_kv_cache: 6
