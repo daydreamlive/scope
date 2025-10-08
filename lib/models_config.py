@@ -80,6 +80,8 @@ def get_required_model_files() -> list[Path]:
     return [
         models_dir / "Wan2.1-T2V-1.3B" / "config.json",
         models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
+        models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
+        models_dir / "StreamDiffusionV2" / "model.pt",
     ]
 
 

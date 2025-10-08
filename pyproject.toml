@@ -48,6 +48,7 @@ dependencies = [
     "huggingface_hub>=0.25.0",
     "peft>=0.17.1",
     "torchcodec>=0.7.0",
+    "gdown>=5.2.0",
 ]
 
 [project.scripts]
