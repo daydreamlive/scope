@@ -16,7 +16,7 @@ By signing off, you confirm that you have the right to submit this code and that
 
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is needed to run the server and [Node.js](https://nodejs.org/en/download) which is needed to build frontend.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is needed to run the server, [Node.js](https://nodejs.org/en/download) which is needed to build frontend and [ffmpeg](https://www.ffmpeg.org/download.html) which is needed for certain media workflows during development.
 
 ## Frontend
 
