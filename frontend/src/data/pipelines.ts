@@ -20,6 +20,15 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
   },
+  streamdiffusionv2: {
+    name: "StreamDiffusionV2",
+    projectUrl: "https://streamdiffusionv2.github.io/",
+    about:
+      "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support streaming.",
+    modified: true,
+    category: "video-input",
+    defaultPrompt: "A cat walking in a circle",
+  },
   passthrough: {
     name: "Passthrough",
     about:

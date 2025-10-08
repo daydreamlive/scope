@@ -58,6 +58,13 @@ class PipelineLoadParams(BaseModel):
     pass
 
 
+class StreamDiffusionV2LoadParams(PipelineLoadParams):
+    """Load parameters for StreamDiffusion V2 pipeline."""
+
+    height: int = Field(default=512, description="Target video height", ge=64, le=2048)
+    width: int = Field(default=512, description="Target video width", ge=64, le=2048)
+
+
 class PassthroughLoadParams(PipelineLoadParams):
     """Load parameters for Passthrough pipeline."""
 
@@ -81,10 +88,16 @@ class LongLiveLoadParams(PipelineLoadParams):
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
-    pipeline_id: str = Field(default="longlive", description="ID of pipeline to load")
-    load_params: PassthroughLoadParams | VodLoadParams | LongLiveLoadParams | None = (
-        Field(default=None, description="Pipeline-specific load parameters")
+    pipeline_id: str = Field(
+        default="streamdiffusionv2", description="ID of pipeline to load"
     )
+    load_params: (
+        StreamDiffusionV2LoadParams
+        | PassthroughLoadParams
+        | VodLoadParams
+        | LongLiveLoadParams
+        | None
+    ) = Field(default=None, description="Pipeline-specific load parameters")
 
 
 class PipelineStatusResponse(BaseModel):

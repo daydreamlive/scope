@@ -192,7 +192,36 @@ class PipelineManager:
         self, pipeline_id: str, load_params: dict | None = None
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
-        if pipeline_id == "passthrough":
+        if pipeline_id == "streamdiffusionv2":
+            from lib.models_config import get_model_file_path, get_models_dir
+            from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+
+            config = OmegaConf.load("pipelines/streamdiffusionv2/model.yaml")
+            models_dir = get_models_dir()
+            config["model_dir"] = str(models_dir)
+            config["text_encoder_path"] = str(
+                get_model_file_path(
+                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                )
+            )
+
+            # Use load parameters for resolution, default to 512x512
+            height = 512
+            width = 512
+            if load_params:
+                height = load_params.get("height", 512)
+                width = load_params.get("width", 512)
+
+            config["height"] = height
+            config["width"] = width
+
+            pipeline = StreamDiffusionV2Pipeline(
+                config, device=torch.device("cuda"), dtype=torch.bfloat16
+            )
+            logger.info("StreamDiffusionV2 pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "passthrough":
             from pipelines.passthrough.pipeline import PassthroughPipeline
 
             # Use load parameters for resolution, default to 512x512

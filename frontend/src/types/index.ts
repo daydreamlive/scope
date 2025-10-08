@@ -1,4 +1,8 @@
-export type PipelineId = "passthrough" | "vod" | "longlive";
+export type PipelineId =
+  | "streamdiffusionv2"
+  | "passthrough"
+  | "vod"
+  | "longlive";
 
 export interface SystemMetrics {
   cpu: number;
