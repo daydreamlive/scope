@@ -62,6 +62,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.chunk_size = chunk_size
         self.start_chunk_size = start_chunk_size
         self.noise_scale = noise_scale
+        self.base_seed = config.get("seed", 42)
 
         self.prompts = None
         self.last_frame = None
@@ -192,7 +193,17 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # Transpose latents
         latents = latents.transpose(2, 1)
 
-        noise = torch.randn_like(latents)
+        # Create generator from seed for reproducible generation
+        # Derive unique seed per chunk using current_start as offset
+        frame_seed = self.base_seed + self.current_start
+        rng = torch.Generator(device=latents.device).manual_seed(frame_seed)
+
+        noise = torch.randn(
+            latents.shape,
+            device=latents.device,
+            dtype=latents.dtype,
+            generator=rng,
+        )
         # Determine how noisy the latents should be
         # Higher noise scale -> noiser latents, less of inputs preserved
         # Lower noise scale -> less noisy latents, more of inputs preserved
@@ -202,6 +213,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
             current_start=self.current_start,
             current_end=self.current_end,
             current_step=current_step,
+            generator=rng,
         )
 
         # # Update tracking variables for next input

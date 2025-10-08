@@ -205,15 +205,18 @@ class PipelineManager:
                 )
             )
 
-            # Use load parameters for resolution, default to 512x512
+            # Use load parameters for resolution and seed
             height = 512
             width = 512
+            seed = 42
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
+                seed = load_params.get("seed", 42)
 
             config["height"] = height
             config["width"] = width
+            config["seed"] = seed
 
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16

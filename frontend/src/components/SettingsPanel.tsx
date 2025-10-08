@@ -311,6 +311,51 @@ export function SettingsPanel({
             </div>
           </div>
         )}
+
+        {pipelineId === "streamdiffusionv2" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium">Parameters</h3>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-foreground w-14">Seed:</label>
+                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={decrementSeed}
+                      disabled={isStreaming}
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </Button>
+                    <Input
+                      type="number"
+                      value={seed}
+                      onChange={e =>
+                        handleSeedChange(parseInt(e.target.value) || 0)
+                      }
+                      disabled={isStreaming}
+                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      min={0}
+                      max={2147483647}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={incrementSeed}
+                      disabled={isStreaming}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

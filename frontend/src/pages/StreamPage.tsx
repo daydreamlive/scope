@@ -130,11 +130,16 @@ export function StreamPage() {
 
       // Prepare load parameters based on pipeline type and video resolution
       let loadParams = null;
-      if (
-        (settings.pipelineId === "streamdiffusionv2" ||
-          settings.pipelineId === "passthrough") &&
-        videoResolution
-      ) {
+      if (settings.pipelineId === "streamdiffusionv2" && videoResolution) {
+        loadParams = {
+          height: videoResolution.height,
+          width: videoResolution.width,
+          seed: settings.seed ?? 42,
+        };
+        console.log(
+          `Loading with resolution: ${videoResolution.width}x${videoResolution.height}, seed: ${loadParams.seed}`
+        );
+      } else if (settings.pipelineId === "passthrough" && videoResolution) {
         loadParams = {
           height: videoResolution.height,
           width: videoResolution.width,

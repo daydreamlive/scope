@@ -149,6 +149,7 @@ class CausalStreamInferencePipeline(torch.nn.Module):
         current_start: int,
         current_end: int,
         current_step: int,
+        generator: Optional[torch.Generator] = None,
     ) -> torch.Tensor:
         batch_size = noise.shape[0]
 
@@ -174,9 +175,17 @@ class CausalStreamInferencePipeline(torch.nn.Module):
                     current_end=current_end,
                 )
                 next_timestep = self.denoising_step_list[index + 1]
+                # Create noise with same shape and properties as denoised_pred
+                flattened_pred = denoised_pred.flatten(0, 1)
+                random_noise = torch.randn(
+                    flattened_pred.shape,
+                    device=flattened_pred.device,
+                    dtype=flattened_pred.dtype,
+                    generator=generator,
+                )
                 noise = self.scheduler.add_noise(
-                    denoised_pred.flatten(0, 1),
-                    torch.randn_like(denoised_pred.flatten(0, 1)),
+                    flattened_pred,
+                    random_noise,
                     next_timestep
                     * torch.ones([batch_size], device="cuda", dtype=torch.long),
                 ).unflatten(0, denoised_pred.shape[:2])
