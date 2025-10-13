@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { Slider } from "./ui/slider";
 import { Plus, Minus } from "lucide-react";
 
@@ -178,7 +179,7 @@ export function DenoisingStepsSlider({
               <label className="text-sm text-foreground w-16">
                 Step {index + 1}:
               </label>
-              <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
+              <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8 min-w-0">
                 <Button
                   variant="ghost"
                   size="icon"
@@ -188,7 +189,7 @@ export function DenoisingStepsSlider({
                 >
                   <Minus className="h-3.5 w-3.5" />
                 </Button>
-                <input
+                <Input
                   type="number"
                   value={stepValue}
                   onChange={e =>
@@ -198,7 +199,7 @@ export function DenoisingStepsSlider({
                     )
                   }
                   disabled={disabled}
-                  className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 flex-1 bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 min-w-0 px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   min={MIN_VALUE}
                   max={MAX_VALUE}
                 />
