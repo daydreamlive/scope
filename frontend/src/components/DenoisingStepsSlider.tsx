@@ -67,9 +67,28 @@ export function DenoisingStepsSlider({
     return "";
   };
 
+  const calculateBoundaryValue = (
+    index: number,
+    attemptedValue: number
+  ): number => {
+    // If we violated the constraint with the previous step, set to previous step - 1
+    if (index > 0 && attemptedValue >= localValue[index - 1]) {
+      return localValue[index - 1] - 1;
+    }
+    // If we violated the constraint with the next step, set to next step + 1
+    if (
+      index < localValue.length - 1 &&
+      attemptedValue <= localValue[index + 1]
+    ) {
+      return localValue[index + 1] + 1;
+    }
+    return attemptedValue;
+  };
+
   const handleSliderChange = (index: number, newValue: number[]) => {
     const updatedValue = [...localValue];
-    updatedValue[index] = newValue[0];
+    const attemptedValue = newValue[0];
+    updatedValue[index] = attemptedValue;
 
     const error = validateSteps(updatedValue);
     setValidationError(error);
@@ -77,12 +96,23 @@ export function DenoisingStepsSlider({
     if (!error) {
       setLocalValue(updatedValue);
       debouncedOnChange(updatedValue);
+    } else {
+      const boundaryValue = calculateBoundaryValue(index, attemptedValue);
+      const clampedValue = Math.max(
+        MIN_VALUE,
+        Math.min(MAX_VALUE, boundaryValue)
+      );
+      const boundedValue = [...localValue];
+      boundedValue[index] = clampedValue;
+      setLocalValue(boundedValue);
+      debouncedOnChange(boundedValue);
     }
   };
 
   const handleValueChange = (index: number, newValue: number) => {
     const updatedValue = [...localValue];
-    updatedValue[index] = Math.max(MIN_VALUE, Math.min(MAX_VALUE, newValue));
+    const clampedValue = Math.max(MIN_VALUE, Math.min(MAX_VALUE, newValue));
+    updatedValue[index] = clampedValue;
 
     const error = validateSteps(updatedValue);
     setValidationError(error);
@@ -90,6 +120,16 @@ export function DenoisingStepsSlider({
     if (!error) {
       setLocalValue(updatedValue);
       onChange(updatedValue); // Immediate update for discrete actions
+    } else {
+      const boundaryValue = calculateBoundaryValue(index, clampedValue);
+      const finalValue = Math.max(
+        MIN_VALUE,
+        Math.min(MAX_VALUE, boundaryValue)
+      );
+      const boundedValue = [...localValue];
+      boundedValue[index] = finalValue;
+      setLocalValue(boundedValue);
+      onChange(boundedValue);
     }
   };
 
