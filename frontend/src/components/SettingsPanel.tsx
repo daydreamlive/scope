@@ -15,6 +15,8 @@ import {
 } from "./ui/tooltip";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
+import { Toggle } from "./ui/toggle";
+import { Slider } from "./ui/slider";
 import { Hammer, Info, Minus, Plus } from "lucide-react";
 import { PIPELINES } from "../data/pipelines";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
@@ -37,6 +39,10 @@ interface SettingsPanelProps {
   onSeedChange?: (seed: number) => void;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
+  noiseScale?: number;
+  onNoiseScaleChange?: (noiseScale: number) => void;
+  noiseController?: boolean;
+  onNoiseControllerChange?: (enabled: boolean) => void;
 }
 
 export function SettingsPanel({
@@ -50,6 +56,10 @@ export function SettingsPanel({
   onSeedChange,
   denoisingSteps = [700, 500],
   onDenoisingStepsChange,
+  noiseScale = 0.7,
+  onNoiseScaleChange,
+  noiseController = true,
+  onNoiseControllerChange,
 }: SettingsPanelProps) {
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -98,6 +108,32 @@ export function SettingsPanel({
     const minValue = 0;
     const newValue = Math.max(minValue, seed - 1);
     handleSeedChange(newValue);
+  };
+
+  const handleNoiseScaleChange = (value: number[]) => {
+    // Clamp to 0.0-1.0 range and round to 2 decimal places
+    const clampedValue = Math.max(0.0, Math.min(1.0, value[0]));
+    const roundedValue = Math.round(clampedValue * 100) / 100;
+    onNoiseScaleChange?.(roundedValue);
+  };
+
+  const handleNoiseScaleInputChange = (value: number) => {
+    // Clamp to 0.0-1.0 range and round to 2 decimal places
+    const clampedValue = Math.max(0.0, Math.min(1.0, value));
+    const roundedValue = Math.round(clampedValue * 100) / 100;
+    onNoiseScaleChange?.(roundedValue);
+  };
+
+  const incrementNoiseScale = () => {
+    const newValue = Math.min(1.0, noiseScale + 0.01);
+    const roundedValue = Math.round(newValue * 100) / 100;
+    onNoiseScaleChange?.(roundedValue);
+  };
+
+  const decrementNoiseScale = () => {
+    const newValue = Math.max(0.0, noiseScale - 0.01);
+    const roundedValue = Math.round(newValue * 100) / 100;
+    onNoiseScaleChange?.(roundedValue);
   };
 
   const currentPipeline = PIPELINES[pipelineId];
@@ -385,6 +421,83 @@ export function SettingsPanel({
             onChange={onDenoisingStepsChange || (() => {})}
             defaultValues={getDefaultDenoisingSteps(pipelineId)}
           />
+        )}
+
+        {pipelineId === "streamdiffusionv2" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-foreground">
+                      Noise Controller:
+                    </label>
+                  </div>
+                  <Toggle
+                    pressed={noiseController}
+                    onPressedChange={onNoiseControllerChange || (() => {})}
+                    disabled={isStreaming}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                  >
+                    {noiseController ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-foreground w-20">
+                    Noise Scale:
+                  </label>
+                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={decrementNoiseScale}
+                      disabled={noiseController}
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </Button>
+                    <Input
+                      type="number"
+                      value={noiseScale}
+                      onChange={e =>
+                        handleNoiseScaleInputChange(
+                          parseFloat(e.target.value) || 0.0
+                        )
+                      }
+                      disabled={noiseController}
+                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      min={0.0}
+                      max={1.0}
+                      step={0.01}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={incrementNoiseScale}
+                      disabled={noiseController}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <Slider
+                  value={[noiseScale]}
+                  onValueChange={handleNoiseScaleChange}
+                  min={0.0}
+                  max={1.0}
+                  step={0.01}
+                  disabled={noiseController}
+                  className="w-full"
+                />
+              </div>
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

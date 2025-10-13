@@ -30,6 +30,8 @@ export interface SettingsState {
   };
   seed?: number;
   denoisingSteps?: number[];
+  noiseScale?: number;
+  noiseController?: boolean;
 }
 
 export type PipelineCategory = "video-input" | "no-video-input";

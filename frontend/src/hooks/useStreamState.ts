@@ -24,6 +24,8 @@ export function useStreamState() {
     pipelineId: "streamdiffusionv2",
     seed: 42,
     denoisingSteps: [700, 500], // Default for StreamDiffusionV2
+    noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
+    noiseController: true, // Default noise controller for StreamDiffusionV2
   });
 
   const [promptData, setPromptData] = useState<PromptData>({

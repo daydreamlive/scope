@@ -122,42 +122,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
 
-    @torch.no_grad()
-    def __call__(
-        self,
-        input: torch.Tensor | list[torch.Tensor] | None = None,
-        prompts: list[str] = None,
-        denoising_step_list: list[int] = None,
-    ) -> torch.Tensor:
-        if input is None:
-            raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
-        if (
-            denoising_step_list is not None
-            and denoising_step_list != self.denoising_step_list
-        ):
-            self.denoising_step_list = denoising_step_list
-            self.stream.denoising_step_list = torch.tensor(
-                denoising_step_list, dtype=torch.long, device=self.device
-            )
-            logger.info(f"Updated denoising step list: {denoising_step_list}")
-
-        exp_chunk_size = self.prepare().input_size
-
-        curr_chunk_size = len(input) if isinstance(input, list) else input.shape[2]
-
-        # Validate chunk size
-        if curr_chunk_size != exp_chunk_size:
-            raise RuntimeError(
-                f"Incorrect chunk size expected {exp_chunk_size} got {curr_chunk_size}"
-            )
-
-        # If a torch.Tensor is passed assume that the input is ready for inference
-        if isinstance(input, list):
-            # Preprocess input for inference
-            input = preprocess_chunk(
-                input, self.device, self.dtype, height=self.height, width=self.width
-            )
-
+    def apply_motion_aware_noise_controller(self, input: torch.Tensor):
         # The prev seq is the last chunk_size frames of the current input
         prev_seq = input[:, :, -self.chunk_size :]
         if self.last_frame is None:
@@ -194,6 +159,50 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.noise_scale = (
             max_noise_scale_no_motion - motion_sensitivity_factor * max_l2_dist.item()
         ) * new_measurement_weight + self.noise_scale * prev_measurement_weight
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        input: torch.Tensor | list[torch.Tensor] | None = None,
+        prompts: list[str] = None,
+        denoising_step_list: list[int] = None,
+        noise_scale: float = None,
+        noise_controller: bool = True,
+    ) -> torch.Tensor:
+        if input is None:
+            raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
+        if (
+            denoising_step_list is not None
+            and denoising_step_list != self.denoising_step_list
+        ):
+            self.denoising_step_list = denoising_step_list
+            self.stream.denoising_step_list = torch.tensor(
+                denoising_step_list, dtype=torch.long, device=self.device
+            )
+            logger.info(f"Updated denoising step list: {denoising_step_list}")
+
+        exp_chunk_size = self.prepare().input_size
+
+        curr_chunk_size = len(input) if isinstance(input, list) else input.shape[2]
+
+        # Validate chunk size
+        if curr_chunk_size != exp_chunk_size:
+            raise RuntimeError(
+                f"Incorrect chunk size expected {exp_chunk_size} got {curr_chunk_size}"
+            )
+
+        # If a torch.Tensor is passed assume that the input is ready for inference
+        if isinstance(input, list):
+            # Preprocess input for inference
+            input = preprocess_chunk(
+                input, self.device, self.dtype, height=self.height, width=self.width
+            )
+
+        if noise_controller:
+            self.apply_motion_aware_noise_controller(input)
+        elif noise_scale is not None and noise_scale != self.noise_scale:
+            self.noise_scale = noise_scale
+
         # Determine the number of denoising steps
         # Higher noise scale -> more denoising steps, more intense changes to input
         # Lower noise scale -> less denoising steps, less intense changes to input

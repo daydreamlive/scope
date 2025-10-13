@@ -5,6 +5,8 @@ import { toast } from "sonner";
 interface InitialParameters {
   prompts?: string[];
   denoising_step_list?: number[];
+  noise_scale?: number;
+  noise_controller?: boolean;
 }
 
 interface UseWebRTCOptions {
@@ -216,7 +218,12 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   );
 
   const sendParameterUpdate = useCallback(
-    (params: { prompts?: string[]; denoising_step_list?: number[] }) => {
+    (params: {
+      prompts?: string[];
+      denoising_step_list?: number[];
+      noise_scale?: number;
+      noise_controller?: boolean;
+    }) => {
       if (
         dataChannelRef.current &&
         dataChannelRef.current.readyState === "open"

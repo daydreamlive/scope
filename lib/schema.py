@@ -16,7 +16,13 @@ class Parameters(BaseModel):
     """Parameters for WebRTC session."""
 
     prompts: list[str] | None = Field(default=None, description="Prompt list")
-    noise_scale: float | None = Field(default=None, description="Noise scale (0.0-1.0)")
+    noise_scale: float | None = Field(
+        default=None, description="Noise scale (0.0-1.0)", ge=0.0, le=1.0
+    )
+    noise_controller: bool | None = Field(
+        default=None,
+        description="Enable automatic noise scale adjustment based on motion detection",
+    )
     denoising_step_list: list[int] | None = Field(
         default=None, description="Denoising step list"
     )

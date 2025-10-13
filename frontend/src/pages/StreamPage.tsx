@@ -131,6 +131,22 @@ export function StreamPage() {
     });
   };
 
+  const handleNoiseScaleChange = (noiseScale: number) => {
+    updateSettings({ noiseScale });
+    // Send noise scale update to backend
+    sendParameterUpdate({
+      noise_scale: noiseScale,
+    });
+  };
+
+  const handleNoiseControllerChange = (enabled: boolean) => {
+    updateSettings({ noiseController: enabled });
+    // Send noise controller update to backend
+    sendParameterUpdate({
+      noise_controller: enabled,
+    });
+  };
+
   const handleStartStream = async () => {
     if (isStreaming) {
       stopStream();
@@ -199,6 +215,8 @@ export function StreamPage() {
         {
           prompts: currentPrompts,
           denoising_step_list: settings.denoisingSteps || [700, 500],
+          noise_scale: settings.noiseScale ?? 0.7,
+          noise_controller: settings.noiseController ?? true,
         },
         streamToSend
       );
@@ -275,6 +293,10 @@ export function StreamPage() {
             onSeedChange={handleSeedChange}
             denoisingSteps={settings.denoisingSteps || [700, 500]}
             onDenoisingStepsChange={handleDenoisingStepsChange}
+            noiseScale={settings.noiseScale ?? 0.7}
+            onNoiseScaleChange={handleNoiseScaleChange}
+            noiseController={settings.noiseController ?? true}
+            onNoiseControllerChange={handleNoiseControllerChange}
           />
         </div>
       </div>
