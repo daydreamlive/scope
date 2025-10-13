@@ -23,6 +23,7 @@ export function useStreamState() {
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
     seed: 42,
+    denoisingSteps: [700, 500], // Default for StreamDiffusionV2
   });
 
   const [promptData, setPromptData] = useState<PromptData>({

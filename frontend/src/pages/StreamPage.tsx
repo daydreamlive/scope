@@ -11,6 +11,7 @@ import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
+import { getDefaultDenoisingSteps } from "../lib/utils";
 import type { PipelineId } from "../types";
 
 export function StreamPage() {
@@ -75,6 +76,7 @@ export function StreamPage() {
     setCurrentPrompts(prompts);
     sendParameterUpdate({
       prompts,
+      denoising_step_list: settings.denoisingSteps || [700, 500],
     });
   };
 
@@ -103,8 +105,11 @@ export function StreamPage() {
     const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
     setCurrentPrompts([newDefaultPrompt]);
 
+    // Update denoising steps based on pipeline
+    const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
+
     // Update the pipeline in settings
-    updateSettings({ pipelineId });
+    updateSettings({ pipelineId, denoisingSteps: newDenoisingSteps });
   };
 
   const handleResolutionChange = (resolution: {
@@ -116,6 +121,14 @@ export function StreamPage() {
 
   const handleSeedChange = (seed: number) => {
     updateSettings({ seed });
+  };
+
+  const handleDenoisingStepsChange = (denoisingSteps: number[]) => {
+    updateSettings({ denoisingSteps });
+    // Send denoising steps update to backend
+    sendParameterUpdate({
+      denoising_step_list: denoisingSteps,
+    });
   };
 
   const handleStartStream = async () => {
@@ -185,6 +198,7 @@ export function StreamPage() {
       startStream(
         {
           prompts: currentPrompts,
+          denoising_step_list: settings.denoisingSteps || [700, 500],
         },
         streamToSend
       );
@@ -259,6 +273,8 @@ export function StreamPage() {
             onResolutionChange={handleResolutionChange}
             seed={settings.seed ?? 42}
             onSeedChange={handleSeedChange}
+            denoisingSteps={settings.denoisingSteps || [700, 500]}
+            onDenoisingStepsChange={handleDenoisingStepsChange}
           />
         </div>
       </div>

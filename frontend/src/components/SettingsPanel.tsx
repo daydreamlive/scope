@@ -17,6 +17,8 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Hammer, Minus, Plus } from "lucide-react";
 import { PIPELINES } from "../data/pipelines";
+import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
+import { getDefaultDenoisingSteps } from "../lib/utils";
 import type { PipelineId } from "../types";
 
 const MIN_DIMENSION_LONGLIVE = 16;
@@ -33,6 +35,8 @@ interface SettingsPanelProps {
   onResolutionChange?: (resolution: { height: number; width: number }) => void;
   seed?: number;
   onSeedChange?: (seed: number) => void;
+  denoisingSteps?: number[];
+  onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
 }
 
 export function SettingsPanel({
@@ -44,6 +48,8 @@ export function SettingsPanel({
   onResolutionChange,
   seed = 42,
   onSeedChange,
+  denoisingSteps = [700, 500],
+  onDenoisingStepsChange,
 }: SettingsPanelProps) {
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -355,6 +361,14 @@ export function SettingsPanel({
               </div>
             </div>
           </div>
+        )}
+
+        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
+          <DenoisingStepsSlider
+            value={denoisingSteps}
+            onChange={onDenoisingStepsChange || (() => {})}
+            defaultValues={getDefaultDenoisingSteps(pipelineId)}
+          />
         )}
       </CardContent>
     </Card>

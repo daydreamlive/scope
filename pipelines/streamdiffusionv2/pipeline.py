@@ -65,6 +65,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.base_seed = config.get("seed", 42)
 
         self.prompts = None
+        self.denoising_step_list = None
+
         self.last_frame = None
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
@@ -126,9 +128,19 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self,
         input: torch.Tensor | list[torch.Tensor] | None = None,
         prompts: list[str] = None,
+        denoising_step_list: list[int] = None,
     ) -> torch.Tensor:
         if input is None:
             raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
+        if (
+            denoising_step_list is not None
+            and denoising_step_list != self.denoising_step_list
+        ):
+            self.denoising_step_list = denoising_step_list
+            self.stream.denoising_step_list = torch.tensor(
+                denoising_step_list, dtype=torch.long, device=self.device
+            )
+            logger.info(f"Updated denoising step list: {denoising_step_list}")
 
         exp_chunk_size = self.prepare().input_size
 

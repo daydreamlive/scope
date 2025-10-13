@@ -17,6 +17,9 @@ class Parameters(BaseModel):
 
     prompts: list[str] | None = Field(default=None, description="Prompt list")
     noise_scale: float | None = Field(default=None, description="Noise scale (0.0-1.0)")
+    denoising_step_list: list[int] | None = Field(
+        default=None, description="Denoising step list"
+    )
 
 
 class WebRTCOfferRequest(BaseModel):

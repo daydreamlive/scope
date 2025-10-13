@@ -3,6 +3,7 @@ export interface WebRTCOfferRequest {
   type?: string;
   initialParameters?: {
     prompts?: string[];
+    denoising_step_list?: number[];
   };
 }
 

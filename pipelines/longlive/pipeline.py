@@ -1,3 +1,4 @@
+import logging
 import time
 
 import torch
@@ -6,6 +7,8 @@ from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWra
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
+
+logger = logging.getLogger(__name__)
 
 
 class LongLivePipeline(Pipeline):
@@ -64,6 +67,7 @@ class LongLivePipeline(Pipeline):
         ).to(device=device, dtype=dtype)
 
         self.prompts = None
+        self.denoising_step_list = None
 
     def prepare(
         self, prompts: list[str] = None, should_prepare: bool = False
@@ -81,6 +85,20 @@ class LongLivePipeline(Pipeline):
 
         return None
 
-    def __call__(self, _: torch.Tensor | list[torch.Tensor] | None = None, **kwargs):
+    def __call__(
+        self,
+        _: torch.Tensor | list[torch.Tensor] | None = None,
+        prompts: list[str] = None,
+        denoising_step_list: list[int] = None,
+    ):
+        if (
+            denoising_step_list is not None
+            and denoising_step_list != self.denoising_step_list
+        ):
+            self.denoising_step_list = denoising_step_list
+            self.stream.denoising_step_list = torch.tensor(
+                denoising_step_list, dtype=torch.long
+            )
+            logger.info(f"Updated denoising step list: {denoising_step_list}")
         self.stream.prepare()
         return self.stream()

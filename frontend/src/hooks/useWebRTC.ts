@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 interface InitialParameters {
   prompts?: string[];
+  denoising_step_list?: number[];
 }
 
 interface UseWebRTCOptions {
@@ -214,22 +215,25 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     [isStreaming]
   );
 
-  const sendParameterUpdate = useCallback((params: { prompts?: string[] }) => {
-    if (
-      dataChannelRef.current &&
-      dataChannelRef.current.readyState === "open"
-    ) {
-      try {
-        const message = JSON.stringify(params);
-        dataChannelRef.current.send(message);
-        console.log("Sent parameter update:", params);
-      } catch (error) {
-        console.error("Failed to send parameter update:", error);
+  const sendParameterUpdate = useCallback(
+    (params: { prompts?: string[]; denoising_step_list?: number[] }) => {
+      if (
+        dataChannelRef.current &&
+        dataChannelRef.current.readyState === "open"
+      ) {
+        try {
+          const message = JSON.stringify(params);
+          dataChannelRef.current.send(message);
+          console.log("Sent parameter update:", params);
+        } catch (error) {
+          console.error("Failed to send parameter update:", error);
+        }
+      } else {
+        console.warn("Data channel not available for parameter update");
       }
-    } else {
-      console.warn("Data channel not available for parameter update");
-    }
-  }, []);
+    },
+    []
+  );
 
   const stopStream = useCallback(() => {
     // Close peer connection
