@@ -15,7 +15,7 @@ import {
 } from "./ui/tooltip";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { Hammer, Minus, Plus } from "lucide-react";
+import { Hammer, Info, Minus, Plus } from "lucide-react";
 import { PIPELINES } from "../data/pipelines";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps } from "../lib/utils";
@@ -137,23 +137,27 @@ export function SettingsPanel({
                 </h4>
               </div>
 
-              <div className="space-y-2">
-                {(currentPipeline.projectUrl || currentPipeline.modified) && (
+              <div>
+                {(currentPipeline.about ||
+                  currentPipeline.projectUrl ||
+                  currentPipeline.modified) && (
                   <div className="flex items-stretch gap-1 h-6">
-                    {currentPipeline.projectUrl && (
-                      <a
-                        href={currentPipeline.projectUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block h-full"
-                      >
-                        <Badge
-                          variant="outline"
-                          className="hover:bg-accent cursor-pointer h-full flex items-center"
-                        >
-                          Project Page
-                        </Badge>
-                      </a>
+                    {currentPipeline.about && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge
+                              variant="outline"
+                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
+                            >
+                              <Info className="h-3.5 w-3.5" />
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            <p className="text-xs">{currentPipeline.about}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     )}
                     {currentPipeline.modified && (
                       <TooltipProvider>
@@ -175,11 +179,23 @@ export function SettingsPanel({
                         </Tooltip>
                       </TooltipProvider>
                     )}
+                    {currentPipeline.projectUrl && (
+                      <a
+                        href={currentPipeline.projectUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block h-full"
+                      >
+                        <Badge
+                          variant="outline"
+                          className="hover:bg-accent cursor-pointer h-full flex items-center"
+                        >
+                          Project Page
+                        </Badge>
+                      </a>
+                    )}
                   </div>
                 )}
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {currentPipeline.about}
-                </p>
               </div>
             </CardContent>
           </Card>
