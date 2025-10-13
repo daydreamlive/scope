@@ -142,7 +142,7 @@ export function DenoisingStepsSlider({
   return (
     <div className={`space-y-2 ${className}`}>
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Denoising Steps</h3>
+        <label className="text-sm text-foreground">Denoising Step List</label>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
