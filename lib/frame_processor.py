@@ -232,10 +232,10 @@ class FrameProcessor:
         # Get the current pipeline using sync wrapper
         pipeline = self.pipeline_manager.get_pipeline()
 
-        prompts = self.parameters.get("prompts", None)
-
         # prepare() will handle any required preparation based on parameters internally
-        requirements = pipeline.prepare(prompts, should_prepare=not self.is_prepared)
+        requirements = pipeline.prepare(
+            should_prepare=not self.is_prepared, **self.parameters
+        )
         self.is_prepared = True
         input = None
 

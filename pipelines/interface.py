@@ -16,9 +16,7 @@ class Pipeline(ABC):
     """Abstract base class for all pipelines."""
 
     @abstractmethod
-    def prepare(
-        self, prompts: list[str] | None = None, should_prepare: bool = False
-    ) -> Requirements | None:
+    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
         """Prepare the pipeline and get requirements for the next processing chunk."""
         pass
 

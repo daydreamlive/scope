@@ -42,7 +42,7 @@ outputs = []
 for i, prompt in enumerate(prompts):
     should_prepare = i == 0
 
-    pipeline.prepare([prompt], should_prepare=should_prepare)
+    pipeline.prepare(prompts=[prompt], should_prepare=should_prepare)
 
     num_frames = 0
     max_output_frames = 81

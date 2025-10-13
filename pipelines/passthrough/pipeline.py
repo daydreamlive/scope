@@ -21,9 +21,7 @@ class PassthroughPipeline(Pipeline):
         self.dtype = dtype
         self.prompts = None
 
-    def prepare(
-        self, prompts: list[str] = None, should_prepare: bool = False
-    ) -> Requirements:
+    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         return Requirements(input_size=4)
 
     def __call__(

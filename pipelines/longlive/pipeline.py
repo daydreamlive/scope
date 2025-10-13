@@ -65,13 +65,12 @@ class LongLivePipeline(Pipeline):
 
         self.prompts = None
 
-    def prepare(
-        self, prompts: list[str] = None, should_prepare: bool = False
-    ) -> Requirements | None:
+    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
         # If caller requested prepare assume cache init
         # Otherwise no cache init
         init_cache = should_prepare
 
+        prompts = kwargs.get("prompts", None)
         if prompts is not None and prompts != self.prompts:
             self.prompts = prompts
             should_prepare = True

@@ -32,7 +32,7 @@ pipeline = StreamDiffusionV2Pipeline(
     device=torch.device("cuda"),
     dtype=torch.bfloat16,
 )
-pipeline.prepare(["a bear is walking on the grass"])
+pipeline.prepare(prompts=["a bear is walking on the grass"])
 
 # input_video is a 1CTHW tensor
 input_video = (

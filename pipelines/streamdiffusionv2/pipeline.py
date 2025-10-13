@@ -69,12 +69,11 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
 
-    def prepare(
-        self, prompts: list[str] = None, should_prepare: bool = False
-    ) -> Requirements:
+    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         if should_prepare:
             logger.info("Initiating pipeline prepare for request")
 
+        prompts = kwargs.get("prompts", None)
         if prompts is not None and prompts != self.prompts:
             logger.info("Initiating pipeline prepare for prompt update")
             should_prepare = True

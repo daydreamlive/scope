@@ -56,9 +56,7 @@ class VodPipeline(Pipeline):
                 f"Error loading video {self.video_path}: {e}. Using gray frames as fallback."
             )
 
-    def prepare(
-        self, prompts: list[str] = None, should_prepare: bool = False
-    ) -> Requirements | None:
+    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
         return None
 
     def __call__(
