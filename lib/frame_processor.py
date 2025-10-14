@@ -127,8 +127,9 @@ class FrameProcessor:
         """Get the current dynamically calculated pipeline FPS"""
         return self.current_pipeline_fps
 
-    def _calculate_pipeline_fps(self, processing_time: float, num_frames: int):
+    def _calculate_pipeline_fps(self, start_time: float, num_frames: int):
         """Calculate FPS based on processing time and number of frames created"""
+        processing_time = time.time() - start_time
         processing_time += SLEEP_TIME
         if processing_time <= 0 or num_frames <= 0:
             return self.current_pipeline_fps  # Return current FPS if invalid data
@@ -291,11 +292,11 @@ class FrameProcessor:
                 except queue.Full:
                     logger.warning("Output queue full, dropping processed frame")
                     # Update FPS calculation based on processing time and frame count
-                    self._calculate_pipeline_fps(processing_time, num_frames)
+                    self._calculate_pipeline_fps(start_time, num_frames)
                     continue
 
             # Update FPS calculation based on processing time and frame count
-            self._calculate_pipeline_fps(processing_time, num_frames)
+            self._calculate_pipeline_fps(start_time, num_frames)
         except Exception as e:
             if self._is_recoverable(e):
                 # Handle recoverable errors with full stack trace and continue processing

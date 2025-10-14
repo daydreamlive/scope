@@ -60,7 +60,7 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         if hasattr(self, "timestamp"):
             self.timestamp += int(self.frame_ptime * VIDEO_CLOCK_RATE)
-            wait = self.start + (self.timestamp / VIDEO_CLOCK_RATE) - time.time()
+            wait = self.frame_ptime
             if wait > 0:
                 await asyncio.sleep(wait)
         else:
