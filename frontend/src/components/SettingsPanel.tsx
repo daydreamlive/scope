@@ -18,7 +18,7 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus } from "lucide-react";
+import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PIPELINES } from "../data/pipelines";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps } from "../lib/utils";
@@ -44,6 +44,9 @@ interface SettingsPanelProps {
   onNoiseScaleChange?: (noiseScale: number) => void;
   noiseController?: boolean;
   onNoiseControllerChange?: (enabled: boolean) => void;
+  manageCache?: boolean;
+  onManageCacheChange?: (enabled: boolean) => void;
+  onResetCache?: () => void;
 }
 
 export function SettingsPanel({
@@ -61,6 +64,9 @@ export function SettingsPanel({
   onNoiseScaleChange,
   noiseController = true,
   onNoiseControllerChange,
+  manageCache = true,
+  onManageCacheChange,
+  onResetCache,
 }: SettingsPanelProps) {
   // Local state for noise scale for immediate UI feedback
   const [localNoiseScale, setLocalNoiseScale] = useState<number>(noiseScale);
@@ -405,6 +411,49 @@ export function SettingsPanel({
                       <Plus className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pipelineId === "streamdiffusionv2" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-foreground">
+                      Manage Cache:
+                    </label>
+                  </div>
+                  <Toggle
+                    pressed={manageCache}
+                    onPressedChange={onManageCacheChange || (() => {})}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                  >
+                    {manageCache ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-foreground">
+                      Reset Cache:
+                    </label>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={onResetCache || (() => {})}
+                    disabled={manageCache}
+                    variant="outline"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
             </div>

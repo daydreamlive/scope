@@ -26,6 +26,11 @@ class Parameters(BaseModel):
     denoising_step_list: list[int] | None = Field(
         default=None, description="Denoising step list"
     )
+    manage_cache: bool | None = Field(
+        default=None,
+        description="Enable automatic cache management for parameter updates",
+    )
+    reset_cache: bool | None = Field(default=None, description="Trigger a cache reset")
 
 
 class WebRTCOfferRequest(BaseModel):

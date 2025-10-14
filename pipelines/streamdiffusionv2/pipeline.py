@@ -75,10 +75,33 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if should_prepare:
             logger.info("Initiating pipeline prepare for request")
 
+        manage_cache = kwargs.get("manage_cache", None)
         prompts = kwargs.get("prompts", None)
+        denoising_step_list = kwargs.get("denoising_step_list", None)
+        noise_controller = kwargs.get("noise_controller", None)
+        noise_scale = kwargs.get("noise_scale", None)
+
+        # Always reset cache when changing prompts
         if prompts is not None and prompts != self.prompts:
             logger.info("Initiating pipeline prepare for prompt update")
             should_prepare = True
+
+        # If manage_cache is True let the pipeline handle cache management for other param updates
+        if manage_cache:
+            if (
+                denoising_step_list is not None
+                and denoising_step_list != self.denoising_step_list
+            ):
+                logger.info("Initating pipeline prepare for denoising step list update")
+                should_prepare = True
+
+            if (
+                not noise_controller
+                and noise_scale is not None
+                and noise_scale != self.noise_scale
+            ):
+                logger.info("Initating pipeline prepare for noise scale update")
+                should_prepare = True
 
         # CausalWanModel uses a RoPE frequency table with a max sequence length of 1024
         # This means that it has positions for 1024 latent frames
@@ -99,6 +122,16 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if should_prepare:
             if prompts is not None:
                 self.prompts = prompts
+
+            if denoising_step_list is not None:
+                self.denoising_step_list = denoising_step_list
+                self.stream.denoising_step_list = torch.tensor(
+                    denoising_step_list, dtype=torch.long, device=self.device
+                )
+
+            if not noise_controller and noise_scale is not None:
+                self.noise_scale = noise_scale
+
             self._prepare_pipeline()
 
         if self.last_frame is None:
@@ -168,20 +201,18 @@ class StreamDiffusionV2Pipeline(Pipeline):
         denoising_step_list: list[int] = None,
         noise_scale: float = None,
         noise_controller: bool = True,
+        manage_cache: bool = True,
     ) -> torch.Tensor:
         if input is None:
             raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
-        if (
-            denoising_step_list is not None
-            and denoising_step_list != self.denoising_step_list
-        ):
-            self.denoising_step_list = denoising_step_list
-            self.stream.denoising_step_list = torch.tensor(
-                denoising_step_list, dtype=torch.long, device=self.device
-            )
-            logger.info(f"Updated denoising step list: {denoising_step_list}")
 
-        exp_chunk_size = self.prepare().input_size
+        exp_chunk_size = self.prepare(
+            prompts=prompts,
+            denoising_step_list=denoising_step_list,
+            noise_scale=noise_scale,
+            noise_controller=noise_controller,
+            manage_cache=manage_cache,
+        ).input_size
 
         curr_chunk_size = len(input) if isinstance(input, list) else input.shape[2]
 
@@ -200,8 +231,6 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         if noise_controller:
             self._apply_motion_aware_noise_controller(input)
-        elif noise_scale is not None and noise_scale != self.noise_scale:
-            self.noise_scale = noise_scale
 
         # Determine the number of denoising steps
         # Higher noise scale -> more denoising steps, more intense changes to input

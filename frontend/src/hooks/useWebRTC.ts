@@ -7,6 +7,7 @@ interface InitialParameters {
   denoising_step_list?: number[];
   noise_scale?: number;
   noise_controller?: boolean;
+  manage_cache?: boolean;
 }
 
 interface UseWebRTCOptions {
@@ -223,6 +224,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       denoising_step_list?: number[];
       noise_scale?: number;
       noise_controller?: boolean;
+      manage_cache?: boolean;
+      reset_cache?: boolean;
     }) => {
       if (
         dataChannelRef.current &&

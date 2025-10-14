@@ -147,6 +147,21 @@ export function StreamPage() {
     });
   };
 
+  const handleManageCacheChange = (enabled: boolean) => {
+    updateSettings({ manageCache: enabled });
+    // Send manage cache update to backend
+    sendParameterUpdate({
+      manage_cache: enabled,
+    });
+  };
+
+  const handleResetCache = () => {
+    // Send reset cache command to backend
+    sendParameterUpdate({
+      reset_cache: true,
+    });
+  };
+
   const handleStartStream = async () => {
     if (isStreaming) {
       stopStream();
@@ -217,6 +232,7 @@ export function StreamPage() {
           denoising_step_list: settings.denoisingSteps || [700, 500],
           noise_scale: settings.noiseScale ?? 0.7,
           noise_controller: settings.noiseController ?? true,
+          manage_cache: settings.manageCache ?? true,
         },
         streamToSend
       );
@@ -297,6 +313,9 @@ export function StreamPage() {
             onNoiseScaleChange={handleNoiseScaleChange}
             noiseController={settings.noiseController ?? true}
             onNoiseControllerChange={handleNoiseControllerChange}
+            manageCache={settings.manageCache ?? true}
+            onManageCacheChange={handleManageCacheChange}
+            onResetCache={handleResetCache}
           />
         </div>
       </div>
