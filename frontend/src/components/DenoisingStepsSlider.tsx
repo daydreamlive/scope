@@ -172,7 +172,6 @@ export function DenoisingStepsSlider({
             step={1}
             incrementAmount={1}
             disabled={disabled}
-            debounceMs={150}
             inputParser={v => parseInt(v) || MIN_VALUE}
             renderExtraButton={() =>
               localValue.length > MIN_SLIDERS ? (

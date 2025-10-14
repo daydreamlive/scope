@@ -453,7 +453,6 @@ export function SettingsPanel({
                 incrementAmount={0.01}
                 disabled={noiseController}
                 labelClassName="text-sm text-foreground w-20"
-                debounceMs={150}
                 valueFormatter={formatNoiseScale}
                 inputParser={v => parseFloat(v) || 0.0}
               />
