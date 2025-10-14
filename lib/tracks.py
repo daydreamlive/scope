@@ -59,12 +59,23 @@ class VideoProcessingTrack(MediaStreamTrack):
             raise MediaStreamError
 
         if hasattr(self, "timestamp"):
+            # Calculate wait time based on current frame rate
+            current_time = time.time()
+            time_since_last_frame = current_time - self.last_frame_time
+
+            # Wait for the appropriate interval based on current FPS
+            target_interval = self.frame_ptime  # Current frame period
+            wait_time = target_interval - time_since_last_frame
+
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+
+            # Update timestamp and last frame time
             self.timestamp += int(self.frame_ptime * VIDEO_CLOCK_RATE)
-            wait = self.frame_ptime
-            if wait > 0:
-                await asyncio.sleep(wait)
+            self.last_frame_time = time.time()
         else:
             self.start = time.time()
+            self.last_frame_time = time.time()
             self.timestamp = 0
 
         return self.timestamp, VIDEO_TIME_BASE
