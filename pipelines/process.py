@@ -39,7 +39,7 @@ def preprocess_chunk(
             align_corners=False,
         )
 
-        logger.warning(f"Resized frame from {H}x{W} to {height}x{width}")
+        logger.debug(f"Resized frame from {H}x{W} to {height}x{width}")
 
         frames.append(frame_resized)
 
