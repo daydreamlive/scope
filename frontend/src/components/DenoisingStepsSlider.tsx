@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Slider } from "./ui/slider";
+import { SliderWithInput } from "./ui/slider-with-input";
 import { Plus, Minus } from "lucide-react";
 
 interface DenoisingStepsSliderProps {
@@ -29,7 +28,6 @@ export function DenoisingStepsSlider({
     value.length > 0 ? value : defaultValues
   );
   const [validationError, setValidationError] = useState<string>("");
-  const updateTimeoutRef = useRef<number | null>(null);
 
   // Sync with external value changes
   useEffect(() => {
@@ -37,26 +35,6 @@ export function DenoisingStepsSlider({
       setLocalValue(value);
     }
   }, [value]);
-
-  // Debounced update function
-  const debouncedOnChange = (newValue: number[]) => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-
-    updateTimeoutRef.current = setTimeout(() => {
-      onChange(newValue);
-    }, 150); // 150ms delay
-  };
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const validateSteps = (steps: number[]): string => {
     for (let i = 1; i < steps.length; i++) {
@@ -85,19 +63,17 @@ export function DenoisingStepsSlider({
     return attemptedValue;
   };
 
-  const handleSliderChange = (index: number, newValue: number[]) => {
+  const handleStepValueChange = (index: number, newValue: number) => {
     const updatedValue = [...localValue];
-    const attemptedValue = newValue[0];
-    updatedValue[index] = attemptedValue;
+    updatedValue[index] = newValue;
 
     const error = validateSteps(updatedValue);
     setValidationError(error);
 
     if (!error) {
       setLocalValue(updatedValue);
-      debouncedOnChange(updatedValue);
     } else {
-      const boundaryValue = calculateBoundaryValue(index, attemptedValue);
+      const boundaryValue = calculateBoundaryValue(index, newValue);
       const clampedValue = Math.max(
         MIN_VALUE,
         Math.min(MAX_VALUE, boundaryValue)
@@ -105,42 +81,13 @@ export function DenoisingStepsSlider({
       const boundedValue = [...localValue];
       boundedValue[index] = clampedValue;
       setLocalValue(boundedValue);
-      debouncedOnChange(boundedValue);
     }
   };
 
-  const handleValueChange = (index: number, newValue: number) => {
+  const handleStepCommit = (index: number, newValue: number) => {
     const updatedValue = [...localValue];
-    const clampedValue = Math.max(MIN_VALUE, Math.min(MAX_VALUE, newValue));
-    updatedValue[index] = clampedValue;
-
-    const error = validateSteps(updatedValue);
-    setValidationError(error);
-
-    if (!error) {
-      setLocalValue(updatedValue);
-      onChange(updatedValue); // Immediate update for discrete actions
-    } else {
-      const boundaryValue = calculateBoundaryValue(index, clampedValue);
-      const finalValue = Math.max(
-        MIN_VALUE,
-        Math.min(MAX_VALUE, boundaryValue)
-      );
-      const boundedValue = [...localValue];
-      boundedValue[index] = finalValue;
-      setLocalValue(boundedValue);
-      onChange(boundedValue);
-    }
-  };
-
-  const incrementValue = (index: number) => {
-    const newValue = Math.min(MAX_VALUE, localValue[index] + 1);
-    handleValueChange(index, newValue);
-  };
-
-  const decrementValue = (index: number) => {
-    const newValue = Math.max(MIN_VALUE, localValue[index] - 1);
-    handleValueChange(index, newValue);
+    updatedValue[index] = newValue;
+    onChange(updatedValue);
   };
 
   const addSlider = () => {
@@ -214,67 +161,33 @@ export function DenoisingStepsSlider({
 
       <div className="space-y-3">
         {localValue.map((stepValue, index) => (
-          <div key={index} className="space-y-2">
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-foreground w-16">
-                Step {index + 1}:
-              </label>
-              <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8 min-w-0">
+          <SliderWithInput
+            key={index}
+            label={`Step ${index + 1}:`}
+            value={stepValue}
+            onValueChange={value => handleStepValueChange(index, value)}
+            onValueCommit={value => handleStepCommit(index, value)}
+            min={MIN_VALUE}
+            max={MAX_VALUE}
+            step={1}
+            incrementAmount={1}
+            disabled={disabled}
+            debounceMs={150}
+            inputParser={v => parseInt(v) || MIN_VALUE}
+            renderExtraButton={() =>
+              localValue.length > MIN_SLIDERS ? (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                  onClick={() => decrementValue(index)}
+                  className="h-8 w-8 shrink-0 rounded-none hover:bg-destructive/10 text-destructive"
+                  onClick={() => removeSlider(index)}
                   disabled={disabled}
                 >
                   <Minus className="h-3.5 w-3.5" />
                 </Button>
-                <Input
-                  type="number"
-                  value={stepValue}
-                  onChange={e =>
-                    handleValueChange(
-                      index,
-                      parseInt(e.target.value) || MIN_VALUE
-                    )
-                  }
-                  disabled={disabled}
-                  className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 min-w-0 px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  min={MIN_VALUE}
-                  max={MAX_VALUE}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                  onClick={() => incrementValue(index)}
-                  disabled={disabled}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </Button>
-                {localValue.length > MIN_SLIDERS && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0 rounded-none hover:bg-destructive/10 text-destructive"
-                    onClick={() => removeSlider(index)}
-                    disabled={disabled}
-                  >
-                    <Minus className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            </div>
-            <Slider
-              value={[stepValue]}
-              onValueChange={value => handleSliderChange(index, value)}
-              min={MIN_VALUE}
-              max={MAX_VALUE}
-              step={1}
-              disabled={disabled}
-              className="w-full"
-            />
-          </div>
+              ) : null
+            }
+          />
         ))}
       </div>
     </div>

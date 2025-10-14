@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -16,7 +17,7 @@ import {
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
-import { Slider } from "./ui/slider";
+import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus } from "lucide-react";
 import { PIPELINES } from "../data/pipelines";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
@@ -61,6 +62,14 @@ export function SettingsPanel({
   noiseController = true,
   onNoiseControllerChange,
 }: SettingsPanelProps) {
+  // Local state for noise scale for immediate UI feedback
+  const [localNoiseScale, setLocalNoiseScale] = useState<number>(noiseScale);
+
+  // Sync with external value changes
+  useEffect(() => {
+    setLocalNoiseScale(noiseScale);
+  }, [noiseScale]);
+
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
       onPipelineIdChange?.(value as PipelineId);
@@ -110,30 +119,17 @@ export function SettingsPanel({
     handleSeedChange(newValue);
   };
 
-  const handleNoiseScaleChange = (value: number[]) => {
-    // Clamp to 0.0-1.0 range and round to 2 decimal places
-    const clampedValue = Math.max(0.0, Math.min(1.0, value[0]));
-    const roundedValue = Math.round(clampedValue * 100) / 100;
-    onNoiseScaleChange?.(roundedValue);
+  const handleNoiseScaleValueChange = (value: number) => {
+    setLocalNoiseScale(value);
   };
 
-  const handleNoiseScaleInputChange = (value: number) => {
-    // Clamp to 0.0-1.0 range and round to 2 decimal places
-    const clampedValue = Math.max(0.0, Math.min(1.0, value));
-    const roundedValue = Math.round(clampedValue * 100) / 100;
-    onNoiseScaleChange?.(roundedValue);
+  const handleNoiseScaleCommit = (value: number) => {
+    onNoiseScaleChange?.(value);
   };
 
-  const incrementNoiseScale = () => {
-    const newValue = Math.min(1.0, noiseScale + 0.01);
-    const roundedValue = Math.round(newValue * 100) / 100;
-    onNoiseScaleChange?.(roundedValue);
-  };
-
-  const decrementNoiseScale = () => {
-    const newValue = Math.max(0.0, noiseScale - 0.01);
-    const roundedValue = Math.round(newValue * 100) / 100;
-    onNoiseScaleChange?.(roundedValue);
+  // Format value to 2 decimal places
+  const formatNoiseScale = (value: number) => {
+    return Math.round(value * 100) / 100;
   };
 
   const currentPipeline = PIPELINES[pipelineId];
@@ -446,56 +442,21 @@ export function SettingsPanel({
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-foreground w-20">
-                    Noise Scale:
-                  </label>
-                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={decrementNoiseScale}
-                      disabled={noiseController}
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                    </Button>
-                    <Input
-                      type="number"
-                      value={noiseScale}
-                      onChange={e =>
-                        handleNoiseScaleInputChange(
-                          parseFloat(e.target.value) || 0.0
-                        )
-                      }
-                      disabled={noiseController}
-                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      min={0.0}
-                      max={1.0}
-                      step={0.01}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={incrementNoiseScale}
-                      disabled={noiseController}
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-                <Slider
-                  value={[noiseScale]}
-                  onValueChange={handleNoiseScaleChange}
-                  min={0.0}
-                  max={1.0}
-                  step={0.01}
-                  disabled={noiseController}
-                  className="w-full"
-                />
-              </div>
+              <SliderWithInput
+                label="Noise Scale:"
+                value={localNoiseScale}
+                onValueChange={handleNoiseScaleValueChange}
+                onValueCommit={handleNoiseScaleCommit}
+                min={0.0}
+                max={1.0}
+                step={0.01}
+                incrementAmount={0.01}
+                disabled={noiseController}
+                labelClassName="text-sm text-foreground w-20"
+                debounceMs={150}
+                valueFormatter={formatNoiseScale}
+                inputParser={v => parseFloat(v) || 0.0}
+              />
             </div>
           </div>
         )}
