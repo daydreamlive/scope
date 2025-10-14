@@ -122,7 +122,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
 
-    def apply_motion_aware_noise_controller(self, input: torch.Tensor):
+    def _apply_motion_aware_noise_controller(self, input: torch.Tensor):
         # The prev seq is the last chunk_size frames of the current input
         prev_seq = input[:, :, -self.chunk_size :]
         if self.last_frame is None:
@@ -199,7 +199,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
             )
 
         if noise_controller:
-            self.apply_motion_aware_noise_controller(input)
+            self._apply_motion_aware_noise_controller(input)
         elif noise_scale is not None and noise_scale != self.noise_scale:
             self.noise_scale = noise_scale
 
