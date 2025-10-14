@@ -89,6 +89,11 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.initialize_output_processing()
         while self.input_task_running:
             try:
+                # Update FPS from FrameProcessor
+                if self.frame_processor:
+                    self.fps = self.frame_processor.get_current_pipeline_fps()
+                    self.frame_ptime = 1.0 / self.fps
+
                 frame_tensor = self.frame_processor.get()
                 if frame_tensor is not None:
                     frame = VideoFrame.from_ndarray(
@@ -98,11 +103,6 @@ class VideoProcessingTrack(MediaStreamTrack):
                     pts, time_base = await self.next_timestamp()
                     frame.pts = pts
                     frame.time_base = time_base
-
-                    # Update FPS from FrameProcessor
-                    if self.frame_processor:
-                        self.fps = self.frame_processor.get_current_pipeline_fps()
-                        self.frame_ptime = 1.0 / self.fps
 
                     return frame
 

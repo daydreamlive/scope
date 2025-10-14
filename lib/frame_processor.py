@@ -19,6 +19,7 @@ OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
 MAX_FPS = 60.0  # Maximum FPS cap
 DEFAULT_FPS = 30.0  # Default FPS
+SLEEP_TIME = 0.01
 
 
 class FrameProcessor:
@@ -53,7 +54,7 @@ class FrameProcessor:
 
         # FPS tracking variables
         self.processing_timestamps = deque(
-            maxlen=30
+            maxlen=2
         )  # Keep last 30 processing timestamps for averaging
         self.last_fps_update = time.time()
         self.fps_update_interval = 0.5  # Update FPS every 0.5 seconds
@@ -128,6 +129,7 @@ class FrameProcessor:
 
     def _calculate_pipeline_fps(self, processing_time: float, num_frames: int):
         """Calculate FPS based on processing time and number of frames created"""
+        processing_time += SLEEP_TIME
         if processing_time <= 0 or num_frames <= 0:
             return self.current_pipeline_fps  # Return current FPS if invalid data
 
@@ -193,7 +195,7 @@ class FrameProcessor:
                 self.process_chunk()
 
                 # Sleep briefly to avoid busy waiting
-                if not self.shutdown_event.wait(0.01):
+                if not self.shutdown_event.wait(SLEEP_TIME):
                     continue
 
             except PipelineNotAvailableException as e:
@@ -219,6 +221,7 @@ class FrameProcessor:
         logger.info("Worker thread stopped")
 
     def process_chunk(self):
+        start_time = time.time()
         try:
             # Check if there are new parameters
             new_parameters = self.parameters_queue.get_nowait()
@@ -246,8 +249,6 @@ class FrameProcessor:
                     return
                 input = self.prepare_chunk(current_chunk_size)
         try:
-            start_time = time.time()
-
             # Pass parameters
             output = pipeline(input, **self.parameters)
 
@@ -256,9 +257,6 @@ class FrameProcessor:
             logger.debug(
                 f"Processed pipeline in {processing_time:.4f}s, {num_frames} frames"
             )
-
-            # Update FPS calculation based on processing time and frame count
-            self._calculate_pipeline_fps(processing_time, num_frames)
 
             # Normalize to [0, 255] and convert to uint8
             output = (
@@ -292,8 +290,12 @@ class FrameProcessor:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:
                     logger.warning("Output queue full, dropping processed frame")
+                    # Update FPS calculation based on processing time and frame count
+                    self._calculate_pipeline_fps(processing_time, num_frames)
                     continue
 
+            # Update FPS calculation based on processing time and frame count
+            self._calculate_pipeline_fps(processing_time, num_frames)
         except Exception as e:
             if self._is_recoverable(e):
                 # Handle recoverable errors with full stack trace and continue processing
