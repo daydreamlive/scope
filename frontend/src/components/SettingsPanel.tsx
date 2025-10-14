@@ -26,7 +26,7 @@ import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps } from "../lib/utils";
 import type { PipelineId } from "../types";
 
-const MIN_DIMENSION_LONGLIVE = 16;
+const MIN_DIMENSION = 16;
 
 interface SettingsPanelProps {
   className?: string;
@@ -88,7 +88,10 @@ export function SettingsPanel({
     dimension: "height" | "width",
     value: number
   ) => {
-    const minValue = pipelineId === "longlive" ? MIN_DIMENSION_LONGLIVE : 1;
+    const minValue =
+      pipelineId === "longlive" || pipelineId === "streamdiffusionv2"
+        ? MIN_DIMENSION
+        : 1;
     const maxValue = 2048;
 
     onResolutionChange?.({
@@ -104,7 +107,10 @@ export function SettingsPanel({
   };
 
   const decrementResolution = (dimension: "height" | "width") => {
-    const minValue = pipelineId === "longlive" ? MIN_DIMENSION_LONGLIVE : 1;
+    const minValue =
+      pipelineId === "longlive" || pipelineId === "streamdiffusionv2"
+        ? MIN_DIMENSION
+        : 1;
     const newValue = Math.max(minValue, resolution[dimension] - 1);
     handleResolutionChange(dimension, newValue);
   };
@@ -241,7 +247,7 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {pipelineId === "longlive" && (
+        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <h3 className="text-sm font-medium">Parameters</h3>
@@ -269,17 +275,12 @@ export function SettingsPanel({
                       onChange={e =>
                         handleResolutionChange(
                           "height",
-                          parseInt(e.target.value) ||
-                            (pipelineId === "longlive"
-                              ? MIN_DIMENSION_LONGLIVE
-                              : 1)
+                          parseInt(e.target.value) || MIN_DIMENSION
                         )
                       }
                       disabled={isStreaming}
                       className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      min={
-                        pipelineId === "longlive" ? MIN_DIMENSION_LONGLIVE : 1
-                      }
+                      min={MIN_DIMENSION}
                       max={2048}
                     />
                     <Button
@@ -316,17 +317,12 @@ export function SettingsPanel({
                       onChange={e =>
                         handleResolutionChange(
                           "width",
-                          parseInt(e.target.value) ||
-                            (pipelineId === "longlive"
-                              ? MIN_DIMENSION_LONGLIVE
-                              : 1)
+                          parseInt(e.target.value) || MIN_DIMENSION
                         )
                       }
                       disabled={isStreaming}
                       className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      min={
-                        pipelineId === "longlive" ? MIN_DIMENSION_LONGLIVE : 1
-                      }
+                      min={MIN_DIMENSION}
                       max={2048}
                     />
                     <Button
@@ -341,55 +337,6 @@ export function SettingsPanel({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.seed.label}
-                    tooltip={PARAMETER_METADATA.seed.tooltip}
-                    className="text-sm text-foreground w-14"
-                  />
-                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={decrementSeed}
-                      disabled={isStreaming}
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                    </Button>
-                    <Input
-                      type="number"
-                      value={seed}
-                      onChange={e =>
-                        handleSeedChange(parseInt(e.target.value) || 0)
-                      }
-                      disabled={isStreaming}
-                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      min={0}
-                      max={2147483647}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={incrementSeed}
-                      disabled={isStreaming}
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {pipelineId === "streamdiffusionv2" && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium">Parameters</h3>
-
-              <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <LabelWithTooltip
                     label={PARAMETER_METADATA.seed.label}

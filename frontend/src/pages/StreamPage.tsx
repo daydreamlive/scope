@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -162,6 +162,18 @@ export function StreamPage() {
     });
   };
 
+  // Sync resolution with videoResolution when video source changes
+  useEffect(() => {
+    if (videoResolution && !isStreaming) {
+      updateSettings({
+        resolution: {
+          height: videoResolution.height,
+          width: videoResolution.width,
+        },
+      });
+    }
+  }, [videoResolution, isStreaming, updateSettings]);
+
   const handleStartStream = async () => {
     if (isStreaming) {
       stopStream();
@@ -172,33 +184,37 @@ export function StreamPage() {
       // Always load pipeline with current parameters - backend will handle the rest
       console.log(`Loading ${settings.pipelineId} pipeline...`);
 
-      // Prepare load parameters based on pipeline type and video resolution
+      // Prepare load parameters based on pipeline type
       let loadParams = null;
-      if (settings.pipelineId === "streamdiffusionv2" && videoResolution) {
+
+      // Use settings.resolution if available, otherwise fall back to videoResolution
+      const resolution = settings.resolution || videoResolution;
+
+      if (settings.pipelineId === "streamdiffusionv2" && resolution) {
         loadParams = {
-          height: videoResolution.height,
-          width: videoResolution.width,
+          height: resolution.height,
+          width: resolution.width,
           seed: settings.seed ?? 42,
         };
         console.log(
-          `Loading with resolution: ${videoResolution.width}x${videoResolution.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
         );
-      } else if (settings.pipelineId === "passthrough" && videoResolution) {
+      } else if (settings.pipelineId === "passthrough" && resolution) {
         loadParams = {
-          height: videoResolution.height,
-          width: videoResolution.width,
+          height: resolution.height,
+          width: resolution.width,
         };
         console.log(
-          `Loading with resolution: ${videoResolution.width}x${videoResolution.height}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}`
         );
-      } else if (settings.pipelineId === "longlive") {
+      } else if (settings.pipelineId === "longlive" && resolution) {
         loadParams = {
-          height: settings.resolution?.height ?? 320,
-          width: settings.resolution?.width ?? 576,
+          height: resolution.height,
+          width: resolution.width,
           seed: settings.seed ?? 42,
         };
         console.log(
-          `Loading with resolution: ${loadParams.width}x${loadParams.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
         );
       }
 
