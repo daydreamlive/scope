@@ -46,7 +46,7 @@ export function SliderWithInput({
   disabled = false,
   className = "",
   labelClassName = "text-sm text-foreground w-16",
-  debounceMs = 50,
+  debounceMs = 100,
   valueFormatter = v => v,
   inputParser = v => parseFloat(v) || min,
   renderExtraButton,

@@ -28,7 +28,7 @@ export function DebouncedSlider({
   step = 1,
   disabled = false,
   className = "",
-  debounceMs = 50,
+  debounceMs = 100,
 }: DebouncedSliderProps) {
   const [localValue, setLocalValue] = useState<number[]>(value);
   const commitTimeoutRef = useRef<number | null>(null);
