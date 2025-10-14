@@ -240,6 +240,7 @@ export function StreamPage() {
         settings.pipelineId !== "vod"
       ) {
         initialParameters.prompts = currentPrompts;
+        initialParameters.manage_cache = settings.manageCache ?? true;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
         ];
@@ -249,7 +250,6 @@ export function StreamPage() {
       if (settings.pipelineId === "streamdiffusionv2") {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
-        initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
       // Pipeline is loaded, now start WebRTC stream

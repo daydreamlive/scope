@@ -76,6 +76,7 @@ class InferencePipeline(torch.nn.Module):
     def prepare(
         self,
         prompts: list[str] = None,
+        denoising_step_list: list[int] = None,
         init_cache: bool = False,
     ):
         # CausalWanModel uses a RoPE frequency table with a max sequence length of 1024
@@ -105,6 +106,11 @@ class InferencePipeline(torch.nn.Module):
 
             if not init_cache and self.current_start > 0:
                 self._recache_frames()
+
+        if denoising_step_list is not None:
+            self.denoising_step_list = torch.tensor(
+                denoising_step_list, dtype=torch.long
+            )
 
         if not init_cache:
             return

@@ -74,13 +74,34 @@ class LongLivePipeline(Pipeline):
         # Otherwise no cache init
         init_cache = should_prepare
 
+        manage_cache = kwargs.get("manage_cache", None)
         prompts = kwargs.get("prompts", None)
+        denoising_step_list = kwargs.get("denoising_step_list", None)
+
         if prompts is not None and prompts != self.prompts:
-            self.prompts = prompts
             should_prepare = True
 
+        if (
+            denoising_step_list is not None
+            and denoising_step_list != self.denoising_step_list
+        ):
+            should_prepare = True
+
+            if manage_cache:
+                init_cache = True
+
         if should_prepare:
-            self.stream.prepare(self.prompts, init_cache=init_cache)
+            if prompts is not None:
+                self.prompts = prompts
+
+            if denoising_step_list is not None:
+                self.denoising_step_list = denoising_step_list
+
+            self.stream.prepare(
+                prompts=self.prompts,
+                denoising_step_list=self.denoising_step_list,
+                init_cache=init_cache,
+            )
 
         return None
 
@@ -89,15 +110,11 @@ class LongLivePipeline(Pipeline):
         _: torch.Tensor | list[torch.Tensor] | None = None,
         prompts: list[str] = None,
         denoising_step_list: list[int] = None,
+        manage_cache: bool = True,
     ):
-        if (
-            denoising_step_list is not None
-            and denoising_step_list != self.denoising_step_list
-        ):
-            self.denoising_step_list = denoising_step_list
-            self.stream.denoising_step_list = torch.tensor(
-                denoising_step_list, dtype=torch.long
-            )
-            logger.info(f"Updated denoising step list: {denoising_step_list}")
-        self.stream.prepare()
+        self.prepare(
+            prompts=prompts,
+            denoising_step_list=denoising_step_list,
+            manage_cache=manage_cache,
+        )
         return self.stream()
