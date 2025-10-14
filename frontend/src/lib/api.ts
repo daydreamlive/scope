@@ -4,6 +4,9 @@ export interface WebRTCOfferRequest {
   initialParameters?: {
     prompts?: string[];
     denoising_step_list?: number[];
+    noise_scale?: number;
+    noise_controller?: boolean;
+    manage_cache?: boolean;
   };
 }
 

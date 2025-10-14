@@ -225,17 +225,35 @@ export function StreamPage() {
         return;
       }
 
+      // Build initial parameters based on pipeline type
+      const initialParameters: {
+        prompts?: string[];
+        denoising_step_list?: number[];
+        noise_scale?: number;
+        noise_controller?: boolean;
+        manage_cache?: boolean;
+      } = {};
+
+      // Common parameters for pipelines that support prompts
+      if (
+        settings.pipelineId !== "passthrough" &&
+        settings.pipelineId !== "vod"
+      ) {
+        initialParameters.prompts = currentPrompts;
+        initialParameters.denoising_step_list = settings.denoisingSteps || [
+          700, 500,
+        ];
+      }
+
+      // StreamDiffusionV2-specific parameters
+      if (settings.pipelineId === "streamdiffusionv2") {
+        initialParameters.noise_scale = settings.noiseScale ?? 0.7;
+        initialParameters.noise_controller = settings.noiseController ?? true;
+        initialParameters.manage_cache = settings.manageCache ?? true;
+      }
+
       // Pipeline is loaded, now start WebRTC stream
-      startStream(
-        {
-          prompts: currentPrompts,
-          denoising_step_list: settings.denoisingSteps || [700, 500],
-          noise_scale: settings.noiseScale ?? 0.7,
-          noise_controller: settings.noiseController ?? true,
-          manage_cache: settings.manageCache ?? true,
-        },
-        streamToSend
-      );
+      startStream(initialParameters, streamToSend);
     } catch (error) {
       console.error("Error during stream start:", error);
     }
