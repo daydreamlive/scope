@@ -73,6 +73,11 @@ export function SettingsPanel({
   // Local state for noise scale for immediate UI feedback
   const [localNoiseScale, setLocalNoiseScale] = useState<number>(noiseScale);
 
+  // Validation error states
+  const [heightError, setHeightError] = useState<string | null>(null);
+  const [widthError, setWidthError] = useState<string | null>(null);
+  const [seedError, setSeedError] = useState<string | null>(null);
+
   // Sync with external value changes
   useEffect(() => {
     setLocalNoiseScale(noiseScale);
@@ -94,9 +99,32 @@ export function SettingsPanel({
         : 1;
     const maxValue = 2048;
 
+    // Validate and set error state
+    if (value < minValue) {
+      if (dimension === "height") {
+        setHeightError(`Must be at least ${minValue}`);
+      } else {
+        setWidthError(`Must be at least ${minValue}`);
+      }
+    } else if (value > maxValue) {
+      if (dimension === "height") {
+        setHeightError(`Must be at most ${maxValue}`);
+      } else {
+        setWidthError(`Must be at most ${maxValue}`);
+      }
+    } else {
+      // Clear error if valid
+      if (dimension === "height") {
+        setHeightError(null);
+      } else {
+        setWidthError(null);
+      }
+    }
+
+    // Always update the value (even if invalid)
     onResolutionChange?.({
       ...resolution,
-      [dimension]: Math.max(minValue, Math.min(maxValue, value)),
+      [dimension]: value,
     });
   };
 
@@ -117,8 +145,19 @@ export function SettingsPanel({
 
   const handleSeedChange = (value: number) => {
     const minValue = 0;
-    const maxValue = 2147483647; // Max 32-bit signed integer
-    onSeedChange?.(Math.max(minValue, Math.min(maxValue, value)));
+    const maxValue = 2147483647;
+
+    // Validate and set error state
+    if (value < minValue) {
+      setSeedError(`Must be at least ${minValue}`);
+    } else if (value > maxValue) {
+      setSeedError(`Must be at most ${maxValue}`);
+    } else {
+      setSeedError(null);
+    }
+
+    // Always update the value (even if invalid)
+    onSeedChange?.(value);
   };
 
   const incrementSeed = () => {
@@ -253,127 +292,151 @@ export function SettingsPanel({
               <h3 className="text-sm font-medium">Parameters</h3>
 
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.height.label}
-                    tooltip={PARAMETER_METADATA.height.tooltip}
-                    className="text-sm text-foreground w-14"
-                  />
-                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={() => decrementResolution("height")}
-                      disabled={isStreaming}
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                    </Button>
-                    <Input
-                      type="number"
-                      value={resolution.height}
-                      onChange={e =>
-                        handleResolutionChange(
-                          "height",
-                          parseInt(e.target.value) || MIN_DIMENSION
-                        )
-                      }
-                      disabled={isStreaming}
-                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      min={MIN_DIMENSION}
-                      max={2048}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <LabelWithTooltip
+                      label={PARAMETER_METADATA.height.label}
+                      tooltip={PARAMETER_METADATA.height.tooltip}
+                      className="text-sm text-foreground w-14"
                     />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={() => incrementResolution("height")}
-                      disabled={isStreaming}
+                    <div
+                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${heightError ? "border-red-500" : ""}`}
                     >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={() => decrementResolution("height")}
+                        disabled={isStreaming}
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </Button>
+                      <Input
+                        type="number"
+                        value={resolution.height}
+                        onChange={e => {
+                          const value = parseInt(e.target.value);
+                          if (!isNaN(value)) {
+                            handleResolutionChange("height", value);
+                          }
+                        }}
+                        disabled={isStreaming}
+                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        min={MIN_DIMENSION}
+                        max={2048}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={() => incrementResolution("height")}
+                        disabled={isStreaming}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
+                  {heightError && (
+                    <p className="text-xs text-red-500 ml-16">{heightError}</p>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.width.label}
-                    tooltip={PARAMETER_METADATA.width.tooltip}
-                    className="text-sm text-foreground w-14"
-                  />
-                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={() => decrementResolution("width")}
-                      disabled={isStreaming}
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                    </Button>
-                    <Input
-                      type="number"
-                      value={resolution.width}
-                      onChange={e =>
-                        handleResolutionChange(
-                          "width",
-                          parseInt(e.target.value) || MIN_DIMENSION
-                        )
-                      }
-                      disabled={isStreaming}
-                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      min={MIN_DIMENSION}
-                      max={2048}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <LabelWithTooltip
+                      label={PARAMETER_METADATA.width.label}
+                      tooltip={PARAMETER_METADATA.width.tooltip}
+                      className="text-sm text-foreground w-14"
                     />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={() => incrementResolution("width")}
-                      disabled={isStreaming}
+                    <div
+                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${widthError ? "border-red-500" : ""}`}
                     >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={() => decrementResolution("width")}
+                        disabled={isStreaming}
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </Button>
+                      <Input
+                        type="number"
+                        value={resolution.width}
+                        onChange={e => {
+                          const value = parseInt(e.target.value);
+                          if (!isNaN(value)) {
+                            handleResolutionChange("width", value);
+                          }
+                        }}
+                        disabled={isStreaming}
+                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        min={MIN_DIMENSION}
+                        max={2048}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={() => incrementResolution("width")}
+                        disabled={isStreaming}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
+                  {widthError && (
+                    <p className="text-xs text-red-500 ml-16">{widthError}</p>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.seed.label}
-                    tooltip={PARAMETER_METADATA.seed.tooltip}
-                    className="text-sm text-foreground w-14"
-                  />
-                  <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={decrementSeed}
-                      disabled={isStreaming}
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                    </Button>
-                    <Input
-                      type="number"
-                      value={seed}
-                      onChange={e =>
-                        handleSeedChange(parseInt(e.target.value) || 0)
-                      }
-                      disabled={isStreaming}
-                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      min={0}
-                      max={2147483647}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <LabelWithTooltip
+                      label={PARAMETER_METADATA.seed.label}
+                      tooltip={PARAMETER_METADATA.seed.tooltip}
+                      className="text-sm text-foreground w-14"
                     />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                      onClick={incrementSeed}
-                      disabled={isStreaming}
+                    <div
+                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${seedError ? "border-red-500" : ""}`}
                     >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={decrementSeed}
+                        disabled={isStreaming}
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </Button>
+                      <Input
+                        type="number"
+                        value={seed}
+                        onChange={e => {
+                          const value = parseInt(e.target.value);
+                          if (!isNaN(value)) {
+                            handleSeedChange(value);
+                          }
+                        }}
+                        disabled={isStreaming}
+                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        min={0}
+                        max={2147483647}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={incrementSeed}
+                        disabled={isStreaming}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
+                  {seedError && (
+                    <p className="text-xs text-red-500 ml-16">{seedError}</p>
+                  )}
                 </div>
               </div>
             </div>
