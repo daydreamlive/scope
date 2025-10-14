@@ -1,10 +1,12 @@
 import { Button } from "./button";
 import { Input } from "./input";
 import { DebouncedSlider } from "./debounced-slider";
+import { LabelWithTooltip } from "./label-with-tooltip";
 import { Plus, Minus } from "lucide-react";
 
 interface SliderWithInputProps {
   label?: string;
+  tooltip?: string;
   value: number;
   onValueChange: (value: number) => void;
   onValueCommit?: (value: number) => void;
@@ -33,6 +35,7 @@ interface SliderWithInputProps {
  */
 export function SliderWithInput({
   label,
+  tooltip,
   value,
   onValueChange,
   onValueCommit,
@@ -83,7 +86,13 @@ export function SliderWithInput({
   return (
     <div className={`space-y-2 ${className}`}>
       <div className="flex items-center gap-2">
-        {label && <label className={labelClassName}>{label}</label>}
+        {label && (
+          <LabelWithTooltip
+            label={label}
+            tooltip={tooltip}
+            className={labelClassName}
+          />
+        )}
         <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8 min-w-0">
           <Button
             variant="ghost"

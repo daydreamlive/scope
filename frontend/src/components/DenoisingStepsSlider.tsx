@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { SliderWithInput } from "./ui/slider-with-input";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { Plus, Minus } from "lucide-react";
 
 interface DenoisingStepsSliderProps {
@@ -9,6 +10,7 @@ interface DenoisingStepsSliderProps {
   onChange: (value: number[]) => void;
   disabled?: boolean;
   defaultValues?: number[];
+  tooltip?: string;
 }
 
 const MIN_SLIDERS = 1;
@@ -23,6 +25,7 @@ export function DenoisingStepsSlider({
   onChange,
   disabled = false,
   defaultValues = DEFAULT_VALUES,
+  tooltip,
 }: DenoisingStepsSliderProps) {
   const [localValue, setLocalValue] = useState<number[]>(
     value.length > 0 ? value : defaultValues
@@ -130,7 +133,11 @@ export function DenoisingStepsSlider({
   return (
     <div className={`space-y-2 ${className}`}>
       <div className="flex items-center justify-between">
-        <label className="text-sm text-foreground">Denoising Step List</label>
+        <LabelWithTooltip
+          label="Denoising Step List"
+          tooltip={tooltip}
+          className="text-sm text-foreground"
+        />
         <div className="flex items-center gap-2">
           <Button
             variant="outline"

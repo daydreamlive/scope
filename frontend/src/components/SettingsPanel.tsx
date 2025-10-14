@@ -14,12 +14,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PIPELINES } from "../data/pipelines";
+import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps } from "../lib/utils";
 import type { PipelineId } from "../types";
@@ -246,9 +248,11 @@ export function SettingsPanel({
 
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <label className="text-sm text-foreground w-14">
-                    Height:
-                  </label>
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.height.label}
+                    tooltip={PARAMETER_METADATA.height.tooltip}
+                    className="text-sm text-foreground w-14"
+                  />
                   <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
                     <Button
                       variant="ghost"
@@ -291,7 +295,11 @@ export function SettingsPanel({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <label className="text-sm text-foreground w-14">Width:</label>
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.width.label}
+                    tooltip={PARAMETER_METADATA.width.tooltip}
+                    className="text-sm text-foreground w-14"
+                  />
                   <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
                     <Button
                       variant="ghost"
@@ -334,7 +342,11 @@ export function SettingsPanel({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <label className="text-sm text-foreground w-14">Seed:</label>
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.seed.label}
+                    tooltip={PARAMETER_METADATA.seed.tooltip}
+                    className="text-sm text-foreground w-14"
+                  />
                   <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
                     <Button
                       variant="ghost"
@@ -379,7 +391,11 @@ export function SettingsPanel({
 
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <label className="text-sm text-foreground w-14">Seed:</label>
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.seed.label}
+                    tooltip={PARAMETER_METADATA.seed.tooltip}
+                    className="text-sm text-foreground w-14"
+                  />
                   <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8">
                     <Button
                       variant="ghost"
@@ -422,11 +438,11 @@ export function SettingsPanel({
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-foreground">
-                      Manage Cache:
-                    </label>
-                  </div>
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.manageCache.label}
+                    tooltip={PARAMETER_METADATA.manageCache.tooltip}
+                    className="text-sm text-foreground"
+                  />
                   <Toggle
                     pressed={manageCache}
                     onPressedChange={onManageCacheChange || (() => {})}
@@ -439,11 +455,11 @@ export function SettingsPanel({
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-foreground">
-                      Reset Cache:
-                    </label>
-                  </div>
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.resetCache.label}
+                    tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                    className="text-sm text-foreground"
+                  />
                   <Button
                     type="button"
                     onClick={onResetCache || (() => {})}
@@ -465,6 +481,7 @@ export function SettingsPanel({
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
             defaultValues={getDefaultDenoisingSteps(pipelineId)}
+            tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
           />
         )}
 
@@ -473,11 +490,11 @@ export function SettingsPanel({
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-foreground">
-                      Noise Controller:
-                    </label>
-                  </div>
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.noiseController.label}
+                    tooltip={PARAMETER_METADATA.noiseController.tooltip}
+                    className="text-sm text-foreground"
+                  />
                   <Toggle
                     pressed={noiseController}
                     onPressedChange={onNoiseControllerChange || (() => {})}
@@ -492,7 +509,8 @@ export function SettingsPanel({
               </div>
 
               <SliderWithInput
-                label="Noise Scale:"
+                label={PARAMETER_METADATA.noiseScale.label}
+                tooltip={PARAMETER_METADATA.noiseScale.tooltip}
                 value={localNoiseScale}
                 onValueChange={handleNoiseScaleValueChange}
                 onValueCommit={handleNoiseScaleCommit}
