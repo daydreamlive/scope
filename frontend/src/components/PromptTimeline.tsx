@@ -1,7 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
-import { Play, Pause, Plus, Edit2, Trash2 } from "lucide-react";
+import {
+  Play,
+  Pause,
+  Plus,
+  Edit2,
+  Trash2,
+  Download,
+  Upload,
+} from "lucide-react";
 import { Input } from "./ui/input";
 
 export interface TimelinePrompt {
@@ -157,6 +165,55 @@ export function PromptTimeline({
     [positionToTime, onTimeChange]
   );
 
+  const handleExport = useCallback(() => {
+    const timelineData = {
+      prompts: prompts,
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+    };
+
+    const dataStr = JSON.stringify(timelineData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `timeline-${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [prompts]);
+
+  const handleImport = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const content = e.target?.result as string;
+          const timelineData = JSON.parse(content);
+
+          if (timelineData.prompts && Array.isArray(timelineData.prompts)) {
+            onPromptsChange(timelineData.prompts);
+          } else {
+            alert("Invalid timeline file format");
+          }
+        } catch (error) {
+          alert("Error reading timeline file");
+          console.error("Import error:", error);
+        }
+      };
+      reader.readAsText(file);
+
+      // Reset the input so the same file can be selected again
+      event.target.value = "";
+    },
+    [onPromptsChange]
+  );
+
   // Add global mouse event listeners for dragging
   useEffect(() => {
     if (draggingPrompt) {
@@ -270,15 +327,39 @@ export function PromptTimeline({
               </Button>
             </div>
           </div>
-          <Button
-            onClick={addPrompt}
-            disabled={disabled}
-            size="sm"
-            variant="outline"
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Add Prompt
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleExport}
+              disabled={disabled || prompts.length === 0}
+              size="sm"
+              variant="outline"
+            >
+              <Download className="h-4 w-4 mr-1" />
+              Export
+            </Button>
+            <div className="relative">
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImport}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                disabled={disabled}
+              />
+              <Button size="sm" variant="outline" disabled={disabled}>
+                <Upload className="h-4 w-4 mr-1" />
+                Import
+              </Button>
+            </div>
+            <Button
+              onClick={addPrompt}
+              disabled={disabled}
+              size="sm"
+              variant="outline"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add Prompt
+            </Button>
+          </div>
         </div>
 
         {/* Timeline */}
