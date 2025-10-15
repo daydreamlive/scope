@@ -168,8 +168,12 @@ export function StreamPage() {
   };
 
   // Sync resolution with videoResolution when video source changes
+  // Only sync for video-input pipelines
   useEffect(() => {
-    if (videoResolution && !isStreaming) {
+    const pipelineCategory = PIPELINES[settings.pipelineId]?.category;
+    const isVideoInputPipeline = pipelineCategory === "video-input";
+
+    if (videoResolution && !isStreaming && isVideoInputPipeline) {
       updateSettings({
         resolution: {
           height: videoResolution.height,
@@ -177,7 +181,7 @@ export function StreamPage() {
         },
       });
     }
-  }, [videoResolution, isStreaming, updateSettings]);
+  }, [videoResolution, isStreaming, settings.pipelineId, updateSettings]);
 
   const handleStartStream = async () => {
     if (isStreaming) {
