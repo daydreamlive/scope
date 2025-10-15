@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
-import { PromptInput } from "../components/PromptInput";
+import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
@@ -25,6 +25,9 @@ export function StreamPage() {
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
+
+  // Ref to access timeline functions
+  const timelineRef = useRef<{ getCurrentTimelinePrompt: () => string }>(null);
 
   // Pipeline management
   const {
@@ -264,7 +267,20 @@ export function StreamPage() {
         settings.pipelineId !== "passthrough" &&
         settings.pipelineId !== "vod"
       ) {
-        initialParameters.prompts = currentPrompts;
+        // Check if timeline is active and has a current prompt
+        let promptsToUse = currentPrompts;
+        if (timelineRef.current) {
+          const timelinePrompt = timelineRef.current.getCurrentTimelinePrompt();
+          if (timelinePrompt) {
+            promptsToUse = [timelinePrompt];
+            console.log(
+              "Starting stream with timeline prompt:",
+              timelinePrompt
+            );
+          }
+        }
+
+        initialParameters.prompts = promptsToUse;
         initialParameters.manage_cache = settings.manageCache ?? true;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
@@ -326,8 +342,8 @@ export function StreamPage() {
               pipelineError={pipelineError}
             />
           </div>
-          <div className="mx-24 mt-4">
-            <PromptInput
+          <div className="mt-2">
+            <PromptInputWithTimeline
               currentPrompt={currentPrompts[0] || ""}
               onPromptChange={handlePromptChange}
               onPromptSubmit={handlePromptSubmit}
@@ -335,6 +351,9 @@ export function StreamPage() {
                 settings.pipelineId === "passthrough" ||
                 settings.pipelineId === "vod"
               }
+              isStreaming={isStreaming}
+              isVideoPaused={settings.paused}
+              timelineRef={timelineRef}
             />
           </div>
         </div>
