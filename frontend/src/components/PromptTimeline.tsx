@@ -1,0 +1,431 @@
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Button } from "./ui/button";
+import { Card, CardContent } from "./ui/card";
+import { Play, Pause, Plus, Edit2, Trash2 } from "lucide-react";
+import { Input } from "./ui/input";
+
+export interface TimelinePrompt {
+  id: string;
+  text: string;
+  startTime: number; // in seconds
+  endTime: number; // in seconds
+}
+
+interface PromptTimelineProps {
+  className?: string;
+  prompts: TimelinePrompt[];
+  onPromptsChange: (prompts: TimelinePrompt[]) => void;
+  disabled?: boolean;
+  isPlaying?: boolean;
+  currentTime?: number; // in seconds
+  onPlayPause?: () => void;
+  onTimeChange?: (time: number) => void;
+}
+
+export function PromptTimeline({
+  className = "",
+  prompts,
+  onPromptsChange,
+  disabled = false,
+  isPlaying = false,
+  currentTime = 0,
+  onPlayPause,
+  onTimeChange,
+}: PromptTimelineProps) {
+  const [editingPrompt, setEditingPrompt] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [draggingPrompt, setDraggingPrompt] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const [timelineWidth, setTimelineWidth] = useState(800);
+  const [visibleStartTime, setVisibleStartTime] = useState(0);
+  const [visibleEndTime, setVisibleEndTime] = useState(40);
+  const pixelsPerSecond = 20; // 20 pixels per second
+
+  // Update timeline width when component mounts or resizes
+  useEffect(() => {
+    const updateWidth = () => {
+      if (timelineRef.current) {
+        setTimelineWidth(timelineRef.current.offsetWidth);
+      }
+    };
+
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, []);
+
+  const timeToPosition = useCallback(
+    (time: number) => {
+      return (time - visibleStartTime) * pixelsPerSecond;
+    },
+    [visibleStartTime, pixelsPerSecond]
+  );
+
+  const positionToTime = useCallback(
+    (position: number) => {
+      return visibleStartTime + position / pixelsPerSecond;
+    },
+    [visibleStartTime, pixelsPerSecond]
+  );
+
+  const updatePrompt = useCallback(
+    (id: string, updates: Partial<TimelinePrompt>) => {
+      onPromptsChange(
+        prompts.map(prompt =>
+          prompt.id === id ? { ...prompt, ...updates } : prompt
+        )
+      );
+    },
+    [prompts, onPromptsChange]
+  );
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent, prompt: TimelinePrompt) => {
+      if (editingPrompt === prompt.id) return;
+
+      e.preventDefault();
+      setDraggingPrompt(prompt.id);
+
+      const rect = timelineRef.current?.getBoundingClientRect();
+      if (rect) {
+        const clickX = e.clientX - rect.left;
+        const promptStartX = timeToPosition(prompt.startTime);
+        setDragOffset(clickX - promptStartX);
+      }
+    },
+    [editingPrompt, timeToPosition]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!draggingPrompt || !timelineRef.current) return;
+
+      const rect = timelineRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left - dragOffset;
+      const newStartTime = Math.max(0, positionToTime(mouseX));
+      const currentPrompt = prompts.find(p => p.id === draggingPrompt);
+      const duration = currentPrompt
+        ? currentPrompt.endTime - currentPrompt.startTime
+        : 10;
+
+      updatePrompt(draggingPrompt, {
+        startTime: newStartTime,
+        endTime: newStartTime + duration,
+      });
+
+      // Auto-scroll if dragging near edges
+      const scrollThreshold = 50;
+      if (mouseX < scrollThreshold && visibleStartTime > 0) {
+        setVisibleStartTime(Math.max(0, visibleStartTime - 10));
+        setVisibleEndTime(Math.max(40, visibleEndTime - 10));
+      } else if (mouseX > timelineWidth - scrollThreshold) {
+        setVisibleStartTime(visibleStartTime + 10);
+        setVisibleEndTime(visibleEndTime + 10);
+      }
+    },
+    [
+      draggingPrompt,
+      dragOffset,
+      positionToTime,
+      prompts,
+      updatePrompt,
+      timelineWidth,
+      visibleStartTime,
+      visibleEndTime,
+    ]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setDraggingPrompt(null);
+    setDragOffset(0);
+  }, []);
+
+  const handleTimelineClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!timelineRef.current) return;
+
+      const rect = timelineRef.current.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const newTime = positionToTime(clickX);
+
+      // Update current time via callback
+      if (onTimeChange) {
+        onTimeChange(Math.max(0, newTime));
+      }
+    },
+    [positionToTime, onTimeChange]
+  );
+
+  // Add global mouse event listeners for dragging
+  useEffect(() => {
+    if (draggingPrompt) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+    }
+  }, [draggingPrompt, handleMouseMove, handleMouseUp]);
+
+  const addPrompt = useCallback(() => {
+    // Find the latest end time among existing prompts
+    const latestEndTime =
+      prompts.length > 0 ? Math.max(...prompts.map(p => p.endTime)) : -10;
+
+    const newPrompt: TimelinePrompt = {
+      id: Date.now().toString(),
+      text: "New prompt",
+      startTime: latestEndTime + 10, // Add 10 seconds after the last prompt (or 0s for first)
+      endTime: latestEndTime + 20, // 10 second duration
+    };
+    onPromptsChange([...prompts, newPrompt]);
+  }, [prompts, onPromptsChange]);
+
+  const deletePrompt = useCallback(
+    (id: string) => {
+      onPromptsChange(prompts.filter(prompt => prompt.id !== id));
+    },
+    [prompts, onPromptsChange]
+  );
+
+  const startEditing = useCallback((prompt: TimelinePrompt) => {
+    setEditingPrompt(prompt.id);
+    setEditingText(prompt.text);
+  }, []);
+
+  const saveEditing = useCallback(() => {
+    if (editingPrompt) {
+      updatePrompt(editingPrompt, { text: editingText });
+      setEditingPrompt(null);
+      setEditingText("");
+    }
+  }, [editingPrompt, editingText, updatePrompt]);
+
+  const cancelEditing = useCallback(() => {
+    setEditingPrompt(null);
+    setEditingText("");
+  }, []);
+
+  const handleKeyPress = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        saveEditing();
+      } else if (e.key === "Escape") {
+        cancelEditing();
+      }
+    },
+    [saveEditing, cancelEditing]
+  );
+
+  return (
+    <Card className={`${className}`}>
+      <CardContent className="p-4">
+        {/* Timeline Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={onPlayPause}
+              disabled={disabled}
+              size="sm"
+              variant="outline"
+            >
+              {isPlaying ? (
+                <Pause className="h-4 w-4" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              {Math.floor(currentTime / 60)}:
+              {(currentTime % 60).toFixed(1).padStart(4, "0")}
+            </span>
+            <div className="flex items-center gap-1 ml-4">
+              <Button
+                onClick={() => {
+                  setVisibleStartTime(Math.max(0, visibleStartTime - 20));
+                  setVisibleEndTime(Math.max(40, visibleEndTime - 20));
+                }}
+                disabled={visibleStartTime <= 0}
+                size="sm"
+                variant="outline"
+                className="text-xs px-2"
+              >
+                ←
+              </Button>
+              <span className="text-xs text-muted-foreground px-2">
+                {visibleStartTime}s - {visibleEndTime}s
+              </span>
+              <Button
+                onClick={() => {
+                  setVisibleStartTime(visibleStartTime + 20);
+                  setVisibleEndTime(visibleEndTime + 20);
+                }}
+                size="sm"
+                variant="outline"
+                className="text-xs px-2"
+              >
+                →
+              </Button>
+            </div>
+          </div>
+          <Button
+            onClick={addPrompt}
+            disabled={disabled}
+            size="sm"
+            variant="outline"
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Add Prompt
+          </Button>
+        </div>
+
+        {/* Timeline */}
+        <div className="relative overflow-hidden" ref={timelineRef}>
+          {/* Time markers */}
+          <div
+            className="relative mb-1"
+            style={{ width: timelineWidth, height: "30px" }}
+          >
+            {Array.from(
+              {
+                length: Math.ceil((visibleEndTime - visibleStartTime) / 10) + 1,
+              },
+              (_, i) => {
+                const time = visibleStartTime + i * 10;
+                const position = timeToPosition(time);
+                return (
+                  <div
+                    key={i}
+                    className="absolute top-0 flex items-center justify-center"
+                    style={{
+                      left: time === 0 ? position + 10 : position,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    <span className="text-gray-400 text-xs">{time}s</span>
+                  </div>
+                );
+              }
+            )}
+          </div>
+
+          {/* Timeline track */}
+          <div
+            className="relative h-16 bg-muted rounded-lg border overflow-hidden cursor-pointer"
+            style={{ width: timelineWidth }}
+            onClick={handleTimelineClick}
+          >
+            {/* Current time cursor */}
+            <div
+              className="absolute top-0 bottom-0 w-1 bg-red-500 z-30 shadow-lg"
+              style={{
+                left: Math.max(
+                  0,
+                  Math.min(timelineWidth, timeToPosition(currentTime))
+                ),
+                display: "block",
+              }}
+            />
+            {/* Debug info */}
+            <div className="absolute top-0 right-0 text-xs text-white bg-black/80 px-2 py-1 rounded">
+              Time: {currentTime.toFixed(1)}s
+            </div>
+
+            {/* Prompt start markers */}
+            {prompts
+              .filter(
+                prompt =>
+                  prompt.startTime >= visibleStartTime &&
+                  prompt.startTime <= visibleEndTime
+              )
+              .map(prompt => (
+                <div
+                  key={`marker-${prompt.id}`}
+                  className="absolute top-0 bottom-0 w-px bg-red-300/50 z-10"
+                  style={{
+                    left: Math.max(
+                      0,
+                      Math.min(timelineWidth, timeToPosition(prompt.startTime))
+                    ),
+                  }}
+                />
+              ))}
+
+            {/* Prompt blocks */}
+            {prompts
+              .filter(
+                prompt =>
+                  prompt.endTime >= visibleStartTime &&
+                  prompt.startTime <= visibleEndTime
+              )
+              .map(prompt => (
+                <div
+                  key={prompt.id}
+                  className={`absolute top-2 bottom-2 bg-primary/20 border border-primary/40 rounded px-2 py-1 transition-colors ${
+                    draggingPrompt === prompt.id
+                      ? "cursor-grabbing bg-primary/30 shadow-lg"
+                      : "cursor-grab hover:bg-primary/30"
+                  }`}
+                  style={{
+                    left: Math.max(0, timeToPosition(prompt.startTime)),
+                    width: Math.min(
+                      timelineWidth -
+                        Math.max(0, timeToPosition(prompt.startTime)),
+                      timeToPosition(prompt.endTime) -
+                        Math.max(0, timeToPosition(prompt.startTime))
+                    ),
+                  }}
+                  onMouseDown={e => handleMouseDown(e, prompt)}
+                >
+                  <div className="flex items-center justify-between h-full">
+                    <div className="flex-1 min-w-0">
+                      {editingPrompt === prompt.id ? (
+                        <Input
+                          value={editingText}
+                          onChange={e => setEditingText(e.target.value)}
+                          onKeyDown={handleKeyPress}
+                          onBlur={saveEditing}
+                          className="h-6 text-xs bg-background text-foreground"
+                          autoFocus
+                        />
+                      ) : (
+                        <span className="text-xs text-primary-foreground font-medium truncate block">
+                          {prompt.text}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 ml-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-4 w-4 p-0 hover:bg-primary/20 text-primary-foreground"
+                        onClick={e => {
+                          e.stopPropagation();
+                          startEditing(prompt);
+                        }}
+                      >
+                        <Edit2 className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-4 w-4 p-0 hover:bg-destructive/20 text-primary-foreground"
+                        onClick={e => {
+                          e.stopPropagation();
+                          deletePrompt(prompt.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

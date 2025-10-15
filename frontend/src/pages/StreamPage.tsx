@@ -3,7 +3,7 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
-import { PromptInput } from "../components/PromptInput";
+import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
@@ -326,8 +326,8 @@ export function StreamPage() {
               pipelineError={pipelineError}
             />
           </div>
-          <div className="mx-24 mt-4">
-            <PromptInput
+          <div className="mt-2">
+            <PromptInputWithTimeline
               currentPrompt={currentPrompts[0] || ""}
               onPromptChange={handlePromptChange}
               onPromptSubmit={handlePromptSubmit}
@@ -335,6 +335,7 @@ export function StreamPage() {
                 settings.pipelineId === "passthrough" ||
                 settings.pipelineId === "vod"
               }
+              isStreaming={isStreaming}
             />
           </div>
         </div>
