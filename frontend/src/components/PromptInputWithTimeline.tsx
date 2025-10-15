@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { PromptInput } from "./PromptInput";
 import { PromptTimeline } from "./PromptTimeline";
 import { PromptTimelineToggle } from "./PromptTimelineToggle";
@@ -11,6 +11,9 @@ interface PromptInputWithTimelineProps {
   onPromptSubmit?: (prompt: string) => void;
   disabled?: boolean;
   isStreaming?: boolean;
+  timelineRef?: React.RefObject<{
+    getCurrentTimelinePrompt: () => string;
+  } | null>;
 }
 
 export function PromptInputWithTimeline({
@@ -20,6 +23,7 @@ export function PromptInputWithTimeline({
   onPromptSubmit,
   disabled = false,
   isStreaming = false,
+  timelineRef,
 }: PromptInputWithTimelineProps) {
   const [mode, setMode] = useState<"text" | "timeline">("text");
 
@@ -40,6 +44,23 @@ export function PromptInputWithTimeline({
       onPromptSubmit(prompt);
     }
   };
+
+  // Expose current timeline prompt to parent
+  const getCurrentTimelinePrompt = React.useCallback(() => {
+    if (mode === "timeline") {
+      const activePrompt = prompts.find(
+        prompt =>
+          currentTime >= prompt.startTime && currentTime <= prompt.endTime
+      );
+      return activePrompt ? activePrompt.text : "";
+    }
+    return "";
+  }, [mode, prompts, currentTime]);
+
+  // Expose the function to parent via ref
+  React.useImperativeHandle(timelineRef, () => ({
+    getCurrentTimelinePrompt,
+  }));
 
   return (
     <div className={`space-y-3 ${className}`}>

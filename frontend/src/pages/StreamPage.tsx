@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -25,6 +25,9 @@ export function StreamPage() {
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
+
+  // Ref to access timeline functions
+  const timelineRef = useRef<{ getCurrentTimelinePrompt: () => string }>(null);
 
   // Pipeline management
   const {
@@ -264,7 +267,20 @@ export function StreamPage() {
         settings.pipelineId !== "passthrough" &&
         settings.pipelineId !== "vod"
       ) {
-        initialParameters.prompts = currentPrompts;
+        // Check if timeline is active and has a current prompt
+        let promptsToUse = currentPrompts;
+        if (timelineRef.current) {
+          const timelinePrompt = timelineRef.current.getCurrentTimelinePrompt();
+          if (timelinePrompt) {
+            promptsToUse = [timelinePrompt];
+            console.log(
+              "Starting stream with timeline prompt:",
+              timelinePrompt
+            );
+          }
+        }
+
+        initialParameters.prompts = promptsToUse;
         initialParameters.manage_cache = settings.manageCache ?? true;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
@@ -336,6 +352,7 @@ export function StreamPage() {
                 settings.pipelineId === "vod"
               }
               isStreaming={isStreaming}
+              timelineRef={timelineRef}
             />
           </div>
         </div>
