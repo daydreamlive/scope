@@ -14,6 +14,7 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
   const animationFrameRef = useRef<number | undefined>(undefined);
   const lastTimeRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
+  const lastAppliedPromptIdRef = useRef<string | null>(null);
   const optionsRef = useRef(options);
 
   // Update options ref when options change
@@ -33,13 +34,20 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
 
       setCurrentTime(elapsed);
 
-      // Find active prompt and apply it
+      // Find active prompt and apply it only if it changed
       const activePrompt = prompts.find(
         prompt => elapsed >= prompt.startTime && elapsed <= prompt.endTime
       );
 
-      if (activePrompt && optionsRef.current?.onPromptChange) {
-        optionsRef.current.onPromptChange(activePrompt.text);
+      // Only send update if the active prompt has changed
+      if (activePrompt && activePrompt.id !== lastAppliedPromptIdRef.current) {
+        if (optionsRef.current?.onPromptChange) {
+          optionsRef.current.onPromptChange(activePrompt.text);
+        }
+        lastAppliedPromptIdRef.current = activePrompt.id;
+      } else if (!activePrompt && lastAppliedPromptIdRef.current !== null) {
+        // No active prompt, reset the last applied prompt
+        lastAppliedPromptIdRef.current = null;
       }
 
       // Continue animation frame loop
