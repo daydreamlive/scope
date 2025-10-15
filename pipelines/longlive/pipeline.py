@@ -5,6 +5,7 @@ import torch
 
 from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 from ..interface import Pipeline, Requirements
+from ..blending import PromptBlender
 from .inference import InferencePipeline
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
 
@@ -69,6 +70,9 @@ class LongLivePipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
+        # Prompt blending
+        self.prompt_blender = PromptBlender(device, dtype)
+
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
         # If caller requested prepare assume cache init
         # Otherwise no cache init
@@ -76,9 +80,12 @@ class LongLivePipeline(Pipeline):
 
         manage_cache = kwargs.get("manage_cache", None)
         prompts = kwargs.get("prompts", None)
+        prompt_interpolation_method = kwargs.get("prompt_interpolation_method", "linear")
         denoising_step_list = kwargs.get("denoising_step_list", None)
 
-        if prompts is not None and prompts != self.prompts:
+        # Check if prompts changed using prompt blender
+        if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
+            logger.info("prepare: Initiating pipeline prepare for prompt update")
             should_prepare = True
 
         if (
@@ -91,17 +98,12 @@ class LongLivePipeline(Pipeline):
                 init_cache = True
 
         if should_prepare:
-            if prompts is not None:
-                self.prompts = prompts
-
+            # Update internal state
             if denoising_step_list is not None:
                 self.denoising_step_list = denoising_step_list
 
-            self.stream.prepare(
-                prompts=self.prompts,
-                denoising_step_list=self.denoising_step_list,
-                init_cache=init_cache,
-            )
+            # Apply prompt blending and prepare stream
+            self._apply_prompt_blending(prompts, prompt_interpolation_method, denoising_step_list, init_cache)
 
         return None
 
@@ -118,3 +120,20 @@ class LongLivePipeline(Pipeline):
             manage_cache=manage_cache,
         )
         return self.stream()
+
+    def _apply_prompt_blending(self, prompts=None, interpolation_method="linear", denoising_step_list=None, init_cache: bool = False):
+        """Apply weighted blending of cached prompt embeddings."""
+        combined_embeds = self.prompt_blender.blend(
+            prompts,
+            interpolation_method,
+            self.stream.text_encoder
+        )
+
+        if combined_embeds is None:
+            return
+
+        # Set the blended embeddings on the stream
+        self.stream.conditional_dict = {'prompt_embeds': combined_embeds}
+
+        # Call stream prepare to update the pipeline with denoising steps
+        self.stream.prepare(prompts=None, denoising_step_list=denoising_step_list, init_cache=init_cache)

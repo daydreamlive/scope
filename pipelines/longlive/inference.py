@@ -104,8 +104,10 @@ class InferencePipeline(torch.nn.Module):
             if self.low_memory:
                 self.text_encoder = self.text_encoder.to(torch.device("cpu"))
 
-            if not init_cache and self.current_start > 0:
-                self._recache_frames()
+        # Recache frames whenever conditional_dict exists and we have history to recache
+        # This handles both direct prompt encoding and externally set conditional_dict (e.g. from prompt blending)
+        if not init_cache and self.current_start > 0 and self.conditional_dict is not None:
+            self._recache_frames()
 
         if denoising_step_list is not None:
             self.denoising_step_list = torch.tensor(
