@@ -1,6 +1,7 @@
 """Pydantic schemas for FastAPI application."""
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,10 +13,22 @@ class HealthResponse(BaseModel):
     timestamp: str
 
 
+class PromptItem(BaseModel):
+    """Individual prompt with weight for blending."""
+
+    text: str = Field(..., description="Prompt text")
+    weight: float = Field(default=1.0, description="Weight for blending (0.0-1.0)")
+
+
 class Parameters(BaseModel):
     """Parameters for WebRTC session."""
 
-    prompts: list[str] | None = Field(default=None, description="Prompt list")
+    prompts: list[PromptItem] | None = Field(
+        default=None, description="List of prompts with weights for blending"
+    )
+    prompt_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="linear", description="Interpolation method: linear (weighted average) or slerp (spherical)"
+    )
     noise_scale: float | None = Field(
         default=None, description="Noise scale (0.0-1.0)", ge=0.0, le=1.0
     )
