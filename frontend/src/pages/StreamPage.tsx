@@ -170,6 +170,14 @@ export function StreamPage() {
     });
   };
 
+  const handlePlayPauseToggle = () => {
+    const newPausedState = !settings.paused;
+    updateSettings({ paused: newPausedState });
+    sendParameterUpdate({
+      paused: newPausedState,
+    });
+  };
+
   // Sync resolution with videoResolution when video source changes
   // Only sync for video-input pipelines
   useEffect(() => {
@@ -340,6 +348,8 @@ export function StreamPage() {
               isPipelineLoading={isPipelineLoading}
               isConnecting={isConnecting}
               pipelineError={pipelineError}
+              isPlaying={!settings.paused}
+              onPlayPauseToggle={handlePlayPauseToggle}
             />
           </div>
           <div className="mt-2">
