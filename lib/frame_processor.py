@@ -62,6 +62,9 @@ class FrameProcessor:
         self.max_fps = MAX_FPS
         self.current_pipeline_fps = DEFAULT_FPS
 
+        self.paused = False
+        self.last_frame = None
+
     def start(self):
         if self.running:
             return
@@ -231,6 +234,31 @@ class FrameProcessor:
         # Get the current pipeline using sync wrapper
         pipeline = self.pipeline_manager.get_pipeline()
 
+        # If pipeline state is paused we just duplicate the last frame
+        # Otherwise, we proceed to pipeline generation
+        paused = self.parameters.pop("paused", None)
+        if paused is not None and paused != self.paused:
+            self.paused = paused
+            if not self.paused:
+                # When resuming, clear old duplicated frames
+                while not self.output_queue.empty():
+                    try:
+                        self.output_queue.get_nowait()
+                    except queue.Empty:
+                        break
+
+        if self.paused and self.last_frame is not None:
+            # The consumer expects frames at pipeline FPS so we sleep for 1 / FPS
+            # We do not calculate pipeline FPS when duplicating the last frame
+            self.shutdown_event.wait(1 / self.current_pipeline_fps)
+
+            try:
+                self.output_queue.put_nowait(self.last_frame)
+            except queue.Full:
+                logger.warning("Output queue full, dropping duplicated last frame")
+
+            return
+
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
         requirements = pipeline.prepare(
@@ -292,6 +320,8 @@ class FrameProcessor:
                     # Update FPS calculation based on processing time and frame count
                     self._calculate_pipeline_fps(start_time, num_frames)
                     continue
+
+            self.last_frame = output[-1]
 
             # Update FPS calculation based on processing time and frame count
             self._calculate_pipeline_fps(start_time, num_frames)
