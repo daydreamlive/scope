@@ -12,7 +12,7 @@ import { Play, Square, Loader2, Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
-import { PromptInput } from "./PromptInput";
+import { PromptInputWithTimeline } from "./PromptInputWithTimeline";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -218,13 +218,15 @@ export function InputAndControlsPanel({
 
         <div>
           <h3 className="text-sm font-medium mb-2">Prompts</h3>
-          <PromptInput
-            prompts={prompts}
-            onPromptsChange={onPromptsChange}
-            onPromptsSubmit={onPromptsSubmit}
+          <PromptInputWithTimeline
+            currentPrompt={prompts[0]?.text || ""}
+            onPromptChange={value =>
+              onPromptsChange([{ text: value, weight: 100 }])
+            }
+            onPromptSubmit={value =>
+              onPromptsSubmit([{ text: value, weight: 100 }])
+            }
             disabled={pipelineId === "passthrough" || pipelineId === "vod"}
-            interpolationMethod={interpolationMethod}
-            onInterpolationMethodChange={onInterpolationMethodChange}
           />
         </div>
       </CardContent>
