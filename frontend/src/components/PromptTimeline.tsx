@@ -9,6 +9,8 @@ import {
   Trash2,
   Download,
   Upload,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Input } from "./ui/input";
 
@@ -47,8 +49,18 @@ export function PromptTimeline({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
   const [visibleStartTime, setVisibleStartTime] = useState(0);
-  const [visibleEndTime, setVisibleEndTime] = useState(40);
-  const pixelsPerSecond = 20; // 20 pixels per second
+  const [visibleEndTime, setVisibleEndTime] = useState(20); // Changed from 40 to 20
+  const [zoomLevel, setZoomLevel] = useState(1); // 1 = 20s, 2 = 10s, 0.5 = 40s
+  const basePixelsPerSecond = 20; // Base pixels per second
+  const pixelsPerSecond = basePixelsPerSecond * zoomLevel; // Scaled pixels per second
+
+  // Calculate visible time range based on zoom level and timeline width
+  const visibleTimeRange = timelineWidth / pixelsPerSecond;
+
+  // Update visible end time when zoom level or timeline width changes
+  useEffect(() => {
+    setVisibleEndTime(visibleStartTime + visibleTimeRange);
+  }, [visibleStartTime, visibleTimeRange]);
 
   // Update timeline width when component mounts or resizes
   useEffect(() => {
@@ -124,12 +136,11 @@ export function PromptTimeline({
 
       // Auto-scroll if dragging near edges
       const scrollThreshold = 50;
+      const scrollAmount = visibleTimeRange * 0.5; // Scroll by half the visible range
       if (mouseX < scrollThreshold && visibleStartTime > 0) {
-        setVisibleStartTime(Math.max(0, visibleStartTime - 10));
-        setVisibleEndTime(Math.max(40, visibleEndTime - 10));
+        setVisibleStartTime(Math.max(0, visibleStartTime - scrollAmount));
       } else if (mouseX > timelineWidth - scrollThreshold) {
-        setVisibleStartTime(visibleStartTime + 10);
-        setVisibleEndTime(visibleEndTime + 10);
+        setVisibleStartTime(visibleStartTime + scrollAmount);
       }
     },
     [
@@ -140,7 +151,7 @@ export function PromptTimeline({
       updatePrompt,
       timelineWidth,
       visibleStartTime,
-      visibleEndTime,
+      visibleTimeRange,
     ]
   );
 
@@ -265,6 +276,15 @@ export function PromptTimeline({
     setEditingText("");
   }, []);
 
+  // Zoom functions
+  const zoomIn = useCallback(() => {
+    setZoomLevel(prev => Math.min(prev * 2, 4)); // Max zoom 4x
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoomLevel(prev => Math.max(prev / 2, 0.25)); // Min zoom 0.25x
+  }, []);
+
   const handleKeyPress = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter") {
@@ -301,8 +321,9 @@ export function PromptTimeline({
             <div className="flex items-center gap-1 ml-4">
               <Button
                 onClick={() => {
-                  setVisibleStartTime(Math.max(0, visibleStartTime - 20));
-                  setVisibleEndTime(Math.max(40, visibleEndTime - 20));
+                  setVisibleStartTime(
+                    Math.max(0, visibleStartTime - visibleTimeRange)
+                  );
                 }}
                 disabled={visibleStartTime <= 0}
                 size="sm"
@@ -312,18 +333,42 @@ export function PromptTimeline({
                 ←
               </Button>
               <span className="text-xs text-muted-foreground px-2">
-                {visibleStartTime}s - {visibleEndTime}s
+                {visibleStartTime.toFixed(0)}s - {visibleEndTime.toFixed(0)}s
               </span>
               <Button
                 onClick={() => {
-                  setVisibleStartTime(visibleStartTime + 20);
-                  setVisibleEndTime(visibleEndTime + 20);
+                  setVisibleStartTime(visibleStartTime + visibleTimeRange);
                 }}
                 size="sm"
                 variant="outline"
                 className="text-xs px-2"
               >
                 →
+              </Button>
+            </div>
+            <div className="flex items-center gap-1 ml-2">
+              <Button
+                onClick={zoomOut}
+                disabled={zoomLevel <= 0.25}
+                size="sm"
+                variant="outline"
+                className="text-xs px-2"
+                title="Zoom Out"
+              >
+                <ZoomOut className="h-3 w-3" />
+              </Button>
+              <span className="text-xs text-muted-foreground px-1">
+                {zoomLevel}x
+              </span>
+              <Button
+                onClick={zoomIn}
+                disabled={zoomLevel >= 4}
+                size="sm"
+                variant="outline"
+                className="text-xs px-2"
+                title="Zoom In"
+              >
+                <ZoomIn className="h-3 w-3" />
               </Button>
             </div>
           </div>
@@ -363,12 +408,9 @@ export function PromptTimeline({
         </div>
 
         {/* Timeline */}
-        <div className="relative overflow-hidden" ref={timelineRef}>
+        <div className="relative overflow-hidden w-full" ref={timelineRef}>
           {/* Time markers */}
-          <div
-            className="relative mb-1"
-            style={{ width: timelineWidth, height: "30px" }}
-          >
+          <div className="relative mb-1 w-full" style={{ height: "30px" }}>
             {Array.from(
               {
                 length: Math.ceil((visibleEndTime - visibleStartTime) / 10) + 1,
@@ -394,8 +436,7 @@ export function PromptTimeline({
 
           {/* Timeline track */}
           <div
-            className="relative h-16 bg-muted rounded-lg border overflow-hidden cursor-pointer"
-            style={{ width: timelineWidth }}
+            className="relative h-16 bg-muted rounded-lg border overflow-hidden cursor-pointer w-full"
             onClick={handleTimelineClick}
           >
             {/* Current time cursor */}
