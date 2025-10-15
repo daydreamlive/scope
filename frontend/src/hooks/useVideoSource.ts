@@ -10,7 +10,7 @@ interface UseVideoSourceProps {
 }
 
 // Standardized FPS for both video and camera modes
-export const FPS = 15;
+export const FPS = 30;
 export const MIN_FPS = 5;
 export const MAX_FPS = 30;
 
