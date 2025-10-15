@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { Pause, Play } from "lucide-react";
@@ -33,7 +33,7 @@ export function VideoOutput({
     }
   }, [remoteStream]);
 
-  const handleVideoClick = () => {
+  const triggerPlayPause = useCallback(() => {
     if (onPlayPauseToggle && remoteStream) {
       onPlayPauseToggle();
 
@@ -56,7 +56,38 @@ export function VideoOutput({
         setIsFadingOut(false);
       }, 400);
     }
+  }, [onPlayPauseToggle, remoteStream]);
+
+  const handleVideoClick = () => {
+    triggerPlayPause();
   };
+
+  // Handle spacebar press for play/pause
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only trigger if spacebar is pressed and stream is active
+      if (e.code === "Space" && remoteStream) {
+        // Don't trigger if user is typing in an input/textarea/select or any contenteditable element
+        const target = e.target as HTMLElement;
+        const isInputFocused =
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable;
+
+        if (!isInputFocused) {
+          // Prevent default spacebar behavior (page scroll)
+          e.preventDefault();
+          triggerPlayPause();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [remoteStream, triggerPlayPause]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
