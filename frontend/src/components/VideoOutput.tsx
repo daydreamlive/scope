@@ -25,7 +25,7 @@ export function VideoOutput({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
-  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const overlayTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (videoRef.current && remoteStream) {
