@@ -3,7 +3,6 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
-import { PromptInput } from "../components/PromptInput";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
@@ -314,33 +313,23 @@ export function StreamPage() {
             onStopStream={stopStream}
             onVideoFileUpload={handleVideoFileUpload}
             pipelineId={settings.pipelineId}
+            prompts={promptItems}
+            onPromptsChange={setPromptItems}
+            onPromptsSubmit={handlePromptsSubmit}
+            interpolationMethod={interpolationMethod}
+            onInterpolationMethodChange={setInterpolationMethod}
           />
         </div>
 
-        {/* Center Panel - Video Output + Prompt */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1">
-            <VideoOutput
-              className="h-full"
-              remoteStream={remoteStream}
-              isPipelineLoading={isPipelineLoading}
-              isConnecting={isConnecting}
-              pipelineError={pipelineError}
-            />
-          </div>
-          <div className="mx-24 mt-4">
-            <PromptInput
-              prompts={promptItems}
-              onPromptsChange={setPromptItems}
-              onPromptsSubmit={handlePromptsSubmit}
-              disabled={
-                settings.pipelineId === "passthrough" ||
-                settings.pipelineId === "vod"
-              }
-              interpolationMethod={interpolationMethod}
-              onInterpolationMethodChange={setInterpolationMethod}
-            />
-          </div>
+        {/* Center Panel - Video Output */}
+        <div className="flex-1">
+          <VideoOutput
+            className="h-full"
+            remoteStream={remoteStream}
+            isPipelineLoading={isPipelineLoading}
+            isConnecting={isConnecting}
+            pipelineError={pipelineError}
+          />
         </div>
 
         {/* Right Panel - Settings */}
