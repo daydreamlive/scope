@@ -4,6 +4,7 @@ import time
 
 import torch
 
+from ..blending import PromptBlender
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 from .vendor.causvid.models.wan.causal_stream_inference import (
@@ -67,23 +68,29 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
+        # Prompt blending
+        self.prompt_blender = PromptBlender(device, dtype)
+
         self.last_frame = None
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         if should_prepare:
-            logger.info("Initiating pipeline prepare for request")
+            logger.info("prepare: Initiating pipeline prepare for request")
 
         manage_cache = kwargs.get("manage_cache", None)
         prompts = kwargs.get("prompts", None)
+        prompt_interpolation_method = kwargs.get(
+            "prompt_interpolation_method", "linear"
+        )
         denoising_step_list = kwargs.get("denoising_step_list", None)
         noise_controller = kwargs.get("noise_controller", None)
         noise_scale = kwargs.get("noise_scale", None)
 
-        # Always reset cache when changing prompts
-        if prompts is not None and prompts != self.prompts:
-            logger.info("Initiating pipeline prepare for prompt update")
+        # Check if prompts changed using prompt blender
+        if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
+            logger.info("prepare: Initiating pipeline prepare for prompt update")
             should_prepare = True
 
         # If manage_cache is True let the pipeline handle cache management for other param updates
@@ -120,9 +127,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
             should_prepare = True
 
         if should_prepare:
-            if prompts is not None:
-                self.prompts = prompts
-
+            # Update internal state before preparing pipeline
             if denoising_step_list is not None:
                 self.denoising_step_list = denoising_step_list
                 self.stream.denoising_step_list = torch.tensor(
@@ -132,7 +137,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
             if not noise_controller and noise_scale is not None:
                 self.noise_scale = noise_scale
 
-            self._prepare_pipeline()
+            self._prepare_pipeline(prompts, prompt_interpolation_method)
 
         if self.last_frame is None:
             return Requirements(input_size=self.start_chunk_size)
@@ -140,14 +145,12 @@ class StreamDiffusionV2Pipeline(Pipeline):
             return Requirements(input_size=self.chunk_size)
 
     @torch.no_grad()
-    def _prepare_pipeline(self):
+    def _prepare_pipeline(self, prompts=None, interpolation_method="linear"):
         # Trigger KV + cross-attn cache re-initialization in prepare()
         self.stream.kv_cache1 = None
 
-        # The CausalInferenceStreamPipeline.prepare() call only uses the batch_size dim
-        # of the noise param so we can generate a dummy tensor here with the right batch_size dim
-        noise = torch.zeros(1, 1).to(self.device, self.dtype)
-        self.stream.prepare(noise, self.prompts)
+        # Apply prompt blending and set conditional_dict
+        self._apply_prompt_blending(prompts, interpolation_method)
 
         self.stream.vae.model.first_batch = True
 
@@ -206,13 +209,11 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if input is None:
             raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
 
-        exp_chunk_size = self.prepare(
-            prompts=prompts,
-            denoising_step_list=denoising_step_list,
-            noise_scale=noise_scale,
-            noise_controller=noise_controller,
-            manage_cache=manage_cache,
-        ).input_size
+        # Note: prepare() was already called by frame_processor before __call__
+        # We just need to get the expected chunk size based on current state
+        exp_chunk_size = (
+            self.start_chunk_size if self.last_frame is None else self.chunk_size
+        )
 
         curr_chunk_size = len(input) if isinstance(input, list) else input.shape[2]
 
@@ -273,3 +274,25 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # Decode to pixel space
         output = self.stream.vae.stream_decode_to_pixel(denoised_pred)
         return postprocess_chunk(output)
+
+    def _initialize_stream_caches(self):
+        """Initialize stream caches without overriding conditional_dict."""
+        noise = torch.zeros(1, 1).to(self.device, self.dtype)
+        saved = self.stream.conditional_dict
+        self.stream.prepare(noise, text_prompts=[""])
+        self.stream.conditional_dict = saved
+
+    def _apply_prompt_blending(self, prompts=None, interpolation_method="linear"):
+        """Apply weighted blending of cached prompt embeddings."""
+        combined_embeds = self.prompt_blender.blend(
+            prompts, interpolation_method, self.stream.text_encoder
+        )
+
+        if combined_embeds is None:
+            return
+
+        # Set the blended embeddings on the stream
+        self.stream.conditional_dict = {"prompt_embeds": combined_embeds}
+
+        # Initialize caches without overriding conditional_dict
+        self._initialize_stream_caches()

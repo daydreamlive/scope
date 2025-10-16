@@ -1,8 +1,14 @@
+export interface PromptItem {
+  text: string;
+  weight: number;
+}
+
 export interface WebRTCOfferRequest {
   sdp?: string;
   type?: string;
   initialParameters?: {
-    prompts?: string[];
+    prompts?: string[] | PromptItem[];
+    prompt_interpolation_method?: "linear" | "slerp";
     denoising_step_list?: number[];
     noise_scale?: number;
     noise_controller?: boolean;

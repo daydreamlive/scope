@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { sendWebRTCOffer } from "../lib/api";
+import { sendWebRTCOffer, type PromptItem } from "../lib/api";
 import { toast } from "sonner";
 
 interface InitialParameters {
-  prompts?: string[];
+  prompts?: string[] | PromptItem[];
+  prompt_interpolation_method?: "linear" | "slerp";
   denoising_step_list?: number[];
   noise_scale?: number;
   noise_controller?: boolean;
@@ -220,7 +221,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
 
   const sendParameterUpdate = useCallback(
     (params: {
-      prompts?: string[];
+      prompts?: string[] | PromptItem[];
+      prompt_interpolation_method?: "linear" | "slerp";
       denoising_step_list?: number[];
       noise_scale?: number;
       noise_controller?: boolean;
