@@ -17,7 +17,7 @@ class PromptItem(BaseModel):
     """Individual prompt with weight for blending."""
 
     text: str = Field(..., description="Prompt text")
-    weight: float = Field(default=1.0, description="Weight for blending (0.0-1.0)")
+    weight: float = Field(default=1.0, ge=0.0, description="Weight for blending (must be non-negative)")
 
 
 class Parameters(BaseModel):

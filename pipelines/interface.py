@@ -5,6 +5,13 @@ from abc import ABC, abstractmethod
 import torch
 from pydantic import BaseModel
 
+# Parameters that are only used in prepare() and should not be passed to __call__()
+PREPARE_ONLY_PARAMS = frozenset({
+    'prompt_interpolation_method',
+    'reset_cache',
+    'manage_cache',
+})
+
 
 class Requirements(BaseModel):
     """Requirements for pipeline configuration."""
@@ -19,7 +26,7 @@ class Pipeline(ABC):
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
         """
         Prepare the pipeline and get requirements for the next processing chunk.
-        
+
         Args:
             should_prepare: Whether to trigger preparation logic
             **kwargs: Additional parameters such as:
