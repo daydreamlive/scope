@@ -362,6 +362,7 @@ export function StreamPage() {
                 settings.pipelineId === "vod"
               }
               isStreaming={isStreaming}
+              isVideoPaused={settings.paused}
               timelineRef={timelineRef}
             />
           </div>

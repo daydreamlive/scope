@@ -11,6 +11,8 @@ import {
   Upload,
   ZoomIn,
   ZoomOut,
+  Square,
+  ArrowUp,
 } from "lucide-react";
 import { Input } from "./ui/input";
 
@@ -30,6 +32,10 @@ interface PromptTimelineProps {
   currentTime?: number; // in seconds
   onPlayPause?: () => void;
   onTimeChange?: (time: number) => void;
+  isRecording?: boolean;
+  onRecordingToggle?: () => void;
+  onPromptSubmit?: (prompt: string) => void;
+  initialPrompt?: string;
 }
 
 export function PromptTimeline({
@@ -41,12 +47,24 @@ export function PromptTimeline({
   currentTime = 0,
   onPlayPause,
   onTimeChange,
+  isRecording = false,
+  onRecordingToggle,
+  onPromptSubmit,
+  initialPrompt = "",
 }: PromptTimelineProps) {
   const [editingPrompt, setEditingPrompt] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [draggingPrompt, setDraggingPrompt] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
+  const [recordingPrompt, setRecordingPrompt] = useState("");
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // Initialize recording prompt with initial prompt when recording starts
+  useEffect(() => {
+    if (isRecording && initialPrompt) {
+      setRecordingPrompt(initialPrompt);
+    }
+  }, [isRecording, initialPrompt]);
   const [timelineWidth, setTimelineWidth] = useState(800);
   const [visibleStartTime, setVisibleStartTime] = useState(0);
   const [visibleEndTime, setVisibleEndTime] = useState(20); // Changed from 40 to 20
@@ -61,6 +79,26 @@ export function PromptTimeline({
   useEffect(() => {
     setVisibleEndTime(visibleStartTime + visibleTimeRange);
   }, [visibleStartTime, visibleTimeRange]);
+
+  // Auto-scroll timeline during recording to follow the red line
+  useEffect(() => {
+    if (isRecording && currentTime > visibleEndTime - visibleTimeRange * 0.2) {
+      // When the red line gets close to the right edge, scroll forward
+      setVisibleStartTime(currentTime - visibleTimeRange * 0.8);
+    } else if (
+      isRecording &&
+      currentTime < visibleStartTime + visibleTimeRange * 0.2
+    ) {
+      // When the red line gets close to the left edge, scroll backward
+      setVisibleStartTime(Math.max(0, currentTime - visibleTimeRange * 0.2));
+    }
+  }, [
+    isRecording,
+    currentTime,
+    visibleEndTime,
+    visibleStartTime,
+    visibleTimeRange,
+  ]);
 
   // Update timeline width when component mounts or resizes
   useEffect(() => {
@@ -162,7 +200,7 @@ export function PromptTimeline({
 
   const handleTimelineClick = useCallback(
     (e: React.MouseEvent) => {
-      if (!timelineRef.current) return;
+      if (!timelineRef.current || isRecording) return;
 
       const rect = timelineRef.current.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
@@ -173,7 +211,7 @@ export function PromptTimeline({
         onTimeChange(Math.max(0, newTime));
       }
     },
-    [positionToTime, onTimeChange]
+    [positionToTime, onTimeChange, isRecording]
   );
 
   const handleExport = useCallback(() => {
@@ -296,6 +334,34 @@ export function PromptTimeline({
     [saveEditing, cancelEditing]
   );
 
+  const handleRecordingPromptSubmit = useCallback(() => {
+    if (!recordingPrompt.trim()) return;
+
+    // Add prompt to timeline at current time
+    const newPrompt: TimelinePrompt = {
+      id: Date.now().toString(),
+      text: recordingPrompt.trim(),
+      startTime: currentTime,
+      endTime: currentTime + 10, // 10 second duration
+    };
+
+    onPromptsChange([...prompts, newPrompt]);
+
+    // Also call the external prompt submit handler if provided
+    if (onPromptSubmit) {
+      onPromptSubmit(recordingPrompt.trim());
+    }
+  }, [recordingPrompt, currentTime, prompts, onPromptsChange, onPromptSubmit]);
+
+  const handleRecordingKeyPress = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        handleRecordingPromptSubmit();
+      }
+    },
+    [handleRecordingPromptSubmit]
+  );
+
   return (
     <Card className={`${className}`}>
       <CardContent className="p-4">
@@ -304,7 +370,7 @@ export function PromptTimeline({
           <div className="flex items-center gap-2">
             <Button
               onClick={onPlayPause}
-              disabled={disabled}
+              disabled={disabled || isRecording}
               size="sm"
               variant="outline"
             >
@@ -314,9 +380,25 @@ export function PromptTimeline({
                 <Play className="h-4 w-4" />
               )}
             </Button>
+            <Button
+              onClick={onRecordingToggle}
+              disabled={disabled}
+              size="sm"
+              variant={isRecording ? "destructive" : "outline"}
+              className={isRecording ? "animate-pulse" : ""}
+            >
+              {isRecording ? (
+                <Square className="h-4 w-4" />
+              ) : (
+                <div className="h-4 w-4 rounded-full bg-red-500" />
+              )}
+              {isRecording ? "Stop" : "Record"}
+            </Button>
             <span className="text-sm text-muted-foreground">
               {Math.floor(currentTime / 60)}:
-              {(currentTime % 60).toFixed(1).padStart(4, "0")}
+              {Math.round(currentTime % 60)
+                .toString()
+                .padStart(2, "0")}
             </span>
             <div className="flex items-center gap-1 ml-4">
               <Button
@@ -333,7 +415,7 @@ export function PromptTimeline({
                 ←
               </Button>
               <span className="text-xs text-muted-foreground px-2">
-                {visibleStartTime.toFixed(0)}s - {visibleEndTime.toFixed(0)}s
+                {Math.round(visibleStartTime)}s - {Math.round(visibleEndTime)}s
               </span>
               <Button
                 onClick={() => {
@@ -375,7 +457,7 @@ export function PromptTimeline({
           <div className="flex items-center gap-2">
             <Button
               onClick={handleExport}
-              disabled={disabled || prompts.length === 0}
+              disabled={disabled || prompts.length === 0 || isRecording}
               size="sm"
               variant="outline"
             >
@@ -388,16 +470,20 @@ export function PromptTimeline({
                 accept=".json"
                 onChange={handleImport}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={disabled}
+                disabled={disabled || isRecording}
               />
-              <Button size="sm" variant="outline" disabled={disabled}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled || isRecording}
+              >
                 <Upload className="h-4 w-4 mr-1" />
                 Import
               </Button>
             </div>
             <Button
               onClick={addPrompt}
-              disabled={disabled}
+              disabled={disabled || isRecording}
               size="sm"
               variant="outline"
             >
@@ -406,6 +492,29 @@ export function PromptTimeline({
             </Button>
           </div>
         </div>
+
+        {/* Recording Prompt Input */}
+        {isRecording && (
+          <div className="mb-4">
+            <div className="flex items-center bg-card border border-border rounded-full px-4 py-3 gap-3">
+              <Input
+                placeholder="Enter prompt to add to timeline..."
+                value={recordingPrompt}
+                onChange={e => setRecordingPrompt(e.target.value)}
+                onKeyPress={handleRecordingKeyPress}
+                className="flex-1 bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0"
+              />
+              <Button
+                onClick={handleRecordingPromptSubmit}
+                disabled={!recordingPrompt.trim()}
+                size="sm"
+                className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Timeline */}
         <div className="relative overflow-hidden w-full" ref={timelineRef}>
@@ -416,7 +525,7 @@ export function PromptTimeline({
                 length: Math.ceil((visibleEndTime - visibleStartTime) / 10) + 1,
               },
               (_, i) => {
-                const time = visibleStartTime + i * 10;
+                const time = Math.round(visibleStartTime + i * 10); // Round to integer
                 const position = timeToPosition(time);
                 return (
                   <div
@@ -452,7 +561,7 @@ export function PromptTimeline({
             />
             {/* Debug info */}
             <div className="absolute top-0 right-0 text-xs text-white bg-black/80 px-2 py-1 rounded">
-              Time: {currentTime.toFixed(1)}s
+              Time: {Math.round(currentTime)}s
             </div>
 
             {/* Prompt start markers */}

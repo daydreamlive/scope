@@ -11,6 +11,7 @@ interface PromptInputWithTimelineProps {
   onPromptSubmit?: (prompt: string) => void;
   disabled?: boolean;
   isStreaming?: boolean;
+  isVideoPaused?: boolean;
   timelineRef?: React.RefObject<{
     getCurrentTimelinePrompt: () => string;
   } | null>;
@@ -23,9 +24,11 @@ export function PromptInputWithTimeline({
   onPromptSubmit,
   disabled = false,
   isStreaming = false,
+  isVideoPaused = false,
   timelineRef,
 }: PromptInputWithTimelineProps) {
   const [mode, setMode] = useState<"text" | "timeline">("text");
+  const [isRecording, setIsRecording] = useState(false);
 
   const {
     prompts,
@@ -37,12 +40,39 @@ export function PromptInputWithTimeline({
   } = useTimelinePlayback({
     onPromptChange: onPromptSubmit,
     isStreaming,
+    isVideoPaused,
   });
 
   const handlePromptSubmit = (prompt: string) => {
     if (onPromptSubmit) {
       onPromptSubmit(prompt);
     }
+  };
+
+  const handleRecordingToggle = () => {
+    const newRecordingState = !isRecording;
+    setIsRecording(newRecordingState);
+
+    if (newRecordingState) {
+      // Auto-start timeline playback when recording begins
+      if (!isPlaying) {
+        togglePlayback();
+      }
+    } else {
+      // Pause timeline when recording stops
+      if (isPlaying) {
+        togglePlayback();
+      }
+    }
+  };
+
+  // Custom play/pause handler that respects recording state
+  const handlePlayPause = () => {
+    // If recording is active, don't allow manual pause
+    if (isRecording && isPlaying) {
+      return; // Disabled during recording
+    }
+    togglePlayback();
   };
 
   // Expose current timeline prompt to parent
@@ -88,8 +118,12 @@ export function PromptInputWithTimeline({
           disabled={disabled}
           isPlaying={isPlaying}
           currentTime={currentTime}
-          onPlayPause={togglePlayback}
+          onPlayPause={handlePlayPause}
           onTimeChange={updateCurrentTime}
+          isRecording={isRecording}
+          onRecordingToggle={handleRecordingToggle}
+          onPromptSubmit={onPromptSubmit}
+          initialPrompt={currentPrompt}
         />
       )}
     </div>

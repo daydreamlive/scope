@@ -4,6 +4,7 @@ import type { TimelinePrompt } from "../components/PromptTimeline";
 interface UseTimelinePlaybackOptions {
   onPromptChange?: (prompt: string) => void;
   isStreaming?: boolean;
+  isVideoPaused?: boolean;
 }
 
 export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
@@ -16,11 +17,19 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
   const startTimeRef = useRef<number>(0);
   const lastAppliedPromptIdRef = useRef<string | null>(null);
   const optionsRef = useRef(options);
+  const wasPausedByVideoRef = useRef<boolean>(false);
 
   // Update options ref when options change
   useEffect(() => {
     optionsRef.current = options;
   }, [options]);
+
+  const pausePlayback = useCallback(() => {
+    setIsPlaying(false);
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+  }, []);
 
   const startPlayback = useCallback(() => {
     console.log("Starting playback, current time:", currentTime);
@@ -57,14 +66,26 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
     animationFrameRef.current = requestAnimationFrame(updateTime);
   }, [currentTime, prompts]);
 
-  const pausePlayback = useCallback(() => {
-    setIsPlaying(false);
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
+  // Pause timeline when video is paused
+  useEffect(() => {
+    if (options?.isVideoPaused && isPlaying) {
+      wasPausedByVideoRef.current = true;
+      pausePlayback();
     }
-  }, []);
+  }, [options?.isVideoPaused, isPlaying, pausePlayback]);
+
+  // Resume timeline when video resumes (if it was playing before video pause)
+  useEffect(() => {
+    if (!options?.isVideoPaused && !isPlaying && wasPausedByVideoRef.current) {
+      wasPausedByVideoRef.current = false;
+      startPlayback();
+    }
+  }, [options?.isVideoPaused, isPlaying, startPlayback]);
 
   const togglePlayback = useCallback(() => {
+    // Reset video pause tracking when user manually toggles
+    wasPausedByVideoRef.current = false;
+
     if (isPlaying) {
       pausePlayback();
     } else {
