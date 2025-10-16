@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Slider } from "./ui/slider";
@@ -32,6 +32,16 @@ export function PromptInput({
   onInterpolationMethodChange,
 }: PromptInputProps) {
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Automatically switch to linear interpolation when there are more than 2 prompts
+  // SLERP only works with exactly 2 prompts
+  // TODO: When toasts are added to the project, show a warning toast when auto-switching
+  // from slerp to linear (e.g., "Switched to linear interpolation: Slerp requires exactly 2 prompts")
+  useEffect(() => {
+    if (prompts.length > 2 && interpolationMethod === "slerp") {
+      onInterpolationMethodChange?.("linear");
+    }
+  }, [prompts.length, interpolationMethod, onInterpolationMethodChange]);
 
   const handlePromptTextChange = (index: number, text: string) => {
     const newPrompts = [...prompts];
@@ -70,8 +80,8 @@ export function PromptInput({
     }, 1000);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent, index: number) => {
-    if (e.key === "Enter" && index === prompts.length - 1) {
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
       handleSubmit();
     }
   };
@@ -94,7 +104,7 @@ export function PromptInput({
           placeholder="blooming flowers"
           value={prompts[0].text}
           onChange={e => handlePromptTextChange(0, e.target.value)}
-          onKeyPress={e => handleKeyPress(e, 0)}
+          onKeyPress={handleKeyPress}
           disabled={disabled}
           className="flex-1 bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
         />
@@ -133,24 +143,22 @@ export function PromptInput({
               placeholder={`Prompt ${index + 1}`}
               value={prompt.text}
               onChange={e => handlePromptTextChange(index, e.target.value)}
-              onKeyPress={e => handleKeyPress(e, index)}
+              onKeyPress={handleKeyPress}
               disabled={disabled}
               className="flex-1 bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0"
             />
-            {index === prompts.length - 1 && (
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  disabled ||
-                  !prompts.some(p => p.text.trim()) ||
-                  isProcessing
-                }
-                size="sm"
-                className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isProcessing ? "..." : <ArrowUp className="h-4 w-4" />}
-              </Button>
-            )}
+            <Button
+              onClick={handleSubmit}
+              disabled={
+                disabled ||
+                !prompts.some(p => p.text.trim()) ||
+                isProcessing
+              }
+              size="sm"
+              className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isProcessing ? "..." : <ArrowUp className="h-4 w-4" />}
+            </Button>
             {index === prompts.length - 1 && prompts.length < 4 && (
               <Button
                 onClick={handleAddPrompt}
@@ -208,7 +216,9 @@ export function PromptInput({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="linear">Linear</SelectItem>
-              <SelectItem value="slerp">Slerp</SelectItem>
+              <SelectItem value="slerp" disabled={prompts.length > 2}>
+                Slerp
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
