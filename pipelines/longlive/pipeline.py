@@ -114,11 +114,8 @@ class LongLivePipeline(Pipeline):
         denoising_step_list: list[int] = None,
         manage_cache: bool = True,
     ):
-        self.prepare(
-            prompts=prompts,
-            denoising_step_list=denoising_step_list,
-            manage_cache=manage_cache,
-        )
+        # Note: prepare() was already called by frame_processor before __call__
+        # Parameters passed here are ignored (they're prepare-only params)
         return self.stream()
 
     def _apply_prompt_blending(self, prompts=None, interpolation_method="linear", denoising_step_list=None, init_cache: bool = False):

@@ -207,13 +207,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if input is None:
             raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
 
-        exp_chunk_size = self.prepare(
-            prompts=prompts,
-            denoising_step_list=denoising_step_list,
-            noise_scale=noise_scale,
-            noise_controller=noise_controller,
-            manage_cache=manage_cache,
-        ).input_size
+        # Note: prepare() was already called by frame_processor before __call__
+        # We just need to get the expected chunk size based on current state
+        exp_chunk_size = self.start_chunk_size if self.last_frame is None else self.chunk_size
 
         curr_chunk_size = len(input) if isinstance(input, list) else input.shape[2]
 
