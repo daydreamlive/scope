@@ -106,7 +106,11 @@ class InferencePipeline(torch.nn.Module):
 
         # Recache frames whenever conditional_dict exists and we have history to recache
         # This handles both direct prompt encoding and externally set conditional_dict (e.g. from prompt blending)
-        if not init_cache and self.current_start > 0 and self.conditional_dict is not None:
+        if (
+            not init_cache
+            and self.current_start > 0
+            and self.conditional_dict is not None
+        ):
             self._recache_frames()
 
         if denoising_step_list is not None:

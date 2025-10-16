@@ -4,8 +4,8 @@ import time
 import torch
 
 from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
-from ..interface import Pipeline, Requirements
 from ..blending import PromptBlender
+from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
 
@@ -80,7 +80,9 @@ class LongLivePipeline(Pipeline):
 
         manage_cache = kwargs.get("manage_cache", None)
         prompts = kwargs.get("prompts", None)
-        prompt_interpolation_method = kwargs.get("prompt_interpolation_method", "linear")
+        prompt_interpolation_method = kwargs.get(
+            "prompt_interpolation_method", "linear"
+        )
         denoising_step_list = kwargs.get("denoising_step_list", None)
 
         # Check if prompts changed using prompt blender
@@ -103,7 +105,9 @@ class LongLivePipeline(Pipeline):
                 self.denoising_step_list = denoising_step_list
 
             # Apply prompt blending and prepare stream
-            self._apply_prompt_blending(prompts, prompt_interpolation_method, denoising_step_list, init_cache)
+            self._apply_prompt_blending(
+                prompts, prompt_interpolation_method, denoising_step_list, init_cache
+            )
 
         return None
 
@@ -118,19 +122,25 @@ class LongLivePipeline(Pipeline):
         # Parameters passed here are ignored (they're prepare-only params)
         return self.stream()
 
-    def _apply_prompt_blending(self, prompts=None, interpolation_method="linear", denoising_step_list=None, init_cache: bool = False):
+    def _apply_prompt_blending(
+        self,
+        prompts=None,
+        interpolation_method="linear",
+        denoising_step_list=None,
+        init_cache: bool = False,
+    ):
         """Apply weighted blending of cached prompt embeddings."""
         combined_embeds = self.prompt_blender.blend(
-            prompts,
-            interpolation_method,
-            self.stream.text_encoder
+            prompts, interpolation_method, self.stream.text_encoder
         )
 
         if combined_embeds is None:
             return
 
         # Set the blended embeddings on the stream
-        self.stream.conditional_dict = {'prompt_embeds': combined_embeds}
+        self.stream.conditional_dict = {"prompt_embeds": combined_embeds}
 
         # Call stream prepare to update the pipeline with denoising steps
-        self.stream.prepare(prompts=None, denoising_step_list=denoising_step_list, init_cache=init_cache)
+        self.stream.prepare(
+            prompts=None, denoising_step_list=denoising_step_list, init_cache=init_cache
+        )

@@ -4,9 +4,9 @@ import time
 
 import torch
 
+from ..blending import PromptBlender
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
-from ..blending import PromptBlender
 from .vendor.causvid.models.wan.causal_stream_inference import (
     CausalStreamInferencePipeline,
 )
@@ -81,7 +81,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         manage_cache = kwargs.get("manage_cache", None)
         prompts = kwargs.get("prompts", None)
-        prompt_interpolation_method = kwargs.get("prompt_interpolation_method", "linear")
+        prompt_interpolation_method = kwargs.get(
+            "prompt_interpolation_method", "linear"
+        )
         denoising_step_list = kwargs.get("denoising_step_list", None)
         noise_controller = kwargs.get("noise_controller", None)
         noise_scale = kwargs.get("noise_scale", None)
@@ -209,7 +211,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         # Note: prepare() was already called by frame_processor before __call__
         # We just need to get the expected chunk size based on current state
-        exp_chunk_size = self.start_chunk_size if self.last_frame is None else self.chunk_size
+        exp_chunk_size = (
+            self.start_chunk_size if self.last_frame is None else self.chunk_size
+        )
 
         curr_chunk_size = len(input) if isinstance(input, list) else input.shape[2]
 
@@ -281,16 +285,14 @@ class StreamDiffusionV2Pipeline(Pipeline):
     def _apply_prompt_blending(self, prompts=None, interpolation_method="linear"):
         """Apply weighted blending of cached prompt embeddings."""
         combined_embeds = self.prompt_blender.blend(
-            prompts,
-            interpolation_method,
-            self.stream.text_encoder
+            prompts, interpolation_method, self.stream.text_encoder
         )
 
         if combined_embeds is None:
             return
 
         # Set the blended embeddings on the stream
-        self.stream.conditional_dict = {'prompt_embeds': combined_embeds}
+        self.stream.conditional_dict = {"prompt_embeds": combined_embeds}
 
         # Initialize caches without overriding conditional_dict
         self._initialize_stream_caches()

@@ -29,7 +29,9 @@ def normalize_weights(weights, dtype, device) -> torch.Tensor:
     else:
         # Fallback: equal weights for all inputs
         weights_tensor = torch.ones_like(weights_tensor) / len(weights_tensor)
-        logger.warning("normalize_weights: All weights zero or negative, using equal weights")
+        logger.warning(
+            "normalize_weights: All weights zero or negative, using equal weights"
+        )
     return weights_tensor
 
 
@@ -78,11 +80,14 @@ def blend_embeddings(embeddings, weights, method, dtype, device) -> torch.Tensor
     else:
         # Linear interpolation (weighted average) with normalization
         # Compute weighted average of norms to preserve magnitude
-        target_norm = sum(embed.norm() * weight for embed, weight in zip(embeddings, normalized_weights))
+        target_norm = sum(
+            embed.norm() * weight
+            for embed, weight in zip(embeddings, normalized_weights, strict=False)
+        )
 
         # Compute linear blend
         combined_embeds = torch.zeros_like(embeddings[0])
-        for embed, weight in zip(embeddings, normalized_weights):
+        for embed, weight in zip(embeddings, normalized_weights, strict=False):
             combined_embeds += weight * embed
 
         # Normalize to preserve embedding magnitude and prevent artifacts
@@ -96,7 +101,9 @@ def blend_embeddings(embeddings, weights, method, dtype, device) -> torch.Tensor
 class PromptBlender:
     """Manages prompt caching and blending for pipelines"""
 
-    def __init__(self, device, dtype, max_cache_size: int = DEFAULT_MAX_CACHE_SIZE) -> None:
+    def __init__(
+        self, device, dtype, max_cache_size: int = DEFAULT_MAX_CACHE_SIZE
+    ) -> None:
         self.device = device
         self.dtype = dtype
         self.max_cache_size = max_cache_size
@@ -110,11 +117,18 @@ class PromptBlender:
             return False
 
         # Compare as tuples for simple equality check
-        new_comparable = [(p.get("text", ""), p.get("weight", DEFAULT_PROMPT_WEIGHT)) for p in prompts]
-        old_comparable = [(p.get("text", ""), p.get("weight", DEFAULT_PROMPT_WEIGHT)) for p in self._current_prompts]
+        new_comparable = [
+            (p.get("text", ""), p.get("weight", DEFAULT_PROMPT_WEIGHT)) for p in prompts
+        ]
+        old_comparable = [
+            (p.get("text", ""), p.get("weight", DEFAULT_PROMPT_WEIGHT))
+            for p in self._current_prompts
+        ]
 
-        return (new_comparable != old_comparable or
-                interpolation_method != self._interpolation_method)
+        return (
+            new_comparable != old_comparable
+            or interpolation_method != self._interpolation_method
+        )
 
     def blend(self, prompts, interpolation_method, text_encoder) -> torch.Tensor | None:
         """Update state and return blended embeddings"""
@@ -142,12 +156,16 @@ class PromptBlender:
                 if len(self._prompt_cache) >= self.max_cache_size:
                     oldest_key = next(iter(self._prompt_cache))
                     self._prompt_cache.pop(oldest_key)
-                    logger.info(f"PromptBlender: Evicted oldest cache entry: {oldest_key[:LOG_PROMPT_PREVIEW_LENGTH]}...")
+                    logger.info(
+                        f"PromptBlender: Evicted oldest cache entry: {oldest_key[:LOG_PROMPT_PREVIEW_LENGTH]}..."
+                    )
 
-                logger.info(f"PromptBlender: Encoding and caching prompt: {prompt_text[:LOG_PROMPT_PREVIEW_LENGTH]}...")
+                logger.info(
+                    f"PromptBlender: Encoding and caching prompt: {prompt_text[:LOG_PROMPT_PREVIEW_LENGTH]}..."
+                )
                 encoded = text_encoder(text_prompts=[prompt_text])
                 # Detach from computation graph to prevent memory leak
-                self._prompt_cache[prompt_text] = encoded['prompt_embeds'].detach()
+                self._prompt_cache[prompt_text] = encoded["prompt_embeds"].detach()
             else:
                 # Move to end (mark as recently used)
                 self._prompt_cache.move_to_end(prompt_text)
@@ -161,9 +179,5 @@ class PromptBlender:
 
         # Use the utility function for actual blending
         return blend_embeddings(
-            embeddings,
-            weights,
-            self._interpolation_method,
-            self.dtype,
-            self.device
+            embeddings, weights, self._interpolation_method, self.dtype, self.device
         )

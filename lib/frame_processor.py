@@ -8,8 +8,9 @@ from typing import Any
 import torch
 from aiortc.mediastreams import VideoFrame
 
-from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 from pipelines.interface import PREPARE_ONLY_PARAMS
+
+from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
@@ -251,8 +252,7 @@ class FrameProcessor:
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = {
-                k: v for k, v in self.parameters.items()
-                if k not in PREPARE_ONLY_PARAMS
+                k: v for k, v in self.parameters.items() if k not in PREPARE_ONLY_PARAMS
             }
             output = pipeline(input, **call_params)
 
