@@ -59,7 +59,7 @@ export function PromptInput({
 
   const handleAddPrompt = () => {
     if (prompts.length < 4) {
-      onPromptsChange?.([...prompts, { text: "", weight: 1.0 }]);
+      onPromptsChange?.([...prompts, { text: "", weight: 100 }]);
     }
   };
 
@@ -202,8 +202,8 @@ export function PromptInput({
                 value={[prompt.weight]}
                 onValueChange={([value]) => handleWeightChange(index, value)}
                 min={0}
-                max={1}
-                step={0.1}
+                max={100}
+                step={1}
                 disabled={disabled}
                 className="flex-1"
               />

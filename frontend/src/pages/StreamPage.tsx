@@ -20,7 +20,7 @@ export function StreamPage() {
 
   // Prompt state
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
-    { text: PIPELINES[settings.pipelineId]?.defaultPrompt || "", weight: 1.0 },
+    { text: PIPELINES[settings.pipelineId]?.defaultPrompt || "", weight: 100 },
   ]);
   const [interpolationMethod, setInterpolationMethod] = useState<
     "linear" | "slerp"
@@ -102,7 +102,7 @@ export function StreamPage() {
 
     // Update the prompt to the new pipeline's default
     const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
-    setPromptItems([{ text: newDefaultPrompt, weight: 1.0 }]);
+    setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
 
     // Update denoising steps and resolution based on pipeline
     const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
