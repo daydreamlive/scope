@@ -285,6 +285,9 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
+      // Reset paused state when starting a fresh stream
+      updateSettings({ paused: false });
+
       // Pipeline is loaded, now start WebRTC stream
       startStream(initialParameters, streamToSend);
     } catch (error) {
