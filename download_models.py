@@ -138,6 +138,34 @@ def download_longlive_pipeline() -> None:
     download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
 
 
+def download_krea_realtime_video_pipeline() -> None:
+    """
+    Download models for the krea-realtime-video pipeline.
+    """
+    # HuggingFace repos
+    krea_rt_repo = "krea/krea-realtime-video"
+    wan_video_14b_repo = "Wan-AI/Wan2.1-T2V-14B"
+
+    # Ensure models directory exists and get paths
+    models_root = ensure_models_dir()
+    krea_rt_dst = models_root / "krea-realtime-video"
+    wan_video_14b_dst = models_root / "Wan2.1-T2V-14B"
+
+    # 1) Download only krea-realtime-video
+    snapshot_download(
+        repo_id=krea_rt_repo,
+        local_dir=krea_rt_dst,
+        allow_patterns=["krea-realtime-video-14b.safetensors"],
+    )
+
+    # 2) Download only config.json from Wan2.1-T2V-14B (no model weights needed)
+    snapshot_download(
+        repo_id=wan_video_14b_repo,
+        local_dir=wan_video_14b_dst,
+        allow_patterns=["config.json"],
+    )
+
+
 def download_models(pipeline_id: str | None = None) -> None:
     """
     Download models. If pipeline_id is None, downloads all pipelines.
@@ -155,9 +183,11 @@ def download_models(pipeline_id: str | None = None) -> None:
         download_streamdiffusionv2_pipeline()
     elif pipeline_id == "longlive":
         download_longlive_pipeline()
+    elif pipeline_id == "krea-realtime-video":
+        download_krea_realtime_video_pipeline()
     else:
         raise ValueError(
-            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive"
+            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video"
         )
 
     print("\nAll downloads complete.")
