@@ -3,14 +3,23 @@ Cross-platform model downloader using underlying libraries:
 - huggingface_hub for HF repo/files
 - gdown for Google Drive
 
+Supported pipelines:
+- default: Wan2.1-T2V-1.3B, WanVideo_comfy, StreamDiffusionV2, LongLive-1.3B
+- krea-realtime: krea-rt-14b, Wan2.1-T2V-14B
+
 Downloads:
   1) hf download Wan-AI/Wan2.1-T2V-1.3B --local-dir models/Wan2.1-T2V-1.3B --exclude ...
   2) hf download Kijai/WanVideo_comfy umt5-xxl-enc-fp8_e4m3fn.safetensors --local-dir models/WanVideo_comfy
   3) gdown <file_id> -> model.pt
   4) mv model.pt -> models/StreamDiffusionV2/model.pt
   5) hf download Efficient-Large-Model/LongLive-1.3B --local-dir models/LongLive-1.3B
+
+krea-realtime pipeline:
+  1) hf download krea/krea-rt-14b --local-dir models/krea-rt-14b
+  2) hf download Wan-AI/Wan2.1-T2V-14B --local-dir models/Wan2.1-T2V-14B --exclude models_t5_umt5-xxl-enc-bf16.pth
 """
 
+import argparse
 import logging
 import shutil
 import sys
@@ -119,7 +128,8 @@ def download_required_models():
         raise
 
 
-def download_models() -> None:
+def download_default_pipelines() -> None:
+    """Download models for all default pipelines (always downloaded)."""
     # HuggingFace repos
     wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
     wan_video_comfy_repo = "Kijai/WanVideo_comfy"
@@ -148,26 +158,103 @@ def download_models() -> None:
     )
 
     # 3) Google Drive download -> model.pt in repo root
-    if stream_diffusion_dst.exists():
-        print(
-            f"[SKIP] StreamDiffusionV2 model already exists at: {stream_diffusion_dst}"
-        )
+    # if stream_diffusion_dst.exists():
+    #     print(
+    #         f"[SKIP] StreamDiffusionV2 model already exists at: {stream_diffusion_dst}"
+    #     )
+    # else:
+    #     tmp_model = Path("model.pt")
+    #     download_from_gdrive(stream_diffusion_gdrive_id, tmp_model)
+
+    #     # 4) Move to StreamDiffusionV2/model.pt
+    #     move_file(tmp_model, stream_diffusion_dst)
+
+    # # 5) HF repo download for LongLive-1.3B
+    # download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
+
+
+def download_krea_realtime_video_pipeline() -> None:
+    """
+    Download models for the krea-realtime-video pipeline.
+
+    Equivalent to:
+      hf download krea/krea-realtime-video krea-realtime-video-14b.safetensors --local-dir models/krea-realtime-video
+      hf download Wan-AI/Wan2.1-T2V-14B config.json --local-dir models/Wan2.1-T2V-14B
+    """
+    # HuggingFace repos
+    krea_rt_repo = "krea/krea-realtime-video"
+    wan_video_14b_repo = "Wan-AI/Wan2.1-T2V-14B"
+
+    # Ensure models directory exists and get paths
+    models_root = ensure_models_dir()
+    krea_rt_dst = models_root / "krea-realtime-video"
+    wan_video_14b_dst = models_root / "Wan2.1-T2V-14B"
+
+    # 1) Download only krea-realtime-video
+    print(f"Downloading krea-realtime-video-14b.safetensors from {krea_rt_repo}...")
+    snapshot_download(
+        repo_id=krea_rt_repo,
+        local_dir=krea_rt_dst,
+        allow_patterns=["krea-realtime-video-14b.safetensors"],
+    )
+
+    # 2) Download only config.json from Wan2.1-T2V-14B (no model weights needed)
+    print(f"Downloading config.json from {wan_video_14b_repo}...")
+    snapshot_download(
+        repo_id=wan_video_14b_repo,
+        local_dir=wan_video_14b_dst,
+        allow_patterns=["config.json"],
+    )
+
+
+def download_models(pipeline_id: str | None = None) -> None:
+    """
+    Download models. If pipeline_id is None, downloads default pipelines only.
+    If pipeline_id is specified, downloads that specific pipeline.
+
+    Args:
+        pipeline_id: Optional pipeline ID. Currently supports "krea-realtime-video".
+                    If None, downloads default pipelines.
+    """
+    if pipeline_id is None:
+        # Download default pipelines
+        download_default_pipelines()
+    elif pipeline_id == "krea-realtime-video":
+        download_krea_realtime_video_pipeline()
     else:
-        tmp_model = Path("model.pt")
-        download_from_gdrive(stream_diffusion_gdrive_id, tmp_model)
-
-        # 4) Move to StreamDiffusionV2/model.pt
-        move_file(tmp_model, stream_diffusion_dst)
-
-    # 5) HF repo download for LongLive-1.3B
-    download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
+        raise ValueError(
+            f"Unknown pipeline: {pipeline_id}. Supported pipelines: krea-realtime-video"
+        )
 
     print("\nAll downloads complete.")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Download models for Daydream Scope pipelines",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Download default pipelines
+  python download_models.py
+
+  # Download krea-realtime pipeline
+  python download_models.py --pipeline krea-realtime
+  python download_models.py -p krea-realtime
+        """,
+    )
+    parser.add_argument(
+        "--pipeline",
+        "-p",
+        type=str,
+        default=None,
+        help="Pipeline ID to download (e.g., 'krea-realtime'). If not specified, downloads default pipelines.",
+    )
+
+    args = parser.parse_args()
+
     try:
-        download_models()
+        download_models(pipeline_id=args.pipeline)
     except KeyboardInterrupt:
         print("\nCancelled.")
         sys.exit(130)
