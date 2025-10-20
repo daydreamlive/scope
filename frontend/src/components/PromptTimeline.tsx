@@ -143,6 +143,40 @@ export function PromptTimeline({
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
 
+  // Resize state
+  const resizeStateRef = useRef<{
+    promptId: string;
+    edge: "left" | "right";
+    startClientX: number;
+    startPrompt: TimelinePrompt;
+    prevPrompt?: TimelinePrompt;
+    nextPrompt?: TimelinePrompt;
+  } | null>(null);
+  const MIN_DURATION_SECONDS = 0.5;
+
+  const beginResize = useCallback(
+    (
+      e: React.MouseEvent,
+      prompt: TimelinePrompt,
+      edge: "left" | "right",
+      prevPrompt?: TimelinePrompt,
+      nextPrompt?: TimelinePrompt
+    ) => {
+      e.stopPropagation();
+      if (isRecording || prompt.isLive) return;
+      resizeStateRef.current = {
+        promptId: prompt.id,
+        edge,
+        startClientX: e.clientX,
+        startPrompt: { ...prompt },
+        prevPrompt: prevPrompt ? { ...prevPrompt } : undefined,
+        nextPrompt: nextPrompt ? { ...nextPrompt } : undefined,
+      };
+      document.body.style.cursor = "col-resize";
+    },
+    [isRecording]
+  );
+
   const timeToPosition = useCallback(
     (time: number) => {
       return (time - visibleStartTime) * pixelsPerSecond;
@@ -240,6 +274,56 @@ export function PromptTimeline({
   // Global listeners to update panning and finish drag
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
+      // Resize has priority over panning
+      if (resizeStateRef.current) {
+        const state = resizeStateRef.current;
+        const deltaX = e.clientX - state.startClientX;
+        const deltaSeconds = deltaX / pixelsPerSecond;
+
+        const sorted = [...prompts].sort((a, b) => a.startTime - b.startTime);
+        const index = sorted.findIndex(p => p.id === state.promptId);
+        if (index === -1) return;
+
+        const current = { ...state.startPrompt };
+        const prev = state.prevPrompt;
+        const next = state.nextPrompt;
+
+        if (state.edge === "left") {
+          let newStart = current.startTime + deltaSeconds;
+          const leftBound = prev ? prev.startTime + MIN_DURATION_SECONDS : 0;
+          const rightBound = current.endTime - MIN_DURATION_SECONDS;
+          newStart = Math.max(leftBound, Math.min(newStart, rightBound));
+
+          current.startTime = newStart;
+          if (prev) {
+            // Keep adjacency
+            prev.endTime = newStart;
+          }
+        } else {
+          let newEnd = current.endTime + deltaSeconds;
+          const leftBound = current.startTime + MIN_DURATION_SECONDS;
+          const rightBound = next
+            ? next.endTime - MIN_DURATION_SECONDS
+            : Number.POSITIVE_INFINITY;
+          newEnd = Math.max(leftBound, Math.min(newEnd, rightBound));
+
+          current.endTime = newEnd;
+          if (next) {
+            // Keep adjacency
+            next.startTime = newEnd;
+          }
+        }
+
+        const updated = sorted.map((p, i) => {
+          if (i === index) return current;
+          if (state.edge === "left" && prev && i === index - 1) return prev;
+          if (state.edge === "right" && next && i === index + 1) return next;
+          return p;
+        });
+        onPromptsChange(updated);
+        return;
+      }
+
       if (!isDraggingRef.current) return;
       const deltaX = e.clientX - dragStartXRef.current;
       const deltaSeconds = -deltaX / pixelsPerSecond;
@@ -251,9 +335,15 @@ export function PromptTimeline({
     };
 
     const handleMouseUp = () => {
-      if (!isDraggingRef.current) return;
-      isDraggingRef.current = false;
-      document.body.style.cursor = "";
+      if (resizeStateRef.current) {
+        resizeStateRef.current = null;
+        document.body.style.cursor = "";
+        return;
+      }
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        document.body.style.cursor = "";
+      }
     };
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -262,7 +352,7 @@ export function PromptTimeline({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [pixelsPerSecond]);
+  }, [pixelsPerSecond, prompts, onPromptsChange]);
 
   const addPrompt = useCallback(() => {
     // Find the latest end time among existing prompts
@@ -550,6 +640,13 @@ export function PromptTimeline({
                   leftPosition = Math.max(leftPosition, previousEndPosition);
                 }
 
+                const prevPrompt =
+                  index > 0 ? sortedPrompts[index - 1] : undefined;
+                const nextPrompt =
+                  index < sortedPrompts.length - 1
+                    ? sortedPrompts[index + 1]
+                    : undefined;
+
                 return (
                   <div
                     key={prompt.id}
@@ -575,6 +672,37 @@ export function PromptTimeline({
                     }}
                     onClick={e => handlePromptClick(e, prompt)}
                   >
+                    {/* Resize handles */}
+                    {!isRecording && !isLive && (
+                      <>
+                        <div
+                          className="absolute top-0 bottom-0 w-2 -left-1 z-40"
+                          style={{ cursor: "col-resize" }}
+                          onMouseDown={e =>
+                            beginResize(
+                              e,
+                              prompt,
+                              "left",
+                              prevPrompt,
+                              nextPrompt
+                            )
+                          }
+                        />
+                        <div
+                          className="absolute top-0 bottom-0 w-2 -right-1 z-40"
+                          style={{ cursor: "col-resize" }}
+                          onMouseDown={e =>
+                            beginResize(
+                              e,
+                              prompt,
+                              "right",
+                              prevPrompt,
+                              nextPrompt
+                            )
+                          }
+                        />
+                      </>
+                    )}
                     <div className="flex flex-col justify-center h-full">
                       <div className="flex-1 flex flex-col justify-center">
                         {prompt.prompts && prompt.prompts.length > 1 ? (
