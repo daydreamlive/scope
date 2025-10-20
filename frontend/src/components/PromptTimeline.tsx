@@ -165,17 +165,10 @@ export function PromptTimeline({
     [isRecording, onPromptSelect, onPromptEdit]
   );
 
-  const handleTimelineClick = useCallback(
-    (_e: React.MouseEvent) => {
-      if (!timelineRef.current || isRecording) return;
-
-      // Only allow reset to beginning
-      if (onTimeChange) {
-        onTimeChange(0);
-      }
-    },
-    [onTimeChange, isRecording]
-  );
+  // Disable click-to-seek; clicks should not affect playhead
+  const handleTimelineClick = useCallback((_e: React.MouseEvent) => {
+    // Intentionally no-op to satisfy requirement #4
+  }, []);
 
   const handleExport = useCallback(() => {
     const timelineData = {
@@ -226,22 +219,71 @@ export function PromptTimeline({
     [onPromptsChange]
   );
 
-  // Add global mouse event listeners for dragging
+  // Drag-to-pan state
+  const isDraggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartVisibleStartRef = useRef(0);
+
+  // Handle mouse down on the track to begin panning
+  const handleTimelineMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!timelineRef.current) return;
+      isDraggingRef.current = true;
+      dragStartXRef.current = e.clientX;
+      dragStartVisibleStartRef.current = visibleStartTime;
+      // Change cursor to grabbing while dragging
+      document.body.style.cursor = "grabbing";
+    },
+    [visibleStartTime]
+  );
+
+  // Global listeners to update panning and finish drag
   useEffect(() => {
-    // Removed dragging functionality
-  }, []);
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const deltaX = e.clientX - dragStartXRef.current;
+      const deltaSeconds = -deltaX / pixelsPerSecond;
+      const nextStart = Math.max(
+        0,
+        dragStartVisibleStartRef.current + deltaSeconds
+      );
+      setVisibleStartTime(nextStart);
+    };
+
+    const handleMouseUp = () => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      document.body.style.cursor = "";
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [pixelsPerSecond]);
 
   const addPrompt = useCallback(() => {
     // Find the latest end time among existing prompts
     const latestEndTime =
       prompts.length > 0 ? Math.max(...prompts.map(p => p.endTime)) : 0;
 
+    // Exclude the last prompt's color to avoid adjacent duplicates
+    const lastPrompt =
+      prompts.length > 0
+        ? [...prompts].sort((a, b) => a.startTime - b.startTime)[
+            prompts.length - 1
+          ]
+        : undefined;
+    const excludeColor = lastPrompt?.color ? [lastPrompt.color] : [];
+
     const newPrompt: TimelinePrompt = {
       id: Date.now().toString(),
       text: "New prompt",
       startTime: latestEndTime, // Start immediately after the last prompt
       endTime: latestEndTime + 10, // 10 second duration
-      color: generateRandomColor(),
+      color: generateRandomColor(excludeColor),
     };
     onPromptsChange([...prompts, newPrompt]);
   }, [prompts, onPromptsChange]);
@@ -261,16 +303,17 @@ export function PromptTimeline({
       if (!promptItems.length || !promptItems.some(p => p.text.trim())) return;
 
       // Complete the current live box and start a new one
-      const updatedPrompts = prompts.map(p =>
-        p.isLive
-          ? {
-              ...p,
-              endTime: currentTime,
-              isLive: false,
-              color: generateRandomColor(),
-            }
-          : p
-      );
+      const lastNonLive = [...prompts].filter(p => !p.isLive).slice(-1)[0];
+      const updatedPrompts = prompts.map(p => {
+        if (!p.isLive) return p;
+        const exclude = lastNonLive?.color ? [lastNonLive.color] : [];
+        return {
+          ...p,
+          endTime: currentTime,
+          isLive: false,
+          color: generateRandomColor(exclude),
+        };
+      });
 
       // Create new live box with blend information
       const newLivePrompt: TimelinePrompt = {
@@ -344,40 +387,16 @@ export function PromptTimeline({
               )}
               {isRecording ? "Stop" : "Record"}
             </Button>
-            <span className="text-sm text-muted-foreground">
-              {Math.floor(currentTime / 60)}:
-              {Math.round(currentTime % 60)
-                .toString()
-                .padStart(2, "0")}
-            </span>
-            <div className="flex items-center gap-1 ml-4">
-              <Button
-                onClick={() => {
-                  setVisibleStartTime(
-                    Math.max(0, visibleStartTime - visibleTimeRange)
-                  );
-                }}
-                disabled={visibleStartTime <= 0}
-                size="sm"
-                variant="outline"
-                className="text-xs px-2"
-              >
-                ←
-              </Button>
-              <span className="text-xs text-muted-foreground px-2">
-                {Math.round(visibleStartTime)}s - {Math.round(visibleEndTime)}s
-              </span>
-              <Button
-                onClick={() => {
-                  setVisibleStartTime(visibleStartTime + visibleTimeRange);
-                }}
-                size="sm"
-                variant="outline"
-                className="text-xs px-2"
-              >
-                →
-              </Button>
-            </div>
+            <Button
+              onClick={addPrompt}
+              disabled={disabled || isRecording}
+              size="sm"
+              variant="outline"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add Prompt
+            </Button>
+            {/* Removed live timer text, scroll arrows, and range label */}
             <div className="flex items-center gap-1 ml-2">
               <Button
                 onClick={zoomOut}
@@ -431,15 +450,6 @@ export function PromptTimeline({
                 Import
               </Button>
             </div>
-            <Button
-              onClick={addPrompt}
-              disabled={disabled || isRecording}
-              size="sm"
-              variant="outline"
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Add Prompt
-            </Button>
           </div>
         </div>
 
@@ -472,9 +482,10 @@ export function PromptTimeline({
 
           {/* Timeline track */}
           <div
-            className="relative bg-muted rounded-lg border overflow-hidden cursor-pointer w-full"
+            className="relative bg-muted rounded-lg border overflow-hidden cursor-grab w-full"
             style={{ height: "120px" }} // Increased height for vertical blend display
             onClick={handleTimelineClick}
+            onMouseDown={handleTimelineMouseDown}
           >
             {/* Current time cursor */}
             <div
@@ -487,10 +498,7 @@ export function PromptTimeline({
                 display: "block",
               }}
             />
-            {/* Debug info */}
-            <div className="absolute top-0 right-0 text-xs text-white bg-black/80 px-2 py-1 rounded">
-              Time: {Math.round(currentTime)}s
-            </div>
+            {/* Removed debug time overlay */}
 
             {/* Prompt blocks */}
             {prompts
@@ -509,20 +517,20 @@ export function PromptTimeline({
                   isRecording && currentTime >= prompt.startTime;
                 const isLive = prompt.isLive;
 
-                // Use the prompt's color or generate one ensuring adjacent boxes have different colors
+                // Use the prompt's color, but ensure it's different from adjacent boxes
+                const adjacentColors: string[] = [];
+                if (index > 0 && sortedPrompts[index - 1].color) {
+                  adjacentColors.push(sortedPrompts[index - 1].color!);
+                }
+                if (
+                  index < sortedPrompts.length - 1 &&
+                  sortedPrompts[index + 1].color
+                ) {
+                  adjacentColors.push(sortedPrompts[index + 1].color!);
+                }
+
                 let boxColor = prompt.color;
-                if (!boxColor) {
-                  // Get colors of adjacent prompts to avoid duplicates
-                  const adjacentColors: string[] = [];
-                  if (index > 0 && sortedPrompts[index - 1].color) {
-                    adjacentColors.push(sortedPrompts[index - 1].color!);
-                  }
-                  if (
-                    index < sortedPrompts.length - 1 &&
-                    sortedPrompts[index + 1].color
-                  ) {
-                    adjacentColors.push(sortedPrompts[index + 1].color!);
-                  }
+                if (!boxColor || adjacentColors.includes(boxColor)) {
                   boxColor = generateRandomColor(adjacentColors);
                 }
 
