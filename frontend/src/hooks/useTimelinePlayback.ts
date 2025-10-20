@@ -59,12 +59,23 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
         lastAppliedPromptIdRef.current = null;
       }
 
+      // Check if we've reached the end of all prompts
+      const sortedPrompts = [...prompts].sort((a, b) => a.endTime - b.endTime);
+      const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
+      const maxEndTime = lastPrompt ? lastPrompt.endTime : 0;
+
+      // If we've reached the end and there are prompts, pause automatically
+      if (elapsed >= maxEndTime && prompts.length > 0) {
+        pausePlayback();
+        return;
+      }
+
       // Continue animation frame loop
       animationFrameRef.current = requestAnimationFrame(updateTime);
     };
 
     animationFrameRef.current = requestAnimationFrame(updateTime);
-  }, [currentTime, prompts]);
+  }, [currentTime, prompts, pausePlayback]);
 
   // Pause timeline when video is paused
   useEffect(() => {

@@ -1,99 +1,126 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import { Slider } from "./ui/slider";
 import { ArrowUp, Plus, X } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import type { PromptItem } from "../lib/api";
+import type { TimelinePrompt } from "./PromptTimeline";
 
-interface PromptInputProps {
+interface TimelinePromptEditorProps {
   className?: string;
-  prompts: PromptItem[];
-  onPromptsChange?: (prompts: PromptItem[]) => void;
-  onPromptsSubmit?: (prompts: PromptItem[]) => void;
+  prompt: TimelinePrompt | null;
+  onPromptUpdate?: (prompt: TimelinePrompt) => void;
+  onPromptSubmit?: (prompt: TimelinePrompt) => void;
   disabled?: boolean;
-  interpolationMethod?: "linear" | "slerp";
-  onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
-  isRecording?: boolean;
-  onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
 }
 
-export function PromptInput({
+export function TimelinePromptEditor({
   className = "",
-  prompts,
-  onPromptsChange,
-  onPromptsSubmit,
+  prompt,
+  onPromptUpdate,
+  onPromptSubmit,
   disabled = false,
-  interpolationMethod = "linear",
-  onInterpolationMethodChange,
-  isRecording = false,
-  onRecordingPromptSubmit,
-}: PromptInputProps) {
-  const [isProcessing, setIsProcessing] = useState(false);
+}: TimelinePromptEditorProps) {
+  const [editingPrompt, setEditingPrompt] = useState<TimelinePrompt | null>(
+    null
+  );
+  const [prompts, setPrompts] = useState<
+    Array<{ text: string; weight: number }>
+  >([]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
-  // Automatically switch to linear interpolation when there are more than 2 prompts
-  // SLERP only works with exactly 2 prompts
-  // TODO: When toasts are added to the project, show a warning toast when auto-switching
-  // from slerp to linear (e.g., "Switched to linear interpolation: Slerp requires exactly 2 prompts")
+  // Initialize editing prompt when prompt changes
   useEffect(() => {
-    if (prompts.length > 2 && interpolationMethod === "slerp") {
-      onInterpolationMethodChange?.("linear");
+    if (prompt) {
+      setEditingPrompt(prompt);
+      if (prompt.prompts && prompt.prompts.length > 0) {
+        setPrompts(prompt.prompts);
+      } else {
+        setPrompts([{ text: prompt.text, weight: 100 }]);
+      }
+    } else {
+      setEditingPrompt(null);
+      setPrompts([]);
     }
-  }, [prompts.length, interpolationMethod, onInterpolationMethodChange]);
+  }, [prompt]);
 
   const handlePromptTextChange = (index: number, text: string) => {
     const newPrompts = [...prompts];
     newPrompts[index] = { ...newPrompts[index], text };
-    onPromptsChange?.(newPrompts);
+    setPrompts(newPrompts);
+
+    if (editingPrompt) {
+      const updatedPrompt = {
+        ...editingPrompt,
+        text: newPrompts.length === 1 ? newPrompts[0].text : "",
+        prompts: newPrompts.length > 1 ? newPrompts : undefined,
+      };
+      setEditingPrompt(updatedPrompt);
+      onPromptUpdate?.(updatedPrompt);
+    }
   };
 
   const handleWeightChange = (index: number, weight: number) => {
     const newPrompts = [...prompts];
     newPrompts[index] = { ...newPrompts[index], weight };
-    onPromptsChange?.(newPrompts);
+    setPrompts(newPrompts);
+
+    if (editingPrompt) {
+      const updatedPrompt = {
+        ...editingPrompt,
+        prompts: newPrompts,
+      };
+      setEditingPrompt(updatedPrompt);
+      onPromptUpdate?.(updatedPrompt);
+    }
   };
 
   const handleAddPrompt = () => {
     if (prompts.length < 4) {
-      onPromptsChange?.([...prompts, { text: "", weight: 100 }]);
+      const newPrompts = [...prompts, { text: "", weight: 100 }];
+      setPrompts(newPrompts);
+
+      if (editingPrompt) {
+        const updatedPrompt = {
+          ...editingPrompt,
+          prompts: newPrompts,
+        };
+        setEditingPrompt(updatedPrompt);
+        onPromptUpdate?.(updatedPrompt);
+      }
     }
   };
 
   const handleRemovePrompt = (index: number) => {
     if (prompts.length > 1) {
       const newPrompts = prompts.filter((_, i) => i !== index);
-      onPromptsChange?.(newPrompts);
+      setPrompts(newPrompts);
+
+      if (editingPrompt) {
+        const updatedPrompt = {
+          ...editingPrompt,
+          text: newPrompts.length === 1 ? newPrompts[0].text : "",
+          prompts: newPrompts.length > 1 ? newPrompts : undefined,
+        };
+        setEditingPrompt(updatedPrompt);
+        onPromptUpdate?.(updatedPrompt);
+      }
     }
   };
 
   const handleSubmit = () => {
+    if (!editingPrompt) return;
+
     const validPrompts = prompts.filter(p => p.text.trim());
     if (!validPrompts.length) return;
 
-    setIsProcessing(true);
+    const finalPrompt = {
+      ...editingPrompt,
+      text: validPrompts.length === 1 ? validPrompts[0].text : "",
+      prompts: validPrompts.length > 1 ? validPrompts : undefined,
+    };
 
-    if (isRecording && onRecordingPromptSubmit) {
-      // During recording, submit the full prompt blend to the timeline
-      onRecordingPromptSubmit(validPrompts);
-      // Don't clear prompts during recording - keep the blend for next submission
-    } else {
-      // Normal mode, submit all prompts
-      onPromptsSubmit?.(validPrompts);
-      // In normal mode, we can clear the prompts after submission
-      // But we'll let the parent component handle this
-    }
-
-    setTimeout(() => {
-      setIsProcessing(false);
-    }, 1000);
+    onPromptSubmit?.(finalPrompt);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -118,14 +145,14 @@ export function PromptInput({
     showRemove: boolean
   ) => {
     const isFocused = focusedIndex === index;
-    const prompt = prompts[index];
+    const promptItem = prompts[index];
 
     return (
       <>
         {isFocused ? (
           <Textarea
             placeholder={placeholder}
-            value={prompt.text}
+            value={promptItem.text}
             onChange={e => handlePromptTextChange(index, e.target.value)}
             onKeyDown={handleKeyDown}
             onFocus={() => setFocusedIndex(index)}
@@ -137,7 +164,7 @@ export function PromptInput({
         ) : (
           <Input
             placeholder={placeholder}
-            value={prompt.text}
+            value={promptItem.text}
             onChange={e => handlePromptTextChange(index, e.target.value)}
             onKeyDown={handleKeyDown}
             onFocus={() => setFocusedIndex(index)}
@@ -148,12 +175,12 @@ export function PromptInput({
         <Button
           onClick={handleSubmit}
           disabled={
-            disabled || !prompts.some(p => p.text.trim()) || isProcessing
+            disabled || !prompts.some(p => p.text.trim()) || !editingPrompt
           }
           size="sm"
           className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isProcessing ? "..." : <ArrowUp className="h-4 w-4" />}
+          <ArrowUp className="h-4 w-4" />
         </Button>
         {index === prompts.length - 1 && prompts.length < 4 && (
           <Button
@@ -181,6 +208,14 @@ export function PromptInput({
     );
   };
 
+  if (!editingPrompt) {
+    return (
+      <div className={`text-center text-muted-foreground py-8 ${className}`}>
+        Click on a prompt box in the timeline to edit it
+      </div>
+    );
+  }
+
   // Single prompt mode: simple pill UI
   if (isSinglePrompt) {
     const isFocused = focusedIndex === 0;
@@ -190,7 +225,7 @@ export function PromptInput({
           isFocused ? "rounded-lg" : "rounded-full"
         } ${className}`}
       >
-        {renderPromptField(0, "blooming flowers", false)}
+        {renderPromptField(0, "Edit prompt...", false)}
       </div>
     );
   }
@@ -198,7 +233,10 @@ export function PromptInput({
   // Multiple prompts mode: show weights and controls
   return (
     <div className={`space-y-3 ${className}`}>
-      {prompts.map((prompt, index) => {
+      <div className="text-sm font-medium text-muted-foreground">
+        Editing Timeline Prompt (Blend Mode)
+      </div>
+      {prompts.map((promptItem, index) => {
         const isFocused = focusedIndex === index;
         return (
           <div key={index} className="space-y-2">
@@ -215,7 +253,7 @@ export function PromptInput({
                 Weight:
               </span>
               <Slider
-                value={[prompt.weight]}
+                value={[promptItem.weight]}
                 onValueChange={([value]) => handleWeightChange(index, value)}
                 min={0}
                 max={100}
@@ -230,29 +268,6 @@ export function PromptInput({
           </div>
         );
       })}
-
-      {prompts.length >= 2 && (
-        <div className="flex items-center gap-2 px-4">
-          <span className="text-xs text-muted-foreground">Blend:</span>
-          <Select
-            value={interpolationMethod}
-            onValueChange={value =>
-              onInterpolationMethodChange?.(value as "linear" | "slerp")
-            }
-            disabled={disabled}
-          >
-            <SelectTrigger className="w-24 h-7 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="linear">Linear</SelectItem>
-              <SelectItem value="slerp" disabled={prompts.length > 2}>
-                Slerp
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )}
     </div>
   );
 }

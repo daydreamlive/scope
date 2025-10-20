@@ -14,6 +14,8 @@ import type { PromptItem } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelineCheckbox } from "./TimelineCheckbox";
+import { TimelinePromptEditor } from "./TimelinePromptEditor";
+import type { TimelinePrompt } from "./PromptTimeline";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -37,6 +39,10 @@ interface InputAndControlsPanelProps {
   onInterpolationMethodChange: (method: "linear" | "slerp") => void;
   showTimeline?: boolean;
   onShowTimelineChange?: (show: boolean) => void;
+  isRecording?: boolean;
+  onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
+  selectedTimelinePrompt?: TimelinePrompt | null;
+  onTimelinePromptUpdate?: (prompt: TimelinePrompt) => void;
 }
 
 export function InputAndControlsPanel({
@@ -61,8 +67,19 @@ export function InputAndControlsPanel({
   onInterpolationMethodChange,
   showTimeline = false,
   onShowTimelineChange,
+  isRecording = false,
+  onRecordingPromptSubmit,
+  selectedTimelinePrompt = null,
+  onTimelinePromptUpdate,
 }: InputAndControlsPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Initialize recording prompt with current prompt when recording starts
+  useEffect(() => {
+    if (isRecording && prompts.length > 0) {
+      // This is now handled by the PromptInput component
+    }
+  }, [isRecording, prompts]);
 
   // Get pipeline category, deafault to video-input
   const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
@@ -223,14 +240,25 @@ export function InputAndControlsPanel({
 
         <div>
           <h3 className="text-sm font-medium mb-2">Prompts</h3>
-          <PromptInput
-            prompts={prompts}
-            onPromptsChange={onPromptsChange}
-            onPromptsSubmit={onPromptsSubmit}
-            disabled={pipelineId === "passthrough" || pipelineId === "vod"}
-            interpolationMethod={interpolationMethod}
-            onInterpolationMethodChange={onInterpolationMethodChange}
-          />
+          {selectedTimelinePrompt ? (
+            <TimelinePromptEditor
+              prompt={selectedTimelinePrompt}
+              onPromptUpdate={onTimelinePromptUpdate}
+              onPromptSubmit={onTimelinePromptUpdate}
+              disabled={isRecording}
+            />
+          ) : (
+            <PromptInput
+              prompts={prompts}
+              onPromptsChange={onPromptsChange}
+              onPromptsSubmit={onPromptsSubmit}
+              disabled={pipelineId === "passthrough" || pipelineId === "vod"}
+              interpolationMethod={interpolationMethod}
+              onInterpolationMethodChange={onInterpolationMethodChange}
+              isRecording={isRecording}
+              onRecordingPromptSubmit={onRecordingPromptSubmit}
+            />
+          )}
         </div>
 
         <div>
