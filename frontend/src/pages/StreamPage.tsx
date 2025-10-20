@@ -192,6 +192,14 @@ export function StreamPage() {
     if (timelineRef.current) {
       timelineRef.current.submitRecordingPrompt(prompts);
     }
+
+    // Also send the updated parameters to the backend immediately
+    // Preserve the full blend while recording
+    sendParameterUpdate({
+      prompts,
+      prompt_interpolation_method: interpolationMethod,
+      denoising_step_list: settings.denoisingSteps || [700, 500],
+    });
   };
 
   const handleTimelinePromptEdit = (prompt: TimelinePrompt | null) => {

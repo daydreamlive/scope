@@ -16,6 +16,7 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
   const lastTimeRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
   const lastAppliedPromptIdRef = useRef<string | null>(null);
+  const lastAppliedPromptTextRef = useRef<string | null>(null);
   const optionsRef = useRef(options);
   const wasPausedByVideoRef = useRef<boolean>(false);
 
@@ -48,15 +49,21 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
         prompt => elapsed >= prompt.startTime && elapsed <= prompt.endTime
       );
 
-      // Only send update if the active prompt has changed
-      if (activePrompt && activePrompt.id !== lastAppliedPromptIdRef.current) {
+      // Only send update if the active prompt block OR its text has changed
+      if (
+        activePrompt &&
+        (activePrompt.id !== lastAppliedPromptIdRef.current ||
+          activePrompt.text !== lastAppliedPromptTextRef.current)
+      ) {
         if (optionsRef.current?.onPromptChange) {
           optionsRef.current.onPromptChange(activePrompt.text);
         }
         lastAppliedPromptIdRef.current = activePrompt.id;
+        lastAppliedPromptTextRef.current = activePrompt.text;
       } else if (!activePrompt && lastAppliedPromptIdRef.current !== null) {
         // No active prompt, reset the last applied prompt
         lastAppliedPromptIdRef.current = null;
+        lastAppliedPromptTextRef.current = null;
       }
 
       // Check if we've reached the end of all prompts
