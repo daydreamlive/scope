@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
+import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
@@ -28,6 +30,19 @@ export function StreamPage() {
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
+
+  // Timeline state
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [selectedTimelinePrompt, setSelectedTimelinePrompt] =
+    useState<TimelinePrompt | null>(null);
+
+  // Ref to access timeline functions
+  const timelineRef = useRef<{
+    getCurrentTimelinePrompt: () => string;
+    submitRecordingPrompt: (prompts: PromptItem[]) => void;
+    updatePrompt: (prompt: TimelinePrompt) => void;
+  }>(null);
 
   // Pipeline management
   const {
@@ -72,11 +87,15 @@ export function StreamPage() {
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
-    sendParameterUpdate({
-      prompts,
-      prompt_interpolation_method: interpolationMethod,
-      denoising_step_list: settings.denoisingSteps || [700, 500],
-    });
+
+    // Only send parameter update if not recording
+    if (!isRecording) {
+      sendParameterUpdate({
+        prompts,
+        prompt_interpolation_method: interpolationMethod,
+        denoising_step_list: settings.denoisingSteps || [700, 500],
+      });
+    }
   };
 
   const handlePipelineIdChange = (pipelineId: PipelineId) => {
@@ -166,6 +185,36 @@ export function StreamPage() {
     });
   };
 
+  const handleRecordingPromptSubmit = (prompts: PromptItem[]) => {
+    console.log("Recording prompt submitted:", prompts);
+
+    // Use the timeline ref to submit the prompt
+    if (timelineRef.current) {
+      timelineRef.current.submitRecordingPrompt(prompts);
+    }
+
+    // Also send the updated parameters to the backend immediately
+    // Preserve the full blend while recording
+    sendParameterUpdate({
+      prompts,
+      prompt_interpolation_method: interpolationMethod,
+      denoising_step_list: settings.denoisingSteps || [700, 500],
+    });
+  };
+
+  const handleTimelinePromptEdit = (prompt: TimelinePrompt | null) => {
+    setSelectedTimelinePrompt(prompt);
+  };
+
+  const handleTimelinePromptUpdate = (prompt: TimelinePrompt) => {
+    setSelectedTimelinePrompt(prompt);
+
+    // Update the prompt in the timeline
+    if (timelineRef.current) {
+      timelineRef.current.updatePrompt(prompt);
+    }
+  };
+
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
     updateSettings({ paused: newPausedState });
@@ -173,7 +222,6 @@ export function StreamPage() {
       paused: newPausedState,
     });
   };
-
   // Sync resolution with videoResolution when video source changes
   // Only sync for video-input pipelines
   useEffect(() => {
@@ -329,20 +377,54 @@ export function StreamPage() {
             onPromptsSubmit={handlePromptsSubmit}
             interpolationMethod={interpolationMethod}
             onInterpolationMethodChange={setInterpolationMethod}
+            showTimeline={showTimeline}
+            onShowTimelineChange={setShowTimeline}
+            isRecording={isRecording}
+            onRecordingPromptSubmit={handleRecordingPromptSubmit}
+            selectedTimelinePrompt={selectedTimelinePrompt}
+            onTimelinePromptUpdate={handleTimelinePromptUpdate}
           />
         </div>
 
-        {/* Center Panel - Video Output */}
-        <div className="flex-1">
-          <VideoOutput
-            className="h-full"
-            remoteStream={remoteStream}
-            isPipelineLoading={isPipelineLoading}
-            isConnecting={isConnecting}
-            pipelineError={pipelineError}
-            isPlaying={!settings.paused}
-            onPlayPauseToggle={handlePlayPauseToggle}
-          />
+        {/* Center Panel - Video Output + Timeline */}
+        <div className="flex-1 flex flex-col">
+          <div className="flex-1">
+            <VideoOutput
+              className="h-full"
+              remoteStream={remoteStream}
+              isPipelineLoading={isPipelineLoading}
+              isConnecting={isConnecting}
+              pipelineError={pipelineError}
+              isPlaying={!settings.paused}
+              onPlayPauseToggle={handlePlayPauseToggle}
+            />
+          </div>
+          {showTimeline && (
+            <div className="mt-2">
+              <PromptInputWithTimeline
+                currentPrompt={promptItems[0]?.text || ""}
+                currentPromptItems={promptItems}
+                onPromptSubmit={text => {
+                  // Do not mutate left-panel prompts here; only inform backend of the active prompt
+                  sendParameterUpdate({
+                    prompts: [{ text, weight: 100 }],
+                    prompt_interpolation_method: interpolationMethod,
+                    denoising_step_list: settings.denoisingSteps || [700, 500],
+                  });
+                }}
+                disabled={
+                  settings.pipelineId === "passthrough" ||
+                  settings.pipelineId === "vod"
+                }
+                isStreaming={isStreaming}
+                isVideoPaused={settings.paused}
+                timelineRef={timelineRef}
+                onRecordingStateChange={setIsRecording}
+                onRecordingPromptSubmit={handleRecordingPromptSubmit}
+                onPromptEdit={handleTimelinePromptEdit}
+              />
+            </div>
+          )}
         </div>
 
         {/* Right Panel - Settings */}

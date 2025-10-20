@@ -20,6 +20,8 @@ interface PromptInputProps {
   disabled?: boolean;
   interpolationMethod?: "linear" | "slerp";
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
+  isRecording?: boolean;
+  onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
 }
 
 export function PromptInput({
@@ -30,6 +32,8 @@ export function PromptInput({
   disabled = false,
   interpolationMethod = "linear",
   onInterpolationMethodChange,
+  isRecording = false,
+  onRecordingPromptSubmit,
 }: PromptInputProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
@@ -75,6 +79,17 @@ export function PromptInput({
 
     setIsProcessing(true);
     onPromptsSubmit?.(validPrompts);
+
+    if (isRecording && onRecordingPromptSubmit) {
+      // During recording, submit the full prompt blend to the timeline
+      onRecordingPromptSubmit(validPrompts);
+      // Don't clear prompts during recording - keep the blend for next submission
+    } else {
+      // Normal mode, submit all prompts
+      onPromptsSubmit?.(validPrompts);
+      // In normal mode, we can clear the prompts after submission
+      // But we'll let the parent component handle this
+    }
 
     setTimeout(() => {
       setIsProcessing(false);
