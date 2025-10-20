@@ -91,14 +91,18 @@ export function PromptInput({
 
   // Calculate normalized weights for display
   const totalWeight = prompts.reduce((sum, p) => sum + p.weight, 0);
-  const normalizedWeights = prompts.map(
-    p => (totalWeight > 0 ? (p.weight / totalWeight) * 100 : 0)
+  const normalizedWeights = prompts.map(p =>
+    totalWeight > 0 ? (p.weight / totalWeight) * 100 : 0
   );
 
   const isSinglePrompt = prompts.length === 1;
 
   // Render a single prompt field with expandable textarea
-  const renderPromptField = (index: number, placeholder: string, showRemove: boolean) => {
+  const renderPromptField = (
+    index: number,
+    placeholder: string,
+    showRemove: boolean
+  ) => {
     const isFocused = focusedIndex === index;
     const prompt = prompts[index];
 
@@ -130,9 +134,7 @@ export function PromptInput({
         <Button
           onClick={handleSubmit}
           disabled={
-            disabled ||
-            !prompts.some(p => p.text.trim()) ||
-            isProcessing
+            disabled || !prompts.some(p => p.text.trim()) || isProcessing
           }
           size="sm"
           className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
