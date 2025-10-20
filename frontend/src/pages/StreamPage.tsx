@@ -166,6 +166,14 @@ export function StreamPage() {
     });
   };
 
+  const handlePlayPauseToggle = () => {
+    const newPausedState = !settings.paused;
+    updateSettings({ paused: newPausedState });
+    sendParameterUpdate({
+      paused: newPausedState,
+    });
+  };
+
   // Sync resolution with videoResolution when video source changes
   // Only sync for video-input pipelines
   useEffect(() => {
@@ -278,6 +286,9 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
+      // Reset paused state when starting a fresh stream
+      updateSettings({ paused: false });
+
       // Pipeline is loaded, now start WebRTC stream
       startStream(initialParameters, streamToSend);
     } catch (error) {
@@ -320,7 +331,6 @@ export function StreamPage() {
             onInterpolationMethodChange={setInterpolationMethod}
           />
         </div>
-
         {/* Center Panel - Video Output */}
         <div className="flex-1">
           <VideoOutput
@@ -329,6 +339,8 @@ export function StreamPage() {
             isPipelineLoading={isPipelineLoading}
             isConnecting={isConnecting}
             pipelineError={pipelineError}
+            isPlaying={!settings.paused}
+            onPlayPauseToggle={handlePlayPauseToggle}
           />
         </div>
 

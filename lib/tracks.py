@@ -1,6 +1,7 @@
 import asyncio
 import fractions
 import logging
+import threading
 import time
 
 from aiortc import MediaStreamTrack
@@ -34,6 +35,9 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.frame_processor = None
         self.input_task = None
         self.input_task_running = False
+        self._paused = False
+        self._paused_lock = threading.Lock()
+        self._last_frame = None
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
@@ -105,16 +109,28 @@ class VideoProcessingTrack(MediaStreamTrack):
                     self.fps = self.frame_processor.get_current_pipeline_fps()
                     self.frame_ptime = 1.0 / self.fps
 
-                frame_tensor = self.frame_processor.get()
-                if frame_tensor is not None:
-                    frame = VideoFrame.from_ndarray(
-                        frame_tensor.numpy(), format="rgb24"
-                    )
+                # If paused, wait for the appropriate frame interval before returning
+                with self._paused_lock:
+                    paused = self._paused
 
+                frame = None
+                if paused:
+                    # When video is paused, return the last frame to freeze the playback video
+                    frame = self._last_frame
+                else:
+                    # When video is not paused, get the next frame from the frame processor
+                    frame_tensor = self.frame_processor.get()
+                    if frame_tensor is not None:
+                        frame = VideoFrame.from_ndarray(
+                            frame_tensor.numpy(), format="rgb24"
+                        )
+
+                if frame is not None:
                     pts, time_base = await self.next_timestamp()
                     frame.pts = pts
                     frame.time_base = time_base
 
+                    self._last_frame = frame
                     return frame
 
                 # No frame available, wait a bit before trying again
@@ -125,6 +141,12 @@ class VideoProcessingTrack(MediaStreamTrack):
                 raise
 
         raise Exception("Track stopped")
+
+    def pause(self, paused: bool):
+        """Pause or resume the video track processing"""
+        with self._paused_lock:
+            self._paused = paused
+        logger.info(f"Video track {'paused' if paused else 'resumed'}")
 
     async def stop(self):
         self.input_task_running = False

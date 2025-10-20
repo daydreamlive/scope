@@ -227,6 +227,10 @@ class WebRTCManager:
                         data = json.loads(message)
                         logger.info(f"Received parameter update: {data}")
 
+                        # Check for paused parameter and call pause() method on video track
+                        if "paused" in data and session.video_track:
+                            session.video_track.pause(data["paused"])
+
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(
                             session.video_track, "frame_processor"
