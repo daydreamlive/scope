@@ -12,7 +12,8 @@ import { Play, Square, Loader2, Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
-import { PromptInputWithTimeline } from "./PromptInputWithTimeline";
+import { PromptInput } from "./PromptInput";
+import { TimelineCheckbox } from "./TimelineCheckbox";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -34,6 +35,8 @@ interface InputAndControlsPanelProps {
   onPromptsSubmit: (prompts: PromptItem[]) => void;
   interpolationMethod: "linear" | "slerp";
   onInterpolationMethodChange: (method: "linear" | "slerp") => void;
+  showTimeline?: boolean;
+  onShowTimelineChange?: (show: boolean) => void;
 }
 
 export function InputAndControlsPanel({
@@ -56,6 +59,8 @@ export function InputAndControlsPanel({
   onPromptsSubmit,
   interpolationMethod,
   onInterpolationMethodChange,
+  showTimeline = false,
+  onShowTimelineChange,
 }: InputAndControlsPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -218,14 +223,20 @@ export function InputAndControlsPanel({
 
         <div>
           <h3 className="text-sm font-medium mb-2">Prompts</h3>
-          <PromptInputWithTimeline
-            currentPrompt={prompts[0]?.text || ""}
-            onPromptChange={value =>
-              onPromptsChange([{ text: value, weight: 100 }])
-            }
-            onPromptSubmit={value =>
-              onPromptsSubmit([{ text: value, weight: 100 }])
-            }
+          <PromptInput
+            prompts={prompts}
+            onPromptsChange={onPromptsChange}
+            onPromptsSubmit={onPromptsSubmit}
+            disabled={pipelineId === "passthrough" || pipelineId === "vod"}
+            interpolationMethod={interpolationMethod}
+            onInterpolationMethodChange={onInterpolationMethodChange}
+          />
+        </div>
+
+        <div>
+          <TimelineCheckbox
+            checked={showTimeline}
+            onChange={onShowTimelineChange || (() => {})}
             disabled={pipelineId === "passthrough" || pipelineId === "vod"}
           />
         </div>

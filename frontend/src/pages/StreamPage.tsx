@@ -3,6 +3,7 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
@@ -28,6 +29,9 @@ export function StreamPage() {
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
+
+  // Timeline state
+  const [showTimeline, setShowTimeline] = useState(false);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{ getCurrentTimelinePrompt: () => string }>(null);
@@ -321,18 +325,39 @@ export function StreamPage() {
             onPromptsSubmit={handlePromptsSubmit}
             interpolationMethod={interpolationMethod}
             onInterpolationMethodChange={setInterpolationMethod}
+            showTimeline={showTimeline}
+            onShowTimelineChange={setShowTimeline}
           />
         </div>
 
-        {/* Center Panel - Video Output */}
-        <div className="flex-1">
-          <VideoOutput
-            className="h-full"
-            remoteStream={remoteStream}
-            isPipelineLoading={isPipelineLoading}
-            isConnecting={isConnecting}
-            pipelineError={pipelineError}
-          />
+        {/* Center Panel - Video Output + Timeline */}
+        <div className="flex-1 flex flex-col">
+          <div className="flex-1">
+            <VideoOutput
+              className="h-full"
+              remoteStream={remoteStream}
+              isPipelineLoading={isPipelineLoading}
+              isConnecting={isConnecting}
+              pipelineError={pipelineError}
+            />
+          </div>
+          {showTimeline && (
+            <div className="mt-2">
+              <PromptInputWithTimeline
+                currentPrompt={promptItems[0]?.text || ""}
+                onPromptSubmit={text => {
+                  handlePromptsSubmit([{ text, weight: 100 }]);
+                }}
+                disabled={
+                  settings.pipelineId === "passthrough" ||
+                  settings.pipelineId === "vod"
+                }
+                isStreaming={isStreaming}
+                isVideoPaused={false}
+                timelineRef={timelineRef}
+              />
+            </div>
+          )}
         </div>
 
         {/* Right Panel - Settings */}
