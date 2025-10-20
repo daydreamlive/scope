@@ -228,6 +228,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       noise_controller?: boolean;
       manage_cache?: boolean;
       reset_cache?: boolean;
+      paused?: boolean;
     }) => {
       if (
         dataChannelRef.current &&

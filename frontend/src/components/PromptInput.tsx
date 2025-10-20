@@ -79,6 +79,7 @@ export function PromptInput({
     if (!validPrompts.length) return;
 
     setIsProcessing(true);
+    onPromptsSubmit?.(validPrompts);
 
     if (isRecording && onRecordingPromptSubmit) {
       // During recording, submit the full prompt blend to the timeline

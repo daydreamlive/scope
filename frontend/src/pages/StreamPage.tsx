@@ -215,6 +215,13 @@ export function StreamPage() {
     }
   };
 
+  const handlePlayPauseToggle = () => {
+    const newPausedState = !settings.paused;
+    updateSettings({ paused: newPausedState });
+    sendParameterUpdate({
+      paused: newPausedState,
+    });
+  };
   // Sync resolution with videoResolution when video source changes
   // Only sync for video-input pipelines
   useEffect(() => {
@@ -327,6 +334,9 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
+      // Reset paused state when starting a fresh stream
+      updateSettings({ paused: false });
+
       // Pipeline is loaded, now start WebRTC stream
       startStream(initialParameters, streamToSend);
     } catch (error) {
@@ -385,6 +395,8 @@ export function StreamPage() {
               isPipelineLoading={isPipelineLoading}
               isConnecting={isConnecting}
               pipelineError={pipelineError}
+              isPlaying={!settings.paused}
+              onPlayPauseToggle={handlePlayPauseToggle}
             />
           </div>
           {showTimeline && (
@@ -405,7 +417,7 @@ export function StreamPage() {
                   settings.pipelineId === "vod"
                 }
                 isStreaming={isStreaming}
-                isVideoPaused={false}
+                isVideoPaused={settings.paused}
                 timelineRef={timelineRef}
                 onRecordingStateChange={setIsRecording}
                 onRecordingPromptSubmit={handleRecordingPromptSubmit}
