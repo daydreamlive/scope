@@ -10,7 +10,9 @@ import {
 import { Button } from "./ui/button";
 import { Play, Square, Loader2, Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
+import type { PromptItem } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
+import { PromptInput } from "./PromptInput";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -27,6 +29,11 @@ interface InputAndControlsPanelProps {
   onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
   pipelineId: string;
+  prompts: PromptItem[];
+  onPromptsChange: (prompts: PromptItem[]) => void;
+  onPromptsSubmit: (prompts: PromptItem[]) => void;
+  interpolationMethod: "linear" | "slerp";
+  onInterpolationMethodChange: (method: "linear" | "slerp") => void;
 }
 
 export function InputAndControlsPanel({
@@ -44,6 +51,11 @@ export function InputAndControlsPanel({
   onStopStream,
   onVideoFileUpload,
   pipelineId,
+  prompts,
+  onPromptsChange,
+  onPromptsSubmit,
+  interpolationMethod,
+  onInterpolationMethodChange,
 }: InputAndControlsPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -202,6 +214,18 @@ export function InputAndControlsPanel({
                   : "Start"}
             </Button>
           </div>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-medium mb-2">Prompts</h3>
+          <PromptInput
+            prompts={prompts}
+            onPromptsChange={onPromptsChange}
+            onPromptsSubmit={onPromptsSubmit}
+            disabled={pipelineId === "passthrough" || pipelineId === "vod"}
+            interpolationMethod={interpolationMethod}
+            onInterpolationMethodChange={onInterpolationMethodChange}
+          />
         </div>
       </CardContent>
     </Card>

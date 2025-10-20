@@ -3,7 +3,6 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
-import { PromptInput } from "../components/PromptInput";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
@@ -13,15 +12,19 @@ import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId } from "../types";
+import type { PromptItem } from "../lib/api";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
   const { settings, updateSettings } = useStreamState();
 
-  // Track current parameter state
-  const [currentPrompts, setCurrentPrompts] = useState<string[]>([
-    PIPELINES[settings.pipelineId]?.defaultPrompt || "",
+  // Prompt state
+  const [promptItems, setPromptItems] = useState<PromptItem[]>([
+    { text: PIPELINES[settings.pipelineId]?.defaultPrompt || "", weight: 100 },
   ]);
+  const [interpolationMethod, setInterpolationMethod] = useState<
+    "linear" | "slerp"
+  >("linear");
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
@@ -67,15 +70,11 @@ export function StreamPage() {
     enabled: PIPELINES[settings.pipelineId]?.category === "video-input",
   });
 
-  const handlePromptChange = (prompt: string) => {
-    setCurrentPrompts([prompt]);
-  };
-
-  const handlePromptSubmit = (prompt: string) => {
-    const prompts = [prompt];
-    setCurrentPrompts(prompts);
+  const handlePromptsSubmit = (prompts: PromptItem[]) => {
+    setPromptItems(prompts);
     sendParameterUpdate({
       prompts,
+      prompt_interpolation_method: interpolationMethod,
       denoising_step_list: settings.denoisingSteps || [700, 500],
     });
   };
@@ -103,7 +102,7 @@ export function StreamPage() {
 
     // Update the prompt to the new pipeline's default
     const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
-    setCurrentPrompts([newDefaultPrompt]);
+    setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
 
     // Update denoising steps and resolution based on pipeline
     const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
@@ -260,7 +259,8 @@ export function StreamPage() {
 
       // Build initial parameters based on pipeline type
       const initialParameters: {
-        prompts?: string[];
+        prompts?: PromptItem[];
+        prompt_interpolation_method?: "linear" | "slerp";
         denoising_step_list?: number[];
         noise_scale?: number;
         noise_controller?: boolean;
@@ -272,7 +272,8 @@ export function StreamPage() {
         settings.pipelineId !== "passthrough" &&
         settings.pipelineId !== "vod"
       ) {
-        initialParameters.prompts = currentPrompts;
+        initialParameters.prompts = promptItems;
+        initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.manage_cache = settings.manageCache ?? true;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
@@ -323,33 +324,24 @@ export function StreamPage() {
             onStopStream={stopStream}
             onVideoFileUpload={handleVideoFileUpload}
             pipelineId={settings.pipelineId}
+            prompts={promptItems}
+            onPromptsChange={setPromptItems}
+            onPromptsSubmit={handlePromptsSubmit}
+            interpolationMethod={interpolationMethod}
+            onInterpolationMethodChange={setInterpolationMethod}
           />
         </div>
-
-        {/* Center Panel - Video Output + Prompt */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1">
-            <VideoOutput
-              className="h-full"
-              remoteStream={remoteStream}
-              isPipelineLoading={isPipelineLoading}
-              isConnecting={isConnecting}
-              pipelineError={pipelineError}
-              isPlaying={!settings.paused}
-              onPlayPauseToggle={handlePlayPauseToggle}
-            />
-          </div>
-          <div className="mx-24 mt-4">
-            <PromptInput
-              currentPrompt={currentPrompts[0] || ""}
-              onPromptChange={handlePromptChange}
-              onPromptSubmit={handlePromptSubmit}
-              disabled={
-                settings.pipelineId === "passthrough" ||
-                settings.pipelineId === "vod"
-              }
-            />
-          </div>
+        {/* Center Panel - Video Output */}
+        <div className="flex-1">
+          <VideoOutput
+            className="h-full"
+            remoteStream={remoteStream}
+            isPipelineLoading={isPipelineLoading}
+            isConnecting={isConnecting}
+            pipelineError={pipelineError}
+            isPlaying={!settings.paused}
+            onPlayPauseToggle={handlePlayPauseToggle}
+          />
         </div>
 
         {/* Right Panel - Settings */}

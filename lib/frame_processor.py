@@ -8,6 +8,8 @@ from typing import Any
 import torch
 from aiortc.mediastreams import VideoFrame
 
+from pipelines.interface import PREPARE_ONLY_PARAMS
+
 from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
@@ -229,7 +231,7 @@ class FrameProcessor:
             return
 
         # prepare() will handle any required preparation based on parameters internally
-        reset_cache = self.parameters.pop("reset_cache", None)
+        reset_cache = self.parameters.get("reset_cache", None)
         requirements = pipeline.prepare(
             should_prepare=not self.is_prepared or reset_cache, **self.parameters
         )
@@ -245,8 +247,11 @@ class FrameProcessor:
                     return
                 input = self.prepare_chunk(current_chunk_size)
         try:
-            # Pass parameters
-            output = pipeline(input, **self.parameters)
+            # Pass parameters (excluding prepare-only parameters)
+            call_params = {
+                k: v for k, v in self.parameters.items() if k not in PREPARE_ONLY_PARAMS
+            }
+            output = pipeline(input, **call_params)
 
             processing_time = time.time() - start_time
             num_frames = output.shape[0]
