@@ -15,7 +15,6 @@ interface PromptInputWithTimelineProps {
     getCurrentTimelinePrompt: () => string;
   } | null>;
   selectedPrompt?: TimelinePrompt | null;
-  onPromptEdit?: (prompt: TimelinePrompt | null) => void;
   onRecordingStateChange?: (isRecording: boolean) => void;
   onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
 }
@@ -30,7 +29,6 @@ export function PromptInputWithTimeline({
   isVideoPaused = false,
   timelineRef,
   selectedPrompt: _selectedPrompt = null,
-  onPromptEdit,
   onRecordingStateChange,
   onRecordingPromptSubmit,
 }: PromptInputWithTimelineProps) {
@@ -38,37 +36,42 @@ export function PromptInputWithTimeline({
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
 
   // Generate random colors for prompt boxes, ensuring adjacent boxes have different colors
-  const generateRandomColor = (excludeColors: string[] = []) => {
-    const colors = [
-      "#FF6B6B",
-      "#4ECDC4",
-      "#45B7D1",
-      "#96CEB4",
-      "#FFEAA7",
-      "#DDA0DD",
-      "#98D8C8",
-      "#F7DC6F",
-      "#BB8FCE",
-      "#85C1E9",
-      "#F8C471",
-      "#82E0AA",
-      "#F1948A",
-      "#85C1E9",
-      "#D7BDE2",
-    ];
+  const generateRandomColor = React.useCallback(
+    (excludeColors: string[] = []) => {
+      const colors = [
+        "#FF6B6B",
+        "#4ECDC4",
+        "#45B7D1",
+        "#96CEB4",
+        "#FFEAA7",
+        "#DDA0DD",
+        "#98D8C8",
+        "#F7DC6F",
+        "#BB8FCE",
+        "#85C1E9",
+        "#F8C471",
+        "#82E0AA",
+        "#F1948A",
+        "#85C1E9",
+        "#D7BDE2",
+      ];
 
-    // Filter out excluded colors
-    const availableColors = colors.filter(
-      color => !excludeColors.includes(color)
-    );
+      // Filter out excluded colors
+      const availableColors = colors.filter(
+        color => !excludeColors.includes(color)
+      );
 
-    // If no colors available, return a random one
-    if (availableColors.length === 0) {
-      return colors[Math.floor(Math.random() * colors.length)];
-    }
+      // If no colors available, return a random one
+      if (availableColors.length === 0) {
+        return colors[Math.floor(Math.random() * colors.length)];
+      }
 
-    return availableColors[Math.floor(Math.random() * availableColors.length)];
-  };
+      return availableColors[
+        Math.floor(Math.random() * availableColors.length)
+      ];
+    },
+    []
+  );
   const {
     prompts,
     setPrompts,
@@ -162,7 +165,6 @@ export function PromptInputWithTimeline({
     if (newRecordingState) {
       // Deselect any currently selected timeline prompt so panel input is enabled
       setSelectedPromptId(null);
-      onPromptEdit?.(null);
 
       // Start recording - implement smart recording behavior
       const sortedPrompts = [...prompts].sort(
@@ -289,16 +291,6 @@ export function PromptInputWithTimeline({
     setSelectedPromptId(promptId);
   }, []);
 
-  // Handle prompt editing
-  const handlePromptEdit = React.useCallback(
-    (prompt: TimelinePrompt) => {
-      if (onPromptEdit) {
-        onPromptEdit(prompt);
-      }
-    },
-    [onPromptEdit]
-  );
-
   // Handle recording prompt submission
   const handleRecordingPromptSubmit = React.useCallback(
     (promptItems: PromptItem[]) => {
@@ -332,17 +324,39 @@ export function PromptInputWithTimeline({
 
       // Do NOT call onPromptSubmit here; it would reset blends to a single prompt
     },
-    [currentTime, setPrompts]
+    [currentTime, setPrompts, generateRandomColor]
   );
 
-  // Handle prompt updates from the editor
-  const handlePromptUpdate = React.useCallback(
-    (updatedPrompt: TimelinePrompt) => {
-      setPrompts(prevPrompts =>
-        prevPrompts.map(p => (p.id === updatedPrompt.id ? updatedPrompt : p))
-      );
+  // Handle adding prompts to timeline from left panel
+  const handleAddPromptToTimeline = React.useCallback(
+    (promptItems: PromptItem[]) => {
+      if (!promptItems.length || !promptItems.some(p => p.text.trim())) return;
+
+      // Find the latest end time among existing prompts
+      const latestEndTime =
+        prompts.length > 0 ? Math.max(...prompts.map(p => p.endTime)) : 0;
+
+      // Exclude the last prompt's color to avoid adjacent duplicates
+      const lastPrompt =
+        prompts.length > 0
+          ? [...prompts].sort((a, b) => a.startTime - b.startTime)[
+              prompts.length - 1
+            ]
+          : undefined;
+      const excludeColor = lastPrompt?.color ? [lastPrompt.color] : [];
+
+      const newPrompt: TimelinePrompt = {
+        id: Date.now().toString(),
+        text: promptItems.map(p => p.text).join(", "), // Combined text for display
+        startTime: latestEndTime, // Start immediately after the last prompt
+        endTime: latestEndTime + 10, // 10 second duration
+        color: generateRandomColor(excludeColor),
+        prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })), // Store blend info
+      };
+
+      setPrompts(prevPrompts => [...prevPrompts, newPrompt]);
     },
-    [setPrompts]
+    [prompts, setPrompts, generateRandomColor]
   );
 
   // Update live box end time as current time progresses
@@ -358,7 +372,7 @@ export function PromptInputWithTimeline({
   React.useImperativeHandle(timelineRef, () => ({
     getCurrentTimelinePrompt,
     submitRecordingPrompt: handleRecordingPromptSubmit,
-    updatePrompt: handlePromptUpdate,
+    addPromptToTimeline: handleAddPromptToTimeline,
   }));
 
   return (
@@ -377,7 +391,6 @@ export function PromptInputWithTimeline({
         initialPrompt={currentPrompt}
         selectedPromptId={selectedPromptId}
         onPromptSelect={handlePromptSelect}
-        onPromptEdit={handlePromptEdit}
         onRecordingPromptSubmit={onRecordingPromptSubmit}
         isRecordDisabled={isRecordDisabled()}
       />

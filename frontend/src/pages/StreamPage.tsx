@@ -4,7 +4,6 @@ import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
-import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
@@ -34,14 +33,12 @@ export function StreamPage() {
   // Timeline state
   const [showTimeline, setShowTimeline] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [selectedTimelinePrompt, setSelectedTimelinePrompt] =
-    useState<TimelinePrompt | null>(null);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
     getCurrentTimelinePrompt: () => string;
     submitRecordingPrompt: (prompts: PromptItem[]) => void;
-    updatePrompt: (prompt: TimelinePrompt) => void;
+    addPromptToTimeline: (prompts: PromptItem[]) => void;
   }>(null);
 
   // Pipeline management
@@ -202,16 +199,10 @@ export function StreamPage() {
     });
   };
 
-  const handleTimelinePromptEdit = (prompt: TimelinePrompt | null) => {
-    setSelectedTimelinePrompt(prompt);
-  };
-
-  const handleTimelinePromptUpdate = (prompt: TimelinePrompt) => {
-    setSelectedTimelinePrompt(prompt);
-
-    // Update the prompt in the timeline
+  const handleAddToTimeline = (promptItems: PromptItem[]) => {
+    // Use the timeline ref to add the prompt
     if (timelineRef.current) {
-      timelineRef.current.updatePrompt(prompt);
+      timelineRef.current.addPromptToTimeline(promptItems);
     }
   };
 
@@ -381,8 +372,7 @@ export function StreamPage() {
             onShowTimelineChange={setShowTimeline}
             isRecording={isRecording}
             onRecordingPromptSubmit={handleRecordingPromptSubmit}
-            selectedTimelinePrompt={selectedTimelinePrompt}
-            onTimelinePromptUpdate={handleTimelinePromptUpdate}
+            onAddToTimeline={handleAddToTimeline}
           />
         </div>
 
@@ -424,7 +414,6 @@ export function StreamPage() {
                 timelineRef={timelineRef}
                 onRecordingStateChange={setIsRecording}
                 onRecordingPromptSubmit={handleRecordingPromptSubmit}
-                onPromptEdit={handleTimelinePromptEdit}
               />
             </div>
           )}

@@ -4,7 +4,6 @@ import { Card, CardContent } from "./ui/card";
 import {
   Play,
   Pause,
-  Plus,
   Download,
   Upload,
   ZoomIn,
@@ -13,6 +12,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import type { PromptItem } from "../lib/api";
+import { TimelinePromptPopup } from "./TimelinePromptPopup";
 
 export interface TimelinePrompt {
   id: string;
@@ -39,7 +39,6 @@ interface PromptTimelineProps {
   initialPrompt?: string;
   selectedPromptId?: string | null;
   onPromptSelect?: (promptId: string | null) => void;
-  onPromptEdit?: (prompt: TimelinePrompt) => void;
   onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
   isRecordDisabled?: boolean;
 }
@@ -59,7 +58,6 @@ export function PromptTimeline({
   initialPrompt: _initialPrompt,
   selectedPromptId = null,
   onPromptSelect,
-  onPromptEdit,
   onRecordingPromptSubmit,
   isRecordDisabled = false,
 }: PromptTimelineProps) {
@@ -69,6 +67,10 @@ export function PromptTimeline({
   const [visibleEndTime, setVisibleEndTime] = useState(20); // Changed from 40 to 20
   const [zoomLevel, setZoomLevel] = useState(1); // 1 = 20s, 2 = 10s, 0.5 = 40s
   const basePixelsPerSecond = 20; // Base pixels per second
+
+  // Popup editor state
+  const [popupPrompt, setPopupPrompt] = useState<TimelinePrompt | null>(null);
+  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 });
 
   // Generate random colors for prompt boxes, ensuring adjacent boxes have different colors
   const generateRandomColor = useCallback((excludeColors: string[] = []) => {
@@ -194,16 +196,36 @@ export function PromptTimeline({
       if (onPromptSelect) {
         onPromptSelect(prompt.id);
       }
-      if (onPromptEdit) {
-        onPromptEdit(prompt);
-      }
+
+      // Show popup editor instead of calling onPromptEdit
+      const rect = e.currentTarget.getBoundingClientRect();
+      setPopupPosition({
+        x: rect.left + rect.width / 2,
+        y: rect.top,
+      });
+      setPopupPrompt(prompt);
     },
-    [isRecording, onPromptSelect, onPromptEdit]
+    [isRecording, onPromptSelect]
   );
 
   // Disable click-to-seek; clicks should not affect playhead
   const handleTimelineClick = useCallback((_e: React.MouseEvent) => {
     // Intentionally no-op to satisfy requirement #4
+  }, []);
+
+  // Handle popup editor updates
+  const handlePopupPromptUpdate = useCallback(
+    (updatedPrompt: TimelinePrompt) => {
+      onPromptsChange(
+        prompts.map(p => (p.id === updatedPrompt.id ? updatedPrompt : p))
+      );
+    },
+    [prompts, onPromptsChange]
+  );
+
+  // Handle popup editor close
+  const handlePopupClose = useCallback(() => {
+    setPopupPrompt(null);
   }, []);
 
   const handleExport = useCallback(() => {
@@ -383,30 +405,6 @@ export function PromptTimeline({
     };
   }, [pixelsPerSecond, prompts, onPromptsChange]);
 
-  const addPrompt = useCallback(() => {
-    // Find the latest end time among existing prompts
-    const latestEndTime =
-      prompts.length > 0 ? Math.max(...prompts.map(p => p.endTime)) : 0;
-
-    // Exclude the last prompt's color to avoid adjacent duplicates
-    const lastPrompt =
-      prompts.length > 0
-        ? [...prompts].sort((a, b) => a.startTime - b.startTime)[
-            prompts.length - 1
-          ]
-        : undefined;
-    const excludeColor = lastPrompt?.color ? [lastPrompt.color] : [];
-
-    const newPrompt: TimelinePrompt = {
-      id: Date.now().toString(),
-      text: "New prompt",
-      startTime: latestEndTime, // Start immediately after the last prompt
-      endTime: latestEndTime + 10, // 10 second duration
-      color: generateRandomColor(excludeColor),
-    };
-    onPromptsChange([...prompts, newPrompt]);
-  }, [prompts, onPromptsChange, generateRandomColor]);
-
   // Zoom functions
   const zoomIn = useCallback(() => {
     setZoomLevel(prev => Math.min(prev * 2, 4)); // Max zoom 4x
@@ -511,15 +509,6 @@ export function PromptTimeline({
                 <div className="h-4 w-4 rounded-full bg-red-500" />
               )}
               {isRecording ? "Stop" : "Record"}
-            </Button>
-            <Button
-              onClick={addPrompt}
-              disabled={disabled || isRecording}
-              size="sm"
-              variant="outline"
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Add Prompt
             </Button>
             {/* Removed live timer text, scroll arrows, and range label */}
             <div className="flex items-center gap-1 ml-2">
@@ -771,6 +760,17 @@ export function PromptTimeline({
           </div>
         </div>
       </CardContent>
+
+      {/* Popup editor */}
+      {popupPrompt && (
+        <TimelinePromptPopup
+          prompt={popupPrompt}
+          onPromptUpdate={handlePopupPromptUpdate}
+          onClose={handlePopupClose}
+          disabled={disabled}
+          position={popupPosition}
+        />
+      )}
     </Card>
   );
 }

@@ -23,6 +23,8 @@ interface PromptInputProps {
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
   isRecording?: boolean;
   onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
+  showTimeline?: boolean;
+  onAddToTimeline?: (prompts: PromptItem[]) => void;
 }
 
 export function PromptInput({
@@ -35,66 +37,90 @@ export function PromptInput({
   onInterpolationMethodChange,
   isRecording = false,
   onRecordingPromptSubmit,
+  showTimeline = false,
+  onAddToTimeline,
 }: PromptInputProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [localPrompts, setLocalPrompts] = useState<PromptItem[]>([]);
+
+  // Sync local prompts with props
+  useEffect(() => {
+    setLocalPrompts(prompts);
+  }, [prompts]);
 
   // Automatically switch to linear interpolation when there are more than 2 prompts
   // SLERP only works with exactly 2 prompts
   // TODO: When toasts are added to the project, show a warning toast when auto-switching
   // from slerp to linear (e.g., "Switched to linear interpolation: Slerp requires exactly 2 prompts")
   useEffect(() => {
-    if (prompts.length > 2 && interpolationMethod === "slerp") {
+    if (localPrompts.length > 2 && interpolationMethod === "slerp") {
       onInterpolationMethodChange?.("linear");
     }
-  }, [prompts.length, interpolationMethod, onInterpolationMethodChange]);
+  }, [localPrompts.length, interpolationMethod, onInterpolationMethodChange]);
 
   const handlePromptTextChange = (index: number, text: string) => {
-    const newPrompts = [...prompts];
+    const newPrompts = [...localPrompts];
     newPrompts[index] = { ...newPrompts[index], text };
+    setLocalPrompts(newPrompts);
     onPromptsChange?.(newPrompts);
   };
 
   const handleWeightChange = (index: number, weight: number) => {
-    const newPrompts = [...prompts];
+    const newPrompts = [...localPrompts];
     newPrompts[index] = { ...newPrompts[index], weight };
+    setLocalPrompts(newPrompts);
     onPromptsChange?.(newPrompts);
   };
 
   const handleAddPrompt = () => {
-    if (prompts.length < 4) {
-      onPromptsChange?.([...prompts, { text: "", weight: 100 }]);
+    if (localPrompts.length < 4) {
+      const newPrompts = [...localPrompts, { text: "", weight: 100 }];
+      setLocalPrompts(newPrompts);
+      onPromptsChange?.(newPrompts);
     }
   };
 
   const handleRemovePrompt = (index: number) => {
-    if (prompts.length > 1) {
-      const newPrompts = prompts.filter((_, i) => i !== index);
+    if (localPrompts.length > 1) {
+      const newPrompts = localPrompts.filter((_, i) => i !== index);
+      setLocalPrompts(newPrompts);
       onPromptsChange?.(newPrompts);
     }
   };
 
   const handleSubmit = () => {
-    const validPrompts = prompts.filter(p => p.text.trim());
+    const validPrompts = localPrompts.filter(p => p.text.trim());
     if (!validPrompts.length) return;
 
     setIsProcessing(true);
-    onPromptsSubmit?.(validPrompts);
 
     if (isRecording && onRecordingPromptSubmit) {
       // During recording, submit the full prompt blend to the timeline
       onRecordingPromptSubmit(validPrompts);
       // Don't clear prompts during recording - keep the blend for next submission
+      setTimeout(() => {
+        setIsProcessing(false);
+      }, 1000);
+    } else if (showTimeline && onAddToTimeline) {
+      // When timeline is shown and not recording, add prompts to timeline
+      onAddToTimeline(validPrompts);
+      // Keep the prompts unchanged after adding to timeline
+      // Reset processing state immediately to keep input enabled
+      setIsProcessing(false);
+      // Force focus back to input field
+      setTimeout(() => {
+        setFocusedIndex(0);
+      }, 0);
     } else {
       // Normal mode, submit all prompts
       onPromptsSubmit?.(validPrompts);
       // In normal mode, we can clear the prompts after submission
       // But we'll let the parent component handle this
+      setTimeout(() => {
+        setIsProcessing(false);
+      }, 1000);
     }
-
-    setTimeout(() => {
-      setIsProcessing(false);
-    }, 1000);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -105,12 +131,12 @@ export function PromptInput({
   };
 
   // Calculate normalized weights for display
-  const totalWeight = prompts.reduce((sum, p) => sum + p.weight, 0);
-  const normalizedWeights = prompts.map(p =>
+  const totalWeight = localPrompts.reduce((sum, p) => sum + p.weight, 0);
+  const normalizedWeights = localPrompts.map(p =>
     totalWeight > 0 ? (p.weight / totalWeight) * 100 : 0
   );
 
-  const isSinglePrompt = prompts.length === 1;
+  const isSinglePrompt = localPrompts.length === 1;
 
   // Render a single prompt field with expandable textarea
   const renderPromptField = (
@@ -119,7 +145,7 @@ export function PromptInput({
     showRemove: boolean
   ) => {
     const isFocused = focusedIndex === index;
-    const prompt = prompts[index];
+    const prompt = localPrompts[index];
 
     return (
       <>
@@ -149,14 +175,14 @@ export function PromptInput({
         <Button
           onClick={handleSubmit}
           disabled={
-            disabled || !prompts.some(p => p.text.trim()) || isProcessing
+            disabled || !localPrompts.some(p => p.text.trim()) || isProcessing
           }
           size="sm"
           className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isProcessing ? "..." : <ArrowUp className="h-4 w-4" />}
         </Button>
-        {index === prompts.length - 1 && prompts.length < 4 && (
+        {index === localPrompts.length - 1 && localPrompts.length < 4 && (
           <Button
             onClick={handleAddPrompt}
             disabled={disabled}
@@ -199,7 +225,7 @@ export function PromptInput({
   // Multiple prompts mode: show weights and controls
   return (
     <div className={`space-y-3 ${className}`}>
-      {prompts.map((prompt, index) => {
+      {localPrompts.map((prompt, index) => {
         const isFocused = focusedIndex === index;
         return (
           <div key={index} className="space-y-2">
@@ -232,7 +258,7 @@ export function PromptInput({
         );
       })}
 
-      {prompts.length >= 2 && (
+      {localPrompts.length >= 2 && (
         <div className="flex items-center gap-2 px-4">
           <span className="text-xs text-muted-foreground">Blend:</span>
           <Select
@@ -247,7 +273,7 @@ export function PromptInput({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="linear">Linear</SelectItem>
-              <SelectItem value="slerp" disabled={prompts.length > 2}>
+              <SelectItem value="slerp" disabled={localPrompts.length > 2}>
                 Slerp
               </SelectItem>
             </SelectContent>
