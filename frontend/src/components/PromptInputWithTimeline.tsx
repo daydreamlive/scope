@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { PromptTimeline, type TimelinePrompt } from "./PromptTimeline";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { PromptItem } from "../lib/api";
@@ -82,6 +82,26 @@ export function PromptInputWithTimeline({
     isVideoPaused,
   });
 
+  // Enhanced rewind handler that applies the first prompt
+  const handleRewind = useCallback(() => {
+    // Reset time to 0
+    updateCurrentTime(0);
+
+    // Find the first prompt in the timeline
+    const sortedPrompts = [...prompts].sort(
+      (a, b) => a.startTime - b.startTime
+    );
+    const firstPrompt = sortedPrompts.find(p => !p.isLive);
+
+    if (firstPrompt) {
+      // Update the current prompt text box to show the first prompt
+      // This will be reflected in the parent component's currentPrompt
+      if (onPromptSubmit) {
+        onPromptSubmit(firstPrompt.text);
+      }
+    }
+  }, [prompts, updateCurrentTime, onPromptSubmit]);
+
   const buildLivePromptFromCurrent = (
     start: number,
     end: number
@@ -108,6 +128,28 @@ export function PromptInputWithTimeline({
     };
   };
 
+  // Check if record button should be disabled
+  const isRecordDisabled = () => {
+    if (disabled) {
+      return true;
+    }
+
+    // If currently recording, the button should be enabled (to allow stopping)
+    if (isRecording) {
+      return false;
+    }
+
+    const sortedPrompts = [...prompts].sort(
+      (a, b) => a.startTime - b.startTime
+    );
+    const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
+    const isAtEnd = !lastPrompt || currentTime >= lastPrompt.endTime;
+    const isAtBeginning = currentTime <= 0;
+
+    // Disable record if playhead is in the middle of timeline
+    return !isAtBeginning && !isAtEnd;
+  };
+
   const handleRecordingToggle = () => {
     const newRecordingState = !isRecording;
     setIsRecording(newRecordingState);
@@ -127,21 +169,40 @@ export function PromptInputWithTimeline({
         (a, b) => a.startTime - b.startTime
       );
       const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
-      const isAtEnd = !lastPrompt || currentTime >= lastPrompt.endTime;
       const isAtBeginning = currentTime <= 0;
 
+      // More robust check for "at end" - consider it at end if we're at or past the last prompt's end time
+      // or if there are no prompts at all, or if we're very close to the end (within 0.1 seconds)
+      const isAtEnd =
+        !lastPrompt ||
+        currentTime >= lastPrompt.endTime ||
+        (lastPrompt && Math.abs(currentTime - lastPrompt.endTime) < 0.1);
+
+      console.log("Recording start debug:", {
+        currentTime,
+        lastPrompt: lastPrompt
+          ? { startTime: lastPrompt.startTime, endTime: lastPrompt.endTime }
+          : null,
+        isAtBeginning,
+        isAtEnd,
+        promptsCount: sortedPrompts.length,
+        isVideoPaused,
+        isPlaying,
+      });
+
       if (isAtBeginning) {
-        // Remove all blocks and start fresh
+        // Remove all blocks and start fresh from beginning
         setPrompts([]);
         const livePrompt = buildLivePromptFromCurrent(0, 0);
         setPrompts([livePrompt]);
       } else if (isAtEnd) {
-        // Start from the end of the last block
+        // Start from the end of the last block (or current time if no blocks exist)
         const start = lastPrompt ? lastPrompt.endTime : currentTime;
         const livePrompt = buildLivePromptFromCurrent(start, start);
         setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
       } else {
-        // In the middle - remove all blocks after current time and make current block live
+        // In the middle - this should be disabled, but handle gracefully
+        // Remove all blocks after current time and make current block live
         const filteredPrompts = sortedPrompts.filter(
           p => p.endTime <= currentTime
         );
@@ -173,8 +234,16 @@ export function PromptInputWithTimeline({
       }
 
       // Auto-start timeline playback when recording begins
+      console.log(
+        "Recording started, isPlaying:",
+        isPlaying,
+        "about to toggle playback"
+      );
       if (!isPlaying) {
+        console.log("Starting playback because not playing");
         togglePlayback();
+      } else {
+        console.log("Already playing, not toggling");
       }
     } else {
       // Stop recording - complete the current live box
@@ -263,7 +332,7 @@ export function PromptInputWithTimeline({
 
       // Do NOT call onPromptSubmit here; it would reset blends to a single prompt
     },
-    [currentTime]
+    [currentTime, setPrompts]
   );
 
   // Handle prompt updates from the editor
@@ -273,7 +342,7 @@ export function PromptInputWithTimeline({
         prevPrompts.map(p => (p.id === updatedPrompt.id ? updatedPrompt : p))
       );
     },
-    []
+    [setPrompts]
   );
 
   // Update live box end time as current time progresses
@@ -283,7 +352,7 @@ export function PromptInputWithTimeline({
         prevPrompts.map(p => (p.isLive ? { ...p, endTime: currentTime } : p))
       );
     }
-  }, [currentTime, isRecording]);
+  }, [currentTime, isRecording, setPrompts]);
 
   // Expose the recording prompt submit function to parent
   React.useImperativeHandle(timelineRef, () => ({
@@ -301,7 +370,7 @@ export function PromptInputWithTimeline({
         isPlaying={isPlaying}
         currentTime={currentTime}
         onPlayPause={handlePlayPause}
-        onTimeChange={updateCurrentTime}
+        onTimeChange={handleRewind}
         isRecording={isRecording}
         onRecordingToggle={handleRecordingToggle}
         onPromptSubmit={onPromptSubmit}
@@ -310,6 +379,7 @@ export function PromptInputWithTimeline({
         onPromptSelect={handlePromptSelect}
         onPromptEdit={handlePromptEdit}
         onRecordingPromptSubmit={onRecordingPromptSubmit}
+        isRecordDisabled={isRecordDisabled()}
       />
     </div>
   );
