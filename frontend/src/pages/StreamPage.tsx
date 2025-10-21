@@ -405,7 +405,10 @@ export function StreamPage() {
                 currentPrompt={promptItems[0]?.text || ""}
                 currentPromptItems={promptItems}
                 onPromptSubmit={text => {
-                  // Do not mutate left-panel prompts here; only inform backend of the active prompt
+                  // Update the left panel's prompt state to reflect current timeline prompt
+                  setPromptItems([{ text, weight: 100 }]);
+
+                  // Send to backend
                   sendParameterUpdate({
                     prompts: [{ text, weight: 100 }],
                     prompt_interpolation_method: interpolationMethod,

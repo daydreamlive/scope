@@ -41,6 +41,7 @@ interface PromptTimelineProps {
   onPromptSelect?: (promptId: string | null) => void;
   onPromptEdit?: (prompt: TimelinePrompt) => void;
   onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
+  isRecordDisabled?: boolean;
 }
 
 export function PromptTimeline({
@@ -60,6 +61,7 @@ export function PromptTimeline({
   onPromptSelect,
   onPromptEdit,
   onRecordingPromptSubmit,
+  isRecordDisabled = false,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -69,7 +71,7 @@ export function PromptTimeline({
   const basePixelsPerSecond = 20; // Base pixels per second
 
   // Generate random colors for prompt boxes, ensuring adjacent boxes have different colors
-  const generateRandomColor = (excludeColors: string[] = []) => {
+  const generateRandomColor = useCallback((excludeColors: string[] = []) => {
     const colors = [
       "#FF6B6B",
       "#4ECDC4",
@@ -99,7 +101,7 @@ export function PromptTimeline({
     }
 
     return availableColors[Math.floor(Math.random() * availableColors.length)];
-  };
+  }, []);
   const pixelsPerSecond = basePixelsPerSecond * zoomLevel; // Scaled pixels per second
 
   // Calculate visible time range based on zoom level and timeline width
@@ -205,8 +207,19 @@ export function PromptTimeline({
   }, []);
 
   const handleExport = useCallback(() => {
+    // Filter out id, text, isLive, and color from prompts for export
+    const exportPrompts = prompts.map(prompt => {
+      const { id, text, isLive, color, ...exportPrompt } = prompt;
+      // Suppress unused variable warnings for intentionally excluded fields
+      void id;
+      void text;
+      void isLive;
+      void color;
+      return exportPrompt;
+    });
+
     const timelineData = {
-      prompts: prompts,
+      prompts: exportPrompts,
       version: "1.0",
       exportedAt: new Date().toISOString(),
     };
@@ -236,7 +249,23 @@ export function PromptTimeline({
           const timelineData = JSON.parse(content);
 
           if (timelineData.prompts && Array.isArray(timelineData.prompts)) {
-            onPromptsChange(timelineData.prompts);
+            // Assign default values for id, text, isLive, and color when importing
+            const importedPrompts = timelineData.prompts.map(
+              (prompt: Partial<TimelinePrompt>, index: number) => ({
+                ...prompt,
+                id: prompt.id || `imported-${Date.now()}-${index}`,
+                text:
+                  prompt.text ||
+                  (prompt.prompts && prompt.prompts.length > 0
+                    ? prompt.prompts
+                        .map((p: { text: string; weight: number }) => p.text)
+                        .join(", ")
+                    : ""),
+                isLive: prompt.isLive || false,
+                color: prompt.color || generateRandomColor(),
+              })
+            );
+            onPromptsChange(importedPrompts);
           } else {
             alert("Invalid timeline file format");
           }
@@ -250,7 +279,7 @@ export function PromptTimeline({
       // Reset the input so the same file can be selected again
       event.target.value = "";
     },
-    [onPromptsChange]
+    [onPromptsChange, generateRandomColor]
   );
 
   // Drag-to-pan state
@@ -376,7 +405,7 @@ export function PromptTimeline({
       color: generateRandomColor(excludeColor),
     };
     onPromptsChange([...prompts, newPrompt]);
-  }, [prompts, onPromptsChange]);
+  }, [prompts, onPromptsChange, generateRandomColor]);
 
   // Zoom functions
   const zoomIn = useCallback(() => {
@@ -422,7 +451,13 @@ export function PromptTimeline({
         _onPromptSubmit(promptItems[0].text); // Send first prompt for backward compatibility
       }
     },
-    [prompts, currentTime, onPromptsChange, _onPromptSubmit]
+    [
+      prompts,
+      currentTime,
+      onPromptsChange,
+      _onPromptSubmit,
+      generateRandomColor,
+    ]
   );
 
   // Expose the function to parent via ref or callback
@@ -465,7 +500,7 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onRecordingToggle}
-              disabled={disabled}
+              disabled={disabled || isRecordDisabled}
               size="sm"
               variant={isRecording ? "destructive" : "outline"}
               className={isRecording ? "animate-pulse" : ""}
@@ -607,21 +642,28 @@ export function PromptTimeline({
                   isRecording && currentTime >= prompt.startTime;
                 const isLive = prompt.isLive;
 
-                // Use the prompt's color, but ensure it's different from adjacent boxes
-                const adjacentColors: string[] = [];
-                if (index > 0 && sortedPrompts[index - 1].color) {
-                  adjacentColors.push(sortedPrompts[index - 1].color!);
-                }
-                if (
-                  index < sortedPrompts.length - 1 &&
-                  sortedPrompts[index + 1].color
-                ) {
-                  adjacentColors.push(sortedPrompts[index + 1].color!);
-                }
-
+                // Use the prompt's color, only generate if it doesn't exist
                 let boxColor = prompt.color;
-                if (!boxColor || adjacentColors.includes(boxColor)) {
+                if (!boxColor) {
+                  // Only generate color if the prompt doesn't have one
+                  const adjacentColors: string[] = [];
+                  if (index > 0 && sortedPrompts[index - 1].color) {
+                    adjacentColors.push(sortedPrompts[index - 1].color!);
+                  }
+                  if (
+                    index < sortedPrompts.length - 1 &&
+                    sortedPrompts[index + 1].color
+                  ) {
+                    adjacentColors.push(sortedPrompts[index + 1].color!);
+                  }
                   boxColor = generateRandomColor(adjacentColors);
+
+                  // Update the prompt with the new color to persist it
+                  const updatedPrompt = { ...prompt, color: boxColor };
+                  const updatedPrompts = prompts.map(p =>
+                    p.id === prompt.id ? updatedPrompt : p
+                  );
+                  onPromptsChange(updatedPrompts);
                 }
 
                 // Calculate position - boxes should be adjacent with no gaps
