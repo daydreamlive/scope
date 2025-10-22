@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { PromptTimeline, type TimelinePrompt } from "./PromptTimeline";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { PromptItem } from "../lib/api";
+import type { SettingsState } from "../types";
 
 interface PromptInputWithTimelineProps {
   className?: string;
@@ -16,8 +17,19 @@ interface PromptInputWithTimelineProps {
   } | null>;
   selectedPrompt?: TimelinePrompt | null;
   onPromptEdit?: (prompt: TimelinePrompt | null) => void;
-  onRecordingStateChange?: (isRecording: boolean) => void;
-  onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
+  onLiveStateChange?: (isLive: boolean) => void;
+  onLivePromptSubmit?: (prompts: PromptItem[]) => void;
+  onDisconnect?: () => void;
+  onStartStream?: () => void;
+  onVideoPlayPauseToggle?: () => void;
+  isCollapsed?: boolean;
+  onCollapseToggle?: (collapsed: boolean) => void;
+  externalSelectedPromptId?: string | null; // New prop to control selection externally
+  // New props for settings export/import
+  settings?: SettingsState;
+  onSettingsImport?: (settings: Partial<SettingsState>) => void;
+  // New prop to expose play/pause handler
+  onPlayPauseRef?: React.RefObject<(() => Promise<void>) | null>;
 }
 
 export function PromptInputWithTimeline({
@@ -31,11 +43,31 @@ export function PromptInputWithTimeline({
   timelineRef,
   selectedPrompt: _selectedPrompt = null,
   onPromptEdit,
-  onRecordingStateChange,
-  onRecordingPromptSubmit,
+  onLiveStateChange,
+  onLivePromptSubmit,
+  onDisconnect,
+  onStartStream,
+  onVideoPlayPauseToggle,
+  isCollapsed = false,
+  onCollapseToggle,
+  externalSelectedPromptId = null,
+  settings,
+  onSettingsImport,
+  onPlayPauseRef,
 }: PromptInputWithTimelineProps) {
-  const [isRecording, setIsRecording] = useState(false);
+  const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+  const [hasStartedPlayback, setHasStartedPlayback] = useState(false);
+  const [scrollToTimeFn, setScrollToTimeFn] = useState<
+    ((time: number) => void) | null
+  >(null);
+
+  // Sync external selected prompt ID with internal state
+  useEffect(() => {
+    if (externalSelectedPromptId !== undefined) {
+      setSelectedPromptId(externalSelectedPromptId);
+    }
+  }, [externalSelectedPromptId]);
 
   // Generate random colors for prompt boxes, ensuring adjacent boxes have different colors
   const generateRandomColor = (excludeColors: string[] = []) => {
@@ -76,177 +108,28 @@ export function PromptInputWithTimeline({
     currentTime,
     updateCurrentTime,
     togglePlayback,
+    resetPlayback,
+    startPlayback,
+    pausePlayback,
   } = useTimelinePlayback({
     onPromptChange: onPromptSubmit,
     isStreaming,
     isVideoPaused,
   });
 
-  // Enhanced rewind handler that applies the first prompt
+  // Compute actual playing state - timeline is playing AND video is not paused
+  const isActuallyPlaying = isPlaying && !isVideoPaused;
+
+  // Enhanced rewind handler that completes current box, resets to beginning, and preserves play/pause state
   const handleRewind = useCallback(() => {
-    // Reset time to 0
-    updateCurrentTime(0);
-
-    // Find the first prompt in the timeline
-    const sortedPrompts = [...prompts].sort(
-      (a, b) => a.startTime - b.startTime
-    );
-    const firstPrompt = sortedPrompts.find(p => !p.isLive);
-
-    if (firstPrompt) {
-      // Update the current prompt text box to show the first prompt
-      // This will be reflected in the parent component's currentPrompt
-      if (onPromptSubmit) {
-        onPromptSubmit(firstPrompt.text);
-      }
-    }
-  }, [prompts, updateCurrentTime, onPromptSubmit]);
-
-  const buildLivePromptFromCurrent = (
-    start: number,
-    end: number
-  ): TimelinePrompt => {
-    if (currentPromptItems && currentPromptItems.length > 0) {
-      return {
-        id: `live-${Date.now()}`,
-        text: currentPromptItems.map(p => p.text).join(", "),
-        startTime: start,
-        endTime: end,
-        isLive: true,
-        prompts: currentPromptItems.map(p => ({
-          text: p.text,
-          weight: p.weight,
-        })),
-      };
-    }
-    return {
-      id: `live-${Date.now()}`,
-      text: currentPrompt || "Recording...",
-      startTime: start,
-      endTime: end,
-      isLive: true,
-    };
-  };
-
-  // Check if record button should be disabled
-  const isRecordDisabled = () => {
-    if (disabled) {
-      return true;
-    }
-
-    // If currently recording, the button should be enabled (to allow stopping)
-    if (isRecording) {
-      return false;
-    }
-
-    const sortedPrompts = [...prompts].sort(
-      (a, b) => a.startTime - b.startTime
-    );
-    const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
-    const isAtEnd = !lastPrompt || currentTime >= lastPrompt.endTime;
-    const isAtBeginning = currentTime <= 0;
-
-    // Disable record if playhead is in the middle of timeline
-    return !isAtBeginning && !isAtEnd;
-  };
-
-  const handleRecordingToggle = () => {
-    const newRecordingState = !isRecording;
-    setIsRecording(newRecordingState);
-
-    // Notify parent component of recording state change
-    if (onRecordingStateChange) {
-      onRecordingStateChange(newRecordingState);
-    }
-
-    if (newRecordingState) {
-      // Deselect any currently selected timeline prompt so panel input is enabled
-      setSelectedPromptId(null);
-      onPromptEdit?.(null);
-
-      // Start recording - implement smart recording behavior
-      const sortedPrompts = [...prompts].sort(
-        (a, b) => a.startTime - b.startTime
-      );
-      const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
-      const isAtBeginning = currentTime <= 0;
-
-      // More robust check for "at end" - consider it at end if we're at or past the last prompt's end time
-      // or if there are no prompts at all, or if we're very close to the end (within 0.1 seconds)
-      const isAtEnd =
-        !lastPrompt ||
-        currentTime >= lastPrompt.endTime ||
-        (lastPrompt && Math.abs(currentTime - lastPrompt.endTime) < 0.1);
-
-      console.log("Recording start debug:", {
-        currentTime,
-        lastPrompt: lastPrompt
-          ? { startTime: lastPrompt.startTime, endTime: lastPrompt.endTime }
-          : null,
-        isAtBeginning,
-        isAtEnd,
-        promptsCount: sortedPrompts.length,
-        isVideoPaused,
-        isPlaying,
-      });
-
-      if (isAtBeginning) {
-        // Remove all blocks and start fresh from beginning
-        setPrompts([]);
-        const livePrompt = buildLivePromptFromCurrent(0, 0);
-        setPrompts([livePrompt]);
-      } else if (isAtEnd) {
-        // Start from the end of the last block (or current time if no blocks exist)
-        const start = lastPrompt ? lastPrompt.endTime : currentTime;
-        const livePrompt = buildLivePromptFromCurrent(start, start);
-        setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
-      } else {
-        // In the middle - this should be disabled, but handle gracefully
-        // Remove all blocks after current time and make current block live
-        const filteredPrompts = sortedPrompts.filter(
-          p => p.endTime <= currentTime
-        );
-
-        // Find the block that contains the current time
-        const currentBlock = sortedPrompts.find(
-          p => currentTime >= p.startTime && currentTime <= p.endTime
-        );
-
-        if (currentBlock) {
-          // Make the current block live
-          const livePrompt: TimelinePrompt = {
-            ...currentBlock,
-            endTime: currentTime,
-            isLive: true,
-          };
-          setPrompts([
-            ...filteredPrompts.filter(p => p.id !== currentBlock.id),
-            livePrompt,
-          ]);
-        } else {
-          // No current block, create new live block from current blend
-          const livePrompt = buildLivePromptFromCurrent(
-            currentTime,
-            currentTime
-          );
-          setPrompts([...filteredPrompts, livePrompt]);
-        }
+    // Complete current live box if live
+    if (isLive) {
+      setIsLive(false);
+      if (onLiveStateChange) {
+        onLiveStateChange(false);
       }
 
-      // Auto-start timeline playback when recording begins
-      console.log(
-        "Recording started, isPlaying:",
-        isPlaying,
-        "about to toggle playback"
-      );
-      if (!isPlaying) {
-        console.log("Starting playback because not playing");
-        togglePlayback();
-      } else {
-        console.log("Already playing, not toggling");
-      }
-    } else {
-      // Stop recording - complete the current live box
+      // Complete the current live box
       setPrompts(prevPrompts =>
         prevPrompts.map(p =>
           p.isLive
@@ -259,22 +142,273 @@ export function PromptInputWithTimeline({
             : p
         )
       );
+    }
 
-      // Pause timeline when recording stops
-      if (isPlaying) {
-        togglePlayback();
+    // Reset time to 0
+    updateCurrentTime(0);
+
+    // Find the first prompt in the timeline
+    const sortedPrompts = [...prompts].sort(
+      (a, b) => a.startTime - b.startTime
+    );
+    const firstPrompt = sortedPrompts.find(p => !p.isLive);
+
+    if (firstPrompt) {
+      // Update the current prompt text box to show the first prompt
+      if (onPromptSubmit) {
+        onPromptSubmit(firstPrompt.text);
       }
     }
-  };
 
-  // Custom play/pause handler that respects recording state
-  const handlePlayPause = () => {
-    // If recording is active, don't allow manual pause
-    if (isRecording && isPlaying) {
-      return; // Disabled during recording
+    // Preserve play/pause state: if was playing, start playing from beginning; if paused, stay paused
+    if (isActuallyPlaying) {
+      // If currently playing, restart playback from the beginning
+      pausePlayback(); // Pause first
+      // Use a longer timeout to ensure currentTime state has been updated
+      setTimeout(() => {
+        // Double-check that currentTime is 0 before starting playback
+        if (currentTime === 0) {
+          startPlayback();
+        } else {
+          // If currentTime is not 0 yet, force it to 0 and then start playback
+          updateCurrentTime(0);
+          setTimeout(() => startPlayback(), 10);
+        }
+      }, 10);
     }
-    togglePlayback();
-  };
+    // If currently paused, do nothing - stay paused at the beginning
+  }, [
+    prompts,
+    updateCurrentTime,
+    onPromptSubmit,
+    isLive,
+    onLiveStateChange,
+    currentTime,
+    isActuallyPlaying,
+    pausePlayback,
+    startPlayback,
+    setPrompts,
+  ]);
+
+  // Enhanced disconnect handler that stops stream, pauses timeline, and rewinds playhead
+  const handleEnhancedDisconnect = useCallback(() => {
+    // 1. Stop the stream
+    if (onDisconnect) {
+      onDisconnect();
+    }
+
+    // 2. Pause the timeline (same as clicking Pause button)
+    if (isActuallyPlaying) {
+      togglePlayback();
+    }
+
+    // 3. Rewind the playhead to the beginning (same as clicking Rewind)
+    // Complete current live box if live
+    if (isLive) {
+      setIsLive(false);
+      if (onLiveStateChange) {
+        onLiveStateChange(false);
+      }
+
+      // Complete the current live box
+      setPrompts(prevPrompts =>
+        prevPrompts.map(p =>
+          p.isLive
+            ? {
+                ...p,
+                endTime: currentTime,
+                isLive: false,
+                color: generateRandomColor(),
+              }
+            : p
+        )
+      );
+    }
+
+    // Reset time to 0
+    updateCurrentTime(0);
+
+    // Find the first prompt in the timeline
+    const sortedPrompts = [...prompts].sort(
+      (a, b) => a.startTime - b.startTime
+    );
+    const firstPrompt = sortedPrompts.find(p => !p.isLive);
+
+    if (firstPrompt) {
+      // Update the current prompt text box to show the first prompt
+      if (onPromptSubmit) {
+        onPromptSubmit(firstPrompt.text);
+      }
+    }
+
+    // Note: Disconnect always leaves the timeline paused at the beginning
+    // (no additional play/pause logic needed since we already paused above)
+  }, [
+    onDisconnect,
+    isActuallyPlaying,
+    togglePlayback,
+    isLive,
+    onLiveStateChange,
+    setPrompts,
+    currentTime,
+    updateCurrentTime,
+    prompts,
+    onPromptSubmit,
+  ]);
+
+  // Reset hasStartedPlayback when stream stops
+  React.useEffect(() => {
+    if (!isStreaming) {
+      setHasStartedPlayback(false);
+    }
+  }, [isStreaming]);
+
+  const buildLivePromptFromCurrent = useCallback(
+    (start: number, end: number): TimelinePrompt => {
+      if (currentPromptItems && currentPromptItems.length > 0) {
+        return {
+          id: `live-${Date.now()}`,
+          text: currentPromptItems.map(p => p.text).join(", "),
+          startTime: start,
+          endTime: end,
+          isLive: true,
+          prompts: currentPromptItems.map(p => ({
+            text: p.text,
+            weight: p.weight,
+          })),
+        };
+      }
+      return {
+        id: `live-${Date.now()}`,
+        text: currentPrompt || "Live...",
+        startTime: start,
+        endTime: end,
+        isLive: true,
+      };
+    },
+    [currentPromptItems, currentPrompt]
+  );
+
+  // Custom play/pause handler that implements new behavior
+  const handlePlayPause = useCallback(async () => {
+    console.log("handlePlayPause called");
+
+    // If not streaming, start the stream first (first time only)
+    if (!isStreaming && onStartStream) {
+      await onStartStream();
+      // Wait a bit for the stream to initialize
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // Check if we're at the end of the timeline
+    const sortedPrompts = [...prompts].sort(
+      (a, b) => a.startTime - b.startTime
+    );
+    const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
+    const isAtEnd = !lastPrompt || currentTime >= lastPrompt.endTime;
+
+    if (!isActuallyPlaying) {
+      // Starting playback
+
+      // Deselect any selected prompt when starting playback
+      if (selectedPromptId) {
+        setSelectedPromptId(null);
+        if (onPromptEdit) {
+          onPromptEdit(null);
+        }
+      }
+
+      if (isAtEnd) {
+        console.log("isAtEnd");
+        // At the end - start live mode with current prompt
+        setIsLive(true);
+        if (onLiveStateChange) {
+          onLiveStateChange(true);
+        }
+
+        // Instead of creating a new live box, extend the last prompt as live
+        // This matches the automatic behavior in useTimelinePlayback
+        const sortedNonLivePrompts = [...prompts]
+          .filter(p => !p.isLive)
+          .sort((a, b) => a.endTime - b.endTime);
+
+        if (sortedNonLivePrompts.length > 0) {
+          console.log("sortedNonLivePrompts:", sortedNonLivePrompts);
+          // const lastNonLivePrompt =
+          //   sortedNonLivePrompts[sortedNonLivePrompts.length - 1];
+
+          // Make the last prompt live by extending its endTime
+          // setPrompts(prevPrompts =>
+          //   prevPrompts.map(p =>
+          //     p.id === lastNonLivePrompt.id
+          //       ? { ...p, isLive: true, endTime: currentTime }
+          //       : p
+          //   )
+          // );
+        } else {
+          console.log("no existing prompts, creating a new live box");
+          // No existing prompts, create a new live box
+          if (!isStreaming && onStartStream) {
+            console.log("starting stream");
+            await onStartStream();
+            // Wait a bit for the stream to initialize
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const livePrompt = buildLivePromptFromCurrent(
+              currentTime,
+              currentTime
+            );
+            setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
+          }
+        }
+
+        // Start timeline playback immediately after creating/extending the live box
+        // Use setTimeout to ensure the state update has been applied
+        setTimeout(() => {
+          console.log("starting playback");
+          togglePlayback();
+          // Resume video if paused
+          if (isVideoPaused && onVideoPlayPauseToggle) {
+            onVideoPlayPauseToggle();
+          }
+        }, 0);
+      } else {
+        console.log("not at the end, resuming playback");
+        // Not at the end - resume both timeline and video
+        togglePlayback();
+        if (isVideoPaused && onVideoPlayPauseToggle) {
+          onVideoPlayPauseToggle();
+        }
+      }
+
+      // Track that we've started playback
+      if (!hasStartedPlayback) {
+        console.log("setting hasStartedPlayback to true");
+        setHasStartedPlayback(true);
+      }
+    } else {
+      console.log("pausing playback");
+      // Pausing playback - pause both timeline and video
+      togglePlayback();
+      if (!isVideoPaused && onVideoPlayPauseToggle) {
+        onVideoPlayPauseToggle();
+      }
+    }
+  }, [
+    isStreaming,
+    onStartStream,
+    prompts,
+    currentTime,
+    isActuallyPlaying,
+    selectedPromptId,
+    onPromptEdit,
+    onLiveStateChange,
+    setPrompts,
+    togglePlayback,
+    isVideoPaused,
+    onVideoPlayPauseToggle,
+    hasStartedPlayback,
+    buildLivePromptFromCurrent,
+  ]);
 
   // Expose current timeline prompt to parent
   const getCurrentTimelinePrompt = React.useCallback(() => {
@@ -291,7 +425,7 @@ export function PromptInputWithTimeline({
 
   // Handle prompt editing
   const handlePromptEdit = React.useCallback(
-    (prompt: TimelinePrompt) => {
+    (prompt: TimelinePrompt | null) => {
       if (onPromptEdit) {
         onPromptEdit(prompt);
       }
@@ -299,8 +433,8 @@ export function PromptInputWithTimeline({
     [onPromptEdit]
   );
 
-  // Handle recording prompt submission
-  const handleRecordingPromptSubmit = React.useCallback(
+  // Handle live prompt submission
+  const handleLivePromptSubmit = React.useCallback(
     (promptItems: PromptItem[]) => {
       if (!promptItems.length || !promptItems.some(p => p.text.trim())) return;
 
@@ -317,12 +451,25 @@ export function PromptInputWithTimeline({
             : p
         );
 
+        // Determine where to place the new prompt
+        // If we're paused in the middle (not playing and not at the end), append to the end
+        const sortedPrompts = [...updatedPrompts].sort(
+          (a, b) => a.endTime - b.endTime
+        );
+        const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
+        const maxEndTime = lastPrompt ? lastPrompt.endTime : 0;
+        const isAtEnd = currentTime >= maxEndTime;
+        const isPausedInMiddle = !isActuallyPlaying && !isAtEnd;
+
+        // Use end of timeline if paused in middle, otherwise use current time
+        const startTime = isPausedInMiddle ? maxEndTime : currentTime;
+
         // Create new live box with blend information
         const newLivePrompt: TimelinePrompt = {
           id: `live-${Date.now()}`,
           text: promptItems.map(p => p.text).join(", "), // Combined text for display
-          startTime: currentTime,
-          endTime: currentTime, // Will be updated as time progresses
+          startTime: startTime,
+          endTime: startTime, // Will be updated as time progresses
           isLive: true,
           prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })), // Store blend info
         };
@@ -330,9 +477,27 @@ export function PromptInputWithTimeline({
         return [...updatedPrompts, newLivePrompt];
       });
 
+      // Set live state to true when creating a new live prompt box
+      // This ensures that after rewind, when users submit prompts, they can continue adding more
+      setIsLive(true);
+      if (onLiveStateChange) {
+        onLiveStateChange(true);
+      }
+
+      // Scroll timeline to show the new live prompt if it's not visible
+      if (scrollToTimeFn) {
+        scrollToTimeFn(currentTime);
+      }
+
       // Do NOT call onPromptSubmit here; it would reset blends to a single prompt
     },
-    [currentTime, setPrompts]
+    [
+      currentTime,
+      setPrompts,
+      isActuallyPlaying,
+      onLiveStateChange,
+      scrollToTimeFn,
+    ]
   );
 
   // Handle prompt updates from the editor
@@ -345,21 +510,27 @@ export function PromptInputWithTimeline({
     [setPrompts]
   );
 
-  // Update live box end time as current time progresses
-  React.useEffect(() => {
-    if (isRecording) {
-      setPrompts(prevPrompts =>
-        prevPrompts.map(p => (p.isLive ? { ...p, endTime: currentTime } : p))
-      );
-    }
-  }, [currentTime, isRecording, setPrompts]);
+  // Note: Live box end time updates are handled by useTimelinePlayback hook
+  // to avoid conflicts and ensure proper synchronization
 
-  // Expose the recording prompt submit function to parent
+  // Expose the live prompt submit function to parent
   React.useImperativeHandle(timelineRef, () => ({
     getCurrentTimelinePrompt,
-    submitRecordingPrompt: handleRecordingPromptSubmit,
+    submitLivePrompt: handleLivePromptSubmit,
     updatePrompt: handlePromptUpdate,
+    clearTimeline: () => setPrompts([]),
+    resetPlayhead: resetPlayback,
+    getPrompts: () => prompts,
+    getCurrentTime: () => currentTime,
+    getIsPlaying: () => isPlaying,
   }));
+
+  // Expose play/pause handler to parent
+  React.useEffect(() => {
+    if (onPlayPauseRef) {
+      onPlayPauseRef.current = handlePlayPause;
+    }
+  }, [handlePlayPause, onPlayPauseRef]);
 
   return (
     <div className={`space-y-3 ${className}`}>
@@ -367,19 +538,22 @@ export function PromptInputWithTimeline({
         prompts={prompts}
         onPromptsChange={setPrompts}
         disabled={disabled}
-        isPlaying={isPlaying}
+        isPlaying={isActuallyPlaying}
         currentTime={currentTime}
         onPlayPause={handlePlayPause}
         onTimeChange={handleRewind}
-        isRecording={isRecording}
-        onRecordingToggle={handleRecordingToggle}
+        onDisconnect={handleEnhancedDisconnect}
         onPromptSubmit={onPromptSubmit}
         initialPrompt={currentPrompt}
         selectedPromptId={selectedPromptId}
         onPromptSelect={handlePromptSelect}
         onPromptEdit={handlePromptEdit}
-        onRecordingPromptSubmit={onRecordingPromptSubmit}
-        isRecordDisabled={isRecordDisabled()}
+        onLivePromptSubmit={onLivePromptSubmit}
+        isCollapsed={isCollapsed}
+        onCollapseToggle={onCollapseToggle}
+        settings={settings}
+        onSettingsImport={onSettingsImport}
+        onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
       />
     </div>
   );

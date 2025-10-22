@@ -18,7 +18,6 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
   const lastAppliedPromptIdRef = useRef<string | null>(null);
   const lastAppliedPromptTextRef = useRef<string | null>(null);
   const optionsRef = useRef(options);
-  const wasPausedByVideoRef = useRef<boolean>(false);
   const promptsRef = useRef(prompts);
 
   // Update options ref when options change
@@ -39,14 +38,6 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
   }, []);
 
   const startPlayback = useCallback(() => {
-    console.log(
-      "Starting playback, current time:",
-      currentTime,
-      "prompts:",
-      prompts.length,
-      "hasLiveBlocks:",
-      prompts.some(p => p.isLive)
-    );
     setIsPlaying(true);
     startTimeRef.current = performance.now() - currentTime * 1000;
     lastTimeRef.current = performance.now();
@@ -55,12 +46,6 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
       const now = performance.now();
       const elapsed = (now - startTimeRef.current) / 1000;
 
-      console.log(
-        "updateTime called, elapsed:",
-        elapsed,
-        "currentTime:",
-        currentTime
-      );
       setCurrentTime(elapsed);
 
       // Update live blocks to extend as time progresses
@@ -101,21 +86,38 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
       const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
       const maxEndTime = lastPrompt ? lastPrompt.endTime : 0;
 
-      // Check if there's a live block (recording in progress)
+      // Check if there's a live block (live mode in progress)
       const hasLiveBlock = currentPrompts.some(p => p.isLive);
 
-      console.log("End check:", {
-        elapsed,
-        maxEndTime,
-        hasLiveBlock,
-        promptsCount: currentPrompts.length,
-      });
-
-      // If we've reached the end and there are prompts, pause automatically
-      // BUT NOT if there's a live block (recording in progress)
+      // If we've reached the end and there are prompts, extend the last box as live
+      // instead of stopping (unless there's already a live block)
       if (elapsed >= maxEndTime && currentPrompts.length > 0 && !hasLiveBlock) {
-        console.log("Pausing at end of timeline");
-        pausePlayback();
+        // Find the last non-live prompt and make it live
+        const sortedNonLivePrompts = [...currentPrompts]
+          .filter(p => !p.isLive)
+          .sort((a, b) => a.endTime - b.endTime);
+
+        if (sortedNonLivePrompts.length > 0) {
+          const lastNonLivePrompt =
+            sortedNonLivePrompts[sortedNonLivePrompts.length - 1];
+
+          // Make the last prompt live
+          setPrompts(prevPrompts =>
+            prevPrompts.map(p =>
+              p.id === lastNonLivePrompt.id
+                ? { ...p, isLive: true, endTime: elapsed }
+                : p
+            )
+          );
+
+          // Notify parent that live mode has started
+          if (optionsRef.current?.onPromptChange) {
+            optionsRef.current.onPromptChange(lastNonLivePrompt.text);
+          }
+        }
+
+        // Continue playing instead of stopping
+        animationFrameRef.current = requestAnimationFrame(updateTime);
         return;
       }
 
@@ -124,41 +126,14 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
     };
 
     animationFrameRef.current = requestAnimationFrame(updateTime);
-  }, [currentTime, prompts, pausePlayback]);
+  }, [currentTime]);
 
-  // Pause timeline when video is paused (including during recording)
-  useEffect(() => {
-    console.log("Video pause effect:", {
-      isVideoPaused: options?.isVideoPaused,
-      isPlaying,
-      hasLiveBlocks: promptsRef.current.some(p => p.isLive),
-    });
-    if (options?.isVideoPaused && isPlaying) {
-      console.log("Pausing timeline due to video pause");
-      wasPausedByVideoRef.current = true;
-      pausePlayback();
-    }
-  }, [options?.isVideoPaused, isPlaying, pausePlayback]);
-
-  // Resume timeline when video resumes (if it was playing before video pause)
-  useEffect(() => {
-    if (!options?.isVideoPaused && !isPlaying && wasPausedByVideoRef.current) {
-      console.log("Resuming timeline due to video resume");
-      wasPausedByVideoRef.current = false;
-      startPlayback();
-    }
-  }, [options?.isVideoPaused, isPlaying, startPlayback]);
+  // Note: Video pause/resume effects removed - now handled by unified play/pause handler
 
   const togglePlayback = useCallback(() => {
-    console.log("togglePlayback called, isPlaying:", isPlaying);
-    // Reset video pause tracking when user manually toggles
-    wasPausedByVideoRef.current = false;
-
     if (isPlaying) {
-      console.log("Pausing playback");
       pausePlayback();
     } else {
-      console.log("Starting playback");
       startPlayback();
     }
   }, [isPlaying, startPlayback, pausePlayback]);

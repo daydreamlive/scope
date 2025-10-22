@@ -182,7 +182,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         setIsConnecting(false);
       }
     },
-    [isConnecting]
+    [isConnecting, options]
   );
 
   const updateVideoTrack = useCallback(

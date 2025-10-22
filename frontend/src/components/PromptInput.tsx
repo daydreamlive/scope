@@ -20,8 +20,8 @@ interface PromptInputProps {
   disabled?: boolean;
   interpolationMethod?: "linear" | "slerp";
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
-  isRecording?: boolean;
-  onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
+  isLive?: boolean;
+  onLivePromptSubmit?: (prompts: PromptItem[]) => void;
 }
 
 export function PromptInput({
@@ -32,8 +32,8 @@ export function PromptInput({
   disabled = false,
   interpolationMethod = "linear",
   onInterpolationMethodChange,
-  isRecording = false,
-  onRecordingPromptSubmit,
+  isLive = false,
+  onLivePromptSubmit,
 }: PromptInputProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
@@ -80,12 +80,14 @@ export function PromptInput({
     setIsProcessing(true);
     onPromptsSubmit?.(validPrompts);
 
-    if (isRecording && onRecordingPromptSubmit) {
-      // During recording, submit the full prompt blend to the timeline
-      onRecordingPromptSubmit(validPrompts);
-      // Don't clear prompts during recording - keep the blend for next submission
-    } else {
-      // Normal mode, submit all prompts
+    // Always call onLivePromptSubmit if available, regardless of isLive state
+    // The timeline component will handle live state management internally
+    if (onLivePromptSubmit) {
+      // Submit the full prompt blend to the timeline
+      onLivePromptSubmit(validPrompts);
+      // Don't clear prompts during live mode - keep the blend for next submission
+    } else if (!isLive) {
+      // Normal mode, submit all prompts (fallback for when onLivePromptSubmit is not available)
       onPromptsSubmit?.(validPrompts);
       // In normal mode, we can clear the prompts after submission
       // But we'll let the parent component handle this

@@ -31,17 +31,31 @@ export function StreamPage() {
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
 
-  // Timeline state
-  const [showTimeline, setShowTimeline] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  const [isLive, setIsLive] = useState(false);
+  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
   const [selectedTimelinePrompt, setSelectedTimelinePrompt] =
     useState<TimelinePrompt | null>(null);
+
+  // Timeline state for left panel
+  const [timelinePrompts, setTimelinePrompts] = useState<TimelinePrompt[]>([]);
+  const [timelineCurrentTime, setTimelineCurrentTime] = useState(0);
+  const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
+
+  // External control of timeline selection
+  const [externalSelectedPromptId, setExternalSelectedPromptId] = useState<
+    string | null
+  >(null);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
     getCurrentTimelinePrompt: () => string;
-    submitRecordingPrompt: (prompts: PromptItem[]) => void;
+    submitLivePrompt: (prompts: PromptItem[]) => void;
     updatePrompt: (prompt: TimelinePrompt) => void;
+    clearTimeline: () => void;
+    resetPlayhead: () => void;
+    getPrompts: () => TimelinePrompt[];
+    getCurrentTime: () => number;
+    getIsPlaying: () => boolean;
   }>(null);
 
   // Pipeline management
@@ -88,8 +102,8 @@ export function StreamPage() {
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
 
-    // Only send parameter update if not recording
-    if (!isRecording) {
+    // Only send parameter update if not live
+    if (!isLive) {
       sendParameterUpdate({
         prompts,
         prompt_interpolation_method: interpolationMethod,
@@ -122,6 +136,12 @@ export function StreamPage() {
     // Update the prompt to the new pipeline's default
     const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
     setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
+
+    // Clear timeline prompts but preserve collapse state
+    if (timelineRef.current) {
+      timelineRef.current.clearTimeline();
+      timelineRef.current.resetPlayhead();
+    }
 
     // Update denoising steps and resolution based on pipeline
     const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
@@ -185,16 +205,14 @@ export function StreamPage() {
     });
   };
 
-  const handleRecordingPromptSubmit = (prompts: PromptItem[]) => {
-    console.log("Recording prompt submitted:", prompts);
-
+  const handleLivePromptSubmit = (prompts: PromptItem[]) => {
     // Use the timeline ref to submit the prompt
     if (timelineRef.current) {
-      timelineRef.current.submitRecordingPrompt(prompts);
+      timelineRef.current.submitLivePrompt(prompts);
     }
 
     // Also send the updated parameters to the backend immediately
-    // Preserve the full blend while recording
+    // Preserve the full blend while live
     sendParameterUpdate({
       prompts,
       prompt_interpolation_method: interpolationMethod,
@@ -204,6 +222,8 @@ export function StreamPage() {
 
   const handleTimelinePromptEdit = (prompt: TimelinePrompt | null) => {
     setSelectedTimelinePrompt(prompt);
+    // Sync external selection state
+    setExternalSelectedPromptId(prompt?.id || null);
   };
 
   const handleTimelinePromptUpdate = (prompt: TimelinePrompt) => {
@@ -215,13 +235,48 @@ export function StreamPage() {
     }
   };
 
+  // Update timeline state for left panel
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (timelineRef.current) {
+        setTimelinePrompts(timelineRef.current.getPrompts());
+        setTimelineCurrentTime(timelineRef.current.getCurrentTime());
+        setIsTimelinePlaying(timelineRef.current.getIsPlaying());
+      }
+    }, 100); // Update every 100ms
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Handle ESC key to exit Edit mode and return to Append mode
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && selectedTimelinePrompt) {
+        setSelectedTimelinePrompt(null);
+        setExternalSelectedPromptId(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [selectedTimelinePrompt]);
+
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
     updateSettings({ paused: newPausedState });
     sendParameterUpdate({
       paused: newPausedState,
     });
+
+    // Deselect any selected prompt when video starts playing
+    if (!newPausedState && selectedTimelinePrompt) {
+      setSelectedTimelinePrompt(null);
+      setExternalSelectedPromptId(null); // Also clear external selection
+    }
   };
+
+  // Ref to access the timeline's play/pause handler
+  const timelinePlayPauseRef = useRef<(() => Promise<void>) | null>(null);
   // Sync resolution with videoResolution when video source changes
   // Only sync for video-input pipelines
   useEffect(() => {
@@ -350,7 +405,7 @@ export function StreamPage() {
       <Header />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex gap-4 px-4 pb-4 pt-2 min-h-0 overflow-hidden">
+      <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
         {/* Left Panel - Input & Controls */}
         <div className="w-1/5">
           <InputAndControlsPanel
@@ -377,18 +432,21 @@ export function StreamPage() {
             onPromptsSubmit={handlePromptsSubmit}
             interpolationMethod={interpolationMethod}
             onInterpolationMethodChange={setInterpolationMethod}
-            showTimeline={showTimeline}
-            onShowTimelineChange={setShowTimeline}
-            isRecording={isRecording}
-            onRecordingPromptSubmit={handleRecordingPromptSubmit}
+            isLive={isLive}
+            onLivePromptSubmit={handleLivePromptSubmit}
             selectedTimelinePrompt={selectedTimelinePrompt}
             onTimelinePromptUpdate={handleTimelinePromptUpdate}
+            isVideoPaused={settings.paused}
+            isTimelinePlaying={isTimelinePlaying}
+            currentTime={timelineCurrentTime}
+            timelinePrompts={timelinePrompts}
           />
         </div>
 
         {/* Center Panel - Video Output + Timeline */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1">
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Video area - takes remaining space but can shrink */}
+          <div className="flex-1 min-h-0">
             <VideoOutput
               className="h-full"
               remoteStream={remoteStream}
@@ -396,38 +454,51 @@ export function StreamPage() {
               isConnecting={isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
-              onPlayPauseToggle={handlePlayPauseToggle}
+              onPlayPauseToggle={() => {
+                // Use timeline's play/pause handler instead of direct video toggle
+                if (timelinePlayPauseRef.current) {
+                  timelinePlayPauseRef.current();
+                }
+              }}
             />
           </div>
-          {showTimeline && (
-            <div className="mt-2">
-              <PromptInputWithTimeline
-                currentPrompt={promptItems[0]?.text || ""}
-                currentPromptItems={promptItems}
-                onPromptSubmit={text => {
-                  // Update the left panel's prompt state to reflect current timeline prompt
-                  setPromptItems([{ text, weight: 100 }]);
+          {/* Timeline area - compact, always visible */}
+          <div className="flex-shrink-0 mt-2">
+            <PromptInputWithTimeline
+              currentPrompt={promptItems[0]?.text || ""}
+              currentPromptItems={promptItems}
+              onPromptSubmit={text => {
+                // Update the left panel's prompt state to reflect current timeline prompt
+                setPromptItems([{ text, weight: 100 }]);
 
-                  // Send to backend
-                  sendParameterUpdate({
-                    prompts: [{ text, weight: 100 }],
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
-                }}
-                disabled={
-                  settings.pipelineId === "passthrough" ||
-                  settings.pipelineId === "vod"
-                }
-                isStreaming={isStreaming}
-                isVideoPaused={settings.paused}
-                timelineRef={timelineRef}
-                onRecordingStateChange={setIsRecording}
-                onRecordingPromptSubmit={handleRecordingPromptSubmit}
-                onPromptEdit={handleTimelinePromptEdit}
-              />
-            </div>
-          )}
+                // Send to backend
+                sendParameterUpdate({
+                  prompts: [{ text, weight: 100 }],
+                  prompt_interpolation_method: interpolationMethod,
+                  denoising_step_list: settings.denoisingSteps || [700, 500],
+                });
+              }}
+              disabled={
+                settings.pipelineId === "passthrough" ||
+                settings.pipelineId === "vod"
+              }
+              isStreaming={isStreaming}
+              isVideoPaused={settings.paused}
+              timelineRef={timelineRef}
+              onLiveStateChange={setIsLive}
+              onLivePromptSubmit={handleLivePromptSubmit}
+              onDisconnect={stopStream}
+              onStartStream={handleStartStream}
+              onVideoPlayPauseToggle={handlePlayPauseToggle}
+              onPromptEdit={handleTimelinePromptEdit}
+              isCollapsed={isTimelineCollapsed}
+              onCollapseToggle={setIsTimelineCollapsed}
+              externalSelectedPromptId={externalSelectedPromptId}
+              settings={settings}
+              onSettingsImport={updateSettings}
+              onPlayPauseRef={timelinePlayPauseRef}
+            />
+          </div>
         </div>
 
         {/* Right Panel - Settings */}

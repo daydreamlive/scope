@@ -7,13 +7,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Button } from "./ui/button";
-import { Play, Square, Loader2, Upload } from "lucide-react";
+import { Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
-import { TimelineCheckbox } from "./TimelineCheckbox";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 
@@ -37,12 +35,14 @@ interface InputAndControlsPanelProps {
   onPromptsSubmit: (prompts: PromptItem[]) => void;
   interpolationMethod: "linear" | "slerp";
   onInterpolationMethodChange: (method: "linear" | "slerp") => void;
-  showTimeline?: boolean;
-  onShowTimelineChange?: (show: boolean) => void;
-  isRecording?: boolean;
-  onRecordingPromptSubmit?: (prompts: PromptItem[]) => void;
+  isLive?: boolean;
+  onLivePromptSubmit?: (prompts: PromptItem[]) => void;
   selectedTimelinePrompt?: TimelinePrompt | null;
   onTimelinePromptUpdate?: (prompt: TimelinePrompt) => void;
+  isVideoPaused?: boolean;
+  isTimelinePlaying?: boolean;
+  currentTime?: number;
+  timelinePrompts?: TimelinePrompt[];
 }
 
 export function InputAndControlsPanel({
@@ -54,10 +54,10 @@ export function InputAndControlsPanel({
   onModeChange,
   isStreaming,
   isConnecting,
-  isPipelineLoading,
-  canStartStream,
-  onStartStream,
-  onStopStream,
+  isPipelineLoading: _isPipelineLoading,
+  canStartStream: _canStartStream,
+  onStartStream: _onStartStream,
+  onStopStream: _onStopStream,
   onVideoFileUpload,
   pipelineId,
   prompts,
@@ -65,21 +65,35 @@ export function InputAndControlsPanel({
   onPromptsSubmit,
   interpolationMethod,
   onInterpolationMethodChange,
-  showTimeline = false,
-  onShowTimelineChange,
-  isRecording = false,
-  onRecordingPromptSubmit,
+  isLive = false,
+  onLivePromptSubmit,
   selectedTimelinePrompt = null,
   onTimelinePromptUpdate,
+  isVideoPaused = false,
+  isTimelinePlaying: _isTimelinePlaying = false,
+  currentTime: _currentTime = 0,
+  timelinePrompts: _timelinePrompts = [],
 }: InputAndControlsPanelProps) {
+  // Helper function to determine if playhead is at the end of timeline
+  const isAtEndOfTimeline = () => {
+    if (_timelinePrompts.length === 0) return true;
+
+    const sortedPrompts = [..._timelinePrompts].sort(
+      (a, b) => a.endTime - b.endTime
+    );
+    const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
+
+    // Check if current time is at or past the end of the last prompt
+    return _currentTime >= lastPrompt.endTime;
+  };
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Initialize recording prompt with current prompt when recording starts
+  // Initialize live prompt with current prompt when live mode starts
   useEffect(() => {
-    if (isRecording && prompts.length > 0) {
+    if (isLive && prompts.length > 0) {
       // This is now handled by the PromptInput component
     }
-  }, [isRecording, prompts]);
+  }, [isLive, prompts]);
 
   // Get pipeline category, deafault to video-input
   const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
@@ -89,14 +103,6 @@ export function InputAndControlsPanel({
       videoRef.current.srcObject = localStream;
     }
   }, [localStream]);
-
-  const handleStreamClick = () => {
-    if (isStreaming) {
-      onStopStream();
-    } else {
-      onStartStream();
-    }
-  };
 
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -209,64 +215,48 @@ export function InputAndControlsPanel({
         )}
 
         <div>
-          <h3 className="text-sm font-medium mb-2">Controls</h3>
-          <div className="flex flex-wrap gap-2 min-w-0">
-            <Button
-              onClick={handleStreamClick}
-              variant={isStreaming ? "destructive" : "default"}
-              size="sm"
-              disabled={
-                isPipelineLoading ||
-                isConnecting ||
-                (!canStartStream && !isStreaming)
-              }
-              className="w-full gap-2"
-            >
-              {isPipelineLoading || isConnecting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : isStreaming ? (
-                <Square className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              {isPipelineLoading || isConnecting
-                ? ""
-                : isStreaming
-                  ? "Stop"
-                  : "Start"}
-            </Button>
-          </div>
-        </div>
-
-        <div>
           <h3 className="text-sm font-medium mb-2">Prompts</h3>
-          {selectedTimelinePrompt ? (
-            <TimelinePromptEditor
-              prompt={selectedTimelinePrompt}
-              onPromptUpdate={onTimelinePromptUpdate}
-              onPromptSubmit={onTimelinePromptUpdate}
-              disabled={isRecording}
-            />
-          ) : (
-            <PromptInput
-              prompts={prompts}
-              onPromptsChange={onPromptsChange}
-              onPromptsSubmit={onPromptsSubmit}
-              disabled={pipelineId === "passthrough" || pipelineId === "vod"}
-              interpolationMethod={interpolationMethod}
-              onInterpolationMethodChange={onInterpolationMethodChange}
-              isRecording={isRecording}
-              onRecordingPromptSubmit={onRecordingPromptSubmit}
-            />
-          )}
-        </div>
+          {(() => {
+            // Simplified logic: Only two states - Append and Edit
+            const isEditMode = selectedTimelinePrompt && isVideoPaused;
 
-        <div>
-          <TimelineCheckbox
-            checked={showTimeline}
-            onChange={onShowTimelineChange || (() => {})}
-            disabled={pipelineId === "passthrough" || pipelineId === "vod"}
-          />
+            return (
+              <div>
+                {/* Panel state indicator - only show in Edit Mode */}
+                {isEditMode && (
+                  <div className="text-xs text-gray-400 mb-2 px-2 py-1 bg-gray-50 rounded">
+                    Edit Mode
+                  </div>
+                )}
+
+                {selectedTimelinePrompt ? (
+                  <TimelinePromptEditor
+                    prompt={selectedTimelinePrompt}
+                    onPromptUpdate={onTimelinePromptUpdate}
+                    onPromptSubmit={onTimelinePromptUpdate}
+                    disabled={false}
+                  />
+                ) : (
+                  <PromptInput
+                    prompts={prompts}
+                    onPromptsChange={onPromptsChange}
+                    onPromptsSubmit={onPromptsSubmit}
+                    disabled={
+                      pipelineId === "passthrough" ||
+                      pipelineId === "vod" ||
+                      (_isTimelinePlaying &&
+                        !isVideoPaused &&
+                        !isAtEndOfTimeline())
+                    }
+                    interpolationMethod={interpolationMethod}
+                    onInterpolationMethodChange={onInterpolationMethodChange}
+                    isLive={isLive}
+                    onLivePromptSubmit={onLivePromptSubmit}
+                  />
+                )}
+              </div>
+            );
+          })()}
         </div>
       </CardContent>
     </Card>

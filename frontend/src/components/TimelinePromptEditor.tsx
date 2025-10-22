@@ -3,7 +3,7 @@ import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import { Slider } from "./ui/slider";
-import { ArrowUp, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import type { TimelinePrompt } from "./PromptTimeline";
 
 interface TimelinePromptEditorProps {
@@ -172,16 +172,6 @@ export function TimelinePromptEditor({
             className="flex-1 bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         )}
-        <Button
-          onClick={handleSubmit}
-          disabled={
-            disabled || !prompts.some(p => p.text.trim()) || !editingPrompt
-          }
-          size="sm"
-          className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <ArrowUp className="h-4 w-4" />
-        </Button>
         {index === prompts.length - 1 && prompts.length < 4 && (
           <Button
             onClick={handleAddPrompt}

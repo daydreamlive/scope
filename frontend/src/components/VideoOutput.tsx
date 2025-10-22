@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Card, CardContent } from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { Pause, Play } from "lucide-react";
 
@@ -100,10 +100,13 @@ export function VideoOutput({
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
-      <CardContent className="flex-1 flex items-center justify-center min-h-0">
+      <CardHeader className="flex-shrink-0">
+        <CardTitle className="text-base font-medium">Video Output</CardTitle>
+      </CardHeader>
+      <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
         {remoteStream ? (
           <div
-            className="relative max-w-full max-h-full cursor-pointer"
+            className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
           >
             <video

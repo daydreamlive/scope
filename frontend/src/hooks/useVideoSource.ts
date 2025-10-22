@@ -248,7 +248,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         return false;
       }
     },
-    [localStream]
+    [localStream, createVideoFileStreamFromFile]
   );
 
   const stopVideo = useCallback(() => {
