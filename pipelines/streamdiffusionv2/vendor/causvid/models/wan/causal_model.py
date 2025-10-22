@@ -521,7 +521,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 rope_params(1024, 2 * (d // 6)),
             ],
             dim=1,
-        )
+        ).to("cuda")
 
         if model_type == "i2v":
             self.img_emb = MLPProj(1280, dim)
@@ -616,42 +616,37 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         Process the latent frames one by one (1560 tokens each)
 
         Args:
-            x (List[Tensor]):
-                List of input video tensors, each with shape [C_in, F, H, W]
+            x (Tensor):
+                Input video tensor with shape [C_in, F, H, W]
             t (Tensor):
                 Diffusion timesteps tensor of shape [B]
-            context (List[Tensor]):
-                List of text embeddings each with shape [L, C]
+            context (Tensor):
+                Text embeddings with shape [L, C]
             seq_len (`int`):
                 Maximum sequence length for positional encoding
             clip_fea (Tensor, *optional*):
                 CLIP image features for image-to-video mode
-            y (List[Tensor], *optional*):
+            y (Tensor, *optional*):
                 Conditional video inputs for image-to-video mode, same shape as x
 
         Returns:
-            List[Tensor]:
-                List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
+            Tensor:
+                Denoised video tensor with shape [C_out, F, H / 8, W / 8]
         """
         if self.model_type == "i2v":
             assert clip_fea is not None and y is not None
-        # params
-        device = self.patch_embedding.weight.device
-        if self.freqs.device != device:
-            self.freqs = self.freqs.to(device)
 
         if y is not None:
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
 
-        # embeddings
-        x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
-        grid_sizes = torch.stack(
-            [torch.tensor(u.shape[2:], dtype=torch.long) for u in x]
-        )
-        x = [u.flatten(2).transpose(1, 2) for u in x]
-        seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
+        x = self.patch_embedding(x).unsqueeze(0)
+        grid_sizes = torch.tensor(x.shape[3:], dtype=torch.long).unsqueeze(0).expand(x.shape[0], -1)
+        print("grid_sizes", grid_sizes)
+        x = x.flatten(3).transpose(2, 3)
+        seq_lens = torch.full((x.shape[0],), x.size(2), dtype=torch.long)
+        print("seq_lens", seq_lens)
         assert seq_lens.max() <= seq_len
-        x = torch.cat(x)
+        x = x.flatten(0,1)
         """
         torch.cat([
             torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
