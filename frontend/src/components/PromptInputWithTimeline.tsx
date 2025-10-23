@@ -291,8 +291,6 @@ export function PromptInputWithTimeline({
 
   // Custom play/pause handler that implements new behavior
   const handlePlayPause = useCallback(async () => {
-    console.log("handlePlayPause called");
-
     // If not streaming, start the stream first (first time only)
     if (!isStreaming && onStartStream) {
       await onStartStream();
@@ -319,7 +317,6 @@ export function PromptInputWithTimeline({
       }
 
       if (isAtEnd) {
-        console.log("isAtEnd");
         // At the end - start live mode with current prompt
         setIsLive(true);
         if (onLiveStateChange) {
@@ -332,24 +329,9 @@ export function PromptInputWithTimeline({
           .filter(p => !p.isLive)
           .sort((a, b) => a.endTime - b.endTime);
 
-        if (sortedNonLivePrompts.length > 0) {
-          console.log("sortedNonLivePrompts:", sortedNonLivePrompts);
-          // const lastNonLivePrompt =
-          //   sortedNonLivePrompts[sortedNonLivePrompts.length - 1];
-
-          // Make the last prompt live by extending its endTime
-          // setPrompts(prevPrompts =>
-          //   prevPrompts.map(p =>
-          //     p.id === lastNonLivePrompt.id
-          //       ? { ...p, isLive: true, endTime: currentTime }
-          //       : p
-          //   )
-          // );
-        } else {
-          console.log("no existing prompts, creating a new live box");
+        if (sortedNonLivePrompts.length === 0) {
           // No existing prompts, create a new live box
           if (!isStreaming && onStartStream) {
-            console.log("starting stream");
             await onStartStream();
             // Wait a bit for the stream to initialize
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -364,7 +346,6 @@ export function PromptInputWithTimeline({
         // Start timeline playback immediately after creating/extending the live box
         // Use setTimeout to ensure the state update has been applied
         setTimeout(() => {
-          console.log("starting playback");
           togglePlayback();
           // Resume video if paused
           if (isVideoPaused && onVideoPlayPauseToggle) {
@@ -372,7 +353,6 @@ export function PromptInputWithTimeline({
           }
         }, 0);
       } else {
-        console.log("not at the end, resuming playback");
         // Not at the end - resume both timeline and video
         togglePlayback();
         if (isVideoPaused && onVideoPlayPauseToggle) {
@@ -382,11 +362,9 @@ export function PromptInputWithTimeline({
 
       // Track that we've started playback
       if (!hasStartedPlayback) {
-        console.log("setting hasStartedPlayback to true");
         setHasStartedPlayback(true);
       }
     } else {
-      console.log("pausing playback");
       // Pausing playback - pause both timeline and video
       togglePlayback();
       if (!isVideoPaused && onVideoPlayPauseToggle) {
