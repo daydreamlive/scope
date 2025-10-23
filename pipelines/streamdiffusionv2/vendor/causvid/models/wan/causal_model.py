@@ -641,10 +641,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         x = self.patch_embedding(x).unsqueeze(0)
         grid_sizes = torch.tensor(x.shape[3:], dtype=torch.long).unsqueeze(0).expand(x.shape[0], -1)
-        print("grid_sizes", grid_sizes)
         x = x.flatten(3).transpose(2, 3)
         seq_lens = torch.full((x.shape[0],), x.size(2), dtype=torch.long)
-        print("seq_lens", seq_lens)
         assert seq_lens.max() <= seq_len
         x = x.flatten(0,1)
         """
@@ -668,14 +666,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # context
         context_lens = None
-        context = self.text_embedding(
-            torch.stack(
-                [
-                    torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
-                    for u in context
-                ]
-            )
-        )
+        padding_length = self.text_len - context.size(1)
+        context = torch.nn.functional.pad(context, (0, 0, 0, padding_length), value=0)
+        context = self.text_embedding(context)
 
         if clip_fea is not None:
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
@@ -691,12 +684,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_lens=context_lens,
             block_mask=self.block_mask,
         )
-
-        def create_custom_forward(module):
-            def custom_forward(*inputs, **kwargs):
-                return module(*inputs, **kwargs)
-
-            return custom_forward
 
         for block_index, block in enumerate(self.blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -858,8 +845,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         Reconstruct video tensors from patch embeddings.
 
         Args:
-            x (List[Tensor]):
-                List of patchified features, each with shape [L, C_out * prod(patch_size)]
+            x (Tensor):
+                Patchified features with shape [B, L, C_out * prod(patch_size)]
             grid_sizes (Tensor):
                 Original spatial-temporal grid dimensions before patching,
                     shape [B, 3] (3 dimensions correspond to F_patches, H_patches, W_patches)
