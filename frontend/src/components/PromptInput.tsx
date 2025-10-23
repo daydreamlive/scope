@@ -54,9 +54,42 @@ export function PromptInput({
     onPromptsChange?.(newPrompts);
   };
 
-  const handleWeightChange = (index: number, weight: number) => {
+  const handleWeightChange = (index: number, normalizedWeight: number) => {
     const newPrompts = [...prompts];
-    newPrompts[index] = { ...newPrompts[index], weight };
+
+    // Calculate the remaining weight to distribute among other prompts
+    const remainingWeight = 100 - normalizedWeight;
+
+    // Get the sum of other prompts' current weights (excluding the changed one)
+    const otherWeightsSum = prompts.reduce(
+      (sum, p, i) => (i === index ? sum : sum + p.weight),
+      0
+    );
+
+    // Update the changed prompt's weight
+    newPrompts[index] = { ...newPrompts[index], weight: normalizedWeight };
+
+    // Redistribute remaining weight proportionally to other prompts
+    if (otherWeightsSum > 0) {
+      newPrompts.forEach((_, i) => {
+        if (i !== index) {
+          const proportion = prompts[i].weight / otherWeightsSum;
+          newPrompts[i] = {
+            ...newPrompts[i],
+            weight: remainingWeight * proportion,
+          };
+        }
+      });
+    } else {
+      // If all other weights are 0, distribute evenly
+      const evenWeight = remainingWeight / (prompts.length - 1);
+      newPrompts.forEach((_, i) => {
+        if (i !== index) {
+          newPrompts[i] = { ...newPrompts[i], weight: evenWeight };
+        }
+      });
+    }
+
     onPromptsChange?.(newPrompts);
   };
 
@@ -210,7 +243,7 @@ export function PromptInput({
   // Multiple prompts mode: show weights and controls
   return (
     <div className={`space-y-3 ${className}`}>
-      {prompts.map((prompt, index) => {
+      {prompts.map((_, index) => {
         return (
           <div key={index} className="space-y-2">
             <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
@@ -222,7 +255,7 @@ export function PromptInput({
                 Weight:
               </span>
               <Slider
-                value={[prompt.weight]}
+                value={[normalizedWeights[index]]}
                 onValueChange={([value]) => handleWeightChange(index, value)}
                 min={0}
                 max={100}
