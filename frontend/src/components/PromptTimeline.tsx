@@ -235,22 +235,25 @@ export function PromptTimeline({
     setVisibleEndTime(visibleStartTime + visibleTimeRange);
   }, [visibleStartTime, visibleTimeRange]);
 
-  // Auto-scroll timeline during live mode to follow the red line
+  // Auto-scroll timeline during playback to follow the red line
   useEffect(() => {
-    // Don't auto-scroll if user is manually dragging
-    if (isDraggingRef.current) return;
+    // Don't auto-scroll if user is manually dragging or not playing
+    if (isDraggingRef.current || !isPlaying) return;
 
-    if (isLive && currentTime > visibleEndTime - visibleTimeRange * 0.2) {
+    if (currentTime > visibleEndTime - visibleTimeRange * 0.2) {
       // When the red line gets close to the right edge, scroll forward
       setVisibleStartTime(currentTime - visibleTimeRange * 0.8);
-    } else if (
-      isLive &&
-      currentTime < visibleStartTime + visibleTimeRange * 0.2
-    ) {
+    } else if (currentTime < visibleStartTime + visibleTimeRange * 0.2) {
       // When the red line gets close to the left edge, scroll backward
       setVisibleStartTime(Math.max(0, currentTime - visibleTimeRange * 0.2));
     }
-  }, [isLive, currentTime, visibleEndTime, visibleStartTime, visibleTimeRange]);
+  }, [
+    isPlaying,
+    currentTime,
+    visibleEndTime,
+    visibleStartTime,
+    visibleTimeRange,
+  ]);
 
   // Update timeline width when component mounts or resizes
   useEffect(() => {

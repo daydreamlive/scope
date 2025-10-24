@@ -152,6 +152,7 @@ export function PromptInputWithTimeline({
     completeLivePrompt();
     updateCurrentTime(0);
     resetToFirstPrompt();
+    scrollToTimeFn?.(0); // Scroll timeline back to beginning
 
     if (isActuallyPlaying) {
       pausePlayback();
@@ -163,6 +164,7 @@ export function PromptInputWithTimeline({
     completeLivePrompt,
     updateCurrentTime,
     resetToFirstPrompt,
+    scrollToTimeFn,
     isActuallyPlaying,
     pausePlayback,
     startPlayback,
@@ -179,6 +181,7 @@ export function PromptInputWithTimeline({
     completeLivePrompt();
     updateCurrentTime(0);
     resetToFirstPrompt();
+    scrollToTimeFn?.(0); // Scroll timeline back to beginning
   }, [
     onDisconnect,
     isActuallyPlaying,
@@ -186,6 +189,7 @@ export function PromptInputWithTimeline({
     completeLivePrompt,
     updateCurrentTime,
     resetToFirstPrompt,
+    scrollToTimeFn,
   ]);
 
   // Reset hasStartedPlayback when stream stops
