@@ -128,21 +128,29 @@ export function PromptInput({
 
     return (
       <>
-        <Textarea
-          placeholder={placeholder}
-          value={prompt.text}
-          onChange={e => handlePromptTextChange(index, e.target.value)}
-          onKeyDown={handleKeyDown}
-          onFocus={() => setFocusedIndex(index)}
-          onBlur={() => setFocusedIndex(null)}
-          disabled={disabled}
-          rows={isFocused ? 3 : 1}
-          className={`flex-1 resize-none bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed ${
-            isFocused
-              ? "min-h-[80px]"
-              : "min-h-[24px] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-          }`}
-        />
+        {isFocused ? (
+          <Textarea
+            placeholder={placeholder}
+            value={prompt.text}
+            onChange={e => handlePromptTextChange(index, e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocusedIndex(index)}
+            onBlur={() => setFocusedIndex(null)}
+            disabled={disabled}
+            rows={3}
+            className="flex-1 resize-none bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed min-h-[80px]"
+            autoFocus
+          />
+        ) : (
+          <div
+            onClick={() => !disabled && setFocusedIndex(index)}
+            className={`flex-1 min-h-[24px] cursor-text overflow-hidden whitespace-nowrap text-ellipsis text-base md:text-sm ${
+              disabled ? "opacity-50 cursor-not-allowed" : ""
+            } ${prompt.text ? "text-card-foreground" : "text-muted-foreground"}`}
+          >
+            {prompt.text || placeholder}
+          </div>
+        )}
         {showRemove && (
           <Button
             onClick={() => handleRemovePrompt(index)}
