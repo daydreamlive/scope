@@ -2,7 +2,8 @@ export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"
   | "vod"
-  | "longlive";
+  | "longlive"
+  | "krea-realtime-video";
 
 export interface SystemMetrics {
   cpu: number;

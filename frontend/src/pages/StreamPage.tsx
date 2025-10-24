@@ -436,6 +436,15 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
         );
+      } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
+        loadParams = {
+          height: resolution.height,
+          width: resolution.width,
+          seed: settings.seed ?? 42,
+        };
+        console.log(
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+        );
       }
 
       const loadSuccess = await loadPipeline(
@@ -475,10 +484,17 @@ export function StreamPage() {
       if (pipelineIdToUse !== "passthrough" && pipelineIdToUse !== "vod") {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
-        initialParameters.manage_cache = settings.manageCache ?? true;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
         ];
+      }
+
+      // Cache management for krea_realtime_video and longlive
+      if (
+        settings.pipelineId === "krea-realtime-video" ||
+        settings.pipelineId === "longlive"
+      ) {
+        initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
       // StreamDiffusionV2-specific parameters
