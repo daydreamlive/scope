@@ -41,6 +41,12 @@ const timeToPosition = (
   return (time - visibleStartTime) * pixelsPerSecond;
 };
 
+const formatTime = (seconds: number): string => {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+};
+
 // Helper function to get adjacent colors for color generation
 const getAdjacentColors = (
   prompts: TimelinePrompt[],
@@ -693,7 +699,9 @@ export function PromptTimeline({
                     transform: "translateX(-50%)",
                   }}
                 >
-                  <span className="text-gray-400 text-xs">{time}s</span>
+                  <span className="text-gray-400 text-xs">
+                    {formatTime(time)}
+                  </span>
                 </div>
               ))}
             </div>
