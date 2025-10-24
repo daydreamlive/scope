@@ -610,9 +610,11 @@ export function PromptTimeline({
 
   return (
     <Card className={`${className}`}>
-      <CardContent className={`p-4 ${isCollapsed ? "pb-2" : ""}`}>
+      <CardContent className={`p-4 ${isCollapsed ? "py-2" : ""}`}>
         {/* Timeline Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div
+          className={`flex items-center justify-between ${isCollapsed ? "mb-0" : "mb-4"}`}
+        >
           <div className="flex items-center gap-2">
             <Button
               onClick={onPlayPause}
