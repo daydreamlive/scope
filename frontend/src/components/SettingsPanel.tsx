@@ -96,7 +96,9 @@ export function SettingsPanel({
     value: number
   ) => {
     const minValue =
-      pipelineId === "longlive" || pipelineId === "streamdiffusionv2"
+      pipelineId === "longlive" ||
+      pipelineId === "streamdiffusionv2" ||
+      pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
     const maxValue = 2048;
@@ -138,7 +140,9 @@ export function SettingsPanel({
 
   const decrementResolution = (dimension: "height" | "width") => {
     const minValue =
-      pipelineId === "longlive" || pipelineId === "streamdiffusionv2"
+      pipelineId === "longlive" ||
+      pipelineId === "streamdiffusionv2" ||
+      pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
     const newValue = Math.max(minValue, effectiveResolution[dimension] - 1);
@@ -288,7 +292,9 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
+        {(pipelineId === "longlive" ||
+          pipelineId === "streamdiffusionv2" ||
+          pipelineId === "krea-realtime-video") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <h3 className="text-sm font-medium">Parameters</h3>
@@ -445,7 +451,9 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
+        {(pipelineId === "longlive" ||
+          pipelineId === "streamdiffusionv2" ||
+          pipelineId === "krea-realtime-video") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -488,7 +496,9 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
+        {(pipelineId === "longlive" ||
+          pipelineId === "streamdiffusionv2" ||
+          pipelineId === "krea-realtime-video") && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}

@@ -29,6 +29,16 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
   },
+  "krea-realtime-video": {
+    name: "Krea Realtime Video",
+    projectUrl: "https://www.krea.ai/blog/krea-realtime-14b",
+    about:
+      "A streaming pipeline and autoregressive video diffusion model from Krea. The model is trained using Self-Forcing on Wan2.1 14b.",
+    modified: true,
+    category: "no-video-input",
+    defaultPrompt:
+      "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
+  },
   passthrough: {
     name: "Passthrough",
     about:

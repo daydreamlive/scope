@@ -297,6 +297,48 @@ class PipelineManager:
             logger.info("LongLive pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "krea-realtime-video":
+            from lib.models_config import get_model_file_path, get_models_dir
+            from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
+
+            config = OmegaConf.load("pipelines/krea_realtime_video/model.yaml")
+            models_dir = get_models_dir()
+            config["model_dir"] = str(models_dir)
+            config["generator_path"] = str(
+                get_model_file_path(
+                    "krea-realtime-video/krea-realtime-video-14b.safetensors"
+                )
+            )
+            config["text_encoder_path"] = str(
+                get_model_file_path(
+                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                )
+            )
+            config["tokenizer_path"] = str(
+                get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+            )
+            config["vae_path"] = str(
+                get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+            )
+
+            height = 512
+            width = 512
+            seed = 42
+            if load_params:
+                height = load_params.get("height", 512)
+                width = load_params.get("width", 512)
+                seed = load_params.get("seed", 42)
+
+            config["height"] = height
+            config["width"] = width
+            config["seed"] = seed
+
+            pipeline = KreaRealtimeVideoPipeline(
+                config, device=torch.device("cuda"), dtype=torch.bfloat16
+            )
+            logger.info("krea-realtime-video pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 
