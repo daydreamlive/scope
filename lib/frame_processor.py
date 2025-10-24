@@ -242,6 +242,16 @@ class FrameProcessor:
 
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
+
+        # Clear output buffer queue when reset_cache is requested to prevent old frames
+        if reset_cache:
+            logger.info("Clearing output buffer queue due to reset_cache request")
+            while not self.output_queue.empty():
+                try:
+                    self.output_queue.get_nowait()
+                except queue.Empty:
+                    break
+
         requirements = pipeline.prepare(
             should_prepare=not self.is_prepared or reset_cache, **self.parameters
         )
