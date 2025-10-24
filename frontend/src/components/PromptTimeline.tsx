@@ -336,9 +336,10 @@ export function PromptTimeline({
   const handlePromptClick = useCallback(
     (e: React.MouseEvent, prompt: TimelinePrompt) => {
       e.stopPropagation();
-      // Allow clicking on non-live prompts even when live mode is active
-      // Only prevent clicking on live prompts themselves
+      // Only allow clicking if not playing (paused/stopped) or if already selected
+      // Live prompts can't be clicked
       if (prompt.isLive) return;
+      if (isPlaying && selectedPromptId !== prompt.id) return;
 
       // Check if this prompt is already selected
       const isCurrentlySelected = selectedPromptId === prompt.id;
@@ -352,7 +353,7 @@ export function PromptTimeline({
         onPromptEdit(isCurrentlySelected ? null : prompt);
       }
     },
-    [selectedPromptId, onPromptSelect, onPromptEdit]
+    [selectedPromptId, onPromptSelect, onPromptEdit, isPlaying]
   );
 
   // Handle timeline clicks to deselect prompts when clicking on empty areas
@@ -781,10 +782,15 @@ export function PromptTimeline({
                     ? visiblePrompts[index + 1]
                     : undefined;
 
+                // Determine if this prompt box is editable
+                const isEditable = !isPlaying || isSelected || isLivePrompt;
+
                 return (
                   <div
                     key={prompt.id}
-                    className={`absolute border rounded px-2 py-1 transition-colors cursor-pointer ${
+                    className={`absolute border rounded px-2 py-1 transition-colors ${
+                      isEditable ? "cursor-pointer" : "cursor-default"
+                    } ${
                       isSelected
                         ? "shadow-lg border-blue-500"
                         : isActive
