@@ -7,6 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { Badge } from "./ui/badge";
 import { Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem } from "../lib/api";
@@ -206,19 +207,20 @@ export function InputAndControlsPanel({
         )}
 
         <div>
-          <h3 className="text-sm font-medium mb-2">Prompts</h3>
           {(() => {
             // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
             const isEditMode = selectedTimelinePrompt && isVideoPaused;
 
             return (
               <div>
-                {/* Panel state indicator - only show in Edit Mode */}
-                {isEditMode && (
-                  <div className="text-xs text-gray-400 mb-2 px-2 py-1 bg-gray-50 rounded">
-                    Edit Mode
-                  </div>
-                )}
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium">Prompts</h3>
+                  {isEditMode && (
+                    <Badge variant="secondary" className="text-xs">
+                      Editing
+                    </Badge>
+                  )}
+                </div>
 
                 {selectedTimelinePrompt ? (
                   <TimelinePromptEditor
