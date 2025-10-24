@@ -18,6 +18,7 @@ import {
   RotateCcw,
   ChevronUp,
   ChevronDown,
+  Trash2,
 } from "lucide-react";
 
 import type { PromptItem } from "../lib/api";
@@ -142,6 +143,7 @@ interface PromptTimelineProps {
   onPlayPause?: () => void;
   onTimeChange?: (time: number) => void;
   onReset?: () => void;
+  onClear?: () => void;
   onPromptSubmit?: (prompt: string) => void;
   initialPrompt?: string;
   selectedPromptId?: string | null;
@@ -166,6 +168,7 @@ export function PromptTimeline({
   onPlayPause,
   onTimeChange,
   onReset,
+  onClear,
   onPromptSubmit: _onPromptSubmit,
   initialPrompt: _initialPrompt,
   selectedPromptId = null,
@@ -631,6 +634,15 @@ export function PromptTimeline({
               title="Reset timeline"
             >
               <RotateCcw className="h-4 w-4" />
+            </Button>
+            <Button
+              onClick={onClear}
+              disabled={disabled || isPlaying || isStreaming}
+              size="sm"
+              variant="outline"
+              title="Clear timeline"
+            >
+              <Trash2 className="h-4 w-4" />
             </Button>
           </div>
           <div className="flex items-center gap-2">
