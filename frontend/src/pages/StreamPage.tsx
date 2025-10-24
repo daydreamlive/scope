@@ -53,6 +53,7 @@ export function StreamPage() {
     updatePrompt: (prompt: TimelinePrompt) => void;
     clearTimeline: () => void;
     resetPlayhead: () => void;
+    resetTimelineCompletely: () => void;
     getPrompts: () => TimelinePrompt[];
     getCurrentTime: () => number;
     getIsPlaying: () => boolean;
@@ -101,15 +102,6 @@ export function StreamPage() {
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
-
-    // Only send parameter update if not live
-    if (!isLive) {
-      sendParameterUpdate({
-        prompts,
-        prompt_interpolation_method: interpolationMethod,
-        denoising_step_list: settings.denoisingSteps || [700, 500],
-      });
-    }
   };
 
   const handlePipelineIdChange = (pipelineId: PipelineId) => {
@@ -137,11 +129,14 @@ export function StreamPage() {
     const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
     setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
 
-    // Clear timeline prompts but preserve collapse state
+    // Reset timeline completely but preserve collapse state
     if (timelineRef.current) {
-      timelineRef.current.clearTimeline();
-      timelineRef.current.resetPlayhead();
+      timelineRef.current.resetTimelineCompletely();
     }
+
+    // Reset selected timeline prompt to exit Edit mode and return to Append mode
+    setSelectedTimelinePrompt(null);
+    setExternalSelectedPromptId(null);
 
     // Update denoising steps and resolution based on pipeline
     const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
@@ -235,18 +230,18 @@ export function StreamPage() {
     }
   };
 
-  // Update timeline state for left panel
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (timelineRef.current) {
-        setTimelinePrompts(timelineRef.current.getPrompts());
-        setTimelineCurrentTime(timelineRef.current.getCurrentTime());
-        setIsTimelinePlaying(timelineRef.current.getIsPlaying());
-      }
-    }, 100); // Update every 100ms
+  // Event-driven timeline state updates for left panel
+  const handleTimelinePromptsChange = (prompts: TimelinePrompt[]) => {
+    setTimelinePrompts(prompts);
+  };
 
-    return () => clearInterval(interval);
-  }, []);
+  const handleTimelineCurrentTimeChange = (currentTime: number) => {
+    setTimelineCurrentTime(currentTime);
+  };
+
+  const handleTimelinePlayingChange = (isPlaying: boolean) => {
+    setIsTimelinePlaying(isPlaying);
+  };
 
   // Handle ESC key to exit Edit mode and return to Append mode
   useEffect(() => {
@@ -497,6 +492,10 @@ export function StreamPage() {
               settings={settings}
               onSettingsImport={updateSettings}
               onPlayPauseRef={timelinePlayPauseRef}
+              onResetCache={handleResetCache}
+              onTimelinePromptsChange={handleTimelinePromptsChange}
+              onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
+              onTimelinePlayingChange={handleTimelinePlayingChange}
             />
           </div>
         </div>

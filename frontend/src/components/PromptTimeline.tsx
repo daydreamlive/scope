@@ -1,4 +1,11 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
+
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
 import {
@@ -13,18 +20,112 @@ import {
   ChevronDown,
   Power,
 } from "lucide-react";
+
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
+import { generateRandomColor } from "../utils/promptColors";
+
+// Timeline constants
+const BASE_PIXELS_PER_SECOND = 20;
+const MIN_DURATION_SECONDS = 0.5;
+const MAX_ZOOM_LEVEL = 4;
+const MIN_ZOOM_LEVEL = 0.25;
+const DEFAULT_VISIBLE_END_TIME = 20;
+
+// Utility functions
+const timeToPosition = (
+  time: number,
+  visibleStartTime: number,
+  pixelsPerSecond: number
+): number => {
+  return (time - visibleStartTime) * pixelsPerSecond;
+};
+
+// Helper function to get adjacent colors for color generation
+const getAdjacentColors = (
+  prompts: TimelinePrompt[],
+  currentIndex: number
+): string[] => {
+  const adjacentColors: string[] = [];
+  if (currentIndex > 0 && prompts[currentIndex - 1].color) {
+    adjacentColors.push(prompts[currentIndex - 1].color!);
+  }
+  if (currentIndex < prompts.length - 1 && prompts[currentIndex + 1].color) {
+    adjacentColors.push(prompts[currentIndex + 1].color!);
+  }
+  return adjacentColors;
+};
+
+// Helper function to calculate prompt box position
+const calculatePromptPosition = (
+  prompt: TimelinePrompt,
+  index: number,
+  visiblePrompts: TimelinePrompt[],
+  timeToPositionFn: (time: number) => number
+): number => {
+  let leftPosition = Math.max(0, timeToPositionFn(prompt.startTime));
+
+  if (index > 0) {
+    const previousPrompt = visiblePrompts[index - 1];
+    const previousEndPosition = Math.max(
+      0,
+      timeToPositionFn(previousPrompt.endTime)
+    );
+    leftPosition = Math.max(leftPosition, previousEndPosition);
+  }
+
+  return leftPosition;
+};
+
+// Helper function to get prompt box styling
+const getPromptBoxStyle = (
+  prompt: TimelinePrompt,
+  leftPosition: number,
+  timelineWidth: number,
+  timeToPositionFn: (time: number) => number,
+  isSelected: boolean,
+  isLivePrompt: boolean,
+  boxColor: string
+) => {
+  return {
+    left: leftPosition,
+    top: "8px",
+    bottom: "8px",
+    width: Math.min(
+      timelineWidth - leftPosition,
+      timeToPositionFn(prompt.endTime) - leftPosition
+    ),
+    backgroundColor: isLivePrompt ? "#6B7280" : boxColor,
+    borderColor: isLivePrompt ? "#9CA3AF" : boxColor,
+    opacity: isSelected ? 1.0 : 0.7,
+  };
+};
 
 export interface TimelinePrompt {
   id: string;
   text: string;
-  startTime: number; // in seconds
-  endTime: number; // in seconds
-  prompts?: Array<{ text: string; weight: number }>; // For prompt blending
-  color?: string; // Random color for the box
-  isLive?: boolean; // Whether this is a live prompt box
+  startTime: number;
+  endTime: number;
+  prompts?: Array<{ text: string; weight: number }>;
+  color?: string;
+  isLive?: boolean;
 }
+
+// Timeline reset state
+const TIMELINE_RESET_STATE = {
+  prompts: [],
+  currentTime: 0,
+  isPlaying: false,
+  isLive: false,
+  isCollapsed: false,
+  selectedPromptId: null,
+  externalSelectedPromptId: null,
+  selectedTimelinePrompt: null,
+  timelineWidth: 800,
+  visibleStartTime: 0,
+  visibleEndTime: 20,
+  zoomLevel: 1,
+};
 
 interface PromptTimelineProps {
   className?: string;
@@ -32,7 +133,7 @@ interface PromptTimelineProps {
   onPromptsChange: (prompts: TimelinePrompt[]) => void;
   disabled?: boolean;
   isPlaying?: boolean;
-  currentTime?: number; // in seconds
+  currentTime?: number;
   onPlayPause?: () => void;
   onTimeChange?: (time: number) => void;
   onDisconnect?: () => void;
@@ -44,11 +145,10 @@ interface PromptTimelineProps {
   onLivePromptSubmit?: (prompts: PromptItem[]) => void;
   isCollapsed?: boolean;
   onCollapseToggle?: (collapsed: boolean) => void;
-  // New props for settings export/import
   settings?: SettingsState;
   onSettingsImport?: (settings: Partial<SettingsState>) => void;
-  // New prop to expose scroll function
   onScrollToTime?: (scrollFn: (time: number) => void) => void;
+  isStreaming?: boolean;
 }
 
 export function PromptTimeline({
@@ -66,64 +166,48 @@ export function PromptTimeline({
   selectedPromptId = null,
   onPromptSelect,
   onPromptEdit,
-  onLivePromptSubmit,
+  onLivePromptSubmit: _onLivePromptSubmit,
   isCollapsed = false,
   onCollapseToggle,
   settings,
   onSettingsImport,
   onScrollToTime,
+  isStreaming = false,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
   const [visibleStartTime, setVisibleStartTime] = useState(0);
-  const [visibleEndTime, setVisibleEndTime] = useState(20); // Changed from 40 to 20
-  const [zoomLevel, setZoomLevel] = useState(1); // 1 = 20s, 2 = 10s, 0.5 = 40s
-  const basePixelsPerSecond = 20; // Base pixels per second
+  const [visibleEndTime, setVisibleEndTime] = useState(
+    DEFAULT_VISIBLE_END_TIME
+  );
+  const [zoomLevel, setZoomLevel] = useState(1);
 
-  // Check if live mode is active by looking for live prompts
-  const isLive = prompts.some(p => p.isLive);
+  // Check if live mode is active
+  const isLive = useMemo(() => prompts.some(p => p.isLive), [prompts]);
 
-  // Generate random colors for prompt boxes, ensuring adjacent boxes have different colors
-  const generateRandomColor = useCallback((excludeColors: string[] = []) => {
-    const colors = [
-      "#FF6B6B",
-      "#4ECDC4",
-      "#45B7D1",
-      "#96CEB4",
-      "#FFEAA7",
-      "#DDA0DD",
-      "#98D8C8",
-      "#F7DC6F",
-      "#BB8FCE",
-      "#85C1E9",
-      "#F8C471",
-      "#82E0AA",
-      "#F1948A",
-      "#85C1E9",
-      "#D7BDE2",
-    ];
-
-    // Filter out excluded colors
-    const availableColors = colors.filter(
-      color => !excludeColors.includes(color)
+  // Memoized filtered prompts for better performance
+  const visiblePrompts = useMemo(() => {
+    return prompts.filter(
+      prompt =>
+        prompt.startTime !== prompt.endTime && // Exclude 0-length prompt boxes
+        prompt.endTime >= visibleStartTime &&
+        prompt.startTime <= visibleEndTime
     );
+  }, [prompts, visibleStartTime, visibleEndTime]);
 
-    // If no colors available, return a random one
-    if (availableColors.length === 0) {
-      return colors[Math.floor(Math.random() * colors.length)];
-    }
+  // Calculate timeline metrics
+  const pixelsPerSecond = useMemo(
+    () => BASE_PIXELS_PER_SECOND * zoomLevel,
+    [zoomLevel]
+  );
+  const visibleTimeRange = useMemo(
+    () => timelineWidth / pixelsPerSecond,
+    [timelineWidth, pixelsPerSecond]
+  );
 
-    return availableColors[Math.floor(Math.random() * availableColors.length)];
-  }, []);
-  const pixelsPerSecond = basePixelsPerSecond * zoomLevel; // Scaled pixels per second
-
-  // Calculate visible time range based on zoom level and timeline width
-  const visibleTimeRange = timelineWidth / pixelsPerSecond;
-
-  // Function to scroll timeline to show a specific time
+  // Scroll timeline to show a specific time
   const scrollToTime = useCallback(
     (time: number) => {
-      // Calculate the optimal visible start time to center the target time
       const targetVisibleStartTime = Math.max(0, time - visibleTimeRange * 0.5);
       setVisibleStartTime(targetVisibleStartTime);
     },
@@ -136,6 +220,15 @@ export function PromptTimeline({
       onScrollToTime(scrollToTime);
     }
   }, [onScrollToTime, scrollToTime]);
+
+  // Reset timeline UI state to initial values
+  const resetTimelineUI = useCallback(() => {
+    // Reset UI state
+    setTimelineWidth(TIMELINE_RESET_STATE.timelineWidth);
+    setVisibleStartTime(TIMELINE_RESET_STATE.visibleStartTime);
+    setVisibleEndTime(TIMELINE_RESET_STATE.visibleEndTime);
+    setZoomLevel(TIMELINE_RESET_STATE.zoomLevel);
+  }, []);
 
   // Update visible end time when zoom level or timeline width changes
   useEffect(() => {
@@ -181,7 +274,6 @@ export function PromptTimeline({
     prevPrompt?: TimelinePrompt;
     nextPrompt?: TimelinePrompt;
   } | null>(null);
-  const MIN_DURATION_SECONDS = 0.5;
 
   const beginResize = useCallback(
     (
@@ -207,12 +299,36 @@ export function PromptTimeline({
     [isPlaying]
   );
 
-  const timeToPosition = useCallback(
-    (time: number) => {
-      return (time - visibleStartTime) * pixelsPerSecond;
-    },
+  // Memoized time-to-position conversion
+  const timeToPositionMemo = useCallback(
+    (time: number) => timeToPosition(time, visibleStartTime, pixelsPerSecond),
     [visibleStartTime, pixelsPerSecond]
   );
+
+  // Memoized current time cursor position
+  const currentTimePosition = useMemo(() => {
+    return Math.max(
+      0,
+      Math.min(
+        timelineWidth,
+        (currentTime - visibleStartTime) * pixelsPerSecond
+      )
+    );
+  }, [currentTime, timelineWidth, visibleStartTime, pixelsPerSecond]);
+
+  // Memoized time markers for better performance
+  const timeMarkers = useMemo(() => {
+    return Array.from(
+      {
+        length: Math.ceil((visibleEndTime - visibleStartTime) / 10) + 1,
+      },
+      (_, i) => {
+        const time = Math.round(visibleStartTime + i * 10);
+        const position = (time - visibleStartTime) * pixelsPerSecond;
+        return { time, position, index: i };
+      }
+    );
+  }, [visibleEndTime, visibleStartTime, pixelsPerSecond]);
 
   const handlePromptClick = useCallback(
     (e: React.MouseEvent, prompt: TimelinePrompt) => {
@@ -314,6 +430,9 @@ export function PromptTimeline({
           const timelineData = JSON.parse(content);
 
           if (timelineData.prompts && Array.isArray(timelineData.prompts)) {
+            // Reset timeline UI state to initial values before importing
+            resetTimelineUI();
+
             // Assign default values for id, text, isLive, and color when importing
             const importedPrompts = timelineData.prompts.map(
               (prompt: Partial<TimelinePrompt>, index: number) => ({
@@ -336,6 +455,15 @@ export function PromptTimeline({
             if (timelineData.settings && onSettingsImport) {
               onSettingsImport(timelineData.settings);
             }
+
+            // Automatically move playhead to beginning after import
+            onTimeChange?.(0);
+
+            // Apply the first prompt from the imported timeline
+            if (importedPrompts.length > 0 && _onPromptSubmit) {
+              const firstPrompt = importedPrompts[0];
+              _onPromptSubmit(firstPrompt.text);
+            }
           } else {
             alert("Invalid timeline file format");
           }
@@ -349,7 +477,13 @@ export function PromptTimeline({
       // Reset the input so the same file can be selected again
       event.target.value = "";
     },
-    [onPromptsChange, generateRandomColor, onSettingsImport]
+    [
+      onPromptsChange,
+      onSettingsImport,
+      resetTimelineUI,
+      onTimeChange,
+      _onPromptSubmit,
+    ]
   );
 
   // Drag-to-pan state
@@ -379,13 +513,13 @@ export function PromptTimeline({
         const deltaX = e.clientX - state.startClientX;
         const deltaSeconds = deltaX / pixelsPerSecond;
 
-        const sorted = [...prompts].sort((a, b) => a.startTime - b.startTime);
-        const index = sorted.findIndex(p => p.id === state.promptId);
+        // Find the prompt index directly since prompts are in chronological order
+        const index = prompts.findIndex(p => p.id === state.promptId);
         if (index === -1) return;
 
         const current = { ...state.startPrompt };
-        const prev = state.prevPrompt;
-        const next = state.nextPrompt;
+        const prev = index > 0 ? prompts[index - 1] : null;
+        const next = index < prompts.length - 1 ? prompts[index + 1] : null;
 
         if (state.edge === "left") {
           let newStart = current.startTime + deltaSeconds;
@@ -413,7 +547,7 @@ export function PromptTimeline({
           }
         }
 
-        const updated = sorted.map((p, i) => {
+        const updated = prompts.map((p, i) => {
           if (i === index) return current;
           if (state.edge === "left" && prev && i === index - 1) return prev;
           if (state.edge === "right" && next && i === index + 1) return next;
@@ -455,70 +589,16 @@ export function PromptTimeline({
 
   // Zoom functions
   const zoomIn = useCallback(() => {
-    setZoomLevel(prev => Math.min(prev * 2, 4)); // Max zoom 4x
+    setZoomLevel(prev => Math.min(prev * 2, MAX_ZOOM_LEVEL));
   }, []);
 
   const zoomOut = useCallback(() => {
-    setZoomLevel(prev => Math.max(prev / 2, 0.25)); // Min zoom 0.25x
+    setZoomLevel(prev => Math.max(prev / 2, MIN_ZOOM_LEVEL));
   }, []);
-
-  // Handle live prompt submission from external source
-  const handleExternalLivePromptSubmit = useCallback(
-    (promptItems: PromptItem[]) => {
-      if (!promptItems.length || !promptItems.some(p => p.text.trim())) return;
-
-      // Complete the current live box and start a new one
-      const lastNonLive = [...prompts].filter(p => !p.isLive).slice(-1)[0];
-      const updatedPrompts = prompts.map(p => {
-        if (!p.isLive) return p;
-        const exclude = lastNonLive?.color ? [lastNonLive.color] : [];
-        return {
-          ...p,
-          endTime: currentTime,
-          isLive: false,
-          color: generateRandomColor(exclude),
-        };
-      });
-
-      // Create new live box with blend information
-      const newLivePrompt: TimelinePrompt = {
-        id: `live-${Date.now()}`,
-        text: promptItems.map(p => p.text).join(", "), // Combined text for display
-        startTime: currentTime,
-        endTime: currentTime, // Will be updated as time progresses
-        isLive: true,
-        prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })), // Store blend info
-      };
-
-      onPromptsChange([...updatedPrompts, newLivePrompt]);
-
-      // Also call the external prompt submit handler if provided
-      if (_onPromptSubmit) {
-        _onPromptSubmit(promptItems[0].text); // Send first prompt for backward compatibility
-      }
-    },
-    [
-      prompts,
-      currentTime,
-      onPromptsChange,
-      _onPromptSubmit,
-      generateRandomColor,
-    ]
-  );
-
-  // Expose the function to parent via ref or callback
-  React.useEffect(() => {
-    if (onLivePromptSubmit) {
-      // This is a bit of a hack, but we need to expose the function
-      // In a real implementation, you might want to use a ref or context
-      (window as unknown as Record<string, unknown>).handleLivePromptSubmit =
-        handleExternalLivePromptSubmit;
-    }
-  }, [handleExternalLivePromptSubmit, onLivePromptSubmit]);
 
   return (
     <Card className={`${className}`}>
-      <CardContent className="p-4">
+      <CardContent className={`p-4 ${isCollapsed ? "pb-2" : ""}`}>
         {/* Timeline Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -569,9 +649,13 @@ export function PromptTimeline({
                 accept=".json"
                 onChange={handleImport}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={disabled}
+                disabled={disabled || isStreaming}
               />
-              <Button size="sm" variant="outline" disabled={disabled}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled || isStreaming}
+              >
                 <Upload className="h-4 w-4 mr-1" />
                 Import
               </Button>
@@ -596,28 +680,18 @@ export function PromptTimeline({
           <div className="relative overflow-hidden w-full" ref={timelineRef}>
             {/* Time markers */}
             <div className="relative mb-1 w-full" style={{ height: "30px" }}>
-              {Array.from(
-                {
-                  length:
-                    Math.ceil((visibleEndTime - visibleStartTime) / 10) + 1,
-                },
-                (_, i) => {
-                  const time = Math.round(visibleStartTime + i * 10); // Round to integer
-                  const position = timeToPosition(time);
-                  return (
-                    <div
-                      key={i}
-                      className="absolute top-0 flex items-center justify-center"
-                      style={{
-                        left: time === 0 ? position + 10 : position,
-                        transform: "translateX(-50%)",
-                      }}
-                    >
-                      <span className="text-gray-400 text-xs">{time}s</span>
-                    </div>
-                  );
-                }
-              )}
+              {timeMarkers.map(({ time, position, index }) => (
+                <div
+                  key={index}
+                  className="absolute top-0 flex items-center justify-center"
+                  style={{
+                    left: time === 0 ? position + 10 : position,
+                    transform: "translateX(-50%)",
+                  }}
+                >
+                  <span className="text-gray-400 text-xs">{time}s</span>
+                </div>
+              ))}
             </div>
 
             {/* Timeline track */}
@@ -631,7 +705,7 @@ export function PromptTimeline({
               <div className="absolute bottom-2 right-2 flex items-center gap-1 z-50">
                 <Button
                   onClick={zoomOut}
-                  disabled={zoomLevel <= 0.25}
+                  disabled={zoomLevel <= MIN_ZOOM_LEVEL}
                   size="sm"
                   variant="outline"
                   className="text-xs px-2 h-6"
@@ -644,7 +718,7 @@ export function PromptTimeline({
                 </span>
                 <Button
                   onClick={zoomIn}
-                  disabled={zoomLevel >= 4}
+                  disabled={zoomLevel >= MAX_ZOOM_LEVEL}
                   size="sm"
                   variant="outline"
                   className="text-xs px-2 h-6"
@@ -657,160 +731,130 @@ export function PromptTimeline({
               <div
                 className="absolute top-0 bottom-0 w-1 bg-red-500 z-30 shadow-lg"
                 style={{
-                  left: Math.max(
-                    0,
-                    Math.min(timelineWidth, timeToPosition(currentTime))
-                  ),
+                  left: currentTimePosition,
                   display: "block",
                 }}
               />
               {/* Removed debug time overlay */}
 
               {/* Prompt blocks */}
-              {prompts
-                .filter(
-                  prompt =>
-                    prompt.startTime !== prompt.endTime && // Exclude 0-length prompt boxes
-                    prompt.endTime >= visibleStartTime &&
-                    prompt.startTime <= visibleEndTime
-                )
-                .sort((a, b) => a.startTime - b.startTime) // Sort by start time
-                .map((prompt, index, sortedPrompts) => {
-                  const isSelected = selectedPromptId === prompt.id;
-                  const isActive =
-                    currentTime >= prompt.startTime &&
-                    currentTime <= prompt.endTime;
-                  const isLiveActive =
-                    isLive && currentTime >= prompt.startTime;
-                  const isLivePrompt = prompt.isLive;
+              {visiblePrompts.map((prompt, index) => {
+                const isSelected = selectedPromptId === prompt.id;
+                const isActive =
+                  currentTime >= prompt.startTime &&
+                  currentTime <= prompt.endTime;
+                const isLiveActive = isLive && currentTime >= prompt.startTime;
+                const isLivePrompt = prompt.isLive;
 
-                  // Use the prompt's color, only generate if it doesn't exist
-                  let boxColor = prompt.color;
-                  if (!boxColor) {
-                    // Only generate color if the prompt doesn't have one
-                    const adjacentColors: string[] = [];
-                    if (index > 0 && sortedPrompts[index - 1].color) {
-                      adjacentColors.push(sortedPrompts[index - 1].color!);
-                    }
-                    if (
-                      index < sortedPrompts.length - 1 &&
-                      sortedPrompts[index + 1].color
-                    ) {
-                      adjacentColors.push(sortedPrompts[index + 1].color!);
-                    }
-                    boxColor = generateRandomColor(adjacentColors);
-
-                    // Update the prompt with the new color to persist it
-                    const updatedPrompt = { ...prompt, color: boxColor };
-                    const updatedPrompts = prompts.map(p =>
-                      p.id === prompt.id ? updatedPrompt : p
-                    );
-                    onPromptsChange(updatedPrompts);
-                  }
-
-                  // Calculate position - boxes should be adjacent with no gaps
-                  let leftPosition = Math.max(
-                    0,
-                    timeToPosition(prompt.startTime)
+                // Use the prompt's color, only generate if it doesn't exist
+                let boxColor = prompt.color;
+                if (!boxColor) {
+                  const adjacentColors = getAdjacentColors(
+                    visiblePrompts,
+                    index
                   );
+                  boxColor = generateRandomColor(adjacentColors);
 
-                  // If this is not the first prompt, position it right after the previous one
-                  if (index > 0) {
-                    const previousPrompt = sortedPrompts[index - 1];
-                    const previousEndPosition = Math.max(
-                      0,
-                      timeToPosition(previousPrompt.endTime)
-                    );
-                    leftPosition = Math.max(leftPosition, previousEndPosition);
-                  }
+                  // Update the prompt with the new color to persist it
+                  const updatedPrompt = { ...prompt, color: boxColor };
+                  const updatedPrompts = prompts.map(p =>
+                    p.id === prompt.id ? updatedPrompt : p
+                  );
+                  onPromptsChange(updatedPrompts);
+                }
 
-                  const prevPrompt =
-                    index > 0 ? sortedPrompts[index - 1] : undefined;
-                  const nextPrompt =
-                    index < sortedPrompts.length - 1
-                      ? sortedPrompts[index + 1]
-                      : undefined;
+                // Calculate position - boxes should be adjacent with no gaps
+                const leftPosition = calculatePromptPosition(
+                  prompt,
+                  index,
+                  visiblePrompts,
+                  timeToPositionMemo
+                );
 
-                  return (
-                    <div
-                      key={prompt.id}
-                      className={`absolute border rounded px-2 py-1 transition-colors cursor-pointer ${
-                        isSelected
-                          ? "shadow-lg border-blue-500"
-                          : isActive
-                            ? "border-green-500"
-                            : isLiveActive
-                              ? "border-red-500"
-                              : ""
-                      }`}
-                      style={{
-                        left: leftPosition,
-                        top: "8px", // Position from top
-                        bottom: "8px", // Position from bottom
-                        width: Math.min(
-                          timelineWidth - leftPosition,
-                          timeToPosition(prompt.endTime) - leftPosition
-                        ),
-                        backgroundColor: isLivePrompt ? "#6B7280" : boxColor, // Grey for live boxes, random color for completed
-                        borderColor: isLivePrompt ? "#9CA3AF" : boxColor,
-                        opacity: isSelected ? 1.0 : 0.7, // Selected boxes are fully opaque, others are 70% opacity
-                      }}
-                      onClick={e => handlePromptClick(e, prompt)}
-                    >
-                      {/* Resize handles */}
-                      {!isPlaying && !isLivePrompt && (
-                        <>
-                          <div
-                            className="absolute top-0 bottom-0 w-2 -left-1 z-40"
-                            style={{ cursor: "col-resize" }}
-                            onMouseDown={e =>
-                              beginResize(
-                                e,
-                                prompt,
-                                "left",
-                                prevPrompt,
-                                nextPrompt
-                              )
-                            }
-                          />
-                          <div
-                            className="absolute top-0 bottom-0 w-2 -right-1 z-40"
-                            style={{ cursor: "col-resize" }}
-                            onMouseDown={e =>
-                              beginResize(
-                                e,
-                                prompt,
-                                "right",
-                                prevPrompt,
-                                nextPrompt
-                              )
-                            }
-                          />
-                        </>
-                      )}
-                      <div className="flex flex-col justify-center h-full">
-                        <div className="flex-1 flex flex-col justify-center">
-                          {prompt.prompts && prompt.prompts.length > 1 ? (
-                            // Display blend prompts vertically
-                            prompt.prompts.map((promptItem, idx) => (
-                              <div
-                                key={idx}
-                                className="text-xs text-white font-medium truncate"
-                              >
-                                {promptItem.text} ({promptItem.weight}%)
-                              </div>
-                            ))
-                          ) : (
-                            // Single prompt display
-                            <span className="text-xs text-white font-medium truncate">
-                              {prompt.text}
-                            </span>
-                          )}
-                        </div>
+                const prevPrompt =
+                  index > 0 ? visiblePrompts[index - 1] : undefined;
+                const nextPrompt =
+                  index < visiblePrompts.length - 1
+                    ? visiblePrompts[index + 1]
+                    : undefined;
+
+                return (
+                  <div
+                    key={prompt.id}
+                    className={`absolute border rounded px-2 py-1 transition-colors cursor-pointer ${
+                      isSelected
+                        ? "shadow-lg border-blue-500"
+                        : isActive
+                          ? "border-green-500"
+                          : isLiveActive
+                            ? "border-red-500"
+                            : ""
+                    }`}
+                    style={getPromptBoxStyle(
+                      prompt,
+                      leftPosition,
+                      timelineWidth,
+                      timeToPositionMemo,
+                      isSelected,
+                      isLivePrompt || false,
+                      boxColor
+                    )}
+                    onClick={e => handlePromptClick(e, prompt)}
+                  >
+                    {/* Resize handles */}
+                    {!isPlaying && !isLivePrompt && (
+                      <>
+                        <div
+                          className="absolute top-0 bottom-0 w-2 -left-1 z-40"
+                          style={{ cursor: "col-resize" }}
+                          onMouseDown={e =>
+                            beginResize(
+                              e,
+                              prompt,
+                              "left",
+                              prevPrompt,
+                              nextPrompt
+                            )
+                          }
+                        />
+                        <div
+                          className="absolute top-0 bottom-0 w-2 -right-1 z-40"
+                          style={{ cursor: "col-resize" }}
+                          onMouseDown={e =>
+                            beginResize(
+                              e,
+                              prompt,
+                              "right",
+                              prevPrompt,
+                              nextPrompt
+                            )
+                          }
+                        />
+                      </>
+                    )}
+                    <div className="flex flex-col justify-center h-full">
+                      <div className="flex-1 flex flex-col justify-center">
+                        {prompt.prompts && prompt.prompts.length > 1 ? (
+                          // Display blend prompts vertically
+                          prompt.prompts.map((promptItem, idx) => (
+                            <div
+                              key={idx}
+                              className="text-xs text-white font-medium truncate"
+                            >
+                              {promptItem.text} ({promptItem.weight}%)
+                            </div>
+                          ))
+                        ) : (
+                          // Single prompt display
+                          <span className="text-xs text-white font-medium truncate">
+                            {prompt.text}
+                          </span>
+                        )}
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

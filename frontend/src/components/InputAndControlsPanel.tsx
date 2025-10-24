@@ -78,22 +78,13 @@ export function InputAndControlsPanel({
   const isAtEndOfTimeline = () => {
     if (_timelinePrompts.length === 0) return true;
 
-    const sortedPrompts = [..._timelinePrompts].sort(
-      (a, b) => a.endTime - b.endTime
-    );
-    const lastPrompt = sortedPrompts[sortedPrompts.length - 1];
+    // Live prompts are always at the end, so the last prompt has the latest endTime
+    const lastPrompt = _timelinePrompts[_timelinePrompts.length - 1];
 
     // Check if current time is at or past the end of the last prompt
     return _currentTime >= lastPrompt.endTime;
   };
   const videoRef = useRef<HTMLVideoElement>(null);
-
-  // Initialize live prompt with current prompt when live mode starts
-  useEffect(() => {
-    if (isLive && prompts.length > 0) {
-      // This is now handled by the PromptInput component
-    }
-  }, [isLive, prompts]);
 
   // Get pipeline category, deafault to video-input
   const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
@@ -217,7 +208,7 @@ export function InputAndControlsPanel({
         <div>
           <h3 className="text-sm font-medium mb-2">Prompts</h3>
           {(() => {
-            // Simplified logic: Only two states - Append and Edit
+            // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
             const isEditMode = selectedTimelinePrompt && isVideoPaused;
 
             return (
@@ -246,6 +237,10 @@ export function InputAndControlsPanel({
                       pipelineId === "vod" ||
                       (_isTimelinePlaying &&
                         !isVideoPaused &&
+                        !isAtEndOfTimeline()) ||
+                      // Disable in Append mode when paused and not at end
+                      (!selectedTimelinePrompt &&
+                        isVideoPaused &&
                         !isAtEndOfTimeline())
                     }
                     interpolationMethod={interpolationMethod}

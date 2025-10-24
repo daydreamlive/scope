@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
+
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import { Slider } from "./ui/slider";
 import { Plus, X } from "lucide-react";
+
 import type { TimelinePrompt } from "./PromptTimeline";
 
 interface TimelinePromptEditorProps {
@@ -13,6 +15,9 @@ interface TimelinePromptEditorProps {
   onPromptSubmit?: (prompt: TimelinePrompt) => void;
   disabled?: boolean;
 }
+
+const MAX_PROMPTS = 4;
+const DEFAULT_WEIGHT = 100;
 
 export function TimelinePromptEditor({
   className = "",
@@ -36,7 +41,7 @@ export function TimelinePromptEditor({
       if (prompt.prompts && prompt.prompts.length > 0) {
         setPrompts(prompt.prompts);
       } else {
-        setPrompts([{ text: prompt.text, weight: 100 }]);
+        setPrompts([{ text: prompt.text, weight: DEFAULT_WEIGHT }]);
       }
     } else {
       setEditingPrompt(null);
@@ -44,6 +49,7 @@ export function TimelinePromptEditor({
     }
   }, [prompt]);
 
+  // Update prompt text
   const handlePromptTextChange = (index: number, text: string) => {
     const newPrompts = [...prompts];
     newPrompts[index] = { ...newPrompts[index], text };
@@ -60,6 +66,7 @@ export function TimelinePromptEditor({
     }
   };
 
+  // Update prompt weight
   const handleWeightChange = (index: number, weight: number) => {
     const newPrompts = [...prompts];
     newPrompts[index] = { ...newPrompts[index], weight };
@@ -75,9 +82,10 @@ export function TimelinePromptEditor({
     }
   };
 
+  // Add new prompt
   const handleAddPrompt = () => {
-    if (prompts.length < 4) {
-      const newPrompts = [...prompts, { text: "", weight: 100 }];
+    if (prompts.length < MAX_PROMPTS) {
+      const newPrompts = [...prompts, { text: "", weight: DEFAULT_WEIGHT }];
       setPrompts(newPrompts);
 
       if (editingPrompt) {
@@ -91,6 +99,7 @@ export function TimelinePromptEditor({
     }
   };
 
+  // Remove prompt
   const handleRemovePrompt = (index: number) => {
     if (prompts.length > 1) {
       const newPrompts = prompts.filter((_, i) => i !== index);
@@ -108,6 +117,7 @@ export function TimelinePromptEditor({
     }
   };
 
+  // Submit prompt
   const handleSubmit = () => {
     if (!editingPrompt) return;
 
@@ -123,6 +133,7 @@ export function TimelinePromptEditor({
     onPromptSubmit?.(finalPrompt);
   };
 
+  // Handle keyboard events
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -138,7 +149,7 @@ export function TimelinePromptEditor({
 
   const isSinglePrompt = prompts.length === 1;
 
-  // Render a single prompt field with expandable textarea
+  // Render prompt field (input or textarea)
   const renderPromptField = (
     index: number,
     placeholder: string,
@@ -172,7 +183,7 @@ export function TimelinePromptEditor({
             className="flex-1 bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         )}
-        {index === prompts.length - 1 && prompts.length < 4 && (
+        {index === prompts.length - 1 && prompts.length < MAX_PROMPTS && (
           <Button
             onClick={handleAddPrompt}
             disabled={disabled}
@@ -198,16 +209,8 @@ export function TimelinePromptEditor({
     );
   };
 
-  if (!editingPrompt) {
-    return (
-      <div className={`text-center text-muted-foreground py-8 ${className}`}>
-        Click on a prompt box in the timeline to edit it
-      </div>
-    );
-  }
-
-  // Single prompt mode: simple pill UI
-  if (isSinglePrompt) {
+  // Render single prompt mode
+  const renderSinglePrompt = () => {
     const isFocused = focusedIndex === 0;
     return (
       <div
@@ -218,46 +221,59 @@ export function TimelinePromptEditor({
         {renderPromptField(0, "Edit prompt...", false)}
       </div>
     );
+  };
+
+  // Render multiple prompts mode
+  const renderMultiplePrompts = () => {
+    return (
+      <div className={`space-y-3 ${className}`}>
+        <div className="text-sm font-medium text-muted-foreground">
+          Editing Timeline Prompt (Blend Mode)
+        </div>
+        {prompts.map((promptItem, index) => {
+          const isFocused = focusedIndex === index;
+          return (
+            <div key={index} className="space-y-2">
+              <div
+                className={`flex items-start bg-card border border-border px-4 py-3 gap-3 transition-all ${
+                  isFocused ? "rounded-lg" : "rounded-full"
+                }`}
+              >
+                {renderPromptField(index, `Prompt ${index + 1}`, true)}
+              </div>
+
+              <div className="flex items-center gap-3 px-4">
+                <span className="text-xs text-muted-foreground w-12">
+                  Weight:
+                </span>
+                <Slider
+                  value={[promptItem.weight]}
+                  onValueChange={([value]) => handleWeightChange(index, value)}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={disabled}
+                  className="flex-1"
+                />
+                <span className="text-xs text-muted-foreground w-12 text-right">
+                  {normalizedWeights[index].toFixed(0)}%
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Render component based on state
+  if (!editingPrompt) {
+    return (
+      <div className={`text-center text-muted-foreground py-8 ${className}`}>
+        Click on a prompt box in the timeline to edit it
+      </div>
+    );
   }
 
-  // Multiple prompts mode: show weights and controls
-  return (
-    <div className={`space-y-3 ${className}`}>
-      <div className="text-sm font-medium text-muted-foreground">
-        Editing Timeline Prompt (Blend Mode)
-      </div>
-      {prompts.map((promptItem, index) => {
-        const isFocused = focusedIndex === index;
-        return (
-          <div key={index} className="space-y-2">
-            <div
-              className={`flex items-start bg-card border border-border px-4 py-3 gap-3 transition-all ${
-                isFocused ? "rounded-lg" : "rounded-full"
-              }`}
-            >
-              {renderPromptField(index, `Prompt ${index + 1}`, true)}
-            </div>
-
-            <div className="flex items-center gap-3 px-4">
-              <span className="text-xs text-muted-foreground w-12">
-                Weight:
-              </span>
-              <Slider
-                value={[promptItem.weight]}
-                onValueChange={([value]) => handleWeightChange(index, value)}
-                min={0}
-                max={100}
-                step={1}
-                disabled={disabled}
-                className="flex-1"
-              />
-              <span className="text-xs text-muted-foreground w-12 text-right">
-                {normalizedWeights[index].toFixed(0)}%
-              </span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+  return isSinglePrompt ? renderSinglePrompt() : renderMultiplePrompts();
 }
