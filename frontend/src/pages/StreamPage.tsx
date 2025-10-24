@@ -492,7 +492,9 @@ export function StreamPage() {
               }}
               disabled={
                 settings.pipelineId === "passthrough" ||
-                settings.pipelineId === "vod"
+                settings.pipelineId === "vod" ||
+                isPipelineLoading ||
+                isConnecting
               }
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
