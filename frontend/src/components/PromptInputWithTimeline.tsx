@@ -243,8 +243,8 @@ export function PromptInputWithTimeline({
       setIsLive(true);
       onLiveStateChange?.(true);
 
-      const nonLivePrompts = prompts.filter(p => !p.isLive);
-      if (nonLivePrompts.length === 0) {
+      // Only create a new live prompt if there are no prompts at all in the timeline
+      if (prompts.length === 0) {
         await initializeStream();
         const livePrompt = buildLivePromptFromCurrent(currentTime, currentTime);
         setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
