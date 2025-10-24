@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
-import { Pause, Play } from "lucide-react";
+import { PlayOverlay } from "./ui/play-overlay";
 
 interface VideoOutputProps {
   className?: string;
@@ -11,6 +11,7 @@ interface VideoOutputProps {
   pipelineError?: string | null;
   isPlaying?: boolean;
   onPlayPauseToggle?: () => void;
+  onStartStream?: () => void;
 }
 
 export function VideoOutput({
@@ -21,6 +22,7 @@ export function VideoOutput({
   pipelineError = null,
   isPlaying = true,
   onPlayPauseToggle,
+  onStartStream,
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
@@ -120,17 +122,13 @@ export function VideoOutput({
             {showOverlay && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div
-                  className={`bg-black/50 rounded-full p-4 transition-all duration-400 ${
+                  className={`transition-all duration-400 ${
                     isFadingOut
                       ? "opacity-0 scale-150"
                       : "opacity-100 scale-100"
                   }`}
                 >
-                  {isPlaying ? (
-                    <Play className="w-12 h-12 text-white" />
-                  ) : (
-                    <Pause className="w-12 h-12 text-white" />
-                  )}
+                  <PlayOverlay isPlaying={isPlaying} size="lg" />
                 </div>
               </div>
             )}
@@ -151,8 +149,14 @@ export function VideoOutput({
             <p>Connecting...</p>
           </div>
         ) : (
-          <div className="text-center text-muted-foreground text-lg">
-            Click "Start" when you are ready
+          <div className="relative w-full h-full flex items-center justify-center">
+            {/* YouTube-style play button overlay */}
+            <PlayOverlay
+              isPlaying={false}
+              onClick={onStartStream}
+              size="lg"
+              variant="themed"
+            />
           </div>
         )}
       </CardContent>

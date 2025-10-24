@@ -504,7 +504,7 @@ export function PromptInputWithTimeline({
         currentTime={currentTime}
         onPlayPause={handlePlayPause}
         onTimeChange={handleRewind}
-        onDisconnect={handleEnhancedDisconnect}
+        onReset={handleEnhancedDisconnect}
         onPromptSubmit={onPromptSubmit}
         initialPrompt={currentPrompt}
         selectedPromptId={selectedPromptId}

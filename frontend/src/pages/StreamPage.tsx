@@ -455,6 +455,12 @@ export function StreamPage() {
                   timelinePlayPauseRef.current();
                 }
               }}
+              onStartStream={() => {
+                // Use timeline's play/pause handler to start stream
+                if (timelinePlayPauseRef.current) {
+                  timelinePlayPauseRef.current();
+                }
+              }}
             />
           </div>
           {/* Timeline area - compact, always visible */}
