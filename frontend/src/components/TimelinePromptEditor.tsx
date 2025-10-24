@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
-import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import { Slider } from "./ui/slider";
 import { Plus, X } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 
 import type { TimelinePrompt } from "./PromptTimeline";
 
@@ -12,8 +18,9 @@ interface TimelinePromptEditorProps {
   className?: string;
   prompt: TimelinePrompt | null;
   onPromptUpdate?: (prompt: TimelinePrompt) => void;
-  onPromptSubmit?: (prompt: TimelinePrompt) => void;
   disabled?: boolean;
+  interpolationMethod?: "linear" | "slerp";
+  onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
 }
 
 const MAX_PROMPTS = 4;
@@ -23,8 +30,9 @@ export function TimelinePromptEditor({
   className = "",
   prompt,
   onPromptUpdate,
-  onPromptSubmit,
   disabled = false,
+  interpolationMethod = "linear",
+  onInterpolationMethodChange,
 }: TimelinePromptEditorProps) {
   const [editingPrompt, setEditingPrompt] = useState<TimelinePrompt | null>(
     null
@@ -33,6 +41,14 @@ export function TimelinePromptEditor({
     Array<{ text: string; weight: number }>
   >([]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+
+  // Automatically switch to linear interpolation when there are more than 2 prompts
+  // SLERP only works with exactly 2 prompts
+  useEffect(() => {
+    if (prompts.length > 2 && interpolationMethod === "slerp") {
+      onInterpolationMethodChange?.("linear");
+    }
+  }, [prompts.length, interpolationMethod, onInterpolationMethodChange]);
 
   // Initialize editing prompt when prompt changes
   useEffect(() => {
@@ -117,30 +133,6 @@ export function TimelinePromptEditor({
     }
   };
 
-  // Submit prompt
-  const handleSubmit = () => {
-    if (!editingPrompt) return;
-
-    const validPrompts = prompts.filter(p => p.text.trim());
-    if (!validPrompts.length) return;
-
-    const finalPrompt = {
-      ...editingPrompt,
-      text: validPrompts.length === 1 ? validPrompts[0].text : "",
-      prompts: validPrompts.length > 1 ? validPrompts : undefined,
-    };
-
-    onPromptSubmit?.(finalPrompt);
-  };
-
-  // Handle keyboard events
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
   // Calculate normalized weights for display
   const totalWeight = prompts.reduce((sum, p) => sum + p.weight, 0);
   const normalizedWeights = prompts.map(p =>
@@ -149,7 +141,7 @@ export function TimelinePromptEditor({
 
   const isSinglePrompt = prompts.length === 1;
 
-  // Render prompt field (input or textarea)
+  // Render prompt field (always uses textarea)
   const renderPromptField = (
     index: number,
     placeholder: string,
@@ -160,40 +152,20 @@ export function TimelinePromptEditor({
 
     return (
       <>
-        {isFocused ? (
-          <Textarea
-            placeholder={placeholder}
-            value={promptItem.text}
-            onChange={e => handlePromptTextChange(index, e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setFocusedIndex(index)}
-            onBlur={() => setFocusedIndex(null)}
-            disabled={disabled}
-            autoFocus
-            className="flex-1 min-h-[80px] resize-none bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
-          />
-        ) : (
-          <Input
-            placeholder={placeholder}
-            value={promptItem.text}
-            onChange={e => handlePromptTextChange(index, e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setFocusedIndex(index)}
-            disabled={disabled}
-            className="flex-1 bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
-          />
-        )}
-        {index === prompts.length - 1 && prompts.length < MAX_PROMPTS && (
-          <Button
-            onClick={handleAddPrompt}
-            disabled={disabled}
-            size="sm"
-            variant="ghost"
-            className="rounded-full w-8 h-8 p-0"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-        )}
+        <Textarea
+          placeholder={placeholder}
+          value={promptItem.text}
+          onChange={e => handlePromptTextChange(index, e.target.value)}
+          onFocus={() => setFocusedIndex(index)}
+          onBlur={() => setFocusedIndex(null)}
+          disabled={disabled}
+          rows={isFocused ? 3 : 1}
+          className={`flex-1 resize-none bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+            isFocused
+              ? "min-h-[80px]"
+              : "min-h-[24px] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          }`}
+        />
         {showRemove && (
           <Button
             onClick={() => handleRemovePrompt(index)}
@@ -211,14 +183,28 @@ export function TimelinePromptEditor({
 
   // Render single prompt mode
   const renderSinglePrompt = () => {
-    const isFocused = focusedIndex === 0;
     return (
-      <div
-        className={`flex items-start bg-card border border-border px-4 py-3 gap-3 transition-all ${
-          isFocused ? "rounded-lg" : "rounded-full"
-        } ${className}`}
-      >
-        {renderPromptField(0, "Edit prompt...", false)}
+      <div className={`space-y-3 ${className}`}>
+        <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
+          {renderPromptField(0, "Edit prompt...", false)}
+        </div>
+
+        {prompts.length < 4 && (
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              onMouseDown={e => {
+                e.preventDefault();
+                handleAddPrompt();
+              }}
+              disabled={disabled}
+              size="sm"
+              variant="ghost"
+              className="rounded-full w-8 h-8 p-0"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
     );
   };
@@ -227,22 +213,14 @@ export function TimelinePromptEditor({
   const renderMultiplePrompts = () => {
     return (
       <div className={`space-y-3 ${className}`}>
-        <div className="text-sm font-medium text-muted-foreground">
-          Editing Timeline Prompt (Blend Mode)
-        </div>
         {prompts.map((promptItem, index) => {
-          const isFocused = focusedIndex === index;
           return (
             <div key={index} className="space-y-2">
-              <div
-                className={`flex items-start bg-card border border-border px-4 py-3 gap-3 transition-all ${
-                  isFocused ? "rounded-lg" : "rounded-full"
-                }`}
-              >
+              <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
                 {renderPromptField(index, `Prompt ${index + 1}`, true)}
               </div>
 
-              <div className="flex items-center gap-3 px-4">
+              <div className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground w-12">
                   Weight:
                 </span>
@@ -262,6 +240,50 @@ export function TimelinePromptEditor({
             </div>
           );
         })}
+
+        <div className="flex items-center justify-between gap-2">
+          {prompts.length >= 2 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Blend:</span>
+              <Select
+                value={interpolationMethod}
+                onValueChange={value =>
+                  onInterpolationMethodChange?.(value as "linear" | "slerp")
+                }
+                disabled={disabled}
+              >
+                <SelectTrigger className="w-24 h-7 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="linear">Linear</SelectItem>
+                  <SelectItem value="slerp" disabled={prompts.length > 2}>
+                    Slerp
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div />
+          )}
+
+          {prompts.length < 4 && (
+            <div className="flex items-center gap-2">
+              <Button
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleAddPrompt();
+                }}
+                disabled={disabled}
+                size="sm"
+                variant="ghost"
+                className="rounded-full w-8 h-8 p-0"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     );
   };

@@ -224,8 +224,9 @@ export function InputAndControlsPanel({
                   <TimelinePromptEditor
                     prompt={selectedTimelinePrompt}
                     onPromptUpdate={onTimelinePromptUpdate}
-                    onPromptSubmit={onTimelinePromptUpdate}
                     disabled={false}
+                    interpolationMethod={interpolationMethod}
+                    onInterpolationMethodChange={onInterpolationMethodChange}
                   />
                 ) : (
                   <PromptInput

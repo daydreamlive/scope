@@ -473,6 +473,17 @@ export function StreamPage() {
                   denoising_step_list: settings.denoisingSteps || [700, 500],
                 });
               }}
+              onPromptItemsSubmit={prompts => {
+                // Update the left panel's prompt state to reflect current timeline prompt blend
+                setPromptItems(prompts);
+
+                // Send to backend with full blend data
+                sendParameterUpdate({
+                  prompts,
+                  prompt_interpolation_method: interpolationMethod,
+                  denoising_step_list: settings.denoisingSteps || [700, 500],
+                });
+              }}
               disabled={
                 settings.pipelineId === "passthrough" ||
                 settings.pipelineId === "vod"

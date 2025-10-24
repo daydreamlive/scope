@@ -1,9 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 import type { TimelinePrompt } from "../components/PromptTimeline";
+import type { PromptItem } from "../lib/api";
 
 interface UseTimelinePlaybackOptions {
   onPromptChange?: (prompt: string) => void;
+  onPromptItemsChange?: (prompts: PromptItem[]) => void;
   isStreaming?: boolean;
   isVideoPaused?: boolean;
   onPromptsChange?: (prompts: TimelinePrompt[]) => void;
@@ -50,7 +52,19 @@ const createUpdateTimeFunction = (
       (activePrompt.id !== lastAppliedPromptIdRef.current ||
         activePrompt.text !== lastAppliedPromptTextRef.current)
     ) {
-      if (optionsRef.current?.onPromptChange) {
+      // If the prompt has blend data, send it as PromptItems
+      if (
+        activePrompt.prompts &&
+        activePrompt.prompts.length > 0 &&
+        optionsRef.current?.onPromptItemsChange
+      ) {
+        const promptItems: PromptItem[] = activePrompt.prompts.map(p => ({
+          text: p.text,
+          weight: p.weight,
+        }));
+        optionsRef.current.onPromptItemsChange(promptItems);
+      } else if (optionsRef.current?.onPromptChange) {
+        // Simple prompt, just send the text
         optionsRef.current.onPromptChange(activePrompt.text);
       }
       lastAppliedPromptIdRef.current = activePrompt.id;
@@ -79,7 +93,18 @@ const createUpdateTimeFunction = (
         );
 
         // Notify parent that live mode has started
-        if (optionsRef.current?.onPromptChange) {
+        // If the prompt has blend data, send it as PromptItems
+        if (
+          lastPrompt.prompts &&
+          lastPrompt.prompts.length > 0 &&
+          optionsRef.current?.onPromptItemsChange
+        ) {
+          const promptItems: PromptItem[] = lastPrompt.prompts.map(p => ({
+            text: p.text,
+            weight: p.weight,
+          }));
+          optionsRef.current.onPromptItemsChange(promptItems);
+        } else if (optionsRef.current?.onPromptChange) {
           optionsRef.current.onPromptChange(lastPrompt.text);
         }
 

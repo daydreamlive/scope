@@ -11,6 +11,7 @@ interface PromptInputWithTimelineProps {
   currentPrompt: string;
   currentPromptItems?: PromptItem[];
   onPromptSubmit?: (prompt: string) => void;
+  onPromptItemsSubmit?: (prompts: PromptItem[]) => void;
   disabled?: boolean;
   isStreaming?: boolean;
   isVideoPaused?: boolean;
@@ -41,6 +42,7 @@ export function PromptInputWithTimeline({
   currentPrompt,
   currentPromptItems = [],
   onPromptSubmit,
+  onPromptItemsSubmit,
   disabled = false,
   isStreaming = false,
   isVideoPaused = false,
@@ -89,6 +91,7 @@ export function PromptInputWithTimeline({
     pausePlayback,
   } = useTimelinePlayback({
     onPromptChange: onPromptSubmit,
+    onPromptItemsChange: onPromptItemsSubmit,
     isStreaming,
     isVideoPaused,
     onPromptsChange: onTimelinePromptsChange,
@@ -129,9 +132,19 @@ export function PromptInputWithTimeline({
     const firstPrompt = prompts.find(p => !p.isLive);
 
     if (firstPrompt) {
-      onPromptSubmit?.(firstPrompt.text);
+      // If the prompt has blend data, send it as PromptItems
+      if (firstPrompt.prompts && firstPrompt.prompts.length > 0) {
+        const promptItems: PromptItem[] = firstPrompt.prompts.map(p => ({
+          text: p.text,
+          weight: p.weight,
+        }));
+        onPromptItemsSubmit?.(promptItems);
+      } else {
+        // Simple prompt, just send the text
+        onPromptSubmit?.(firstPrompt.text);
+      }
     }
-  }, [prompts, onPromptSubmit]);
+  }, [prompts, onPromptSubmit, onPromptItemsSubmit]);
 
   // Enhanced rewind handler
   const handleRewind = useCallback(() => {
