@@ -158,19 +158,19 @@ def download_default_pipelines() -> None:
     )
 
     # 3) Google Drive download -> model.pt in repo root
-    # if stream_diffusion_dst.exists():
-    #     print(
-    #         f"[SKIP] StreamDiffusionV2 model already exists at: {stream_diffusion_dst}"
-    #     )
-    # else:
-    #     tmp_model = Path("model.pt")
-    #     download_from_gdrive(stream_diffusion_gdrive_id, tmp_model)
+    if stream_diffusion_dst.exists():
+        print(
+            f"[SKIP] StreamDiffusionV2 model already exists at: {stream_diffusion_dst}"
+        )
+    else:
+        tmp_model = Path("model.pt")
+        download_from_gdrive(stream_diffusion_gdrive_id, tmp_model)
 
-    #     # 4) Move to StreamDiffusionV2/model.pt
-    #     move_file(tmp_model, stream_diffusion_dst)
+        # 4) Move to StreamDiffusionV2/model.pt
+        move_file(tmp_model, stream_diffusion_dst)
 
-    # # 5) HF repo download for LongLive-1.3B
-    # download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
+    # 5) HF repo download for LongLive-1.3B
+    download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
 
 
 def download_krea_realtime_video_pipeline() -> None:
