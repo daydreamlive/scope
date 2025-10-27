@@ -69,30 +69,57 @@ def get_model_file_path(relative_path: str) -> Path:
     return models_dir / relative_path
 
 
-def get_required_model_files() -> list[Path]:
+def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     """
-    Get the list of required model files that should exist.
+    Get the list of required model files that should exist for a given pipeline.
+
+    Args:
+        pipeline_id: The pipeline ID to get required models for.
+                     If None, returns models for all default pipelines.
+                     If provided, returns models specific to that pipeline.
 
     Returns:
         list[Path]: List of required model file paths
     """
     models_dir = get_models_dir()
-    return [
-        models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-        models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-        models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
-        models_dir / "StreamDiffusionV2" / "model.pt",
-    ]
+
+    # Passthrough doesn't need models
+    if pipeline_id == "passthrough":
+        return []
+
+    # streamdiffusionv2 pipeline
+    if pipeline_id == "streamdiffusionv2":
+        return [
+            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
+            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
+            models_dir / "StreamDiffusionV2" / "model.pt",
+        ]
+
+    # longlive pipeline
+    if pipeline_id == "longlive":
+        return [
+            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
+            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
+            models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
+        ]
+
+    # Default: nothing is required
+    return []
 
 
-def models_are_downloaded() -> bool:
+def models_are_downloaded(pipeline_id: str | None = None) -> bool:
     """
     Check if all required model files are downloaded.
+
+    Args:
+        pipeline_id: The pipeline ID to check models for.
+                     If None, checks models for all default pipelines.
+                     If provided, checks models specific to that pipeline.
 
     Returns:
         bool: True if all required models are present, False otherwise
     """
-    required_files = get_required_model_files()
+    required_files = get_required_model_files(pipeline_id)
 
     for file_path in required_files:
         if not file_path.exists():

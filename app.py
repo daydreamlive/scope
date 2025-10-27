@@ -18,8 +18,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from download_models import download_required_models
+from download_models import download_models
+from lib.models_config import models_are_downloaded
 from lib.pipeline_manager import PipelineManager
 from lib.schema import (
     HealthResponse,
@@ -149,13 +151,6 @@ async def lifespan(app: FastAPI):
             "other hardware will be supported in the future."
         )
         logger.error(error_msg)
-        sys.exit(1)
-
-    # Download models if needed
-    try:
-        download_required_models()
-    except Exception as e:
-        logger.error(f"Failed to download models: {e}")
         sys.exit(1)
 
     # Initialize pipeline manager (but don't load pipeline yet)
@@ -292,6 +287,48 @@ async def handle_webrtc_offer(
 
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class ModelStatusResponse(BaseModel):
+    downloaded: bool
+
+
+class DownloadModelsRequest(BaseModel):
+    pipeline_id: str
+
+
+@app.get("/api/v1/models/status")
+async def get_model_status(pipeline_id: str):
+    """Check if models for a pipeline are downloaded."""
+    try:
+        downloaded = models_are_downloaded(pipeline_id)
+        return ModelStatusResponse(downloaded=downloaded)
+    except Exception as e:
+        logger.error(f"Error checking model status: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/models/download")
+async def download_pipeline_models(request: DownloadModelsRequest):
+    """Download models for a specific pipeline."""
+    try:
+        if not request.pipeline_id:
+            raise HTTPException(status_code=400, detail="pipeline_id is required")
+
+        # Download in a background thread to avoid blocking
+        import threading
+
+        def download_in_background():
+            download_models(pipeline_id=request.pipeline_id)
+
+        thread = threading.Thread(target=download_in_background)
+        thread.daemon = True
+        thread.start()
+
+        return {"message": f"Model download started for {request.pipeline_id}"}
+    except Exception as e:
+        logger.error(f"Error starting model download: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

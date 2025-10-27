@@ -23,7 +23,7 @@ interface PromptInputWithTimelineProps {
   onLiveStateChange?: (isLive: boolean) => void;
   onLivePromptSubmit?: (prompts: PromptItem[]) => void;
   onDisconnect?: () => void;
-  onStartStream?: () => void;
+  onStartStream?: () => Promise<boolean> | void;
   onVideoPlayPauseToggle?: () => void;
   isCollapsed?: boolean;
   onCollapseToggle?: (collapsed: boolean) => void;
@@ -35,6 +35,7 @@ interface PromptInputWithTimelineProps {
   onTimelinePromptsChange?: (prompts: TimelinePrompt[]) => void;
   onTimelineCurrentTimeChange?: (currentTime: number) => void;
   onTimelinePlayingChange?: (isPlaying: boolean) => void;
+  isDownloading?: boolean;
 }
 
 export function PromptInputWithTimeline({
@@ -228,11 +229,17 @@ export function PromptInputWithTimeline({
   );
 
   // Initialize stream if needed
-  const initializeStream = useCallback(async () => {
+  const initializeStream = useCallback(async (): Promise<boolean> => {
     if (!isStreaming && onStartStream) {
-      await onStartStream();
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const result = await onStartStream();
+      const started = result === true; // Treat undefined/void as false
+      if (started) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return true;
+      }
+      return false;
     }
+    return isStreaming; // Already streaming
   }, [isStreaming, onStartStream]);
 
   // Check if at end of timeline
@@ -251,7 +258,13 @@ export function PromptInputWithTimeline({
 
   // Handle starting playback
   const handleStartPlayback = useCallback(async () => {
-    await initializeStream();
+    const streamStarted = await initializeStream();
+
+    // Only proceed if stream successfully started
+    if (!streamStarted) {
+      return;
+    }
+
     deselectPrompt();
 
     const isAtEnd = isAtTimelineEnd();
@@ -262,9 +275,14 @@ export function PromptInputWithTimeline({
 
       // Only create a new live prompt if there are no prompts at all in the timeline
       if (prompts.length === 0) {
-        await initializeStream();
-        const livePrompt = buildLivePromptFromCurrent(currentTime, currentTime);
-        setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
+        const streamStartedAgain = await initializeStream();
+        if (streamStartedAgain) {
+          const livePrompt = buildLivePromptFromCurrent(
+            currentTime,
+            currentTime
+          );
+          setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
+        }
       }
 
       setTimeout(() => {
