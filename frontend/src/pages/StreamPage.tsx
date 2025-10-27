@@ -4,6 +4,7 @@ import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
+import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
@@ -15,6 +16,7 @@ import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId } from "../types";
 import type { PromptItem } from "../lib/api";
+import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
@@ -45,6 +47,13 @@ export function StreamPage() {
   const [externalSelectedPromptId, setExternalSelectedPromptId] = useState<
     string | null
   >(null);
+
+  // Download dialog state
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [pipelineNeedsModels, setPipelineNeedsModels] = useState<string | null>(
+    null
+  );
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -104,7 +113,7 @@ export function StreamPage() {
     setPromptItems(prompts);
   };
 
-  const handlePipelineIdChange = (pipelineId: PipelineId) => {
+  const handlePipelineIdChange = async (pipelineId: PipelineId) => {
     // Stop the stream if it's currently running
     if (isStreaming) {
       stopStream();
@@ -148,6 +157,81 @@ export function StreamPage() {
       denoisingSteps: newDenoisingSteps,
       resolution: newResolution,
     });
+  };
+
+  const handleDownloadModels = async () => {
+    if (!pipelineNeedsModels) return;
+
+    setIsDownloading(true);
+    setShowDownloadDialog(false);
+
+    try {
+      await downloadPipelineModels(pipelineNeedsModels);
+
+      // Start polling to check when download is complete
+      const checkDownloadComplete = async () => {
+        try {
+          const status = await checkModelStatus(pipelineNeedsModels);
+          if (status.downloaded) {
+            setIsDownloading(false);
+            setPipelineNeedsModels(null);
+
+            // Now update the pipeline since download is complete
+            const pipelineId = pipelineNeedsModels as PipelineId;
+            const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
+            setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
+
+            if (timelineRef.current) {
+              timelineRef.current.resetTimelineCompletely();
+            }
+
+            setSelectedTimelinePrompt(null);
+            setExternalSelectedPromptId(null);
+
+            const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
+            const newResolution = getDefaultResolution(pipelineId);
+
+            updateSettings({
+              pipelineId,
+              denoisingSteps: newDenoisingSteps,
+              resolution: newResolution,
+            });
+
+            // Automatically start the stream after download completes
+            // Use setTimeout to ensure state updates are processed first
+            setTimeout(async () => {
+              const started = await handleStartStream();
+              // If stream started successfully, also start the timeline
+              if (started && timelinePlayPauseRef.current) {
+                setTimeout(() => {
+                  timelinePlayPauseRef.current?.();
+                }, 2000); // Give stream time to fully initialize
+              }
+            }, 100);
+          } else {
+            // Check again in 2 seconds
+            setTimeout(checkDownloadComplete, 2000);
+          }
+        } catch (error) {
+          console.error("Error checking download status:", error);
+          setIsDownloading(false);
+        }
+      };
+
+      // Start checking for completion
+      setTimeout(checkDownloadComplete, 5000);
+    } catch (error) {
+      console.error("Error downloading models:", error);
+      setIsDownloading(false);
+    }
+  };
+
+  const handleDialogClose = () => {
+    setShowDownloadDialog(false);
+    setPipelineNeedsModels(null);
+
+    // When user cancels, no stream or timeline has started yet, so nothing to clean up
+    // Just close the dialog and return early without any state changes
   };
 
   const handleResolutionChange = (resolution: {
@@ -288,15 +372,37 @@ export function StreamPage() {
     }
   }, [videoResolution, isStreaming, settings.pipelineId, updateSettings]);
 
-  const handleStartStream = async () => {
+  const handleStartStream = async (
+    overridePipelineId?: PipelineId
+  ): Promise<boolean> => {
     if (isStreaming) {
       stopStream();
-      return;
+      return true;
     }
 
+    // Use override pipeline ID if provided, otherwise use current settings
+    const pipelineIdToUse = overridePipelineId || settings.pipelineId;
+
     try {
+      // Check if models are needed but not downloaded
+      const pipelineInfo = PIPELINES[pipelineIdToUse];
+      if (pipelineInfo?.requiresModels) {
+        try {
+          const status = await checkModelStatus(pipelineIdToUse);
+          if (!status.downloaded) {
+            // Show download dialog
+            setPipelineNeedsModels(pipelineIdToUse);
+            setShowDownloadDialog(true);
+            return false; // Stream did not start
+          }
+        } catch (error) {
+          console.error("Error checking model status:", error);
+          // Continue anyway if check fails
+        }
+      }
+
       // Always load pipeline with current parameters - backend will handle the rest
-      console.log(`Loading ${settings.pipelineId} pipeline...`);
+      console.log(`Loading ${pipelineIdToUse} pipeline...`);
 
       // Prepare load parameters based on pipeline type
       let loadParams = null;
@@ -304,7 +410,7 @@ export function StreamPage() {
       // Use settings.resolution if available, otherwise fall back to videoResolution
       const resolution = settings.resolution || videoResolution;
 
-      if (settings.pipelineId === "streamdiffusionv2" && resolution) {
+      if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
@@ -313,7 +419,7 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
         );
-      } else if (settings.pipelineId === "passthrough" && resolution) {
+      } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
@@ -321,7 +427,7 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}`
         );
-      } else if (settings.pipelineId === "longlive" && resolution) {
+      } else if (pipelineIdToUse === "longlive" && resolution) {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
@@ -333,16 +439,16 @@ export function StreamPage() {
       }
 
       const loadSuccess = await loadPipeline(
-        settings.pipelineId,
+        pipelineIdToUse,
         loadParams || undefined
       );
       if (!loadSuccess) {
         console.error("Failed to load pipeline, cannot start stream");
-        return;
+        return false;
       }
 
       // Check if this pipeline needs video input
-      const pipelineCategory = PIPELINES[settings.pipelineId]?.category;
+      const pipelineCategory = PIPELINES[pipelineIdToUse]?.category;
       const needsVideoInput = pipelineCategory === "video-input";
 
       // Only send video stream for pipelines that need video input
@@ -352,7 +458,7 @@ export function StreamPage() {
 
       if (needsVideoInput && !localStream) {
         console.error("Video input required but no local stream available");
-        return;
+        return false;
       }
 
       // Build initial parameters based on pipeline type
@@ -366,10 +472,7 @@ export function StreamPage() {
       } = {};
 
       // Common parameters for pipelines that support prompts
-      if (
-        settings.pipelineId !== "passthrough" &&
-        settings.pipelineId !== "vod"
-      ) {
+      if (pipelineIdToUse !== "passthrough" && pipelineIdToUse !== "vod") {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.manage_cache = settings.manageCache ?? true;
@@ -379,7 +482,7 @@ export function StreamPage() {
       }
 
       // StreamDiffusionV2-specific parameters
-      if (settings.pipelineId === "streamdiffusionv2") {
+      if (pipelineIdToUse === "streamdiffusionv2") {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
@@ -389,8 +492,11 @@ export function StreamPage() {
 
       // Pipeline is loaded, now start WebRTC stream
       startStream(initialParameters, streamToSend);
+
+      return true; // Stream started successfully
     } catch (error) {
       console.error("Error during stream start:", error);
+      return false;
     }
   };
 
@@ -449,6 +555,7 @@ export function StreamPage() {
               isConnecting={isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
+              isDownloading={isDownloading}
               onPlayPauseToggle={() => {
                 // Use timeline's play/pause handler instead of direct video toggle
                 if (timelinePlayPauseRef.current) {
@@ -494,7 +601,8 @@ export function StreamPage() {
                 settings.pipelineId === "passthrough" ||
                 settings.pipelineId === "vod" ||
                 isPipelineLoading ||
-                isConnecting
+                isConnecting ||
+                showDownloadDialog
               }
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
@@ -515,6 +623,7 @@ export function StreamPage() {
               onTimelinePromptsChange={handleTimelinePromptsChange}
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
+              isDownloading={isDownloading}
             />
           </div>
         </div>
@@ -547,6 +656,15 @@ export function StreamPage() {
 
       {/* Status Bar */}
       <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
+
+      {/* Download Dialog */}
+      {showDownloadDialog && pipelineNeedsModels && (
+        <DownloadDialog
+          pipelineId={pipelineNeedsModels as PipelineId}
+          onClose={handleDialogClose}
+          onDownload={handleDownloadModels}
+        />
+      )}
     </div>
   );
 }

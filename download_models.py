@@ -11,6 +11,7 @@ Downloads:
   5) hf download Efficient-Large-Model/LongLive-1.3B --local-dir models/LongLive-1.3B
 """
 
+import argparse
 import logging
 import shutil
 import sys
@@ -99,14 +100,9 @@ def move_file(src: Path, dst: Path) -> None:
     print(f"[OK] Moved '{src}' -> '{dst}'")
 
 
-def check_models_downloaded() -> bool:
-    """Check if required model files are already downloaded."""
-    return models_are_downloaded()
-
-
 def download_required_models():
     """Download required models if they are not already present."""
-    if check_models_downloaded():
+    if models_are_downloaded():
         logger.info("Models already downloaded, skipping download")
         return
 
@@ -119,14 +115,13 @@ def download_required_models():
         raise
 
 
-def download_models() -> None:
-    # HuggingFace repos
+def download_streamdiffusionv2_pipeline() -> None:
+    """Download models for the StreamDiffusionV2 pipeline."""
     wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
     wan_video_comfy_repo = "Kijai/WanVideo_comfy"
     wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-    longlive_repo = "Efficient-Large-Model/LongLive-1.3B"
 
-    # Google Drive file
+    # Google Drive file for StreamDiffusionV2
     stream_diffusion_gdrive_id = "1-2pZ01uq2l_ulj-aBP1i8Fh10y6Zklyk"
 
     # Ensure models directory exists and get paths
@@ -134,7 +129,6 @@ def download_models() -> None:
     wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
     stream_diffusion_dst = models_root / "StreamDiffusionV2" / "model.pt"
-    longlive_dst = models_root / "LongLive-1.3B"
 
     # 1) HF repo download excluding a large file
     wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
@@ -159,15 +153,95 @@ def download_models() -> None:
         # 4) Move to StreamDiffusionV2/model.pt
         move_file(tmp_model, stream_diffusion_dst)
 
-    # 5) HF repo download for LongLive-1.3B
+
+def download_longlive_pipeline() -> None:
+    """Download models for the LongLive pipeline."""
+    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
+    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
+    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
+    longlive_repo = "Efficient-Large-Model/LongLive-1.3B"
+
+    # Ensure models directory exists and get paths
+    models_root = ensure_models_dir()
+    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
+    wan_video_comfy_dst = models_root / "WanVideo_comfy"
+    longlive_dst = models_root / "LongLive-1.3B"
+
+    # 1) HF repo download for Wan2.1-T2V-1.3B, excluding large file
+    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    if wan_video_dst.exists():
+        print(f"[SKIP] Wan2.1-T2V-1.3B already exists at: {wan_video_dst}")
+    else:
+        download_hf_repo_excluding(
+            wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
+        )
+
+    # 2) HF single file download for UMT5 encoder
+    if (wan_video_comfy_dst / wan_video_comfy_file).exists():
+        print(
+            f"[SKIP] UMT5 encoder already exists at: {wan_video_comfy_dst / wan_video_comfy_file}"
+        )
+    else:
+        download_hf_single_file(
+            wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
+        )
+
+    # 3) HF repo download for LongLive-1.3B
     download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
+
+
+def download_models(pipeline_id: str | None = None) -> None:
+    """
+    Download models. If pipeline_id is None, downloads all pipelines.
+    If pipeline_id is specified, downloads that specific pipeline.
+
+    Args:
+        pipeline_id: Optional pipeline ID. Supports "streamdiffusionv2" or "longlive".
+                    If None, downloads all pipelines.
+    """
+    if pipeline_id is None:
+        # Download all pipelines
+        download_streamdiffusionv2_pipeline()
+        download_longlive_pipeline()
+    elif pipeline_id == "streamdiffusionv2":
+        download_streamdiffusionv2_pipeline()
+    elif pipeline_id == "longlive":
+        download_longlive_pipeline()
+    else:
+        raise ValueError(
+            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive"
+        )
 
     print("\nAll downloads complete.")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Download models for Daydream Scope pipelines",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Download all pipelines
+  python download_models.py
+
+  # Download specific pipeline
+  python download_models.py --pipeline streamdiffusionv2
+  python download_models.py --pipeline longlive
+  python download_models.py -p streamdiffusionv2
+        """,
+    )
+    parser.add_argument(
+        "--pipeline",
+        "-p",
+        type=str,
+        default=None,
+        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive'). If not specified, downloads all pipelines.",
+    )
+
+    args = parser.parse_args()
+
     try:
-        download_models()
+        download_models(args.pipeline)
     except KeyboardInterrupt:
         print("\nCancelled.")
         sys.exit(130)
