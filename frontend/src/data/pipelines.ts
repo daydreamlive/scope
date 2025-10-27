@@ -7,6 +7,9 @@ export interface PipelineInfo {
   modified?: boolean;
   category: PipelineCategory;
   defaultPrompt?: string;
+  estimatedVram?: number; // GB
+  estimatedDownloadSize?: number; // GB
+  requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
@@ -18,6 +21,9 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     modified: true,
     category: "video-input",
     defaultPrompt: "A dog in the grass looking around, photorealistic",
+    estimatedVram: 20,
+    estimatedDownloadSize: 16,
+    requiresModels: true,
   },
   longlive: {
     name: "LongLive",
@@ -28,6 +34,9 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     category: "no-video-input",
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
+    estimatedVram: 20,
+    estimatedDownloadSize: 20,
+    requiresModels: true,
   },
   "krea-realtime-video": {
     name: "Krea Realtime Video",
@@ -38,12 +47,16 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     category: "no-video-input",
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
+    estimatedVram: 40,
+    estimatedDownloadSize: 27,
+    requiresModels: true,
   },
   passthrough: {
     name: "Passthrough",
     about:
       "A pipeline that returns the input video without any processing that is useful for testing and debugging.",
     category: "video-input",
+    requiresModels: false,
   },
   // vod: {
   //   name: "VOD",

@@ -100,3 +100,38 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
   const result = await response.json();
   return result;
 };
+
+export const checkModelStatus = async (pipelineId: string): Promise<{ downloaded: boolean }> => {
+  const response = await fetch(`/api/v1/models/status?pipeline_id=${pipelineId}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Model status check failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export const downloadPipelineModels = async (pipelineId: string): Promise<{ message: string }> => {
+  const response = await fetch("/api/v1/models/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pipeline_id: pipelineId }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Model download failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};

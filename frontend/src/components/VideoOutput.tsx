@@ -10,6 +10,7 @@ interface VideoOutputProps {
   isConnecting?: boolean;
   pipelineError?: string | null;
   isPlaying?: boolean;
+  isDownloading?: boolean;
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
 }
@@ -21,6 +22,7 @@ export function VideoOutput({
   isConnecting = false,
   pipelineError = null,
   isPlaying = true,
+  isDownloading = false,
   onPlayPauseToggle,
   onStartStream,
 }: VideoOutputProps) {
@@ -138,10 +140,15 @@ export function VideoOutput({
             <p>Pipeline Error</p>
             <p className="text-sm mt-2 max-w-md mx-auto">{pipelineError}</p>
           </div>
+        ) : isDownloading ? (
+          <div className="text-center text-muted-foreground text-lg">
+            <Spinner size={24} className="mx-auto mb-3" />
+            <p>Downloading...</p>
+          </div>
         ) : isPipelineLoading ? (
           <div className="text-center text-muted-foreground text-lg">
             <Spinner size={24} className="mx-auto mb-3" />
-            <p>Loading pipeline...</p>
+            <p>Loading...</p>
           </div>
         ) : isConnecting ? (
           <div className="text-center text-muted-foreground text-lg">
