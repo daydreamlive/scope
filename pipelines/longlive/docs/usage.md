@@ -6,21 +6,19 @@ The model is trained using [Self-Forcing](https://self-forcing.github.io/) on Wa
 
 ## Examples
 
-The following examples include the prompts used so you can try them as well.
+The following examples include timeline JSON files with the prompts used so you can try them as well.
 
-https://github.com/user-attachments/assets/68d3d7f5-80ba-45f7-b83f-add8b970b2d8
+https://github.com/user-attachments/assets/e9adaf9d-8639-42aa-911e-fc3574e7fdef
 
-Prompts:
-1. "A 3D animated scene. A **panda** walks along a path towards the camera on a spring day."
-2. "A 3D animated scene. A **panda** sits down on a path in a park on a spring day."
-3. "A 3D animated scene. A **panda** stands up on a path and raises its arms in a park on a spring day."
+[Timeline JSON file](./examples/timeline-panda.json)
 
-https://github.com/user-attachments/assets/855a1e5b-cdcd-42ac-8223-d73c999a8026
+https://github.com/user-attachments/assets/63940a18-be6e-47fe-80bb-43d05162f2d6
 
-Prompts:
-1. A dog walking in grass.
-2. A cat walking in grass.
-3. A lion walking in grass.
+[Timeline JSON file](./examples/timeline-factory.json)
+
+https://github.com/user-attachments/assets/f51d4c1a-c377-49bf-948e-a3c2deeb699e
+
+[Timeline JSON file](./examples/timeline-ironman.json)
 
 ## Resolution
 
