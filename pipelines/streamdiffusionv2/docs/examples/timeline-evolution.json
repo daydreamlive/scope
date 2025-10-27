@@ -1,0 +1,71 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 4.3515,
+      "prompts": [
+        {
+          "text": "A domestic short-haired cat in tall grass, soft sunlight, natural fur texture, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 4.3515,
+      "endTime": 9.23580000001192,
+      "prompts": [
+        {
+          "text": "A domestic cat sitting in tall grass looking around with glowing red cybernetic eyes, subtle metallic scars, photorealistic\n",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 9.23580000001192,
+      "endTime": 12.65410000002384,
+      "prompts": [
+        {
+          "text": "A fully robotic cat with smooth titanium plating and glowing optical sensors, red eyes, elegant feline body design, futuristic military prototype aesthetics, in the grass looking around",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 12.65410000002384,
+      "endTime": 18.242199999928474,
+      "prompts": [
+        {
+          "text": "A fully robotic cat with smooth titanium plating and glowing optical sensors, elegant feline body design, red eyes, futuristic military prototype aesthetics, apocalypse, smoke, ultra detailed photorealism",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 18.242199999928474,
+      "endTime": 28.593,
+      "prompts": [
+        {
+          "text": "A nuclear blast, an apocolyptic mushroom cloud with the shockwave moving back and forth",
+          "weight": 100
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "pipelineId": "streamdiffusionv2",
+    "resolution": {
+      "height": 512,
+      "width": 512
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      700,
+      500
+    ],
+    "noiseScale": 0.8,
+    "noiseController": false,
+    "manageCache": false
+  },
+  "version": "2.0",
+  "exportedAt": "2025-10-27T19:37:42.187Z"
+}

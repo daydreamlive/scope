@@ -1,0 +1,61 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 4.9427999999523164,
+      "prompts": [
+        {
+          "text": "A domestic short-haired cat in tall grass, soft sunlight, natural fur texture, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 4.9427999999523164,
+      "endTime": 12.126699999988078,
+      "prompts": [
+        {
+          "text": "A tuna fish in the grass looking around, confused about being on land, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 12.126699999988078,
+      "endTime": 19.6105,
+      "prompts": [
+        {
+          "text": "A chicken in the grass looking around, clucking nervously, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 19.6105,
+      "endTime": 30.75119999998807,
+      "prompts": [
+        {
+          "text": "A field mouse in the grass looking around, cleaning itself nervously, photorealistic",
+          "weight": 100
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "pipelineId": "streamdiffusionv2",
+    "resolution": {
+      "height": 512,
+      "width": 512
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      700,
+      500
+    ],
+    "noiseScale": 0.8,
+    "noiseController": false,
+    "manageCache": false
+  },
+  "version": "2.0",
+  "exportedAt": "2025-10-27T16:33:37.351Z"
+}

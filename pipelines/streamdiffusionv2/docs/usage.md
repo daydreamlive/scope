@@ -6,9 +6,19 @@ The model is trained using [Self-Forcing](https://self-forcing.github.io/) on Wa
 
 ## Examples
 
-https://github.com/user-attachments/assets/60a15839-1e7c-480a-bc11-4f447ba6ec49
+The following examples include timeline JSON files with the prompts used so you can try them as well.
 
-https://github.com/user-attachments/assets/dfcc04a3-f55c-4cc7-a063-7343aa584ea8
+https://github.com/user-attachments/assets/639dd5a2-1bb0-4916-94b6-7935fafe459a
+
+[Timeline JSON file](./examples/timeline-evolution.json)
+
+https://github.com/user-attachments/assets/26e570ab-f2f9-4b99-b82f-5bc36499bd89
+
+[Timeline JSON file](./examples/timeline-feline.json)
+
+https://github.com/user-attachments/assets/a78ec9c5-83aa-4f0d-826e-f32f6fd10366
+
+[Timeline JSON file](./examples/timeline-prey.json)
 
 ## Resolution
 

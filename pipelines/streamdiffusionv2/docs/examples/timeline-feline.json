@@ -1,0 +1,71 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 4.7475,
+      "prompts": [
+        {
+          "text": "A domestic black cat in tall grass, soft sunlight, natural fur texture, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 4.7475,
+      "endTime": 10.064399999976159,
+      "prompts": [
+        {
+          "text": "A domestic orange cat in tall grass, soft sunlight, natural fur texture, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 10.064399999976159,
+      "endTime": 14.981399999976158,
+      "prompts": [
+        {
+          "text": "A tiger in tall grass, soft sunlight, natural fur texture, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 14.981399999976158,
+      "endTime": 20.058,
+      "prompts": [
+        {
+          "text": "A lion in tall grass, soft sunlight, natural fur texture, photorealistic",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 20.058,
+      "endTime": 24.304299999952317,
+      "prompts": [
+        {
+          "text": "A pink panther in tall grass, soft sunlight, natural fur texture, photorealistic",
+          "weight": 100
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "pipelineId": "streamdiffusionv2",
+    "resolution": {
+      "height": 512,
+      "width": 512
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      700,
+      500
+    ],
+    "noiseScale": 0.8,
+    "noiseController": false,
+    "manageCache": false
+  },
+  "version": "2.0",
+  "exportedAt": "2025-10-27T19:25:32.028Z"
+}
