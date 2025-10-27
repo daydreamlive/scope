@@ -15,7 +15,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
   - [LongLive](./pipelines/longlive/docs/usage.md)
 - WebRTC real-time streaming
 - Low latency async video processing pipelines
-- Interactive UI with text prompting, model parameter controls and video/camera/text input modes
+- Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
 
 ...and more to come!
 
@@ -87,6 +87,15 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 5. **Access the app**: Wait for deployment to complete, then open the app at port 8000
 
 The template will automatically download model weights and configure everything needed.
+
+## First Generation
+
+The easiest way to get started is to replay an example generation and then modify prompts in the timeline to steer the generation in a different direction.
+
+Examples with importable timeline files can be found here:
+
+- [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md)
+- [LongLive](./pipelines/longlive/docs/usage.md)
 
 ## Firewalls
 
