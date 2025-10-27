@@ -1,0 +1,51 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 11.4555,
+      "prompts": [
+        {
+          "text": "A 3D animated scene. A panda with fluffy black and white fur walks forward along a stone path through a park on a spring day. The panda moves at a steady pace directly toward the camera, its distinctive black eye patches framing bright, clear eyes that remain focused straight ahead throughout its walk. The panda's round body shifts with each step as its thick black legs alternate in a regular walking rhythm. Cherry blossom trees line the path, their pink-laden branches swaying gently and releasing petals that drift through the air. Green grass spreads calmly on both sides of the path, with beds of colorful tulips and daffodils standing bright and still. The camera remains in a fixed position as the panda approaches, its forward-gazing eyes clearly visible and alert, never looking away or blinking. Spring sunlight filters through the moving tree branches, creating shifting shadows on the path and illuminating the panda's expressive eyes. The panda's fur catches the light as it continues walking forward with its characteristic waddle, maintaining steady eye contact with the camera. Pink petals occasionally land on the panda's head and back before sliding off. The scene captures the peaceful atmosphere of a spring afternoon in the park, with cherry blossoms floating down around the panda's steady, focused forward progress along the stone path.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 11.4555,
+      "endTime": 24.16839999985695,
+      "prompts": [
+        {
+          "text": "A 3D animated scene. The panda with fluffy black and white fur slows its forward walk and comes to a gentle stop on the stone path in the park on a spring day. The panda's bright, clear eyes within its distinctive black eye patches remain focused forward as it begins to lower itself down, bending its thick black legs and using its front paws for balance. The panda's round body settles onto the warm stone path with a soft, controlled motion, ending in a comfortable sitting position with its legs stretched out in front. As the panda completes this sitting motion, the camera begins a smooth, steady zoom out, pulling back to reveal the panda's entire body from head to toe. The widening frame shows the full panda sitting peacefully on the path, its black and white fur clearly visible against the stone surface. Cherry blossom trees continue to sway gently overhead, their pink petals still drifting down through the expanded view. The broader perspective reveals more of the serene park - the stone path extending in both directions, the calm green grass on either side, and the bright beds of tulips and daffodils. The panda remains centered in frame as the camera pulls back, its eyes still alert and forward-facing, now appearing as a complete figure sitting contentedly in the middle of the path. Spring sunlight continues filtering through the tree branches, casting dappled shadows across the panda's full form. Pink petals land softly on the sitting panda's head and shoulders as the peaceful spring afternoon continues around it.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 24.16839999985695,
+      "endTime": 36.94459999966622,
+      "prompts": [
+        {
+          "text": "A 3D animated scene. The panda with fluffy black and white fur pushes off from its sitting position on the stone path in the park on a spring day, using its strong front paws against the ground to rise. The panda's distinctive black eye patches frame its bright, clear eyes that remain focused forward as it stands up to its full height, its round body straightening and thick black legs supporting its weight. Once fully standing, the panda lifts both of its black furry arms upward, raising them high above its head in a gentle stretching motion. The panda's arms extend fully, its paws reaching toward the sky as if greeting the beautiful spring day. Cherry blossom trees continue swaying gently overhead, their pink petals drifting down around the panda's raised arms and settling on its fluffy head and shoulders. The camera holds steady in its position, capturing the panda's full standing form with its arms raised in a peaceful, celebratory gesture. The panda's forward-facing eyes remain bright and alert as it holds this position, its round belly visible as it stretches upward. Spring sunlight filters through the tree branches, illuminating the panda's black and white fur and creating a gentle glow around its raised paws. The green grass remains calm on both sides of the path, with the colorful tulips and daffodils standing still. Pink petals continue floating through the air as the panda maintains its arms-raised pose on the peaceful stone path in the serene spring park.",
+          "weight": 100
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "pipelineId": "longlive",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750
+    ],
+    "noiseScale": 0.7,
+    "noiseController": true,
+    "manageCache": true
+  },
+  "version": "2.0",
+  "exportedAt": "2025-10-27T16:10:59.279Z"
+}

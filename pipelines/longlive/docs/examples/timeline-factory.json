@@ -1,0 +1,51 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 11.225200000047684,
+      "prompts": [
+        {
+          "text": "A cinematic wide-angle panorama slowly panning across a massive industrial factory complex at golden hour. The camera glides smoothly from left to right, revealing towering smokestacks releasing gentle plumes of white steam into the amber sky, rows of corrugated metal warehouses with large numbered doors, and interconnected buildings with reflective glass windows catching the warm sunlight. In the foreground, a paved access road curves through the industrial landscape with yellow safety markings clearly visible. The background shows a distant cityscape silhouette against mountains. The scene captures the grand scale of modern manufacturing, with subtle details like rotating ventilation fans on rooftops, blinking red aviation warning lights on tall structures, loading docks with parked semi-trucks, and small human figures in high-visibility vests walking between buildings for scale. The lighting creates long dramatic shadows across the concrete grounds while the metallic surfaces gleam with industrial precision. The atmosphere is clear with excellent visibility, emphasizing the geometric patterns and industrial architecture of this sprawling manufacturing facility.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 11.225200000047684,
+      "endTime": 21.944400000333786,
+      "prompts": [
+        {
+          "text": "A dramatic cinematic wide shot of a massive industrial factory complex experiencing a catastrophic explosion during daytime. The camera holds steady as a brilliant orange and yellow fireball erupts from the central manufacturing building, sending a powerful shockwave rippling outward through the air. Thick billowing clouds of dark gray and black smoke rise dramatically into the clear blue sky, mushrooming upward in a towering column. Debris and metal fragments are launched high into the air, tumbling and spinning in slow motion arcs against the sky. The surrounding warehouse structures shake violently from the blast force, with windows shattering outward in cascading sheets of glass that catch the sunlight. Secondary smaller explosions bloom like fiery flowers along the connected pipeline systems, creating a chain reaction of orange bursts. The concrete ground cracks and buckles from the impact, sending dust clouds rolling across the industrial yard. In the foreground, the access road and safety barriers are pelted with falling debris. The background mountains remain serene and untouched, creating a stark contrast to the chaos. The entire scene captures the raw power and destructive force of the industrial accident, with fire, smoke, and destruction dominating the frame while maintaining a safe cinematic distance from the devastation.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 21.944400000333786,
+      "endTime": 33.73460000038147,
+      "prompts": [
+        {
+          "text": "\"A cinematic wide shot of the burning industrial factory complex as heavy rain begins to fall from dark storm clouds gathering overhead. The camera holds steady as thick raindrops start pelting down, creating visible curtains of water that sweep across the devastated manufacturing buildings. The intense orange and yellow flames that were consuming the structures begin to diminish and sputter as the torrential downpour intensifies, producing massive clouds of white steam that mix with the black smoke. Water cascades off the damaged rooftops and broken structures, forming waterfalls that pour through gaps in the twisted metal framework. The rain creates thousands of tiny splashes on the cracked concrete ground, quickly forming puddles that reflect the dying orange glow of the subsiding fires. Lightning flashes in the distance behind the dark gray storm clouds, briefly illuminating the entire industrial landscape. The heavy rainfall gradually overwhelms the flames, transforming the inferno into smoldering, steam-covered ruins. Ash and soot wash away in dark rivulets across the factory yard. The surrounding warehouse structures are drenched, their metal surfaces gleaming wet in the diffused light. The background mountains disappear into the misty rain and low-hanging clouds. The scene captures nature's power intervening to quell the industrial disaster, with the cleansing rain bringing a sense of calm after the chaos.",
+          "weight": 100
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "pipelineId": "longlive",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750
+    ],
+    "noiseScale": 0.7,
+    "noiseController": true,
+    "manageCache": true
+  },
+  "version": "2.0",
+  "exportedAt": "2025-10-27T15:51:04.242Z"
+}
