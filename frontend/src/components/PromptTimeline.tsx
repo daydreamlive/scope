@@ -463,6 +463,20 @@ export function PromptTimeline({
             );
             onPromptsChange(importedPrompts);
 
+            // Adjust visible timeline range to show all imported prompts
+            if (importedPrompts.length > 0) {
+              const maxEndTime = Math.max(
+                ...importedPrompts.map((p: TimelinePrompt) => p.endTime || 0)
+              );
+              // Set visible end time to show all prompts, with minimum of default visible range
+              const newVisibleEndTime = Math.max(
+                maxEndTime + 2, // Add 2 seconds buffer
+                DEFAULT_VISIBLE_END_TIME
+              );
+              setVisibleStartTime(0);
+              setVisibleEndTime(newVisibleEndTime);
+            }
+
             // Import settings if available and callback is provided
             if (timelineData.settings && onSettingsImport) {
               onSettingsImport(timelineData.settings);
