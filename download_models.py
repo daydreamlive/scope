@@ -13,9 +13,14 @@ Downloads:
 
 import argparse
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
+
+# Disable hf_transfer to use standard download method
+# This prevents errors when HF_HUB_ENABLE_HF_TRANSFER=1 is set but hf_transfer is not installed
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 
 from lib.models_config import (
     ensure_models_dir,
