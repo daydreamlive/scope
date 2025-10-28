@@ -33,6 +33,7 @@ interface SettingsPanelProps {
   pipelineId: PipelineId;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
+  isDownloading?: boolean;
   resolution?: {
     height: number;
     width: number;
@@ -56,6 +57,7 @@ export function SettingsPanel({
   pipelineId,
   onPipelineIdChange,
   isStreaming = false,
+  isDownloading = false,
   resolution,
   onResolutionChange,
   seed = 42,
@@ -200,7 +202,7 @@ export function SettingsPanel({
           <Select
             value={pipelineId}
             onValueChange={handlePipelineIdChange}
-            disabled={isStreaming}
+            disabled={isStreaming || isDownloading}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select a pipeline" />

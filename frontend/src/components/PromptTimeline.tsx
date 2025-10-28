@@ -156,6 +156,7 @@ interface PromptTimelineProps {
   onSettingsImport?: (settings: Partial<SettingsState>) => void;
   onScrollToTime?: (scrollFn: (time: number) => void) => void;
   isStreaming?: boolean;
+  isDownloading?: boolean;
 }
 
 export function PromptTimeline({
@@ -181,6 +182,7 @@ export function PromptTimeline({
   onSettingsImport,
   onScrollToTime,
   isStreaming = false,
+  isDownloading = false,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -632,7 +634,7 @@ export function PromptTimeline({
           <div className="flex items-center gap-2">
             <Button
               onClick={onPlayPause}
-              disabled={disabled}
+              disabled={disabled || isDownloading}
               size="sm"
               variant="outline"
             >
@@ -644,7 +646,7 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onReset}
-              disabled={disabled}
+              disabled={disabled || isDownloading}
               size="sm"
               variant="outline"
               title="Reset timeline"
@@ -653,7 +655,7 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onClear}
-              disabled={disabled || isPlaying || isStreaming}
+              disabled={disabled || isPlaying || isStreaming || isDownloading}
               size="sm"
               variant="outline"
               title="Clear timeline"
@@ -664,7 +666,7 @@ export function PromptTimeline({
           <div className="flex items-center gap-2">
             <Button
               onClick={handleExport}
-              disabled={disabled}
+              disabled={disabled || isDownloading}
               size="sm"
               variant="outline"
             >
@@ -677,12 +679,12 @@ export function PromptTimeline({
                 accept=".json"
                 onChange={handleImport}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={disabled || isStreaming}
+                disabled={disabled || isStreaming || isDownloading}
               />
               <Button
                 size="sm"
                 variant="outline"
-                disabled={disabled || isStreaming}
+                disabled={disabled || isStreaming || isDownloading}
               >
                 <Upload className="h-4 w-4 mr-1" />
                 Import
@@ -692,6 +694,7 @@ export function PromptTimeline({
               onClick={() => onCollapseToggle?.(!isCollapsed)}
               size="sm"
               variant="outline"
+              disabled={isDownloading}
               title={isCollapsed ? "Expand timeline" : "Collapse timeline"}
             >
               {isCollapsed ? (
