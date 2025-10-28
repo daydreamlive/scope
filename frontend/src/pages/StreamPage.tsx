@@ -659,8 +659,9 @@ export function StreamPage() {
       <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
 
       {/* Download Dialog */}
-      {showDownloadDialog && pipelineNeedsModels && (
+      {pipelineNeedsModels && (
         <DownloadDialog
+          open={showDownloadDialog}
           pipelineId={pipelineNeedsModels as PipelineId}
           onClose={handleDialogClose}
           onDownload={handleDownloadModels}
