@@ -174,22 +174,14 @@ def download_longlive_pipeline() -> None:
 
     # 1) HF repo download for Wan2.1-T2V-1.3B, excluding large file
     wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
-    if wan_video_dst.exists():
-        print(f"[SKIP] Wan2.1-T2V-1.3B already exists at: {wan_video_dst}")
-    else:
-        download_hf_repo_excluding(
-            wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
-        )
+    download_hf_repo_excluding(
+        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
+    )
 
     # 2) HF single file download for UMT5 encoder
-    if (wan_video_comfy_dst / wan_video_comfy_file).exists():
-        print(
-            f"[SKIP] UMT5 encoder already exists at: {wan_video_comfy_dst / wan_video_comfy_file}"
-        )
-    else:
-        download_hf_single_file(
-            wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-        )
+    download_hf_single_file(
+        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
+    )
 
     # 3) HF repo download for LongLive-1.3B
     download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
