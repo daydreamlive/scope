@@ -334,7 +334,10 @@ class PipelineManager:
             config["seed"] = seed
 
             pipeline = KreaRealtimeVideoPipeline(
-                config, device=torch.device("cuda"), dtype=torch.bfloat16
+                config,
+                # use_fp8_e4m3fn=True,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
             )
             logger.info("krea-realtime-video pipeline initialized")
             return pipeline
