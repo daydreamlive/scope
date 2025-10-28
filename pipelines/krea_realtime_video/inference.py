@@ -272,15 +272,17 @@ class InferencePipeline(torch.nn.Module):
             self.first_context_frame = denoised_pred[:, :1]
 
         # Push the generated latents to the context frame buffer (sliding window)
-        self.context_frame_buffer = torch.cat(
-            [
-                self.context_frame_buffer,
-                denoised_pred.to(
-                    self.context_frame_buffer.device, self.context_frame_buffer.dtype
-                ),
-            ],
-            dim=1,
-        )[:, -(self.context_frame_buffer_max_size) :]
+        if self.context_frame_buffer_max_size > 0:
+            self.context_frame_buffer = torch.cat(
+                [
+                    self.context_frame_buffer,
+                    denoised_pred.to(
+                        self.context_frame_buffer.device,
+                        self.context_frame_buffer.dtype,
+                    ),
+                ],
+                dim=1,
+            )[:, -self.context_frame_buffer_max_size :]
 
         output = self.vae.decode_to_pixel(denoised_pred, use_cache=True)
 
