@@ -65,6 +65,7 @@ export function PromptInputWithTimeline({
   onTimelinePromptsChange,
   onTimelineCurrentTimeChange,
   onTimelinePlayingChange,
+  isDownloading = false,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -536,6 +537,7 @@ export function PromptInputWithTimeline({
         onSettingsImport={onSettingsImport}
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
         isStreaming={isStreaming}
+        isDownloading={isDownloading}
       />
     </div>
   );

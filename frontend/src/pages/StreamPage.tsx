@@ -635,6 +635,7 @@ export function StreamPage() {
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
+            isDownloading={isDownloading}
             resolution={
               settings.resolution || getDefaultResolution(settings.pipelineId)
             }
