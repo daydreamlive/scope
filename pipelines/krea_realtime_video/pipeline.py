@@ -17,7 +17,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         self,
         config,
         low_memory: bool = False,
-        use_fp8: bool = False,
+        use_fp8_e4m3fn: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
@@ -43,7 +43,10 @@ class KreaRealtimeVideoPipeline(Pipeline):
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
 
-        if use_fp8:
+        if use_fp8_e4m3fn:
+            # Cast before optional quantization
+            generator = generator.to(dtype=dtype)
+
             start = time.time()
 
             from torchao.quantization.quant_api import (
@@ -52,12 +55,17 @@ class KreaRealtimeVideoPipeline(Pipeline):
                 quantize_,
             )
 
+            # Move to target device during quantization
+            # Defaults to using fp8_e4m3fn for both weights and activations
             quantize_(
                 generator,
                 Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
+                device=device,
             )
 
             print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
+        else:
+            generator = generator.to(device=device, dtype=dtype)
 
         start = time.time()
         text_encoder = WanTextEncoder(
@@ -76,9 +84,16 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         seed = getattr(config, "seed", 42)
 
+        # Move text encoder to target device but use dtype of weights
+        text_encoder = text_encoder.to(device=device)
+        # Move VAE to target device and use target dtype
+        vae = vae.to(device=device, dtype=dtype)
+
         self.stream = InferencePipeline(
             config, generator, text_encoder, vae, low_memory, seed
-        ).to(device=device, dtype=dtype)
+        )
+        self.device = device
+        self.dtype = dtype
 
         self.prompts = None
         self.denoising_step_list = None
@@ -139,9 +154,12 @@ class KreaRealtimeVideoPipeline(Pipeline):
         init_cache: bool = False,
     ):
         """Apply weighted blending of cached prompt embeddings."""
-        combined_embeds = self.prompt_blender.blend(
-            prompts, interpolation_method, self.stream.text_encoder
-        )
+        # autocast to target dtype since we the text encoder weights dtype
+        # might be different (eg float8_e4m3fn)
+        with torch.autocast(str(self.device), dtype=self.dtype):
+            combined_embeds = self.prompt_blender.blend(
+                prompts, interpolation_method, self.stream.text_encoder
+            )
 
         if combined_embeds is None:
             return

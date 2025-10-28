@@ -12,7 +12,9 @@ from .pipeline import KreaRealtimeVideoPipeline
 config = OmegaConf.load("pipelines/krea_realtime_video/model.yaml")
 
 models_dir = get_models_dir()
+# 320 should work with 32GB VRAM
 height = 480
+# 576 should work with 32GB VRAM
 width = 832
 
 config["model_dir"] = str(models_dir)
@@ -29,7 +31,12 @@ config["width"] = width
 
 device = torch.device("cuda")
 pipeline = KreaRealtimeVideoPipeline(
-    config, low_memory=is_cuda_low_memory(device), device=device, dtype=torch.bfloat16
+    config,
+    low_memory=is_cuda_low_memory(device),
+    # Uncomment to work with 32GB VRAM
+    # use_fp8_e4m3fn=True,
+    device=device,
+    dtype=torch.bfloat16,
 )
 
 prompts = [
