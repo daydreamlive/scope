@@ -31,13 +31,18 @@ export function DownloadDialog({
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Download Pipeline Models</DialogTitle>
-          <DialogDescription>{pipelineInfo.about}</DialogDescription>
+          <DialogTitle>Download Models</DialogTitle>
+          <DialogDescription className="mt-3">
+            This pipeline requires model weights to be downloaded.
+          </DialogDescription>
         </DialogHeader>
 
         {pipelineInfo.estimatedVram && (
-          <p className="text-sm text-muted-foreground">
-            Estimated required VRAM: {pipelineInfo.estimatedVram} GB
+          <p className="text-sm text-muted-foreground mb-3">
+            <span className="font-semibold">
+              Estimated GPU VRAM Requirement:
+            </span>{" "}
+            {pipelineInfo.estimatedVram} GB
           </p>
         )}
 
