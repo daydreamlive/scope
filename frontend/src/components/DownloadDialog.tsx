@@ -50,9 +50,6 @@ export function DownloadDialog({
           <Button onClick={onDownload} className="gap-2">
             <Download className="h-4 w-4" />
             Download
-            {pipelineInfo.estimatedDownloadSize
-              ? ` (${pipelineInfo.estimatedDownloadSize} GB)`
-              : ""}
           </Button>
         </DialogFooter>
       </DialogContent>
