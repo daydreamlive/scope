@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from download_models import download_models
-from lib.models_config import models_are_downloaded
+from lib.models_config import get_models_dir, models_are_downloaded
 from lib.pipeline_manager import PipelineManager
 from lib.schema import (
     HealthResponse,
@@ -152,6 +152,10 @@ async def lifespan(app: FastAPI):
         )
         logger.error(error_msg)
         sys.exit(1)
+
+    # Log models directory
+    models_dir = get_models_dir()
+    logger.info(f"Models directory: {models_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
     pipeline_manager = PipelineManager()

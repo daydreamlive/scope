@@ -34,12 +34,10 @@ def get_models_dir() -> Path:
     env_dir = os.environ.get(MODELS_DIR_ENV_VAR)
     if env_dir:
         models_dir = Path(env_dir).expanduser().resolve()
-        logger.info(f"Using models directory from {MODELS_DIR_ENV_VAR}: {models_dir}")
         return models_dir
 
     # Use default directory
     models_dir = Path(DEFAULT_MODELS_DIR).expanduser().resolve()
-    logger.debug(f"Using default models directory: {models_dir}")
     return models_dir
 
 
@@ -123,7 +121,6 @@ def models_are_downloaded(pipeline_id: str | None = None) -> bool:
 
     for file_path in required_files:
         if not file_path.exists():
-            logger.info(f"Missing model file: {file_path}")
             return False
 
     return True
