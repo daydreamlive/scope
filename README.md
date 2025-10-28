@@ -54,13 +54,15 @@ uv run build
 > [!IMPORTANT]
 > If you are running the server in a cloud environment, make sure to read the [Firewalls](#firewalls) section.
 
-This will start the server and on the first run will also download required model weights. The default directory where model weights are stored is `~/.daydream-scope/models`.
+This will start the server.
 
 ```
 uv run daydream-scope
 ```
 
 After the server starts up, the frontend will be available at `http://localhost:8000`.
+
+The frontend will present a dialog for downloading model weights for pipelines before running them (by pressing play with the pipeline selected) for the first time. The default directory where model weights are stored is `~/.daydream-scope/models`.
 
 ### Runpod
 
@@ -86,7 +88,7 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 
 5. **Access the app**: Wait for deployment to complete, then open the app at port 8000
 
-The template will automatically download model weights and configure everything needed.
+The template will configure everything needed and the frontend will present a dialog for downloading model weights for pipelines when running them (by pressing play with the pipeline selected) for the first time.
 
 ## First Generation
 
