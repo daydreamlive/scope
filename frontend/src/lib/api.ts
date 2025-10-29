@@ -36,7 +36,7 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   height?: number;
   width?: number;
   seed?: number;
-  use_fp8_e4m3fn?: boolean;
+  quantization?: "fp8_e4m3fn" | null;
 }
 
 export interface PipelineLoadRequest {

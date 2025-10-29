@@ -34,7 +34,7 @@ export interface SettingsState {
   noiseScale?: number;
   noiseController?: boolean;
   manageCache?: boolean;
-  useFp8E4m3fn?: boolean;
+  quantization?: "fp8_e4m3fn" | null;
   paused?: boolean;
 }
 

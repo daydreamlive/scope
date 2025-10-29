@@ -3,6 +3,8 @@ import time
 
 import torch
 
+from lib.schema import Quantization
+
 from ..blending import PromptBlender
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
@@ -17,7 +19,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         self,
         config,
         low_memory: bool = False,
-        use_fp8_e4m3fn: bool = False,
+        quantization: Quantization | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
@@ -43,7 +45,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
 
-        if use_fp8_e4m3fn:
+        if quantization == Quantization.FP8_E4M3FN:
             # Cast before optional quantization
             generator = generator.to(dtype=dtype)
 
