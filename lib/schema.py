@@ -116,6 +116,18 @@ class LongLiveLoadParams(PipelineLoadParams):
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
 
 
+class KreaRealtimeVideoLoadParams(PipelineLoadParams):
+    """Load parameters for KreaRealtimeVideo pipeline."""
+
+    height: int = Field(default=512, description="Target video height", ge=64, le=2048)
+    width: int = Field(default=512, description="Target video width", ge=64, le=2048)
+    seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    use_fp8_e4m3fn: bool = Field(
+        default=True,
+        description="Enable FP8 E4M3FN quantization for the text encoder",
+    )
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -127,6 +139,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | VodLoadParams
         | LongLiveLoadParams
+        | KreaRealtimeVideoLoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 

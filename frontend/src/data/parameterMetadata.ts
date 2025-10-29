@@ -52,4 +52,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Controls the amount of noise added during generation. Higher values add more variation and creativity and lower values produce more stable results.",
   },
+  useFp8E4m3fn: {
+    label: "FP8 E4M3FN:",
+    tooltip:
+      "Enables FP8 E4M3FN quantization for the text encoder. This can reduce memory usage and improve performance.",
+  },
 };
