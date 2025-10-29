@@ -137,6 +137,15 @@ class StreamDiffusionV2LoadParams(PipelineLoadParams):
     height: int = Field(default=512, description="Target video height", ge=64, le=2048)
     width: int = Field(default=512, description="Target video width", ge=64, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    default_temporal_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="slerp",
+        description="Default method for temporal interpolation between prompt blends across frames",
+    )
+    default_temporal_interpolation_steps: int = Field(
+        default=0,
+        ge=0,
+        description="Default number of generation calls to transition over for temporal interpolation",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -157,6 +166,15 @@ class LongLiveLoadParams(PipelineLoadParams):
     height: int = Field(default=320, description="Target video height", ge=16, le=2048)
     width: int = Field(default=576, description="Target video width", ge=16, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    default_temporal_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="slerp",
+        description="Default method for temporal interpolation between prompt blends across frames",
+    )
+    default_temporal_interpolation_steps: int = Field(
+        default=0,
+        ge=0,
+        description="Default number of generation calls to transition over for temporal interpolation",
+    )
 
 
 class KreaRealtimeVideoLoadParams(PipelineLoadParams):
@@ -168,6 +186,15 @@ class KreaRealtimeVideoLoadParams(PipelineLoadParams):
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    default_temporal_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="linear",
+        description="Default method for temporal interpolation between prompt blends across frames",
+    )
+    default_temporal_interpolation_steps: int = Field(
+        default=4,
+        ge=0,
+        description="Default number of generation calls to transition over for temporal interpolation",
     )
 
 
