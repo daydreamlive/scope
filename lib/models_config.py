@@ -101,6 +101,15 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
             models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
         ]
 
+    # krea-realtime-video pipeline
+    logger.info(f"pipeline_id: {pipeline_id}")
+    if pipeline_id == "krea-realtime-video":
+        return [
+            models_dir / "krea-realtime-video" / "krea-realtime-video-14b.safetensors",
+            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
+            models_dir / "Wan2.1-T2V-14B" / "config.json",
+        ]
+
     # Default: nothing is required
     return []
 
