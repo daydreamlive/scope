@@ -23,12 +23,20 @@ except ModuleNotFoundError:
 
 # FLASH_ATTN_3_AVAILABLE = False
 
+from .sage import sageattn_func, SAGEATTN_AVAILABLE
+
 import warnings
 
 __all__ = [
     "flash_attention",
     "attention",
+    "sageattn_func",
+    "SAGEATTN_AVAILABLE",
 ]
+
+print("flash attn 2 available", FLASH_ATTN_2_AVAILABLE)
+print("flash attn 3 available", FLASH_ATTN_3_AVAILABLE)
+print("sage attn available", SAGEATTN_AVAILABLE)
 
 
 def flash_attention(
@@ -159,7 +167,23 @@ def attention(
     dtype=torch.bfloat16,
     fa_version=None,
 ):
-    if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    if SAGEATTN_AVAILABLE:
+        # Use sageattention when available
+        attn_mask = None
+
+        og_dtype = q.dtype
+        q = q.transpose(1, 2).to(dtype)
+        k = k.transpose(1, 2).to(dtype)
+        v = v.transpose(1, 2).to(dtype)
+
+        out = sageattn_func(
+            q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p
+        )
+
+        out = out.transpose(1, 2).contiguous().to(og_dtype)
+        return out
+
+    elif FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
         return flash_attention(
             q=q,
             k=k,
