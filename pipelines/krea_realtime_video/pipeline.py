@@ -5,7 +5,7 @@ import torch
 
 from lib.schema import Quantization
 
-from ..blending import PromptBlender
+from ..blending import PromptBlender, parse_and_start_transition
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
 from .vendor.wan2_1.vae_block3 import WanVAEWrapper
@@ -100,8 +100,17 @@ class KreaRealtimeVideoPipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
-        # Prompt blending
-        self.prompt_blender = PromptBlender(device, dtype)
+        # Prompt blending with cache reset callback for transitions
+        self.prompt_blender = PromptBlender(
+            device, dtype, cache_reset_callback=self._reset_cache_for_transition
+        )
+
+    def _reset_cache_for_transition(self):
+        """Reset cross-attention cache for prompt transitions."""
+        generator_param = next(self.stream.generator.model.parameters())
+        self.stream._initialize_crossattn_cache(
+            batch_size=1, dtype=generator_param.dtype, device=generator_param.device
+        )
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
         # If caller requested prepare assume cache init
@@ -113,12 +122,32 @@ class KreaRealtimeVideoPipeline(Pipeline):
         prompt_interpolation_method = kwargs.get(
             "prompt_interpolation_method", "linear"
         )
+        transition = kwargs.get("transition", None)
         denoising_step_list = kwargs.get("denoising_step_list", None)
 
         # Check if prompts changed using prompt blender
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
             logger.info("prepare: Initiating pipeline prepare for prompt update")
             should_prepare = True
+
+        # Handle prompt transition requests
+        if transition is not None:
+            logger.info("prepare: Starting prompt transition")
+            with torch.autocast(str(self.device), dtype=self.dtype):
+                target_prompts, should_apply_immediately = parse_and_start_transition(
+                    transition, self.prompt_blender, self.stream.text_encoder
+                )
+
+            if target_prompts:
+                self.prompts = target_prompts
+
+                if should_apply_immediately:
+                    # num_steps=0: apply immediately without transition
+                    logger.info(
+                        "prepare: Applying transition prompts immediately (num_steps=0)"
+                    )
+                    should_prepare = True
+                # else: Smooth transition started, queue will handle embeddings in __call__
 
         if (
             denoising_step_list is not None
@@ -135,6 +164,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
                 self.denoising_step_list = denoising_step_list
 
             # Apply prompt blending and prepare stream
+            # (PromptBlender.blend() returns None if transitioning, which skips preparation)
             self._apply_prompt_blending(
                 prompts, prompt_interpolation_method, denoising_step_list, init_cache
             )
@@ -145,6 +175,18 @@ class KreaRealtimeVideoPipeline(Pipeline):
         self,
         _: torch.Tensor | list[torch.Tensor] | None = None,
     ):
+        # Update prompt embedding for this generation call
+        # Handles both static blending and temporal transitions
+        with torch.autocast(str(self.device), dtype=self.dtype):
+            next_embedding = self.prompt_blender.get_next_embedding(
+                self.stream.text_encoder
+            )
+
+        if next_embedding is not None:
+            # Ensure embedding is in the correct dtype for cross-attention
+            next_embedding = next_embedding.to(dtype=self.dtype)
+            self.stream.conditional_dict = {"prompt_embeds": next_embedding}
+
         # Note: The caller must call prepare() before __call__()
         return self.stream()
 
@@ -165,6 +207,9 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         if combined_embeds is None:
             return
+
+        # Ensure embedding is in the correct dtype for cross-attention
+        combined_embeds = combined_embeds.to(dtype=self.dtype)
 
         # Set the blended embeddings on the stream
         self.stream.conditional_dict = {"prompt_embeds": combined_embeds}
