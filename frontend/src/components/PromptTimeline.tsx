@@ -412,6 +412,7 @@ export function PromptTimeline({
             noiseScale: settings.noiseScale,
             noiseController: settings.noiseController,
             manageCache: settings.manageCache,
+            useFp8E4m3fn: settings.useFp8E4m3fn,
             // Exclude paused state as it's runtime-specific
           }
         : undefined,

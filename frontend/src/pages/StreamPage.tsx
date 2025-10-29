@@ -277,6 +277,11 @@ export function StreamPage() {
     });
   };
 
+  const handleUseFp8E4m3fnChange = (enabled: boolean) => {
+    updateSettings({ useFp8E4m3fn: enabled });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -441,9 +446,10 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          use_fp8_e4m3fn: settings.useFp8E4m3fn ?? true,
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, use_fp8_e4m3fn: ${loadParams.use_fp8_e4m3fn}`
         );
       }
 
@@ -666,6 +672,8 @@ export function StreamPage() {
             onNoiseControllerChange={handleNoiseControllerChange}
             manageCache={settings.manageCache ?? true}
             onManageCacheChange={handleManageCacheChange}
+            useFp8E4m3fn={settings.useFp8E4m3fn ?? true}
+            onUseFp8E4m3fnChange={handleUseFp8E4m3fnChange}
             onResetCache={handleResetCache}
           />
         </div>

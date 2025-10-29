@@ -32,9 +32,20 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   seed?: number;
 }
 
+export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
+  height?: number;
+  width?: number;
+  seed?: number;
+  use_fp8_e4m3fn?: boolean;
+}
+
 export interface PipelineLoadRequest {
   pipeline_id?: string;
-  load_params?: PassthroughLoadParams | LongLiveLoadParams | null;
+  load_params?:
+    | PassthroughLoadParams
+    | LongLiveLoadParams
+    | KreaRealtimeVideoLoadParams
+    | null;
 }
 
 export interface PipelineStatusResponse {
