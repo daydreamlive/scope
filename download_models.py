@@ -145,11 +145,14 @@ def download_krea_realtime_video_pipeline() -> None:
     # HuggingFace repos
     krea_rt_repo = "krea/krea-realtime-video"
     wan_video_14b_repo = "Wan-AI/Wan2.1-T2V-14B"
+    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
+    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
 
     # Ensure models directory exists and get paths
     models_root = ensure_models_dir()
     krea_rt_dst = models_root / "krea-realtime-video"
     wan_video_14b_dst = models_root / "Wan2.1-T2V-14B"
+    wan_video_comfy_dst = models_root / "WanVideo_comfy"
 
     # 1) Download only krea-realtime-video
     snapshot_download(
@@ -163,6 +166,11 @@ def download_krea_realtime_video_pipeline() -> None:
         repo_id=wan_video_14b_repo,
         local_dir=wan_video_14b_dst,
         allow_patterns=["config.json"],
+    )
+
+    # 3) HF single file download for UMT5 encoder
+    download_hf_single_file(
+        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
     )
 
 

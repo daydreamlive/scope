@@ -44,6 +44,8 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     category: "no-video-input",
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
+    estimatedVram: 32,
+    requiresModels: true,
   },
   passthrough: {
     name: "Passthrough",
