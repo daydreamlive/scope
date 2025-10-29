@@ -4,7 +4,7 @@ import time
 import torch
 
 from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
-from ..blending import PromptBlender, parse_and_start_transition
+from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
@@ -102,22 +102,13 @@ class LongLivePipeline(Pipeline):
             should_prepare = True
 
         # Handle prompt transition requests
-        if transition is not None:
-            logger.info("prepare: Starting prompt transition")
-            target_prompts, should_apply_immediately = parse_and_start_transition(
-                transition, self.prompt_blender, self.stream.text_encoder
-            )
-
-            if target_prompts:
-                self.prompts = target_prompts
-
-                if should_apply_immediately:
-                    # num_steps=0: apply immediately without transition
-                    logger.info(
-                        "prepare: Applying transition prompts immediately (num_steps=0)"
-                    )
-                    should_prepare = True
-                # else: Smooth transition started, queue will handle embeddings in __call__
+        should_prepare_from_transition, target_prompts = handle_transition_prepare(
+            transition, self.prompt_blender, self.stream.text_encoder
+        )
+        if target_prompts:
+            self.prompts = target_prompts
+        if should_prepare_from_transition:
+            should_prepare = True
 
         if (
             denoising_step_list is not None
