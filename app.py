@@ -24,6 +24,7 @@ from download_models import download_models
 from lib.models_config import get_models_dir, models_are_downloaded
 from lib.pipeline_manager import PipelineManager
 from lib.schema import (
+    HardwareInfoResponse,
     HealthResponse,
     PipelineLoadRequest,
     PipelineStatusResponse,
@@ -333,6 +334,23 @@ async def download_pipeline_models(request: DownloadModelsRequest):
         return {"message": f"Model download started for {request.pipeline_id}"}
     except Exception as e:
         logger.error(f"Error starting model download: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
+async def get_hardware_info():
+    """Get hardware information including available VRAM."""
+    try:
+        vram_gb = None
+
+        if torch.cuda.is_available():
+            # Get total VRAM from the first GPU (in bytes), convert to GB
+            _, total_mem = torch.cuda.mem_get_info(0)
+            vram_gb = total_mem / (1024**3)
+
+        return HardwareInfoResponse(vram_gb=vram_gb)
+    except Exception as e:
+        logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

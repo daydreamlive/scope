@@ -153,3 +153,24 @@ export const downloadPipelineModels = async (
   const result = await response.json();
   return result;
 };
+
+export interface HardwareInfoResponse {
+  vram_gb: number | null;
+}
+
+export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
+  const response = await fetch("/api/v1/hardware/info", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Hardware info failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
