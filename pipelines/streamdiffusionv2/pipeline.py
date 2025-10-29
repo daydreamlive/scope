@@ -4,7 +4,7 @@ import time
 
 import torch
 
-from ..blending import PromptBlender
+from ..blending import PromptBlender, parse_and_start_transition
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 from .vendor.causvid.models.wan.causal_stream_inference import (
@@ -68,8 +68,10 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
-        # Prompt blending
-        self.prompt_blender = PromptBlender(device, dtype)
+        # Prompt blending with cache reset callback for transitions
+        self.prompt_blender = PromptBlender(
+            device, dtype, cache_reset_callback=self._initialize_stream_caches
+        )
 
         self.last_frame = None
         self.current_start = 0
@@ -84,6 +86,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         prompt_interpolation_method = kwargs.get(
             "prompt_interpolation_method", "linear"
         )
+        transition = kwargs.get("transition", None)
         denoising_step_list = kwargs.get("denoising_step_list", None)
         noise_controller = kwargs.get("noise_controller", None)
         noise_scale = kwargs.get("noise_scale", None)
@@ -92,6 +95,24 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
             logger.info("prepare: Initiating pipeline prepare for prompt update")
             should_prepare = True
+
+        # Handle prompt transition requests
+        if transition is not None:
+            logger.info("prepare: Starting prompt transition")
+            target_prompts, should_apply_immediately = parse_and_start_transition(
+                transition, self.prompt_blender, self.stream.text_encoder
+            )
+
+            if target_prompts:
+                self.prompts = target_prompts
+
+                if should_apply_immediately:
+                    # num_steps=0: apply immediately without transition
+                    logger.info(
+                        "prepare: Applying transition prompts immediately (num_steps=0)"
+                    )
+                    should_prepare = True
+                # else: Smooth transition started, queue will handle embeddings in __call__
 
         # If manage_cache is True let the pipeline handle cache management for other param updates
         if manage_cache:
@@ -137,6 +158,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
             if not noise_controller and noise_scale is not None:
                 self.noise_scale = noise_scale
 
+            # Prepare pipeline
+            # (PromptBlender.blend() returns None if transitioning, which skips cache reset)
             self._prepare_pipeline(prompts, prompt_interpolation_method)
 
         if self.last_frame is None:
@@ -204,6 +227,15 @@ class StreamDiffusionV2Pipeline(Pipeline):
     ) -> torch.Tensor:
         if input is None:
             raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
+
+        # Update prompt embedding for this generation call
+        # Handles both static blending and temporal transitions
+        next_embedding = self.prompt_blender.get_next_embedding(
+            self.stream.text_encoder
+        )
+
+        if next_embedding is not None:
+            self.stream.conditional_dict = {"prompt_embeds": next_embedding}
 
         # Note: The caller must call prepare() before __call__()
         # We just need to get the expected chunk size based on current state

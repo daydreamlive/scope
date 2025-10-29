@@ -4,7 +4,7 @@ import time
 import torch
 
 from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
-from ..blending import PromptBlender
+from ..blending import PromptBlender, parse_and_start_transition
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
@@ -70,8 +70,18 @@ class LongLivePipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
-        # Prompt blending
-        self.prompt_blender = PromptBlender(device, dtype)
+        # Prompt blending with cache reset callback for transitions
+        self.prompt_blender = PromptBlender(
+            device, dtype, cache_reset_callback=self._reset_cache_for_transition
+        )
+
+    def _reset_cache_for_transition(self):
+        """Reset cross-attention cache for prompt transitions."""
+        # Use model's current device/dtype (should match initialization)
+        model_param = next(self.stream.generator.model.parameters())
+        self.stream._initialize_crossattn_cache(
+            batch_size=1, dtype=model_param.dtype, device=model_param.device
+        )
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
         # If caller requested prepare assume cache init
@@ -83,12 +93,31 @@ class LongLivePipeline(Pipeline):
         prompt_interpolation_method = kwargs.get(
             "prompt_interpolation_method", "linear"
         )
+        transition = kwargs.get("transition", None)
         denoising_step_list = kwargs.get("denoising_step_list", None)
 
         # Check if prompts changed using prompt blender
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
             logger.info("prepare: Initiating pipeline prepare for prompt update")
             should_prepare = True
+
+        # Handle prompt transition requests
+        if transition is not None:
+            logger.info("prepare: Starting prompt transition")
+            target_prompts, should_apply_immediately = parse_and_start_transition(
+                transition, self.prompt_blender, self.stream.text_encoder
+            )
+
+            if target_prompts:
+                self.prompts = target_prompts
+
+                if should_apply_immediately:
+                    # num_steps=0: apply immediately without transition
+                    logger.info(
+                        "prepare: Applying transition prompts immediately (num_steps=0)"
+                    )
+                    should_prepare = True
+                # else: Smooth transition started, queue will handle embeddings in __call__
 
         if (
             denoising_step_list is not None
@@ -105,6 +134,7 @@ class LongLivePipeline(Pipeline):
                 self.denoising_step_list = denoising_step_list
 
             # Apply prompt blending and prepare stream
+            # (PromptBlender.blend() returns None if transitioning, which skips preparation)
             self._apply_prompt_blending(
                 prompts, prompt_interpolation_method, denoising_step_list, init_cache
             )
@@ -115,6 +145,15 @@ class LongLivePipeline(Pipeline):
         self,
         _: torch.Tensor | list[torch.Tensor] | None = None,
     ):
+        # Update prompt embedding for this generation call
+        # Handles both static blending and temporal transitions
+        next_embedding = self.prompt_blender.get_next_embedding(
+            self.stream.text_encoder
+        )
+
+        if next_embedding is not None:
+            self.stream.conditional_dict = {"prompt_embeds": next_embedding}
+
         # Note: The caller must call prepare() before __call__()
         return self.stream()
 
@@ -126,6 +165,7 @@ class LongLivePipeline(Pipeline):
         init_cache: bool = False,
     ):
         """Apply weighted blending of cached prompt embeddings."""
+
         combined_embeds = self.prompt_blender.blend(
             prompts, interpolation_method, self.stream.text_encoder
         )

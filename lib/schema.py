@@ -22,15 +22,44 @@ class PromptItem(BaseModel):
     )
 
 
+class PromptTransition(BaseModel):
+    """Configuration for transitioning between prompt blends over time.
+
+    This controls temporal interpolation - how smoothly prompts transition
+    across multiple generation frames, distinct from spatial blending of
+    multiple prompts within a single frame.
+    """
+
+    target_prompts: list[PromptItem] = Field(
+        ..., description="Target prompt blend to interpolate to"
+    )
+    num_steps: int = Field(
+        default=4,
+        ge=0,
+        description="Number of generation calls to transition over (0 = instant, 4 is default)",
+    )
+    temporal_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="linear",
+        description="Method for temporal interpolation between blends across frames",
+    )
+
+
 class Parameters(BaseModel):
     """Parameters for WebRTC session."""
 
     prompts: list[PromptItem] | None = Field(
-        default=None, description="List of prompts with weights for blending"
+        default=None,
+        description="List of prompts with weights for spatial blending within a single frame",
     )
     prompt_interpolation_method: Literal["linear", "slerp"] = Field(
         default="linear",
-        description="Interpolation method: linear (weighted average) or slerp (spherical)",
+        description="Spatial interpolation method for blending multiple prompts: linear (weighted average) or slerp (spherical)",
+    )
+    transition: PromptTransition | None = Field(
+        default=None,
+        description="Optional transition to smoothly interpolate from current prompts to target prompts over multiple frames. "
+        "When provided, the transition.target_prompts will become the new prompts after the transition completes, "
+        "and this field takes precedence over the 'prompts' field for initiating the transition.",
     )
     noise_scale: float | None = Field(
         default=None, description="Noise scale (0.0-1.0)", ge=0.0, le=1.0
