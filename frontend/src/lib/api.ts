@@ -3,12 +3,19 @@ export interface PromptItem {
   weight: number;
 }
 
+export interface PromptTransition {
+  target_prompts: PromptItem[];
+  num_steps?: number; // Default: 4
+  temporal_interpolation_method?: "linear" | "slerp"; // Default: linear
+}
+
 export interface WebRTCOfferRequest {
   sdp?: string;
   type?: string;
   initialParameters?: {
     prompts?: string[] | PromptItem[];
     prompt_interpolation_method?: "linear" | "slerp";
+    transition?: PromptTransition;
     denoising_step_list?: number[];
     noise_scale?: number;
     noise_controller?: boolean;
