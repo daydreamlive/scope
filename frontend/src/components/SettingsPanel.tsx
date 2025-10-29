@@ -49,6 +49,8 @@ interface SettingsPanelProps {
   onNoiseControllerChange?: (enabled: boolean) => void;
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
+  useFp8E4m3fn?: boolean;
+  onUseFp8E4m3fnChange?: (enabled: boolean) => void;
   onResetCache?: () => void;
 }
 
@@ -70,6 +72,8 @@ export function SettingsPanel({
   onNoiseControllerChange,
   manageCache = true,
   onManageCacheChange,
+  useFp8E4m3fn = true,
+  onUseFp8E4m3fnChange,
   onResetCache,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
@@ -507,6 +511,32 @@ export function SettingsPanel({
             defaultValues={getDefaultDenoisingSteps(pipelineId)}
             tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
           />
+        )}
+
+        {pipelineId === "krea-realtime-video" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.useFp8E4m3fn.label}
+                    tooltip={PARAMETER_METADATA.useFp8E4m3fn.tooltip}
+                    className="text-sm text-foreground"
+                  />
+                  <Toggle
+                    pressed={useFp8E4m3fn}
+                    onPressedChange={onUseFp8E4m3fnChange || (() => {})}
+                    disabled={isStreaming}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                  >
+                    {useFp8E4m3fn ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {pipelineId === "streamdiffusionv2" && (
