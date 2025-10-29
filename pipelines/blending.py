@@ -334,7 +334,7 @@ class PromptBlender:
 
         # Pre-compute interpolation steps
         # Generate num_steps embeddings from current to target
-        t_values = torch.linspace(0, 1, steps=num_steps + 1)[1:].to(self.device)
+        t_values = torch.linspace(0, 1, steps=num_steps).to(self.device)
 
         interpolated_embeddings = []
         for _i, t in enumerate(t_values):
