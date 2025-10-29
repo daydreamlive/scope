@@ -73,6 +73,14 @@ class ErrorResponse(BaseModel):
     detail: str = Field(None, description="Additional error details")
 
 
+class HardwareInfoResponse(BaseModel):
+    """Hardware information response schema."""
+
+    vram_gb: float | None = Field(
+        default=None, description="Total VRAM in GB (None if CUDA not available)"
+    )
+
+
 class PipelineStatusEnum(str, Enum):
     """Pipeline status enumeration."""
 

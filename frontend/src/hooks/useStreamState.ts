@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type {
   SystemMetrics,
   StreamStatus,
@@ -6,6 +6,7 @@ import type {
   PromptData,
 } from "../types";
 import { getDefaultResolution } from "../lib/utils";
+import { getHardwareInfo, type HardwareInfoResponse } from "../lib/api";
 
 export function useStreamState() {
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
@@ -29,7 +30,7 @@ export function useStreamState() {
     noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
     noiseController: true, // Default noise controller for StreamDiffusionV2
     manageCache: true, // Default manage cache for StreamDiffusionV2
-    useFp8E4m3fn: true, // Default FP8 E4M3FN for pipelines that support it
+    quantization: null,
     paused: false, // Default to not paused (generating)
   });
 
@@ -37,6 +38,42 @@ export function useStreamState() {
     prompt: "",
     isProcessing: false,
   });
+
+  // Store hardware info
+  const [hardwareInfo, setHardwareInfo] = useState<HardwareInfoResponse | null>(
+    null
+  );
+
+  // Fetch hardware info on mount
+  useEffect(() => {
+    const fetchHardwareInfo = async () => {
+      try {
+        const info = await getHardwareInfo();
+        setHardwareInfo(info);
+      } catch (error) {
+        console.error("Failed to fetch hardware info:", error);
+      }
+    };
+
+    fetchHardwareInfo();
+  }, []);
+
+  // Set recommended quantization when krea-realtime-video is selected
+  useEffect(() => {
+    if (
+      settings.pipelineId === "krea-realtime-video" &&
+      hardwareInfo?.vram_gb !== null &&
+      hardwareInfo?.vram_gb !== undefined
+    ) {
+      // > 40GB = no quantization (null), <= 40GB = fp8_e4m3fn
+      const recommendedQuantization =
+        hardwareInfo.vram_gb > 40 ? null : "fp8_e4m3fn";
+      setSettings(prev => ({
+        ...prev,
+        quantization: recommendedQuantization,
+      }));
+    }
+  }, [settings.pipelineId, hardwareInfo]);
 
   const updateMetrics = useCallback((newMetrics: Partial<SystemMetrics>) => {
     setSystemMetrics(prev => ({ ...prev, ...newMetrics }));
@@ -59,6 +96,7 @@ export function useStreamState() {
     streamStatus,
     settings,
     promptData,
+    hardwareInfo,
     updateMetrics,
     updateStreamStatus,
     updateSettings,
