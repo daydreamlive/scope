@@ -90,6 +90,8 @@ class InferencePipeline(torch.nn.Module):
         denoising_step_list: list[int] = None,
         init_cache: bool = False,
     ):
+        generator_param = next(self.generator.model.parameters())
+
         # CausalWanModel uses a RoPE frequency table with a max sequence length of 1024
         # This means that it has positions for 1024 latent frames
         # current_start is used to index into this table
@@ -102,8 +104,7 @@ class InferencePipeline(torch.nn.Module):
 
         if prompts is not None:
             # Make sure text encoder is on right device
-            generator_device = next(self.generator.model.parameters()).device
-            self.text_encoder = self.text_encoder.to(generator_device)
+            self.text_encoder = self.text_encoder.to(generator_param.device)
 
             self.conditional_dict = self.text_encoder(text_prompts=prompts)
             if self.batch_size > 1:
@@ -116,10 +117,9 @@ class InferencePipeline(torch.nn.Module):
                 self.text_encoder = self.text_encoder.to(torch.device("cpu"))
 
             if self.crossattn_cache is not None:
-                for i in range(self.num_transformer_blocks):
-                    self.crossattn_cache[i]["k"].zero_()
-                    self.crossattn_cache[i]["v"].zero_()
-                    self.crossattn_cache[i]["is_init"] = False
+                self._initialize_crossattn_cache(
+                    self.batch_size, generator_param.dtype, generator_param.device
+                )
 
         if denoising_step_list is not None:
             self.denoising_step_list = torch.tensor(
@@ -143,7 +143,6 @@ class InferencePipeline(torch.nn.Module):
 
         kv_cache_size = self.local_attn_size * self.frame_seq_length
 
-        generator_param = next(self.generator.model.parameters())
         self._initialize_kv_cache(
             batch_size=self.batch_size,
             dtype=generator_param.dtype,
@@ -323,29 +322,36 @@ class InferencePipeline(torch.nn.Module):
         num_heads = self.generator.model.num_heads
         head_dim = self.generator.model.dim // num_heads
 
-        for _ in range(self.num_transformer_blocks):
-            kv_cache1.append(
-                {
-                    "k": torch.zeros(
-                        [batch_size, kv_cache_size, num_heads, head_dim],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    "v": torch.zeros(
-                        [batch_size, kv_cache_size, num_heads, head_dim],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    "global_end_index": torch.tensor(
-                        [0], dtype=torch.long, device=device
-                    ),
-                    "local_end_index": torch.tensor(
-                        [0], dtype=torch.long, device=device
-                    ),
-                }
-            )
+        if self.kv_cache1:
+            for i in range(self.num_transformer_blocks):
+                self.kv_cache1[i]["k"].zero_()
+                self.kv_cache1[i]["v"].zero_()
+                self.kv_cache1[i]["global_end_index"] = 0
+                self.kv_cache1[i]["local_end_index"] = 0
+        else:
+            for _ in range(self.num_transformer_blocks):
+                kv_cache1.append(
+                    {
+                        "k": torch.zeros(
+                            [batch_size, kv_cache_size, num_heads, head_dim],
+                            dtype=dtype,
+                            device=device,
+                        ),
+                        "v": torch.zeros(
+                            [batch_size, kv_cache_size, num_heads, head_dim],
+                            dtype=dtype,
+                            device=device,
+                        ),
+                        "global_end_index": torch.tensor(
+                            [0], dtype=torch.long, device=device
+                        ),
+                        "local_end_index": torch.tensor(
+                            [0], dtype=torch.long, device=device
+                        ),
+                    }
+                )
 
-        self.kv_cache1 = kv_cache1  # always store the clean cache
+            self.kv_cache1 = kv_cache1  # always store the clean cache
 
     def _initialize_crossattn_cache(self, batch_size, dtype, device):
         """
@@ -357,23 +363,29 @@ class InferencePipeline(torch.nn.Module):
         num_heads = self.generator.model.num_heads
         head_dim = self.generator.model.dim // num_heads
 
-        for _ in range(self.num_transformer_blocks):
-            crossattn_cache.append(
-                {
-                    "k": torch.zeros(
-                        [batch_size, 512, num_heads, head_dim],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    "v": torch.zeros(
-                        [batch_size, 512, num_heads, head_dim],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    "is_init": False,
-                }
-            )
-        self.crossattn_cache = crossattn_cache
+        if self.crossattn_cache:
+            for i in range(self.num_transformer_blocks):
+                self.crossattn_cache[i]["k"].zero_()
+                self.crossattn_cache[i]["v"].zero_()
+                self.crossattn_cache[i]["is_init"] = False
+        else:
+            for _ in range(self.num_transformer_blocks):
+                crossattn_cache.append(
+                    {
+                        "k": torch.zeros(
+                            [batch_size, 512, num_heads, head_dim],
+                            dtype=dtype,
+                            device=device,
+                        ),
+                        "v": torch.zeros(
+                            [batch_size, 512, num_heads, head_dim],
+                            dtype=dtype,
+                            device=device,
+                        ),
+                        "is_init": False,
+                    }
+                )
+            self.crossattn_cache = crossattn_cache
 
     def _set_all_modules_max_attention_size(self, local_attn_size_value: int):
         """
@@ -449,11 +461,9 @@ class InferencePipeline(torch.nn.Module):
         context_frames = self._get_context_frames()
         num_context_frames = context_frames.shape[1]
 
-        for i in range(self.num_transformer_blocks):
-            self.kv_cache1[i]["k"].zero_()
-            self.kv_cache1[i]["v"].zero_()
-            self.kv_cache1[i]["global_end_index"] = 0
-            self.kv_cache1[i]["local_end_index"] = 0
+        self._initialize_kv_cache(
+            self.batch_size, context_frames.dtype, context_frames.device
+        )
 
         # Prepare blockwise causal mask
         self.generator.model.block_mask = (
@@ -484,8 +494,3 @@ class InferencePipeline(torch.nn.Module):
         )
 
         self.generator.model.block_mask = None
-
-        for i in range(self.num_transformer_blocks):
-            self.crossattn_cache[i]["k"].zero_()
-            self.crossattn_cache[i]["v"].zero_()
-            self.crossattn_cache[i]["is_init"] = False
