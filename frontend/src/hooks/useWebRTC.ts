@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { sendWebRTCOffer, type PromptItem } from "../lib/api";
+import {
+  sendWebRTCOffer,
+  type PromptItem,
+  type PromptTransition,
+} from "../lib/api";
 import { toast } from "sonner";
 
 interface InitialParameters {
   prompts?: string[] | PromptItem[];
   prompt_interpolation_method?: "linear" | "slerp";
+  transition?: PromptTransition;
   denoising_step_list?: number[];
   noise_scale?: number;
   noise_controller?: boolean;
@@ -223,6 +228,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     (params: {
       prompts?: string[] | PromptItem[];
       prompt_interpolation_method?: "linear" | "slerp";
+      transition?: PromptTransition;
       denoising_step_list?: number[];
       noise_scale?: number;
       noise_controller?: boolean;
@@ -235,9 +241,17 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         dataChannelRef.current.readyState === "open"
       ) {
         try {
-          const message = JSON.stringify(params);
+          // Filter out undefined/null parameters
+          const filteredParams: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(params)) {
+            if (value !== undefined && value !== null) {
+              filteredParams[key] = value;
+            }
+          }
+
+          const message = JSON.stringify(filteredParams);
           dataChannelRef.current.send(message);
-          console.log("Sent parameter update:", params);
+          console.log("Sent parameter update:", filteredParams);
         } catch (error) {
           console.error("Failed to send parameter update:", error);
         }

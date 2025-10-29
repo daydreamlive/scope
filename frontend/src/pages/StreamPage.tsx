@@ -15,7 +15,7 @@ import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId } from "../types";
-import type { PromptItem } from "../lib/api";
+import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 
 export function StreamPage() {
@@ -29,6 +29,9 @@ export function StreamPage() {
   const [interpolationMethod, setInterpolationMethod] = useState<
     "linear" | "slerp"
   >("linear");
+  const [temporalInterpolationMethod, setTemporalInterpolationMethod] =
+    useState<"linear" | "slerp">("slerp");
+  const [transitionSteps, setTransitionSteps] = useState(4);
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
@@ -113,7 +116,21 @@ export function StreamPage() {
     setPromptItems(prompts);
   };
 
-  const handlePipelineIdChange = async (pipelineId: PipelineId) => {
+  const handleTransitionSubmit = (transition: PromptTransition) => {
+    setPromptItems(transition.target_prompts);
+
+    // Add to timeline if available
+    if (timelineRef.current) {
+      timelineRef.current.submitLivePrompt(transition.target_prompts);
+    }
+
+    // Send transition to backend
+    sendParameterUpdate({
+      transition,
+    });
+  };
+
+  const handlePipelineIdChange = (pipelineId: PipelineId) => {
     // Stop the stream if it's currently running
     if (isStreaming) {
       stopStream();
@@ -556,8 +573,11 @@ export function StreamPage() {
             prompts={promptItems}
             onPromptsChange={setPromptItems}
             onPromptsSubmit={handlePromptsSubmit}
+            onTransitionSubmit={handleTransitionSubmit}
             interpolationMethod={interpolationMethod}
             onInterpolationMethodChange={setInterpolationMethod}
+            temporalInterpolationMethod={temporalInterpolationMethod}
+            onTemporalInterpolationMethodChange={setTemporalInterpolationMethod}
             isLive={isLive}
             onLivePromptSubmit={handleLivePromptSubmit}
             selectedTimelinePrompt={selectedTimelinePrompt}
@@ -566,6 +586,8 @@ export function StreamPage() {
             isTimelinePlaying={isTimelinePlaying}
             currentTime={timelineCurrentTime}
             timelinePrompts={timelinePrompts}
+            transitionSteps={transitionSteps}
+            onTransitionStepsChange={setTransitionSteps}
           />
         </div>
 

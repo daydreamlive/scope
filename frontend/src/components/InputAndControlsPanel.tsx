@@ -10,7 +10,7 @@ import {
 import { Badge } from "./ui/badge";
 import { Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
-import type { PromptItem } from "../lib/api";
+import type { PromptItem, PromptTransition } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
@@ -34,8 +34,11 @@ interface InputAndControlsPanelProps {
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
   onPromptsSubmit: (prompts: PromptItem[]) => void;
+  onTransitionSubmit: (transition: PromptTransition) => void;
   interpolationMethod: "linear" | "slerp";
   onInterpolationMethodChange: (method: "linear" | "slerp") => void;
+  temporalInterpolationMethod: "linear" | "slerp";
+  onTemporalInterpolationMethodChange: (method: "linear" | "slerp") => void;
   isLive?: boolean;
   onLivePromptSubmit?: (prompts: PromptItem[]) => void;
   selectedTimelinePrompt?: TimelinePrompt | null;
@@ -44,6 +47,8 @@ interface InputAndControlsPanelProps {
   isTimelinePlaying?: boolean;
   currentTime?: number;
   timelinePrompts?: TimelinePrompt[];
+  transitionSteps: number;
+  onTransitionStepsChange: (steps: number) => void;
 }
 
 export function InputAndControlsPanel({
@@ -64,8 +69,11 @@ export function InputAndControlsPanel({
   prompts,
   onPromptsChange,
   onPromptsSubmit,
+  onTransitionSubmit,
   interpolationMethod,
   onInterpolationMethodChange,
+  temporalInterpolationMethod,
+  onTemporalInterpolationMethodChange,
   isLive = false,
   onLivePromptSubmit,
   selectedTimelinePrompt = null,
@@ -74,6 +82,8 @@ export function InputAndControlsPanel({
   isTimelinePlaying: _isTimelinePlaying = false,
   currentTime: _currentTime = 0,
   timelinePrompts: _timelinePrompts = [],
+  transitionSteps,
+  onTransitionStepsChange,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -235,6 +245,7 @@ export function InputAndControlsPanel({
                     prompts={prompts}
                     onPromptsChange={onPromptsChange}
                     onPromptsSubmit={onPromptsSubmit}
+                    onTransitionSubmit={onTransitionSubmit}
                     disabled={
                       pipelineId === "passthrough" ||
                       pipelineId === "vod" ||
@@ -248,8 +259,16 @@ export function InputAndControlsPanel({
                     }
                     interpolationMethod={interpolationMethod}
                     onInterpolationMethodChange={onInterpolationMethodChange}
+                    temporalInterpolationMethod={temporalInterpolationMethod}
+                    onTemporalInterpolationMethodChange={
+                      onTemporalInterpolationMethodChange
+                    }
                     isLive={isLive}
                     onLivePromptSubmit={onLivePromptSubmit}
+                    isStreaming={isStreaming}
+                    transitionSteps={transitionSteps}
+                    onTransitionStepsChange={onTransitionStepsChange}
+                    timelinePrompts={_timelinePrompts}
                   />
                 )}
               </div>
