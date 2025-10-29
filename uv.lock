@@ -537,6 +537,7 @@ dependencies = [
     { name = "omegaconf" },
     { name = "peft" },
     { name = "safetensors" },
+    { name = "sageattention", marker = "sys_platform == 'linux'" },
     { name = "torch", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "torchao" },
@@ -556,6 +557,9 @@ dev = [
     { name = "ruff" },
     { name = "twine" },
 ]
+sageattention = [
+    { name = "sageattention", marker = "sys_platform == 'linux'" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -574,6 +578,7 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "peft", specifier = ">=0.17.1" },
     { name = "safetensors", specifier = ">=0.6.2" },
+    { name = "sageattention", marker = "sys_platform == 'linux'", path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==2.8.0" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.8.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchao", specifier = "==0.13.0" },
@@ -593,6 +598,7 @@ dev = [
     { name = "ruff", specifier = ">=0.8.0" },
     { name = "twine", specifier = ">=5.0.0" },
 ]
+sageattention = [{ name = "sageattention", marker = "sys_platform == 'linux'", path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" }]
 
 [[package]]
 name = "diffusers"
@@ -2297,6 +2303,14 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ad/fe/cad1d9762868c7c5dc70c8620074df28ebb1a8e4c17d4c0cb031889c457e/safetensors-0.6.2-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:d944cea65fad0ead848b6ec2c37cc0b197194bec228f8020054742190e9312ac", size = 655957, upload-time = "2025-08-08T13:13:57.029Z" },
     { url = "https://files.pythonhosted.org/packages/59/a7/e2158e17bbe57d104f0abbd95dff60dda916cf277c9f9663b4bf9bad8b6e/safetensors-0.6.2-cp38-abi3-win32.whl", hash = "sha256:cab75ca7c064d3911411461151cb69380c9225798a20e712b102edda2542ddb1", size = 308926, upload-time = "2025-08-08T13:14:01.095Z" },
     { url = "https://files.pythonhosted.org/packages/2c/c3/c0be1135726618dc1e28d181b8c442403d8dbb9e273fd791de2d4384bcdd/safetensors-0.6.2-cp38-abi3-win_amd64.whl", hash = "sha256:c7b214870df923cbc1593c3faee16bec59ea462758699bd3fee399d00aac072c", size = 320192, upload-time = "2025-08-08T13:13:59.467Z" },
+]
+
+[[package]]
+name = "sageattention"
+version = "2.2.0"
+source = { path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" }
+wheels = [
+    { filename = "sageattention-2.2.0-cp310-cp310-linux_x86_64.whl", hash = "sha256:5de168b5a1650bcb3f006b6c8254036e6fab78db2c0830bf0907dc1313a1197b" },
 ]
 
 [[package]]
