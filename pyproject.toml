@@ -44,6 +44,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "accelerate>=1.1.1",
     "flash-attn==2.8.3; sys_platform == 'linux' or sys_platform == 'win32'",
+    "sageattention==2.2.0; sys_platform == 'linux'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
     "peft>=0.17.1",
@@ -80,6 +81,10 @@ flash-attn = [
     # Prebuilt Windows wheels from https://github.com/kingbri1/flash-attention
     { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
+sageattention = [
+    # Local prebuilt wheel
+    { path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -93,6 +98,9 @@ dev = [
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
     "twine>=5.0.0",
+]
+sageattention = [
+    "sageattention==2.2.0; sys_platform == 'linux'",
 ]
 
 [tool.ruff]
