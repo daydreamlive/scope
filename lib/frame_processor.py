@@ -19,6 +19,7 @@ PREPARE_ONLY_PARAMS = frozenset(
         "reset_cache",
         "manage_cache",
         "prompts",
+        "transition",
         "denoising_step_list",
         "noise_scale",
     }
@@ -255,6 +256,8 @@ class FrameProcessor:
         requirements = pipeline.prepare(
             should_prepare=not self.is_prepared or reset_cache, **self.parameters
         )
+        # Transition is consumed by prepare()
+        self.parameters.pop("transition", None)
         self.is_prepared = True
         input = None
 
