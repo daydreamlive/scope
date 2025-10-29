@@ -29,6 +29,7 @@ export function useStreamState() {
     noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
     noiseController: true, // Default noise controller for StreamDiffusionV2
     manageCache: true, // Default manage cache for StreamDiffusionV2
+    useFp8E4m3fn: true, // Default FP8 E4M3FN for pipelines that support it
     paused: false, // Default to not paused (generating)
   });
 
