@@ -362,6 +362,19 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
+  // Update temporal interpolation defaults when pipeline changes
+  useEffect(() => {
+    const pipeline = PIPELINES[settings.pipelineId];
+    if (pipeline) {
+      const defaultMethod =
+        pipeline.defaultTemporalInterpolationMethod || "slerp";
+      const defaultSteps = pipeline.defaultTemporalInterpolationSteps ?? 4;
+
+      setTemporalInterpolationMethod(defaultMethod);
+      setTransitionSteps(defaultSteps);
+    }
+  }, [settings.pipelineId]);
+
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
     updateSettings({ paused: newPausedState });

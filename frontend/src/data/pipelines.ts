@@ -9,6 +9,8 @@ export interface PipelineInfo {
   defaultPrompt?: string;
   estimatedVram?: number; // GB
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
+  defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
+  defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
@@ -22,6 +24,8 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultPrompt: "A dog in the grass looking around, photorealistic",
     estimatedVram: 20,
     requiresModels: true,
+    defaultTemporalInterpolationMethod: "slerp",
+    defaultTemporalInterpolationSteps: 0,
   },
   longlive: {
     name: "LongLive",
@@ -34,6 +38,8 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 20,
     requiresModels: true,
+    defaultTemporalInterpolationMethod: "slerp",
+    defaultTemporalInterpolationSteps: 0,
   },
   "krea-realtime-video": {
     name: "Krea Realtime Video",
@@ -46,6 +52,8 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 32,
     requiresModels: true,
+    defaultTemporalInterpolationMethod: "linear",
+    defaultTemporalInterpolationSteps: 4,
   },
   passthrough: {
     name: "Passthrough",
