@@ -35,7 +35,7 @@ export function Header({ className = "" }: HeaderProps) {
             />
           </a>
           <a
-            href="https://docs.daydream.live/knowledge-hub/research-references/about-video-and-world-models"
+            href="https://docs.daydream.live/knowledge-hub/tutorials/scope"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:opacity-80 transition-opacity"
