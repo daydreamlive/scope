@@ -5,7 +5,7 @@ import torch
 
 from lib.schema import Quantization
 
-from ..blending import PromptBlender, parse_and_start_transition
+from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
 from .vendor.wan2_1.vae_block3 import WanVAEWrapper
@@ -130,24 +130,15 @@ class KreaRealtimeVideoPipeline(Pipeline):
             logger.info("prepare: Initiating pipeline prepare for prompt update")
             should_prepare = True
 
-        # Handle prompt transition requests
-        if transition is not None:
-            logger.info("prepare: Starting prompt transition")
-            with torch.autocast(str(self.device), dtype=self.dtype):
-                target_prompts, should_apply_immediately = parse_and_start_transition(
-                    transition, self.prompt_blender, self.stream.text_encoder
-                )
-
-            if target_prompts:
-                self.prompts = target_prompts
-
-                if should_apply_immediately:
-                    # num_steps=0: apply immediately without transition
-                    logger.info(
-                        "prepare: Applying transition prompts immediately (num_steps=0)"
-                    )
-                    should_prepare = True
-                # else: Smooth transition started, queue will handle embeddings in __call__
+        # Handle prompt transition requests (with autocast for quantized models)
+        with torch.autocast(str(self.device), dtype=self.dtype):
+            should_prepare_from_transition, target_prompts = handle_transition_prepare(
+                transition, self.prompt_blender, self.stream.text_encoder
+            )
+        if target_prompts:
+            self.prompts = target_prompts
+        if should_prepare_from_transition:
+            should_prepare = True
 
         if (
             denoising_step_list is not None

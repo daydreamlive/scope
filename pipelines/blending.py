@@ -162,6 +162,40 @@ def parse_and_start_transition(transition, prompt_blender, text_encoder):
     return target_prompts, False
 
 
+def handle_transition_prepare(transition, prompt_blender, text_encoder):
+    """Handle transition in pipeline prepare() method.
+
+    This is a convenience wrapper that handles the common pattern of:
+    1. Starting a transition
+    2. Returning updated prompts and prepare flag
+
+    Args:
+        transition: Transition config dict (from WebRTC parameters)
+        prompt_blender: PromptBlender instance
+        text_encoder: Text encoder for encoding prompts
+
+    Returns:
+        tuple: (should_prepare, target_prompts)
+            - should_prepare: True if pipeline should re-prepare (immediate transition)
+            - target_prompts: Target prompts list from transition, or None
+    """
+    if transition is None:
+        return False, None
+
+    logger.info("handle_transition_prepare: Starting prompt transition")
+    target_prompts, should_apply_immediately = parse_and_start_transition(
+        transition, prompt_blender, text_encoder
+    )
+
+    if target_prompts and should_apply_immediately:
+        logger.info(
+            "handle_transition_prepare: Applying transition prompts immediately (num_steps=0)"
+        )
+        return True, target_prompts
+
+    return False, target_prompts
+
+
 class PromptBlender:
     """Manages prompt caching and blending for pipelines"""
 

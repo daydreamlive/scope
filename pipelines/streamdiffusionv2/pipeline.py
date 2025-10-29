@@ -4,7 +4,7 @@ import time
 
 import torch
 
-from ..blending import PromptBlender, parse_and_start_transition
+from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 from .vendor.causvid.models.wan.causal_stream_inference import (
@@ -97,22 +97,13 @@ class StreamDiffusionV2Pipeline(Pipeline):
             should_prepare = True
 
         # Handle prompt transition requests
-        if transition is not None:
-            logger.info("prepare: Starting prompt transition")
-            target_prompts, should_apply_immediately = parse_and_start_transition(
-                transition, self.prompt_blender, self.stream.text_encoder
-            )
-
-            if target_prompts:
-                self.prompts = target_prompts
-
-                if should_apply_immediately:
-                    # num_steps=0: apply immediately without transition
-                    logger.info(
-                        "prepare: Applying transition prompts immediately (num_steps=0)"
-                    )
-                    should_prepare = True
-                # else: Smooth transition started, queue will handle embeddings in __call__
+        should_prepare_from_transition, target_prompts = handle_transition_prepare(
+            transition, self.prompt_blender, self.stream.text_encoder
+        )
+        if target_prompts:
+            self.prompts = target_prompts
+        if should_prepare_from_transition:
+            should_prepare = True
 
         # If manage_cache is True let the pipeline handle cache management for other param updates
         if manage_cache:
