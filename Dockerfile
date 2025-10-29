@@ -49,5 +49,14 @@ COPY *.py /app/
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
 
+RUN apt-get update && \
+    apt-get install -y wget openssh-server && \
+    mkdir -p /workspace && \
+    mkdir -p ~/.ssh && \
+    chmod 700 ~/.ssh && \
+    echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys && \
+    chmod 600 ~/.ssh/authorized_keys && \
+    rm -rf /var/lib/apt/lists/*
+
 # Default command to run the application
 CMD ["uv", "run", "app.py", "--host", "0.0.0.0", "--port", "8000"]
