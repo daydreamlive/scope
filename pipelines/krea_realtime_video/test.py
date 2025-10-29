@@ -33,8 +33,8 @@ device = torch.device("cuda")
 pipeline = KreaRealtimeVideoPipeline(
     config,
     low_memory=is_cuda_low_memory(device),
-    # Uncomment to work with 32GB VRAM
-    # use_fp8_e4m3fn=True,
+    # Set quantization to Quantization.FP8_E4M3FN to work with 32GB VRAM
+    # quantization=Quantization.FP8_E4M3FN,
     device=device,
     dtype=torch.bfloat16,
 )

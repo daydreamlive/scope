@@ -49,8 +49,8 @@ interface SettingsPanelProps {
   onNoiseControllerChange?: (enabled: boolean) => void;
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
-  useFp8E4m3fn?: boolean;
-  onUseFp8E4m3fnChange?: (enabled: boolean) => void;
+  quantization?: "fp8_e4m3fn" | null;
+  onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
   onResetCache?: () => void;
 }
 
@@ -72,8 +72,8 @@ export function SettingsPanel({
   onNoiseControllerChange,
   manageCache = true,
   onManageCacheChange,
-  useFp8E4m3fn = true,
-  onUseFp8E4m3fnChange,
+  quantization = "fp8_e4m3fn",
+  onQuantizationChange,
   onResetCache,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
@@ -513,32 +513,6 @@ export function SettingsPanel({
           />
         )}
 
-        {pipelineId === "krea-realtime-video" && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="space-y-2 pt-2">
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.useFp8E4m3fn.label}
-                    tooltip={PARAMETER_METADATA.useFp8E4m3fn.tooltip}
-                    className="text-sm text-foreground"
-                  />
-                  <Toggle
-                    pressed={useFp8E4m3fn}
-                    onPressedChange={onUseFp8E4m3fnChange || (() => {})}
-                    disabled={isStreaming}
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                  >
-                    {useFp8E4m3fn ? "ON" : "OFF"}
-                  </Toggle>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {pipelineId === "streamdiffusionv2" && (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -577,6 +551,39 @@ export function SettingsPanel({
                 valueFormatter={formatNoiseScale}
                 inputParser={v => parseFloat(v) || 0.0}
               />
+            </div>
+          </div>
+        )}
+
+        {pipelineId === "krea-realtime-video" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.quantization.label}
+                    tooltip={PARAMETER_METADATA.quantization.tooltip}
+                    className="text-sm text-foreground"
+                  />
+                  <Select
+                    value={quantization || "none"}
+                    onValueChange={value => {
+                      onQuantizationChange?.(
+                        value === "none" ? null : (value as "fp8_e4m3fn")
+                      );
+                    }}
+                    disabled={isStreaming}
+                  >
+                    <SelectTrigger className="w-[140px] h-7">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="fp8_e4m3fn">fp8_e4m3fn</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
           </div>
         )}

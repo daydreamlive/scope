@@ -324,21 +324,20 @@ class PipelineManager:
             height = 512
             width = 512
             seed = 42
-            use_fp8_e4m3fn = True
+            quantization = None
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
                 seed = load_params.get("seed", 42)
-                use_fp8_e4m3fn = load_params.get("use_fp8_e4m3fn", True)
+                quantization = load_params.get("quantization", None)
 
             config["height"] = height
             config["width"] = width
             config["seed"] = seed
 
-            logger.info(f"use_fp8_e4m3fn: {use_fp8_e4m3fn}")
             pipeline = KreaRealtimeVideoPipeline(
                 config,
-                use_fp8_e4m3fn=use_fp8_e4m3fn,
+                quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
             )

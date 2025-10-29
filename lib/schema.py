@@ -82,6 +82,12 @@ class PipelineStatusEnum(str, Enum):
     ERROR = "error"
 
 
+class Quantization(str, Enum):
+    """Quantization method enumeration."""
+
+    FP8_E4M3FN = "fp8_e4m3fn"
+
+
 class PipelineLoadParams(BaseModel):
     """Base class for pipeline load parameters."""
 
@@ -122,9 +128,9 @@ class KreaRealtimeVideoLoadParams(PipelineLoadParams):
     height: int = Field(default=512, description="Target video height", ge=64, le=2048)
     width: int = Field(default=512, description="Target video width", ge=64, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
-    use_fp8_e4m3fn: bool = Field(
-        default=True,
-        description="Enable FP8 E4M3FN quantization for the text encoder",
+    quantization: Quantization | None = Field(
+        default=Quantization.FP8_E4M3FN,
+        description="Quantization method to use for diffusion model. If None, no quantization is applied.",
     )
 
 

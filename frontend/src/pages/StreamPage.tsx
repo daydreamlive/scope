@@ -277,8 +277,8 @@ export function StreamPage() {
     });
   };
 
-  const handleUseFp8E4m3fnChange = (enabled: boolean) => {
-    updateSettings({ useFp8E4m3fn: enabled });
+  const handleQuantizationChange = (quantization: "fp8_e4m3fn" | null) => {
+    updateSettings({ quantization });
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
@@ -446,10 +446,13 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
-          use_fp8_e4m3fn: settings.useFp8E4m3fn ?? true,
+          quantization:
+            settings.quantization !== undefined
+              ? settings.quantization
+              : "fp8_e4m3fn",
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, use_fp8_e4m3fn: ${loadParams.use_fp8_e4m3fn}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
         );
       }
 
@@ -672,8 +675,12 @@ export function StreamPage() {
             onNoiseControllerChange={handleNoiseControllerChange}
             manageCache={settings.manageCache ?? true}
             onManageCacheChange={handleManageCacheChange}
-            useFp8E4m3fn={settings.useFp8E4m3fn ?? true}
-            onUseFp8E4m3fnChange={handleUseFp8E4m3fnChange}
+            quantization={
+              settings.quantization !== undefined
+                ? settings.quantization
+                : "fp8_e4m3fn"
+            }
+            onQuantizationChange={handleQuantizationChange}
             onResetCache={handleResetCache}
           />
         </div>
