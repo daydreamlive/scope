@@ -35,7 +35,8 @@ pipeline = KreaRealtimeVideoPipeline(
     low_memory=is_cuda_low_memory(device),
     # Set quantization to Quantization.FP8_E4M3FN to work with 32GB VRAM
     # quantization=Quantization.FP8_E4M3FN,
-    compile=True,
+    # Only enable compile diffusion model for hopper right now
+    compile=any(x in torch.cuda.get_device_name(0).lower() for x in ("h100", "hopper")),
     device=device,
     dtype=torch.bfloat16,
 )
