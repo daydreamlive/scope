@@ -11,8 +11,9 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 ## Features
 
 - Autoregressive video diffusion models
-  - [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md)
-  - [LongLive](./pipelines/longlive/docs/usage.md)
+  - [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md) (video-to-video)
+  - [LongLive](./pipelines/longlive/docs/usage.md) (text-to-video)
+  - [Krea Realtime Video](./pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
 - WebRTC real-time streaming
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
@@ -26,7 +27,18 @@ Scope currently supports the following operating systems:
 - Linux
 - Windows
 
-Scope currently requires a Nvidia GPU with >= 24GB VRAM. We recommend a driver that supports CUDA >= 12.8 and a RTX 3090/4090/5090 (newer generations will support higher FPS throughput and lower latency). If you do not have access to a GPU with these specs then we recommend installing on [Runpod](#runpod).
+Scope currently requires a Nvidia GPU with >= 24GB VRAM. As a baseline, we recommend a driver that supports CUDA >= 12.8 and a RTX 3090/4090/5090 (newer generations will support higher FPS throughput and lower latency).
+
+The following models currently have more restrictive requirements:
+
+**Krea Realtime Video**
+
+- Requires a Nvidia GPU with >= 32 GB VRAM
+- Requires Linux for usable performance and Windows support is limited without any guarantees
+- At the default resolution of 320x576, a 32 GB VRAM GPU (eg RTX 5090) can run the model with fp8 quantization
+- If you want to use a higher resolution like 480x832, we suggest using a > 40GB VRAM GPU (eg H100, RTX 6000 Pro)
+
+If you do not have access to a GPU with these specs then we recommend installing on [Runpod](#runpod).
 
 ## Install
 
@@ -98,6 +110,7 @@ Examples with importable timeline files can be found here:
 
 - [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md)
 - [LongLive](./pipelines/longlive/docs/usage.md)
+- [Krea Realtime Video](./pipelines/krea_realtime_video/docs/usage.md)
 
 ## Firewalls
 

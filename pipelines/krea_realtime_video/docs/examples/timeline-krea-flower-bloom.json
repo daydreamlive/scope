@@ -1,0 +1,52 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 11.35560000014305,
+      "prompts": [
+        {
+          "text": "A cinematic macro shot of a single flower bud nestled in soft morning light. The camera slowly zooms in as the delicate green sepals begin to part, revealing vibrant petals tightly curled within. Time seems to slow as the bud gently unfolds, each petal unfurling in graceful, fluid motion. Tiny droplets of dew glisten on the surface, catching the light and scattering it into sparkling reflections. The petals spread wider and wider, revealing the bright golden center as the flower comes fully to life. The surrounding meadow shimmers softly out of focus, bathed in a warm, diffused glow. Subtle movements of grass and drifting pollen fill the frame, emphasizing the serenity and beauty of natural growth. The camera lingers on the open blossom, now radiant and complete — a quiet celebration of life emerging from stillness.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 11.35560000014305,
+      "endTime": 24.48110000014305,
+      "prompts": [
+        {
+          "text": "A cinematic macro shot of the same fully bloomed flower basking in soft daylight. The camera remains close, focusing on the delicate petals as a subtle transformation begins to unfold. At first, faint veins of crimson appear near the base of each petal, slowly spreading outward like ripples of color. The hues deepen and intensify, shifting from pale pink to vivid scarlet in a mesmerizing gradient. The light catches the changing surface, revealing velvety textures and glimmering highlights as the transformation continues. The surrounding meadow remains softly blurred in the background, enhancing the focus on the flower’s vivid metamorphosis. Tiny motes of pollen drift through the air, illuminated by the warm glow of the sun. The camera holds steady as the final shade settles into a rich, luminous red — the flower now radiant and alive, standing as a striking symbol of transformation and beauty.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 24.48110000014305,
+      "endTime": 39.359200000047686,
+      "prompts": [
+        {
+          "text": "A cinematic macro shot of the same red flower standing still in soft daylight. The camera focuses closely on the petals as a subtle transformation begins to ripple through their surface. The deep crimson hue starts to fade from the edges inward, replaced by cool tones of violet that shift toward a brilliant, luminous blue. The transition unfolds slowly, like color spreading through water — graceful and mesmerizing. Veins of bright cyan trace across the petals, deepening into rich sapphire shades as the entire bloom takes on a radiant, iridescent glow. The texture of the petals glistens softly in the light, revealing intricate patterns beneath the shifting color. The background remains softly blurred, with hints of green and gold creating contrast against the vivid blue bloom. The camera lingers on the flower’s final form — now fully transformed, glowing with serene beauty, a symbol of calm and renewal emerging from change.",
+          "weight": 100
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "pipelineId": "krea-realtime-video",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750
+    ],
+    "noiseScale": 0.7,
+    "noiseController": true,
+    "manageCache": true,
+    "quantization": null
+  },
+  "version": "2.0",
+  "exportedAt": "2025-10-30T17:11:49.071Z"
+}

@@ -1,0 +1,52 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 13.123799999952316,
+      "prompts": [
+        {
+          "text": "A 3D animated scene. An abstract, liquid-like shape swirls gracefully in midair against a softly lit background of deep blues and silvers. The camera floats slowly around it, capturing the mesmerizing motion as the shape continuously shifts and folds in on itself like flowing water. Its translucent surface reflects light in rippling patterns, creating glimmers of turquoise and white that dance across its curves. Tiny droplets and shimmering particles drift away from its edges, suspended in slow motion before rejoining the main form. The motion is smooth and continuous — a hypnotic flow of energy and motion as the shape bends, stretches, and spirals into fluid loops. Soft light filters through the translucent form, revealing layers of motion within, like currents beneath the surface of an ocean wave. The scene evokes serenity and wonder — a living sculpture made of water, light, and motion.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 13.123799999952316,
+      "endTime": 30.569599999904632,
+      "prompts": [
+        {
+          "text": "A 3D animated scene. The swirling abstract shape of liquid light continues to twist gently in midair, its motion slowing as the fluid currents begin to converge. The camera moves closer, focusing on the center as the swirling form gradually stabilizes. Ripples fade into smooth, glassy contours as the shape starts to morph — the flowing curves folding inward and upward, forming the walls of a cup. The transformation is graceful and continuous, as if sculpted from water and light itself. The surface solidifies from translucent fluid into clear, shimmering glass, catching and refracting the ambient blue and silver light. Tiny droplets merge seamlessly into the structure, completing the rim with perfect precision. The camera slowly circles the newly formed cup, the reflections of its surroundings gliding across its surface. A final droplet lands inside, creating gentle ripples that fade to stillness — a calm, poetic ending to the transformation from abstract fluid to elegant form.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 30.569599999904632,
+      "endTime": 56.81939999985695,
+      "prompts": [
+        {
+          "text": "A 3D animated scene. The glass cup hovers motionless in the softly glowing space, its surface gleaming with reflections of blue and silver light. Slowly, the transformation begins — the cup’s circular rim starts to fold inward as the glass seems to melt and stretch like liquid crystal. The camera glides in close, capturing the graceful flow of the morphing shape as the cup’s walls narrow and elongate. The handle extends outward, curving elegantly, while the body of the cup flattens and thins into the smooth bowl of a spoon. The transformation is seamless and fluid, with swirling reflections sliding across the transparent surface like ripples of light. As the motion slows, the shape resolves into a perfectly formed glass spoon, floating gently in midair. The camera orbits slowly around it, catching the soft gleam of highlights along its curves. The scene ends in calm stillness — the once-fluid abstract form now resting as a delicate, luminous spoon suspended in space.",
+          "weight": 100
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "pipelineId": "krea-realtime-video",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750
+    ],
+    "noiseScale": 0.7,
+    "noiseController": true,
+    "manageCache": true,
+    "quantization": null
+  },
+  "version": "2.0",
+  "exportedAt": "2025-10-30T17:37:04.689Z"
+}
