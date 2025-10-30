@@ -71,8 +71,18 @@ const createUpdateTimeFunction = (
           activePrompt.transitionSteps,
           activePrompt.temporalInterpolationMethod
         );
+      } else if (optionsRef.current?.onPromptItemsChange) {
+        // Simple prompt - send as single PromptItem with transition settings
+        const promptItems: PromptItem[] = [
+          { text: activePrompt.text, weight: 100 },
+        ];
+        optionsRef.current.onPromptItemsChange(
+          promptItems,
+          activePrompt.transitionSteps,
+          activePrompt.temporalInterpolationMethod
+        );
       } else if (optionsRef.current?.onPromptChange) {
-        // Simple prompt, just send the text
+        // Fallback to simple text if onPromptItemsChange not available
         optionsRef.current.onPromptChange(activePrompt.text);
       }
       lastAppliedPromptIdRef.current = activePrompt.id;
@@ -116,7 +126,18 @@ const createUpdateTimeFunction = (
             lastPrompt.transitionSteps,
             lastPrompt.temporalInterpolationMethod
           );
+        } else if (optionsRef.current?.onPromptItemsChange) {
+          // Simple prompt - send as single PromptItem with transition settings
+          const promptItems: PromptItem[] = [
+            { text: lastPrompt.text, weight: 100 },
+          ];
+          optionsRef.current.onPromptItemsChange(
+            promptItems,
+            lastPrompt.transitionSteps,
+            lastPrompt.temporalInterpolationMethod
+          );
         } else if (optionsRef.current?.onPromptChange) {
+          // Fallback to simple text if onPromptItemsChange not available
           optionsRef.current.onPromptChange(lastPrompt.text);
         }
 

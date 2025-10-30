@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { Slider } from "./ui/slider";
 
 import type { TimelinePrompt } from "./PromptTimeline";
 import { usePromptManager } from "../hooks/usePromptManager";
@@ -22,6 +23,7 @@ interface TimelinePromptEditorProps {
   disabled?: boolean;
   interpolationMethod?: "linear" | "slerp";
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
+  timelinePrompts?: TimelinePrompt[];
 }
 
 const MAX_PROMPTS = 4;
@@ -34,6 +36,7 @@ export function TimelinePromptEditor({
   disabled = false,
   interpolationMethod = "linear",
   onInterpolationMethodChange,
+  timelinePrompts = [],
 }: TimelinePromptEditorProps) {
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const lastSyncedPromptIdRef = useRef<string | null>(null);
@@ -128,6 +131,11 @@ export function TimelinePromptEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prompt?.id]);
 
+  // Check if this is the first block (can't transition from nothing)
+  const isFirstBlock = Boolean(
+    prompt && timelinePrompts.length > 0 && timelinePrompts[0].id === prompt.id
+  );
+
   // Automatically switch to linear interpolation when there are more than 2 prompts
   // SLERP only works with exactly 2 prompts
   useEffect(() => {
@@ -138,6 +146,89 @@ export function TimelinePromptEditor({
 
   const isSinglePrompt = prompts.length === 1;
 
+  // Update transition steps
+  const handleTransitionStepsChange = (steps: number) => {
+    if (prompt) {
+      const updatedPrompt = {
+        ...prompt,
+        transitionSteps: steps,
+      };
+      onPromptUpdate?.(updatedPrompt);
+    }
+  };
+
+  // Update temporal interpolation method
+  const handleTemporalInterpolationMethodChange = (
+    method: "linear" | "slerp"
+  ) => {
+    if (prompt) {
+      const updatedPrompt = {
+        ...prompt,
+        temporalInterpolationMethod: method,
+      };
+      onPromptUpdate?.(updatedPrompt);
+    }
+  };
+
+  // Render transition settings
+  const renderTransitionSettings = () => {
+    const effectiveTransitionSteps = isFirstBlock
+      ? 0
+      : (prompt?.transitionSteps ?? 0);
+    const effectiveTemporalMethod =
+      prompt?.temporalInterpolationMethod ?? "slerp";
+
+    return (
+      <div className="space-y-3 pt-3 border-t border-border">
+        <div className="text-xs font-medium text-muted-foreground">
+          Temporal Transition Settings
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground w-16">Steps:</span>
+          <Slider
+            value={[effectiveTransitionSteps]}
+            onValueChange={([value]: number[]) => handleTransitionStepsChange(value)}
+            min={0}
+            max={10}
+            step={1}
+            disabled={disabled || isFirstBlock}
+            className="flex-1"
+          />
+          <span className="text-xs text-muted-foreground w-8 text-right">
+            {effectiveTransitionSteps}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground w-16">Method:</span>
+          <Select
+            value={effectiveTemporalMethod}
+            onValueChange={value =>
+              handleTemporalInterpolationMethodChange(
+                value as "linear" | "slerp"
+              )
+            }
+            disabled={disabled || isFirstBlock}
+          >
+            <SelectTrigger className="flex-1 h-7 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="linear">Linear</SelectItem>
+              <SelectItem value="slerp">Slerp</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isFirstBlock && (
+          <div className="text-xs text-muted-foreground italic">
+            First block cannot have transitions
+          </div>
+        )}
+      </div>
+    );
+  };
   // Render single prompt mode
   const renderSinglePrompt = () => {
     return (
@@ -173,6 +264,8 @@ export function TimelinePromptEditor({
             </Button>
           </div>
         )}
+
+        {renderTransitionSettings()}
       </div>
     );
   };
@@ -253,6 +346,8 @@ export function TimelinePromptEditor({
             </div>
           )}
         </div>
+
+        {renderTransitionSettings()}
       </div>
     );
   };
