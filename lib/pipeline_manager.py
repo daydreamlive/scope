@@ -338,7 +338,11 @@ class PipelineManager:
             pipeline = KreaRealtimeVideoPipeline(
                 config,
                 quantization=quantization,
-                compile=True,
+                # Only compile diffusion model for hopper right now
+                compile=any(
+                    x in torch.cuda.get_device_name(0).lower()
+                    for x in ("h100", "hopper")
+                ),
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
             )
