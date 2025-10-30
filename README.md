@@ -133,6 +133,12 @@ uv run daydream-scope
 
 Read the [contribution guide](./docs/contributing.md).
 
+## Troubleshooting
+
+**Python.h: No such file or directory**
+
+This error has been encountered on certain Linux machines when the Python header file is missing. If you encounter this error, make sure you install the [python3-dev package](https://packages.debian.org/bookworm/python3-dev).
+
 ## License
 
 The alpha version of this project is licensed under [CC BY-NC-SA 4.0](./LICENSE).
