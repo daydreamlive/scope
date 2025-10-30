@@ -637,25 +637,50 @@ export function StreamPage() {
               currentPromptItems={promptItems}
               onPromptSubmit={text => {
                 // Update the left panel's prompt state to reflect current timeline prompt
-                setPromptItems([{ text, weight: 100 }]);
+                const prompts = [{ text, weight: 100 }];
+                setPromptItems(prompts);
 
-                // Send to backend
-                sendParameterUpdate({
-                  prompts: [{ text, weight: 100 }],
-                  prompt_interpolation_method: interpolationMethod,
-                  denoising_step_list: settings.denoisingSteps || [700, 500],
-                });
+                // Send to backend - use transition if streaming and transition steps > 0
+                if (isStreaming && transitionSteps > 0) {
+                  sendParameterUpdate({
+                    transition: {
+                      target_prompts: prompts,
+                      num_steps: transitionSteps,
+                      temporal_interpolation_method:
+                        temporalInterpolationMethod,
+                    },
+                  });
+                } else {
+                  // Send direct prompts without transition
+                  sendParameterUpdate({
+                    prompts,
+                    prompt_interpolation_method: interpolationMethod,
+                    denoising_step_list: settings.denoisingSteps || [700, 500],
+                  });
+                }
               }}
               onPromptItemsSubmit={prompts => {
                 // Update the left panel's prompt state to reflect current timeline prompt blend
                 setPromptItems(prompts);
 
-                // Send to backend with full blend data
-                sendParameterUpdate({
-                  prompts,
-                  prompt_interpolation_method: interpolationMethod,
-                  denoising_step_list: settings.denoisingSteps || [700, 500],
-                });
+                // Send to backend - use transition if streaming and transition steps > 0
+                if (isStreaming && transitionSteps > 0) {
+                  sendParameterUpdate({
+                    transition: {
+                      target_prompts: prompts,
+                      num_steps: transitionSteps,
+                      temporal_interpolation_method:
+                        temporalInterpolationMethod,
+                    },
+                  });
+                } else {
+                  // Send direct prompts without transition
+                  sendParameterUpdate({
+                    prompts,
+                    prompt_interpolation_method: interpolationMethod,
+                    denoising_step_list: settings.denoisingSteps || [700, 500],
+                  });
+                }
               }}
               disabled={
                 settings.pipelineId === "passthrough" ||
