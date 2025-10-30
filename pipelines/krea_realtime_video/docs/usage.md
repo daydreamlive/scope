@@ -12,15 +12,21 @@ A > 40 GB VRAM GPU (eg H100, RTX 6000 Pro) are recommended for these examples si
 
 https://github.com/user-attachments/assets/149d41ce-0392-4d9d-ae19-cd7896ff92b9
 
+[Daydream Project](https://app.daydream.live/creators/yondonfu/creations/flowers)
+
 [Timeline JSON file](./examples/timeline-krea-flower-bloom.json)
 
 https://github.com/user-attachments/assets/8b9086be-b59f-42f1-94fb-2523ddec41bd
+
+[Daydream Project](https://app.daydream.live/creators/yondonfu/creations/abstract)
 
 [Timeline JSON file](./examples/timeline-krea-abstract-shape.json)
 
 A >= 32 GB VRAM GPU (eg RTX 5090) is recommended for these examples which have lower VRAM requirements due to the lower resolution.
 
 https://github.com/user-attachments/assets/facdc365-87a4-40a9-a6e3-cfb1b88583b3
+
+[Daydream Project](https://app.daydream.live/creators/yondonfu/creations/flowers-low)
 
 [Timeline JSON file](./examples/timeline-krea-flower-bloom-low-res.json)
 

@@ -10,15 +10,15 @@ The following examples include timeline JSON files with the prompts used so you 
 
 https://github.com/user-attachments/assets/e9adaf9d-8639-42aa-911e-fc3574e7fdef
 
+[Daydream Project](https://app.daydream.live/creators/yondonfu/creations/panda)
+
 [Timeline JSON file](./examples/timeline-panda.json)
 
 https://github.com/user-attachments/assets/63940a18-be6e-47fe-80bb-43d05162f2d6
 
+[Daydream Project](https://app.daydream.live/creators/yondonfu/creations/factory)
+
 [Timeline JSON file](./examples/timeline-factory.json)
-
-https://github.com/user-attachments/assets/f51d4c1a-c377-49bf-948e-a3c2deeb699e
-
-[Timeline JSON file](./examples/timeline-ironman.json)
 
 ## Resolution
 
