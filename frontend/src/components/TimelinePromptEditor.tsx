@@ -144,7 +144,6 @@ export function TimelinePromptEditor({
 
   const isSinglePrompt = prompts.length === 1;
 
-  // Update transition steps
   const handleTransitionStepsChange = (steps: number) => {
     if (prompt) {
       const updatedPrompt = {
@@ -155,7 +154,6 @@ export function TimelinePromptEditor({
     }
   };
 
-  // Update temporal interpolation method
   const handleTemporalInterpolationMethodChange = (
     method: "linear" | "slerp"
   ) => {

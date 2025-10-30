@@ -3,7 +3,6 @@ import type { TimelinePrompt } from "../components/PromptTimeline";
 
 /**
  * Callback interfaces for submitting timeline prompts.
- * Supports both simple text and multi-prompt blends with transition settings.
  */
 export interface PromptSubmissionCallbacks {
   onPromptSubmit?: (prompt: string) => void;
@@ -15,8 +14,7 @@ export interface PromptSubmissionCallbacks {
 }
 
 /**
- * Submits a timeline prompt through the appropriate callback with fallback logic.
- * Handles multi-prompt blends, simple prompts with transition settings, and text-only fallback.
+ * Submits a timeline prompt through the appropriate callback.
  *
  * @param prompt - The timeline prompt to submit
  * @param callbacks - Object containing onPromptSubmit and/or onPromptItemsSubmit callbacks
@@ -25,7 +23,6 @@ export function submitTimelinePrompt(
   prompt: TimelinePrompt,
   callbacks: PromptSubmissionCallbacks
 ): void {
-  // If the prompt has blend data, send it as PromptItems
   if (
     prompt.prompts &&
     prompt.prompts.length > 0 &&
@@ -41,7 +38,6 @@ export function submitTimelinePrompt(
       prompt.temporalInterpolationMethod
     );
   } else if (callbacks.onPromptItemsSubmit) {
-    // Simple prompt - send as single PromptItem with transition settings
     const promptItems: PromptItem[] = [{ text: prompt.text, weight: 100 }];
     callbacks.onPromptItemsSubmit(
       promptItems,
@@ -49,7 +45,6 @@ export function submitTimelinePrompt(
       prompt.temporalInterpolationMethod
     );
   } else if (callbacks.onPromptSubmit) {
-    // Fallback to simple text if onPromptItemsSubmit not available
     callbacks.onPromptSubmit(prompt.text);
   }
 }
