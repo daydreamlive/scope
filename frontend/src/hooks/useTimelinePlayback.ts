@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import type { PromptItem } from "../lib/api";
+import { submitTimelinePrompt } from "../utils/timelinePromptSubmission";
 
 interface UseTimelinePlaybackOptions {
   onPromptChange?: (prompt: string) => void;
@@ -56,35 +57,10 @@ const createUpdateTimeFunction = (
       (activePrompt.id !== lastAppliedPromptIdRef.current ||
         activePrompt.text !== lastAppliedPromptTextRef.current)
     ) {
-      // If the prompt has blend data, send it as PromptItems
-      if (
-        activePrompt.prompts &&
-        activePrompt.prompts.length > 0 &&
-        optionsRef.current?.onPromptItemsChange
-      ) {
-        const promptItems: PromptItem[] = activePrompt.prompts.map(p => ({
-          text: p.text,
-          weight: p.weight,
-        }));
-        optionsRef.current.onPromptItemsChange(
-          promptItems,
-          activePrompt.transitionSteps,
-          activePrompt.temporalInterpolationMethod
-        );
-      } else if (optionsRef.current?.onPromptItemsChange) {
-        // Simple prompt - send as single PromptItem with transition settings
-        const promptItems: PromptItem[] = [
-          { text: activePrompt.text, weight: 100 },
-        ];
-        optionsRef.current.onPromptItemsChange(
-          promptItems,
-          activePrompt.transitionSteps,
-          activePrompt.temporalInterpolationMethod
-        );
-      } else if (optionsRef.current?.onPromptChange) {
-        // Fallback to simple text if onPromptItemsChange not available
-        optionsRef.current.onPromptChange(activePrompt.text);
-      }
+      submitTimelinePrompt(activePrompt, {
+        onPromptSubmit: optionsRef.current?.onPromptChange,
+        onPromptItemsSubmit: optionsRef.current?.onPromptItemsChange,
+      });
       lastAppliedPromptIdRef.current = activePrompt.id;
       lastAppliedPromptTextRef.current = activePrompt.text;
     } else if (!activePrompt && lastAppliedPromptIdRef.current !== null) {
@@ -111,35 +87,10 @@ const createUpdateTimeFunction = (
         );
 
         // Notify parent that live mode has started
-        // If the prompt has blend data, send it as PromptItems
-        if (
-          lastPrompt.prompts &&
-          lastPrompt.prompts.length > 0 &&
-          optionsRef.current?.onPromptItemsChange
-        ) {
-          const promptItems: PromptItem[] = lastPrompt.prompts.map(p => ({
-            text: p.text,
-            weight: p.weight,
-          }));
-          optionsRef.current.onPromptItemsChange(
-            promptItems,
-            lastPrompt.transitionSteps,
-            lastPrompt.temporalInterpolationMethod
-          );
-        } else if (optionsRef.current?.onPromptItemsChange) {
-          // Simple prompt - send as single PromptItem with transition settings
-          const promptItems: PromptItem[] = [
-            { text: lastPrompt.text, weight: 100 },
-          ];
-          optionsRef.current.onPromptItemsChange(
-            promptItems,
-            lastPrompt.transitionSteps,
-            lastPrompt.temporalInterpolationMethod
-          );
-        } else if (optionsRef.current?.onPromptChange) {
-          // Fallback to simple text if onPromptItemsChange not available
-          optionsRef.current.onPromptChange(lastPrompt.text);
-        }
+        submitTimelinePrompt(lastPrompt, {
+          onPromptSubmit: optionsRef.current?.onPromptChange,
+          onPromptItemsSubmit: optionsRef.current?.onPromptItemsChange,
+        });
 
         // Continue playing instead of stopping
         animationFrameRef.current = requestAnimationFrame(
