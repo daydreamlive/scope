@@ -5,6 +5,7 @@ import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
 import { generateRandomColor } from "../utils/promptColors";
+import { submitTimelinePrompt } from "../utils/timelinePromptSubmission";
 
 interface PromptInputWithTimelineProps {
   className?: string;
@@ -148,21 +149,10 @@ export function PromptInputWithTimeline({
     const firstPrompt = prompts.find(p => !p.isLive);
 
     if (firstPrompt) {
-      // If the prompt has blend data, send it as PromptItems
-      if (firstPrompt.prompts && firstPrompt.prompts.length > 0) {
-        const promptItems: PromptItem[] = firstPrompt.prompts.map(p => ({
-          text: p.text,
-          weight: p.weight,
-        }));
-        onPromptItemsSubmit?.(
-          promptItems,
-          firstPrompt.transitionSteps,
-          firstPrompt.temporalInterpolationMethod
-        );
-      } else {
-        // Simple prompt, just send the text
-        onPromptSubmit?.(firstPrompt.text);
-      }
+      submitTimelinePrompt(firstPrompt, {
+        onPromptSubmit,
+        onPromptItemsSubmit,
+      });
     }
   }, [prompts, onPromptSubmit, onPromptItemsSubmit]);
 
