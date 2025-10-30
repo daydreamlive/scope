@@ -13,6 +13,9 @@ from .vendor.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder
 
 logger = logging.getLogger(__name__)
 
+WARMUP_RUNS = 3
+WARMUP_PROMPT = "a majestic sunset"
+
 
 class KreaRealtimeVideoPipeline(Pipeline):
     def __init__(
@@ -20,6 +23,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         config,
         low_memory: bool = False,
         quantization: Quantization | None = None,
+        compile: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
@@ -69,6 +73,12 @@ class KreaRealtimeVideoPipeline(Pipeline):
         else:
             generator = generator.to(device=device, dtype=dtype)
 
+        if compile:
+            # Only compile the attention blocks
+            for block in generator.model.blocks:
+                # Disable fullgraph right now due to issues with RoPE
+                block.compile(fullgraph=False)
+
         start = time.time()
         text_encoder = WanTextEncoder(
             model_name=model_name,
@@ -104,6 +114,19 @@ class KreaRealtimeVideoPipeline(Pipeline):
         self.prompt_blender = PromptBlender(
             device, dtype, cache_reset_callback=self._reset_cache_for_transition
         )
+
+        # Warmup
+        # Always warmup regardless of whether compile = True because even if compile = False
+        # flex attention will still be compiled
+        start = time.time()
+
+        self.prepare(prompts=[{"text": WARMUP_PROMPT}], should_prepare=True)
+        for _ in range(WARMUP_RUNS):
+            self.stream()
+
+        print(f"Warmed up in {time.time() - start:2f}s")
+
+        # Assume that caller will call prepare() to initialize pipeline properly
 
     def _reset_cache_for_transition(self):
         """Reset cross-attention cache for prompt transitions."""
