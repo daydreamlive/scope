@@ -23,7 +23,7 @@ interface TimelinePromptEditorProps {
   disabled?: boolean;
   interpolationMethod?: "linear" | "slerp";
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
-  timelinePrompts?: TimelinePrompt[];
+  promptIndex?: number;
 }
 
 const MAX_PROMPTS = 4;
@@ -36,7 +36,7 @@ export function TimelinePromptEditor({
   disabled = false,
   interpolationMethod = "linear",
   onInterpolationMethodChange,
-  timelinePrompts = [],
+  promptIndex,
 }: TimelinePromptEditorProps) {
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const lastSyncedPromptIdRef = useRef<string | null>(null);
@@ -132,9 +132,7 @@ export function TimelinePromptEditor({
   }, [prompt?.id]);
 
   // Check if this is the first block (can't transition from nothing)
-  const isFirstBlock = Boolean(
-    prompt && timelinePrompts.length > 0 && timelinePrompts[0].id === prompt.id
-  );
+  const isFirstBlock = promptIndex === 0;
 
   // Automatically switch to linear interpolation when there are more than 2 prompts
   // SLERP only works with exactly 2 prompts
