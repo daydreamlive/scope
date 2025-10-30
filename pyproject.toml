@@ -49,6 +49,7 @@ dependencies = [
     "peft>=0.17.1",
     "torchcodec>=0.7.0",
     "torchao==0.13.0",
+    "kernels>=0.10.4",
 ]
 
 [project.scripts]
