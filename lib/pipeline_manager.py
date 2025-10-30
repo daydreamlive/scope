@@ -338,6 +338,7 @@ class PipelineManager:
             pipeline = KreaRealtimeVideoPipeline(
                 config,
                 quantization=quantization,
+                compile=True,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
             )
