@@ -115,6 +115,8 @@ export interface TimelinePrompt {
   prompts?: Array<{ text: string; weight: number }>;
   color?: string;
   isLive?: boolean;
+  transitionSteps?: number;
+  temporalInterpolationMethod?: "linear" | "slerp";
 }
 
 // Timeline reset state
