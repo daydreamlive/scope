@@ -239,6 +239,7 @@ export function InputAndControlsPanel({
                     disabled={false}
                     interpolationMethod={interpolationMethod}
                     onInterpolationMethodChange={onInterpolationMethodChange}
+                    timelinePrompts={_timelinePrompts}
                   />
                 ) : (
                   <PromptInput
