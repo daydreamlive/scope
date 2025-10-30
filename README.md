@@ -87,7 +87,7 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 
 1. **Click the Runpod template link**: [Template](https://console.runpod.io/deploy?template=aca8mw9ivw&ref=5k8hxjq3)
 
-2. **Select your GPU**: Choose a GPU that meets the [system requirements](#system-requirements).
+2. **Select your GPU**: Choose a GPU that meets the [system requirements](#system-requirements). Please note that your driver must support CUDA >= 12.8.
 
 3. **Configure environment variables**:
    - Click "Edit Template"
