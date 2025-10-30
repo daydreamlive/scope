@@ -11,7 +11,11 @@ interface PromptInputWithTimelineProps {
   currentPrompt: string;
   currentPromptItems?: PromptItem[];
   onPromptSubmit?: (prompt: string) => void;
-  onPromptItemsSubmit?: (prompts: PromptItem[]) => void;
+  onPromptItemsSubmit?: (
+    prompts: PromptItem[],
+    transitionSteps?: number,
+    temporalInterpolationMethod?: "linear" | "slerp"
+  ) => void;
   disabled?: boolean;
   isStreaming?: boolean;
   isVideoPaused?: boolean;
@@ -37,6 +41,8 @@ interface PromptInputWithTimelineProps {
   onTimelineCurrentTimeChange?: (currentTime: number) => void;
   onTimelinePlayingChange?: (isPlaying: boolean) => void;
   isDownloading?: boolean;
+  transitionSteps?: number;
+  temporalInterpolationMethod?: "linear" | "slerp";
 }
 
 export function PromptInputWithTimeline({
@@ -68,6 +74,8 @@ export function PromptInputWithTimeline({
   onTimelineCurrentTimeChange,
   onTimelinePlayingChange,
   isDownloading = false,
+  transitionSteps,
+  temporalInterpolationMethod,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -146,7 +154,11 @@ export function PromptInputWithTimeline({
           text: p.text,
           weight: p.weight,
         }));
-        onPromptItemsSubmit?.(promptItems);
+        onPromptItemsSubmit?.(
+          promptItems,
+          firstPrompt.transitionSteps,
+          firstPrompt.temporalInterpolationMethod
+        );
       } else {
         // Simple prompt, just send the text
         onPromptSubmit?.(firstPrompt.text);
@@ -214,6 +226,8 @@ export function PromptInputWithTimeline({
         startTime: start,
         endTime: end,
         isLive: true,
+        transitionSteps,
+        temporalInterpolationMethod,
       };
 
       if (currentPromptItems?.length > 0) {
@@ -232,7 +246,12 @@ export function PromptInputWithTimeline({
         text: currentPrompt || "Live...",
       };
     },
-    [currentPromptItems, currentPrompt]
+    [
+      currentPromptItems,
+      currentPrompt,
+      transitionSteps,
+      temporalInterpolationMethod,
+    ]
   );
 
   // Initialize stream if needed
@@ -432,6 +451,8 @@ export function PromptInputWithTimeline({
           endTime: startTime,
           isLive: true,
           prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })),
+          transitionSteps,
+          temporalInterpolationMethod,
         };
 
         return [...updatedPrompts, newLivePrompt];

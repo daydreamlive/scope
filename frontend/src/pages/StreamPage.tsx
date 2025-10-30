@@ -645,6 +645,8 @@ export function StreamPage() {
             <PromptInputWithTimeline
               currentPrompt={promptItems[0]?.text || ""}
               currentPromptItems={promptItems}
+              transitionSteps={transitionSteps}
+              temporalInterpolationMethod={temporalInterpolationMethod}
               onPromptSubmit={text => {
                 // Update the left panel's prompt state to reflect current timeline prompt
                 const prompts = [{ text, weight: 100 }];
@@ -669,18 +671,29 @@ export function StreamPage() {
                   });
                 }
               }}
-              onPromptItemsSubmit={prompts => {
+              onPromptItemsSubmit={(
+                prompts,
+                blockTransitionSteps,
+                blockTemporalInterpolationMethod
+              ) => {
                 // Update the left panel's prompt state to reflect current timeline prompt blend
                 setPromptItems(prompts);
 
+                // Use transition params from block if provided, otherwise use global settings
+                const effectiveTransitionSteps =
+                  blockTransitionSteps ?? transitionSteps;
+                const effectiveTemporalInterpolationMethod =
+                  blockTemporalInterpolationMethod ??
+                  temporalInterpolationMethod;
+
                 // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && transitionSteps > 0) {
+                if (isStreaming && effectiveTransitionSteps > 0) {
                   sendParameterUpdate({
                     transition: {
                       target_prompts: prompts,
-                      num_steps: transitionSteps,
+                      num_steps: effectiveTransitionSteps,
                       temporal_interpolation_method:
-                        temporalInterpolationMethod,
+                        effectiveTemporalInterpolationMethod,
                     },
                   });
                 } else {
