@@ -5,7 +5,6 @@ interface PromptWithWeight {
 
 /**
  * Redistributes weights equally when adding a new prompt.
- * All prompts will have equal weight summing to 100.
  */
 export function redistributeWeightsOnAdd<T extends PromptWithWeight>(
   existingPrompts: T[],
@@ -27,7 +26,6 @@ export function redistributeWeightsOnAdd<T extends PromptWithWeight>(
 
 /**
  * Redistributes weights proportionally when removing a prompt.
- * Remaining prompts maintain their relative proportions and sum to 100.
  */
 export function redistributeWeightsOnRemove<T extends PromptWithWeight>(
   prompts: T[],

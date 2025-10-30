@@ -190,7 +190,6 @@ export function TimelinePromptEditor({
     }
   };
 
-  // Update transition steps
   const handleTransitionStepsChange = (steps: number) => {
     if (editingPrompt) {
       const updatedPrompt = {
@@ -202,7 +201,6 @@ export function TimelinePromptEditor({
     }
   };
 
-  // Update temporal interpolation method
   const handleTemporalInterpolationMethodChange = (
     method: "linear" | "slerp"
   ) => {
@@ -264,7 +262,6 @@ export function TimelinePromptEditor({
     );
   };
 
-  // Render transition settings
   const renderTransitionSettings = () => {
     const effectiveTransitionSteps = isFirstBlock
       ? 0
