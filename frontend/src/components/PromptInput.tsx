@@ -235,58 +235,62 @@ export function PromptInput({
           {renderPromptField(0, "blooming flowers", false)}
         </div>
 
-        <div className="flex items-center justify-between gap-2">
+        <div className="space-y-2">
+          {/* Temporal Blend - Top row */}
           <div
-            className={`flex flex-col gap-2 ${disabled || !isStreaming || timelinePrompts.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+            className={`flex items-center justify-between gap-2 ${disabled || !isStreaming || timelinePrompts.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
           >
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-32">
-                Transition Steps:
-              </span>
-              <div className="flex items-center gap-2 w-32">
-                <Slider
-                  value={[transitionSteps]}
-                  onValueChange={([value]) => onTransitionStepsChange?.(value)}
-                  min={0}
-                  max={16}
-                  step={1}
-                  disabled={
-                    disabled || !isStreaming || timelinePrompts.length === 0
-                  }
-                  className="flex-1"
-                />
-                <span className="text-xs text-muted-foreground w-6 text-right">
-                  {transitionSteps}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-32">
-                Temporal Blend:
-              </span>
-              <Select
-                value={temporalInterpolationMethod}
-                onValueChange={value =>
-                  onTemporalInterpolationMethodChange?.(
-                    value as "linear" | "slerp"
-                  )
-                }
+            <span className="text-xs text-muted-foreground">
+              Temporal Blend:
+            </span>
+            <Select
+              value={temporalInterpolationMethod}
+              onValueChange={value =>
+                onTemporalInterpolationMethodChange?.(
+                  value as "linear" | "slerp"
+                )
+              }
+              disabled={
+                disabled || !isStreaming || timelinePrompts.length === 0
+              }
+            >
+              <SelectTrigger className="w-24 h-6 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="linear">Linear</SelectItem>
+                <SelectItem value="slerp">Slerp</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Transition Steps - Middle row */}
+          <div
+            className={`flex items-center justify-between gap-2 ${disabled || !isStreaming || timelinePrompts.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            <span className="text-xs text-muted-foreground">
+              Transition Steps:
+            </span>
+            <div className="flex items-center gap-2 w-32 h-6">
+              <Slider
+                value={[transitionSteps]}
+                onValueChange={([value]) => onTransitionStepsChange?.(value)}
+                min={0}
+                max={16}
+                step={1}
                 disabled={
                   disabled || !isStreaming || timelinePrompts.length === 0
                 }
-              >
-                <SelectTrigger className="w-24 h-7 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="linear">Linear</SelectItem>
-                  <SelectItem value="slerp">Slerp</SelectItem>
-                </SelectContent>
-              </Select>
+                className="flex-1"
+              />
+              <span className="text-xs text-muted-foreground w-6 text-right">
+                {transitionSteps}
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Add/Submit buttons - Bottom row */}
+          <div className="flex items-center justify-end gap-2">
             {prompts.length < 4 && (
               <Button
                 onMouseDown={e => {
@@ -351,85 +355,82 @@ export function PromptInput({
         );
       })}
 
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3 flex-wrap">
-          {prompts.length >= 2 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                Spatial Blend:
-              </span>
-              <Select
-                value={interpolationMethod}
-                onValueChange={value =>
-                  onInterpolationMethodChange?.(value as "linear" | "slerp")
-                }
-                disabled={disabled}
-              >
-                <SelectTrigger className="w-24 h-7 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="linear">Linear</SelectItem>
-                  <SelectItem value="slerp" disabled={prompts.length > 2}>
-                    Slerp
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+      <div className="space-y-2">
+        {/* Spatial Blend - only for multiple prompts */}
+        {prompts.length >= 2 && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              Spatial Blend:
+            </span>
+            <Select
+              value={interpolationMethod}
+              onValueChange={value =>
+                onInterpolationMethodChange?.(value as "linear" | "slerp")
+              }
+              disabled={disabled}
+            >
+              <SelectTrigger className="w-24 h-6 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="linear">Linear</SelectItem>
+                <SelectItem value="slerp" disabled={prompts.length > 2}>
+                  Slerp
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-          <div
-            className={`flex flex-col gap-2 ${disabled || !isStreaming || timelinePrompts.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+        {/* Temporal Blend - Top row */}
+        <div
+          className={`flex items-center justify-between gap-2 ${disabled || !isStreaming || timelinePrompts.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+        >
+          <span className="text-xs text-muted-foreground">Temporal Blend:</span>
+          <Select
+            value={temporalInterpolationMethod}
+            onValueChange={value =>
+              onTemporalInterpolationMethodChange?.(value as "linear" | "slerp")
+            }
+            disabled={disabled || !isStreaming || timelinePrompts.length === 0}
           >
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                Transition Steps:
-              </span>
-              <div className="flex items-center gap-2 w-32">
-                <Slider
-                  value={[transitionSteps]}
-                  onValueChange={([value]) => onTransitionStepsChange?.(value)}
-                  min={0}
-                  max={16}
-                  step={1}
-                  disabled={
-                    disabled || !isStreaming || timelinePrompts.length === 0
-                  }
-                  className="flex-1"
-                />
-                <span className="text-xs text-muted-foreground w-6 text-right">
-                  {transitionSteps}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                Temporal Blend:
-              </span>
-              <Select
-                value={temporalInterpolationMethod}
-                onValueChange={value =>
-                  onTemporalInterpolationMethodChange?.(
-                    value as "linear" | "slerp"
-                  )
-                }
-                disabled={
-                  disabled || !isStreaming || timelinePrompts.length === 0
-                }
-              >
-                <SelectTrigger className="w-24 h-7 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="linear">Linear</SelectItem>
-                  <SelectItem value="slerp">Slerp</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <SelectTrigger className="w-24 h-6 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="linear">Linear</SelectItem>
+              <SelectItem value="slerp">Slerp</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Transition Steps - Middle row */}
+        <div
+          className={`flex items-center justify-between gap-2 ${disabled || !isStreaming || timelinePrompts.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+        >
+          <span className="text-xs text-muted-foreground">
+            Transition Steps:
+          </span>
+          <div className="flex items-center gap-2 w-32 h-6">
+            <Slider
+              value={[transitionSteps]}
+              onValueChange={([value]) => onTransitionStepsChange?.(value)}
+              min={0}
+              max={16}
+              step={1}
+              disabled={
+                disabled || !isStreaming || timelinePrompts.length === 0
+              }
+              className="flex-1"
+            />
+            <span className="text-xs text-muted-foreground w-6 text-right">
+              {transitionSteps}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Add/Submit buttons - Bottom row */}
+        <div className="flex items-center justify-end gap-2">
           {prompts.length < 4 && (
             <Button
               onMouseDown={e => {
