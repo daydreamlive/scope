@@ -5,7 +5,11 @@ import type { PromptItem } from "../lib/api";
 
 interface UseTimelinePlaybackOptions {
   onPromptChange?: (prompt: string) => void;
-  onPromptItemsChange?: (prompts: PromptItem[]) => void;
+  onPromptItemsChange?: (
+    prompts: PromptItem[],
+    transitionSteps?: number,
+    temporalInterpolationMethod?: "linear" | "slerp"
+  ) => void;
   isStreaming?: boolean;
   isVideoPaused?: boolean;
   onPromptsChange?: (prompts: TimelinePrompt[]) => void;
@@ -62,7 +66,11 @@ const createUpdateTimeFunction = (
           text: p.text,
           weight: p.weight,
         }));
-        optionsRef.current.onPromptItemsChange(promptItems);
+        optionsRef.current.onPromptItemsChange(
+          promptItems,
+          activePrompt.transitionSteps,
+          activePrompt.temporalInterpolationMethod
+        );
       } else if (optionsRef.current?.onPromptChange) {
         // Simple prompt, just send the text
         optionsRef.current.onPromptChange(activePrompt.text);
@@ -103,7 +111,11 @@ const createUpdateTimeFunction = (
             text: p.text,
             weight: p.weight,
           }));
-          optionsRef.current.onPromptItemsChange(promptItems);
+          optionsRef.current.onPromptItemsChange(
+            promptItems,
+            lastPrompt.transitionSteps,
+            lastPrompt.temporalInterpolationMethod
+          );
         } else if (optionsRef.current?.onPromptChange) {
           optionsRef.current.onPromptChange(lastPrompt.text);
         }
