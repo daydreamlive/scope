@@ -686,6 +686,16 @@ export function StreamPage() {
                   blockTemporalInterpolationMethod ??
                   temporalInterpolationMethod;
 
+                // Update the left panel's transition settings to reflect current block's values
+                if (blockTransitionSteps !== undefined) {
+                  setTransitionSteps(blockTransitionSteps);
+                }
+                if (blockTemporalInterpolationMethod !== undefined) {
+                  setTemporalInterpolationMethod(
+                    blockTemporalInterpolationMethod
+                  );
+                }
+
                 // Send to backend - use transition if streaming and transition steps > 0
                 if (isStreaming && effectiveTransitionSteps > 0) {
                   sendParameterUpdate({
