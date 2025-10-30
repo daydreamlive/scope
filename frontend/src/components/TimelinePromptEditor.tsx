@@ -13,6 +13,10 @@ import {
 } from "./ui/select";
 
 import type { TimelinePrompt } from "./PromptTimeline";
+import {
+  redistributeWeightsOnAdd,
+  redistributeWeightsOnRemove,
+} from "../utils/promptWeights";
 
 interface TimelinePromptEditorProps {
   className?: string;
@@ -21,7 +25,7 @@ interface TimelinePromptEditorProps {
   disabled?: boolean;
   interpolationMethod?: "linear" | "slerp";
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
-  timelinePrompts?: TimelinePrompt[];
+  promptIndex?: number;
 }
 
 const MAX_PROMPTS = 4;
@@ -34,7 +38,7 @@ export function TimelinePromptEditor({
   disabled = false,
   interpolationMethod = "linear",
   onInterpolationMethodChange,
-  timelinePrompts = [],
+  promptIndex,
 }: TimelinePromptEditorProps) {
   const [editingPrompt, setEditingPrompt] = useState<TimelinePrompt | null>(
     null
@@ -45,9 +49,7 @@ export function TimelinePromptEditor({
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
   // Check if this is the first block (can't transition from nothing)
-  const isFirstBlock = Boolean(
-    prompt && timelinePrompts.length > 0 && timelinePrompts[0].id === prompt.id
-  );
+  const isFirstBlock = promptIndex === 0;
 
   // Automatically switch to linear interpolation when there are more than 2 prompts
   // SLERP only works with exactly 2 prompts
@@ -85,7 +87,7 @@ export function TimelinePromptEditor({
       setEditingPrompt(null);
       setPrompts([]);
     }
-  }, [prompt, isFirstBlock, onPromptUpdate]);
+  }, [prompt, promptIndex, onPromptUpdate]);
 
   // Update prompt text
   const handlePromptTextChange = (index: number, text: string) => {
@@ -156,16 +158,7 @@ export function TimelinePromptEditor({
   // Add new prompt
   const handleAddPrompt = () => {
     if (prompts.length < MAX_PROMPTS) {
-      const newPromptCount = prompts.length + 1;
-      const equalWeight = 100 / newPromptCount;
-      const redistributedPrompts = prompts.map(p => ({
-        ...p,
-        weight: equalWeight,
-      }));
-      const newPrompts = [
-        ...redistributedPrompts,
-        { text: "", weight: equalWeight },
-      ];
+      const newPrompts = redistributeWeightsOnAdd(prompts);
       setPrompts(newPrompts);
 
       if (editingPrompt) {
@@ -182,21 +175,7 @@ export function TimelinePromptEditor({
   // Remove prompt
   const handleRemovePrompt = (index: number) => {
     if (prompts.length > 1) {
-      const remainingPrompts = prompts.filter((_, i) => i !== index);
-      const totalWeight = remainingPrompts.reduce(
-        (sum, p) => sum + p.weight,
-        0
-      );
-
-      // Redistribute to sum to 100
-      const redistributed = remainingPrompts.map(p => ({
-        ...p,
-        weight:
-          totalWeight > 0
-            ? (p.weight / totalWeight) * 100
-            : 100 / remainingPrompts.length,
-      }));
-
+      const redistributed = redistributeWeightsOnRemove(prompts, index);
       setPrompts(redistributed);
 
       if (editingPrompt) {

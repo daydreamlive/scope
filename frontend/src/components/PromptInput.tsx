@@ -12,6 +12,10 @@ import {
 } from "./ui/select";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import type { TimelinePrompt } from "./PromptTimeline";
+import {
+  redistributeWeightsOnAdd,
+  redistributeWeightsOnRemove,
+} from "../utils/promptWeights";
 
 interface PromptInputProps {
   className?: string;
@@ -110,36 +114,14 @@ export function PromptInput({
 
   const handleAddPrompt = () => {
     if (prompts.length < 4) {
-      const newPromptCount = prompts.length + 1;
-      const equalWeight = 100 / newPromptCount;
-      const redistributedPrompts = prompts.map(p => ({
-        ...p,
-        weight: equalWeight,
-      }));
-      onPromptsChange?.([
-        ...redistributedPrompts,
-        { text: "", weight: equalWeight },
-      ]);
+      const newPrompts = redistributeWeightsOnAdd(prompts);
+      onPromptsChange?.(newPrompts);
     }
   };
 
   const handleRemovePrompt = (index: number) => {
     if (prompts.length > 1) {
-      const remainingPrompts = prompts.filter((_, i) => i !== index);
-      const totalWeight = remainingPrompts.reduce(
-        (sum, p) => sum + p.weight,
-        0
-      );
-
-      // Redistribute to sum to 100
-      const redistributed = remainingPrompts.map(p => ({
-        ...p,
-        weight:
-          totalWeight > 0
-            ? (p.weight / totalWeight) * 100
-            : 100 / remainingPrompts.length,
-      }));
-
+      const redistributed = redistributeWeightsOnRemove(prompts, index);
       onPromptsChange?.(redistributed);
     }
   };
