@@ -156,7 +156,16 @@ export function TimelinePromptEditor({
   // Add new prompt
   const handleAddPrompt = () => {
     if (prompts.length < MAX_PROMPTS) {
-      const newPrompts = [...prompts, { text: "", weight: DEFAULT_WEIGHT }];
+      const newPromptCount = prompts.length + 1;
+      const equalWeight = 100 / newPromptCount;
+      const redistributedPrompts = prompts.map(p => ({
+        ...p,
+        weight: equalWeight,
+      }));
+      const newPrompts = [
+        ...redistributedPrompts,
+        { text: "", weight: equalWeight },
+      ];
       setPrompts(newPrompts);
 
       if (editingPrompt) {
@@ -173,14 +182,28 @@ export function TimelinePromptEditor({
   // Remove prompt
   const handleRemovePrompt = (index: number) => {
     if (prompts.length > 1) {
-      const newPrompts = prompts.filter((_, i) => i !== index);
-      setPrompts(newPrompts);
+      const remainingPrompts = prompts.filter((_, i) => i !== index);
+      const totalWeight = remainingPrompts.reduce(
+        (sum, p) => sum + p.weight,
+        0
+      );
+
+      // Redistribute to sum to 100
+      const redistributed = remainingPrompts.map(p => ({
+        ...p,
+        weight:
+          totalWeight > 0
+            ? (p.weight / totalWeight) * 100
+            : 100 / remainingPrompts.length,
+      }));
+
+      setPrompts(redistributed);
 
       if (editingPrompt) {
         const updatedPrompt = {
           ...editingPrompt,
-          text: newPrompts.length === 1 ? newPrompts[0].text : "",
-          prompts: newPrompts.length > 1 ? newPrompts : undefined,
+          text: redistributed.length === 1 ? redistributed[0].text : "",
+          prompts: redistributed.length > 1 ? redistributed : undefined,
         };
         setEditingPrompt(updatedPrompt);
         onPromptUpdate?.(updatedPrompt);
