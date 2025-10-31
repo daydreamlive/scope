@@ -1,9 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 
-import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
-import { Slider } from "./ui/slider";
-import { Plus, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -13,6 +11,9 @@ import {
 } from "./ui/select";
 
 import type { TimelinePrompt } from "./PromptTimeline";
+import { usePromptManager } from "../hooks/usePromptManager";
+import { PromptField } from "./shared/PromptField";
+import { WeightSlider } from "./shared/WeightSlider";
 
 interface TimelinePromptEditorProps {
   className?: string;
@@ -34,13 +35,98 @@ export function TimelinePromptEditor({
   interpolationMethod = "linear",
   onInterpolationMethodChange,
 }: TimelinePromptEditorProps) {
-  const [editingPrompt, setEditingPrompt] = useState<TimelinePrompt | null>(
-    null
-  );
-  const [prompts, setPrompts] = useState<
-    Array<{ text: string; weight: number }>
-  >([]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const lastSyncedPromptIdRef = useRef<string | null>(null);
+  const isInternalUpdateRef = useRef(false);
+
+  // Derive prompts from a TimelinePrompt
+  const getPromptsFromTimelinePrompt = (
+    timelinePrompt: TimelinePrompt | null
+  ) => {
+    if (!timelinePrompt) return [];
+    if (timelinePrompt.prompts && timelinePrompt.prompts.length > 0) {
+      return timelinePrompt.prompts;
+    }
+    return [{ text: timelinePrompt.text, weight: DEFAULT_WEIGHT }];
+  };
+
+  // Initialize prompts from prompt prop (memoized to avoid recalculation)
+  const initialPrompts = useMemo(
+    () => getPromptsFromTimelinePrompt(prompt),
+    [prompt?.id]
+  );
+
+  // Use shared prompt management hook (uncontrolled mode)
+  const {
+    prompts,
+    handlePromptTextChange,
+    handleWeightChange,
+    handleAddPrompt,
+    handleRemovePrompt,
+    normalizedWeights,
+    setPrompts,
+  } = usePromptManager({
+    initialPrompts: initialPrompts,
+    maxPrompts: MAX_PROMPTS,
+    defaultWeight: DEFAULT_WEIGHT,
+    onPromptsChange: newPrompts => {
+      if (prompt) {
+        isInternalUpdateRef.current = true;
+        const updatedPrompt = {
+          ...prompt,
+          text: newPrompts.length === 1 ? newPrompts[0].text : "",
+          prompts: newPrompts.length > 1 ? newPrompts : undefined,
+        };
+        onPromptUpdate?.(updatedPrompt);
+        // Reset flag in next tick
+        requestAnimationFrame(() => {
+          isInternalUpdateRef.current = false;
+        });
+      }
+    },
+  });
+
+  // Sync prompts when prompt prop changes (external update only)
+  useEffect(() => {
+    // Skip if this is an internal update from user interaction
+    if (isInternalUpdateRef.current) {
+      return;
+    }
+
+    if (!prompt) {
+      // Only clear if prompts aren't already empty
+      if (prompts.length > 0) {
+        lastSyncedPromptIdRef.current = null;
+        setPrompts([]);
+      }
+      return;
+    }
+
+    // Skip if we've already synced this prompt
+    if (lastSyncedPromptIdRef.current === prompt.id) {
+      return;
+    }
+
+    const expectedPrompts = getPromptsFromTimelinePrompt(prompt);
+
+    // Compare prompts to avoid unnecessary updates
+    const promptsMatch =
+      prompts.length === expectedPrompts.length &&
+      prompts.every(
+        (p, i) =>
+          p.text === expectedPrompts[i].text &&
+          Math.abs(p.weight - expectedPrompts[i].weight) < 0.001
+      );
+
+    if (!promptsMatch) {
+      lastSyncedPromptIdRef.current = prompt.id;
+      setPrompts(expectedPrompts);
+    } else {
+      // Mark as synced even if they match
+      lastSyncedPromptIdRef.current = prompt.id;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prompt?.id]);
 
   // Automatically switch to linear interpolation when there are more than 2 prompts
   // SLERP only works with exactly 2 prompts
@@ -50,176 +136,25 @@ export function TimelinePromptEditor({
     }
   }, [prompts.length, interpolationMethod, onInterpolationMethodChange]);
 
-  // Initialize editing prompt when prompt changes
-  useEffect(() => {
-    if (prompt) {
-      setEditingPrompt(prompt);
-      if (prompt.prompts && prompt.prompts.length > 0) {
-        setPrompts(prompt.prompts);
-      } else {
-        setPrompts([{ text: prompt.text, weight: DEFAULT_WEIGHT }]);
-      }
-    } else {
-      setEditingPrompt(null);
-      setPrompts([]);
-    }
-  }, [prompt]);
-
-  // Update prompt text
-  const handlePromptTextChange = (index: number, text: string) => {
-    const newPrompts = [...prompts];
-    newPrompts[index] = { ...newPrompts[index], text };
-    setPrompts(newPrompts);
-
-    if (editingPrompt) {
-      const updatedPrompt = {
-        ...editingPrompt,
-        text: newPrompts.length === 1 ? newPrompts[0].text : "",
-        prompts: newPrompts.length > 1 ? newPrompts : undefined,
-      };
-      setEditingPrompt(updatedPrompt);
-      onPromptUpdate?.(updatedPrompt);
-    }
-  };
-
-  // Update prompt weight
-  const handleWeightChange = (index: number, normalizedWeight: number) => {
-    const newPrompts = [...prompts];
-
-    // Calculate the remaining weight to distribute among other prompts
-    const remainingWeight = 100 - normalizedWeight;
-
-    // Get the sum of other prompts' current weights (excluding the changed one)
-    const otherWeightsSum = prompts.reduce(
-      (sum, p, i) => (i === index ? sum : sum + p.weight),
-      0
-    );
-
-    // Update the changed prompt's weight
-    newPrompts[index] = { ...newPrompts[index], weight: normalizedWeight };
-
-    // Redistribute remaining weight proportionally to other prompts
-    if (otherWeightsSum > 0) {
-      newPrompts.forEach((_, i) => {
-        if (i !== index) {
-          const proportion = prompts[i].weight / otherWeightsSum;
-          newPrompts[i] = {
-            ...newPrompts[i],
-            weight: remainingWeight * proportion,
-          };
-        }
-      });
-    } else {
-      // If all other weights are 0, distribute evenly
-      const evenWeight = remainingWeight / (prompts.length - 1);
-      newPrompts.forEach((_, i) => {
-        if (i !== index) {
-          newPrompts[i] = { ...newPrompts[i], weight: evenWeight };
-        }
-      });
-    }
-
-    setPrompts(newPrompts);
-
-    if (editingPrompt) {
-      const updatedPrompt = {
-        ...editingPrompt,
-        prompts: newPrompts,
-      };
-      setEditingPrompt(updatedPrompt);
-      onPromptUpdate?.(updatedPrompt);
-    }
-  };
-
-  // Add new prompt
-  const handleAddPrompt = () => {
-    if (prompts.length < MAX_PROMPTS) {
-      const newPrompts = [...prompts, { text: "", weight: DEFAULT_WEIGHT }];
-      setPrompts(newPrompts);
-
-      if (editingPrompt) {
-        const updatedPrompt = {
-          ...editingPrompt,
-          prompts: newPrompts,
-        };
-        setEditingPrompt(updatedPrompt);
-        onPromptUpdate?.(updatedPrompt);
-      }
-    }
-  };
-
-  // Remove prompt
-  const handleRemovePrompt = (index: number) => {
-    if (prompts.length > 1) {
-      const newPrompts = prompts.filter((_, i) => i !== index);
-      setPrompts(newPrompts);
-
-      if (editingPrompt) {
-        const updatedPrompt = {
-          ...editingPrompt,
-          text: newPrompts.length === 1 ? newPrompts[0].text : "",
-          prompts: newPrompts.length > 1 ? newPrompts : undefined,
-        };
-        setEditingPrompt(updatedPrompt);
-        onPromptUpdate?.(updatedPrompt);
-      }
-    }
-  };
-
-  // Calculate normalized weights for display
-  const totalWeight = prompts.reduce((sum, p) => sum + p.weight, 0);
-  const normalizedWeights = prompts.map(p =>
-    totalWeight > 0 ? (p.weight / totalWeight) * 100 : 0
-  );
-
   const isSinglePrompt = prompts.length === 1;
-
-  // Render prompt field with ellipsis when collapsed
-  const renderPromptField = (
-    index: number,
-    placeholder: string,
-    showRemove: boolean
-  ) => {
-    const isFocused = focusedIndex === index;
-    const promptItem = prompts[index];
-
-    return (
-      <>
-        <Textarea
-          placeholder={placeholder}
-          value={promptItem.text}
-          onChange={e => handlePromptTextChange(index, e.target.value)}
-          onFocus={() => setFocusedIndex(index)}
-          onBlur={() => setFocusedIndex(null)}
-          disabled={disabled}
-          rows={isFocused ? 3 : 1}
-          className={`flex-1 resize-none bg-transparent border-0 text-card-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 p-0 disabled:opacity-50 disabled:cursor-not-allowed ${
-            isFocused
-              ? "min-h-[80px]"
-              : "min-h-[24px] overflow-hidden whitespace-nowrap text-ellipsis"
-          }`}
-        />
-        {showRemove && (
-          <Button
-            onClick={() => handleRemovePrompt(index)}
-            disabled={disabled}
-            size="sm"
-            variant="ghost"
-            className="rounded-full w-8 h-8 p-0"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        )}
-      </>
-    );
-  };
 
   // Render single prompt mode
   const renderSinglePrompt = () => {
     return (
       <div className={`space-y-3 ${className}`}>
         <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
-          {renderPromptField(0, "Edit prompt...", false)}
+          <PromptField
+            prompt={prompts[0]}
+            index={0}
+            placeholder="Edit prompt..."
+            showRemove={false}
+            focusedIndex={focusedIndex}
+            onTextChange={handlePromptTextChange}
+            onFocus={setFocusedIndex}
+            onBlur={() => setFocusedIndex(null)}
+            onRemove={handleRemovePrompt}
+            disabled={disabled}
+          />
         </div>
 
         {prompts.length < 4 && (
@@ -246,30 +181,29 @@ export function TimelinePromptEditor({
   const renderMultiplePrompts = () => {
     return (
       <div className={`space-y-3 ${className}`}>
-        {prompts.map((_, index) => {
+        {prompts.map((promptItem, index) => {
           return (
             <div key={index} className="space-y-2">
               <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
-                {renderPromptField(index, `Prompt ${index + 1}`, true)}
+                <PromptField
+                  prompt={promptItem}
+                  index={index}
+                  placeholder={`Prompt ${index + 1}`}
+                  showRemove={true}
+                  focusedIndex={focusedIndex}
+                  onTextChange={handlePromptTextChange}
+                  onFocus={setFocusedIndex}
+                  onBlur={() => setFocusedIndex(null)}
+                  onRemove={handleRemovePrompt}
+                  disabled={disabled}
+                />
               </div>
 
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground w-12">
-                  Weight:
-                </span>
-                <Slider
-                  value={[normalizedWeights[index]]}
-                  onValueChange={([value]) => handleWeightChange(index, value)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  disabled={disabled}
-                  className="flex-1"
-                />
-                <span className="text-xs text-muted-foreground w-12 text-right">
-                  {normalizedWeights[index].toFixed(0)}%
-                </span>
-              </div>
+              <WeightSlider
+                value={normalizedWeights[index]}
+                onValueChange={value => handleWeightChange(index, value)}
+                disabled={disabled}
+              />
             </div>
           );
         })}
@@ -324,7 +258,7 @@ export function TimelinePromptEditor({
   };
 
   // Render component based on state
-  if (!editingPrompt) {
+  if (!prompt) {
     return (
       <div className={`text-center text-muted-foreground py-8 ${className}`}>
         Click on a prompt box in the timeline to edit it
