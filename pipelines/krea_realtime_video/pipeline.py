@@ -32,6 +32,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
         vae_path = getattr(config, "vae_path", None)
+        vae_config = getattr(config, "vae", None)
 
         # Load diffusion model
         start = time.time()
@@ -88,10 +89,17 @@ class KreaRealtimeVideoPipeline(Pipeline):
         )
         print(f"Loaded text encoder in {time.time() - start:3f}s")
 
+        # Create VAE: use factory if vae config specified, otherwise use vendor default
         start = time.time()
-        vae = WanVAEWrapper(
-            model_name=model_name, model_dir=model_dir, vae_path=vae_path
-        )
+        if vae_config is not None:
+            from ..base.wan2_1.vae_factory import create_vae_wrapper
+
+            vae = create_vae_wrapper(vae_model=vae_config, model_dir=model_dir)
+        else:
+            # Use vendor-optimized VAE (default)
+            vae = WanVAEWrapper(
+                model_name=model_name, model_dir=model_dir, vae_path=vae_path
+            )
         print(f"Loaded VAE in {time.time() - start:.3f}s")
 
         seed = getattr(config, "seed", 42)

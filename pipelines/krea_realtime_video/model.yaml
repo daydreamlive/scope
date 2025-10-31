@@ -8,3 +8,8 @@ denoising_step_list:
 - 250
 warp_denoising_step: true
 num_frame_per_block: 3
+
+# VAE configuration (optional)
+# By default, uses vendor-optimized VAE
+# Uncomment to use factory VAE (supports auto-download):
+vae: lightvae2.1  # 75% pruned, lower VRAM

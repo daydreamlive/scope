@@ -16,7 +16,7 @@ num_frame_per_block: 3
 # Available models: 'wan2.1' (default, full model) or 'lightvae2.1' (75% pruned, lower VRAM)
 # The checkpoint will be auto-downloaded from lightx2v/Autoencoders if missing
 # vae: lightvae2.1
-vae: wan
+vae: lightvae2.1
 
 adapter:
   type: "lora"

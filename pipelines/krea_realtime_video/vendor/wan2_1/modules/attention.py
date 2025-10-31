@@ -1,6 +1,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import torch
 from flash_attn import flash_attn_func
+import platform
 
 def is_hopper_gpu():
     if not torch.cuda.is_available():
@@ -18,9 +19,13 @@ except ModuleNotFoundError:
 try:
     from kernels import get_kernel
 
-    flash_attn_3_hub = get_kernel("kernels-community/flash-attn3", revision="fake-ops-return-probs")
-    flash_attn_interface = flash_attn_3_hub
-    FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
+    # Avoid attempting to load FA3 custom kernel on Windows where no build exists
+    if platform.system() != "Windows":
+        flash_attn_3_hub = get_kernel("kernels-community/flash-attn3", revision="fake-ops-return-probs")
+        flash_attn_interface = flash_attn_3_hub
+        FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
+    else:
+        FLASH_ATTN_3_AVAILABLE = False
 except ModuleNotFoundError:
     FLASH_ATTN_3_AVAILABLE = False
 
