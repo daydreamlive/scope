@@ -421,6 +421,12 @@ def main():
     parser.add_argument(
         "--port", type=int, default=8000, help="Port to bind to (default: 8000)"
     )
+    parser.add_argument(
+        "-N",
+        "--no-browser",
+        action="store_true",
+        help="Do not automatically open a browser window after the server starts",
+    )
 
     args = parser.parse_args()
 
@@ -443,13 +449,16 @@ def main():
         )
         server = uvicorn.Server(config)
 
-        # Start browser opening thread
-        browser_thread = threading.Thread(
-            target=open_browser_when_ready,
-            args=(args.host, args.port, server),
-            daemon=True,
-        )
-        browser_thread.start()
+        # Start browser opening thread (unless disabled)
+        if not args.no_browser:
+            browser_thread = threading.Thread(
+                target=open_browser_when_ready,
+                args=(args.host, args.port, server),
+                daemon=True,
+            )
+            browser_thread.start()
+        else:
+            logger.info("main: Skipping browser auto-launch due to --no-browser")
 
         # Run the server
         try:
