@@ -33,7 +33,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
         print(f"Loaded text encoder in {time.time() - start:3f}s")
 
         start = time.time()
-        self.vae = get_vae_wrapper(model_name=args.model_name)(model_dir=model_dir)
+        vae_name = getattr(args, "vae", args.model_name)
+        self.vae = get_vae_wrapper(model_name=vae_name)(model_dir=model_dir)
         print(f"Loaded VAE in {time.time() - start:3f}s")
 
         # Step 2: Initialize all causal hyperparmeters

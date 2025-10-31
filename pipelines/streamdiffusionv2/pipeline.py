@@ -259,6 +259,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         # Encode frames to latents using VAE
         latents = self.stream.vae.model.stream_encode(input)
+
         # Transpose latents
         latents = latents.transpose(2, 1)
 

@@ -368,6 +368,8 @@ class LightVAE_(nn.Module):
         self.conv2 = CausalConv3d(z_dim, z_dim, 1)
         self.decoder = Decoder3d(dim, z_dim, dim_mult, num_res_blocks, attn_scales, self.temperal_upsample, dropout, pruning_rate)
 
+        self.first_batch = True
+
     def encode(self, x, scale):
         self.clear_cache()
         t = x.shape[2]
@@ -420,6 +422,104 @@ class LightVAE_(nn.Module):
             outs.append(out)
         return torch.cat(outs, 2)
 
+    def stream_encode(self, x):
+        """
+        stream_encode: Streaming encode optimized for StreamDiffusionV2.
+
+        Similar to WanVAE's stream_encode, handles first_batch initialization
+        and processes frames in streaming-optimized chunks.
+
+        Note: Returns raw mu without normalization, matching WanVAE behavior.
+
+        Args:
+            x: [B, C, T, H, W] pixel tensor
+
+        Returns:
+            [B, Cz, T, H/8, W/8] latent tensor (unnormalized)
+        """
+        t = x.shape[2]
+        if self.first_batch:
+            self.clear_cache_encode()
+            self._enc_conv_idx = [0]
+            out = self.encoder(
+                x[:, :, :1, :, :],
+                feat_cache=self._enc_feat_map,
+                feat_idx=self._enc_conv_idx,
+            )
+            self._enc_conv_idx = [0]
+            out_ = self.encoder(
+                x[:, :, 1:, :, :],
+                feat_cache=self._enc_feat_map,
+                feat_idx=self._enc_conv_idx,
+            )
+            out = torch.cat([out, out_], 2)
+        else:
+            out = []
+            for i in range(t // 4):
+                self._enc_conv_idx = [0]
+                out.append(
+                    self.encoder(
+                        x[:, :, i * 4 : (i + 1) * 4, :, :],
+                        feat_cache=self._enc_feat_map,
+                        feat_idx=self._enc_conv_idx,
+                    )
+                )
+            out = torch.cat(out, 2)
+        mu, log_var = self.conv1(out).chunk(2, dim=1)
+        return mu
+
+    def stream_decode(self, z, scale):
+        """
+        stream_decode: Streaming decode optimized for StreamDiffusionV2.
+
+        Similar to WanVAE's stream_decode, handles first_batch initialization
+        and processes frames with streaming cache management.
+
+        Args:
+            z: [B, Cz, T, H/8, W/8] latent tensor
+            scale: [mean, 1/std] normalization parameters
+
+        Returns:
+            [B, C, T, H, W] pixel tensor
+        """
+        t = z.shape[2]
+        if isinstance(scale[0], torch.Tensor):
+            z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
+                1, self.z_dim, 1, 1, 1
+            )
+        else:
+            z = z / scale[1] + scale[0]
+        x = self.conv2(z)
+        if self.first_batch:
+            self.clear_cache_decode()
+            self.first_batch = False
+            self._conv_idx = [0]
+            out = self.decoder(
+                x[:, :, :1, :, :],
+                feat_cache=self._feat_map,
+                feat_idx=self._conv_idx,
+            )
+            self._conv_idx = [0]
+            out_ = self.decoder(
+                x[:, :, 1:, :, :],
+                feat_cache=self._feat_map,
+                feat_idx=self._conv_idx,
+            )
+            out = torch.cat([out, out_], 2)
+        else:
+            out = []
+            for i in range(t):
+                self._conv_idx = [0]
+                out.append(
+                    self.decoder(
+                        x[:, :, i : (i + 1), :, :],
+                        feat_cache=self._feat_map,
+                        feat_idx=self._conv_idx,
+                    )
+                )
+            out = torch.cat(out, 2)
+        return out
+
     def clear_cache(self):
         self._conv_num = count_conv3d(self.decoder)
         self._conv_idx = [0]
@@ -427,6 +527,18 @@ class LightVAE_(nn.Module):
         self._enc_conv_num = count_conv3d(self.encoder)
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
+
+    def clear_cache_encode(self):
+        """clear_cache_encode: Clear encoder cache only."""
+        self._enc_conv_num = count_conv3d(self.encoder)
+        self._enc_conv_idx = [0]
+        self._enc_feat_map = [None] * self._enc_conv_num
+
+    def clear_cache_decode(self):
+        """clear_cache_decode: Clear decoder cache only."""
+        self._conv_num = count_conv3d(self.decoder)
+        self._conv_idx = [0]
+        self._feat_map = [None] * self._conv_num
 
 
 def _load_lightvae_weights(pretrained_path: str) -> dict:
