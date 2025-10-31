@@ -12,6 +12,10 @@ import {
 } from "./ui/select";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import type { TimelinePrompt } from "./PromptTimeline";
+import {
+  redistributeWeightsOnAdd,
+  redistributeWeightsOnRemove,
+} from "../utils/promptWeights";
 
 interface PromptInputProps {
   className?: string;
@@ -110,14 +114,15 @@ export function PromptInput({
 
   const handleAddPrompt = () => {
     if (prompts.length < 4) {
-      onPromptsChange?.([...prompts, { text: "", weight: 100 }]);
+      const newPrompts = redistributeWeightsOnAdd(prompts);
+      onPromptsChange?.(newPrompts);
     }
   };
 
   const handleRemovePrompt = (index: number) => {
     if (prompts.length > 1) {
-      const newPrompts = prompts.filter((_, i) => i !== index);
-      onPromptsChange?.(newPrompts);
+      const redistributed = redistributeWeightsOnRemove(prompts, index);
+      onPromptsChange?.(redistributed);
     }
   };
 

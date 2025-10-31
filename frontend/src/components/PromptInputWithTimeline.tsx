@@ -5,13 +5,18 @@ import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
 import { generateRandomColor } from "../utils/promptColors";
+import { submitTimelinePrompt } from "../utils/timelinePromptSubmission";
 
 interface PromptInputWithTimelineProps {
   className?: string;
   currentPrompt: string;
   currentPromptItems?: PromptItem[];
   onPromptSubmit?: (prompt: string) => void;
-  onPromptItemsSubmit?: (prompts: PromptItem[]) => void;
+  onPromptItemsSubmit?: (
+    prompts: PromptItem[],
+    transitionSteps?: number,
+    temporalInterpolationMethod?: "linear" | "slerp"
+  ) => void;
   disabled?: boolean;
   isStreaming?: boolean;
   isVideoPaused?: boolean;
@@ -36,6 +41,8 @@ interface PromptInputWithTimelineProps {
   onTimelineCurrentTimeChange?: (currentTime: number) => void;
   onTimelinePlayingChange?: (isPlaying: boolean) => void;
   isDownloading?: boolean;
+  transitionSteps?: number;
+  temporalInterpolationMethod?: "linear" | "slerp";
 }
 
 export function PromptInputWithTimeline({
@@ -66,6 +73,8 @@ export function PromptInputWithTimeline({
   onTimelineCurrentTimeChange,
   onTimelinePlayingChange,
   isDownloading = false,
+  transitionSteps,
+  temporalInterpolationMethod,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -134,17 +143,10 @@ export function PromptInputWithTimeline({
     const firstPrompt = prompts.find(p => !p.isLive);
 
     if (firstPrompt) {
-      // If the prompt has blend data, send it as PromptItems
-      if (firstPrompt.prompts && firstPrompt.prompts.length > 0) {
-        const promptItems: PromptItem[] = firstPrompt.prompts.map(p => ({
-          text: p.text,
-          weight: p.weight,
-        }));
-        onPromptItemsSubmit?.(promptItems);
-      } else {
-        // Simple prompt, just send the text
-        onPromptSubmit?.(firstPrompt.text);
-      }
+      submitTimelinePrompt(firstPrompt, {
+        onPromptSubmit,
+        onPromptItemsSubmit,
+      });
     }
   }, [prompts, onPromptSubmit, onPromptItemsSubmit]);
 
@@ -208,6 +210,8 @@ export function PromptInputWithTimeline({
         startTime: start,
         endTime: end,
         isLive: true,
+        transitionSteps,
+        temporalInterpolationMethod,
       };
 
       if (currentPromptItems?.length > 0) {
@@ -226,7 +230,12 @@ export function PromptInputWithTimeline({
         text: currentPrompt || "Live...",
       };
     },
-    [currentPromptItems, currentPrompt]
+    [
+      currentPromptItems,
+      currentPrompt,
+      transitionSteps,
+      temporalInterpolationMethod,
+    ]
   );
 
   // Initialize stream if needed
@@ -418,6 +427,8 @@ export function PromptInputWithTimeline({
           endTime: startTime,
           isLive: true,
           prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })),
+          transitionSteps,
+          temporalInterpolationMethod,
         };
 
         return [...updatedPrompts, newLivePrompt];

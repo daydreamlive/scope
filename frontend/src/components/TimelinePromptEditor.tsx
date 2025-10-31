@@ -13,6 +13,10 @@ import {
 } from "./ui/select";
 
 import type { TimelinePrompt } from "./PromptTimeline";
+import {
+  redistributeWeightsOnAdd,
+  redistributeWeightsOnRemove,
+} from "../utils/promptWeights";
 
 interface TimelinePromptEditorProps {
   className?: string;
@@ -21,6 +25,7 @@ interface TimelinePromptEditorProps {
   disabled?: boolean;
   interpolationMethod?: "linear" | "slerp";
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
+  promptIndex?: number;
 }
 
 const MAX_PROMPTS = 4;
@@ -33,6 +38,7 @@ export function TimelinePromptEditor({
   disabled = false,
   interpolationMethod = "linear",
   onInterpolationMethodChange,
+  promptIndex,
 }: TimelinePromptEditorProps) {
   const [editingPrompt, setEditingPrompt] = useState<TimelinePrompt | null>(
     null
@@ -41,6 +47,9 @@ export function TimelinePromptEditor({
     Array<{ text: string; weight: number }>
   >([]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+
+  // Check if this is the first block (can't transition from nothing)
+  const isFirstBlock = promptIndex === 0;
 
   // Automatically switch to linear interpolation when there are more than 2 prompts
   // SLERP only works with exactly 2 prompts
@@ -53,17 +62,32 @@ export function TimelinePromptEditor({
   // Initialize editing prompt when prompt changes
   useEffect(() => {
     if (prompt) {
-      setEditingPrompt(prompt);
-      if (prompt.prompts && prompt.prompts.length > 0) {
-        setPrompts(prompt.prompts);
+      // Ensure first block always has transitionSteps=0
+      const normalizedPrompt =
+        isFirstBlock && prompt.transitionSteps !== 0
+          ? { ...prompt, transitionSteps: 0 }
+          : prompt;
+
+      setEditingPrompt(normalizedPrompt);
+      if (normalizedPrompt.prompts && normalizedPrompt.prompts.length > 0) {
+        setPrompts(normalizedPrompt.prompts);
       } else {
-        setPrompts([{ text: prompt.text, weight: DEFAULT_WEIGHT }]);
+        setPrompts([{ text: normalizedPrompt.text, weight: DEFAULT_WEIGHT }]);
+      }
+
+      // Update parent if we normalized the first block
+      if (
+        isFirstBlock &&
+        prompt.transitionSteps !== 0 &&
+        normalizedPrompt !== prompt
+      ) {
+        onPromptUpdate?.(normalizedPrompt);
       }
     } else {
       setEditingPrompt(null);
       setPrompts([]);
     }
-  }, [prompt]);
+  }, [prompt, promptIndex, onPromptUpdate]);
 
   // Update prompt text
   const handlePromptTextChange = (index: number, text: string) => {
@@ -134,7 +158,7 @@ export function TimelinePromptEditor({
   // Add new prompt
   const handleAddPrompt = () => {
     if (prompts.length < MAX_PROMPTS) {
-      const newPrompts = [...prompts, { text: "", weight: DEFAULT_WEIGHT }];
+      const newPrompts = redistributeWeightsOnAdd(prompts);
       setPrompts(newPrompts);
 
       if (editingPrompt) {
@@ -151,18 +175,42 @@ export function TimelinePromptEditor({
   // Remove prompt
   const handleRemovePrompt = (index: number) => {
     if (prompts.length > 1) {
-      const newPrompts = prompts.filter((_, i) => i !== index);
-      setPrompts(newPrompts);
+      const redistributed = redistributeWeightsOnRemove(prompts, index);
+      setPrompts(redistributed);
 
       if (editingPrompt) {
         const updatedPrompt = {
           ...editingPrompt,
-          text: newPrompts.length === 1 ? newPrompts[0].text : "",
-          prompts: newPrompts.length > 1 ? newPrompts : undefined,
+          text: redistributed.length === 1 ? redistributed[0].text : "",
+          prompts: redistributed.length > 1 ? redistributed : undefined,
         };
         setEditingPrompt(updatedPrompt);
         onPromptUpdate?.(updatedPrompt);
       }
+    }
+  };
+
+  const handleTransitionStepsChange = (steps: number) => {
+    if (editingPrompt) {
+      const updatedPrompt = {
+        ...editingPrompt,
+        transitionSteps: steps,
+      };
+      setEditingPrompt(updatedPrompt);
+      onPromptUpdate?.(updatedPrompt);
+    }
+  };
+
+  const handleTemporalInterpolationMethodChange = (
+    method: "linear" | "slerp"
+  ) => {
+    if (editingPrompt) {
+      const updatedPrompt = {
+        ...editingPrompt,
+        temporalInterpolationMethod: method,
+      };
+      setEditingPrompt(updatedPrompt);
+      onPromptUpdate?.(updatedPrompt);
     }
   };
 
@@ -214,6 +262,65 @@ export function TimelinePromptEditor({
     );
   };
 
+  const renderTransitionSettings = () => {
+    const effectiveTransitionSteps = isFirstBlock
+      ? 0
+      : (editingPrompt?.transitionSteps ?? 0);
+    const effectiveTemporalMethod =
+      editingPrompt?.temporalInterpolationMethod ?? "slerp";
+
+    return (
+      <div className="space-y-3 pt-3 border-t border-border">
+        <div className="text-xs font-medium text-muted-foreground">
+          Temporal Transition Settings
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground w-16">Steps:</span>
+          <Slider
+            value={[effectiveTransitionSteps]}
+            onValueChange={([value]) => handleTransitionStepsChange(value)}
+            min={0}
+            max={10}
+            step={1}
+            disabled={disabled || isFirstBlock}
+            className="flex-1"
+          />
+          <span className="text-xs text-muted-foreground w-8 text-right">
+            {effectiveTransitionSteps}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground w-16">Method:</span>
+          <Select
+            value={effectiveTemporalMethod}
+            onValueChange={value =>
+              handleTemporalInterpolationMethodChange(
+                value as "linear" | "slerp"
+              )
+            }
+            disabled={disabled || isFirstBlock}
+          >
+            <SelectTrigger className="flex-1 h-7 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="linear">Linear</SelectItem>
+              <SelectItem value="slerp">Slerp</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isFirstBlock && (
+          <div className="text-xs text-muted-foreground italic">
+            First block cannot have transitions
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Render single prompt mode
   const renderSinglePrompt = () => {
     return (
@@ -238,6 +345,8 @@ export function TimelinePromptEditor({
             </Button>
           </div>
         )}
+
+        {renderTransitionSettings()}
       </div>
     );
   };
@@ -319,6 +428,8 @@ export function TimelinePromptEditor({
             </div>
           )}
         </div>
+
+        {renderTransitionSettings()}
       </div>
     );
   };
