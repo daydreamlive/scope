@@ -50,6 +50,8 @@ dependencies = [
     "torchcodec>=0.7.0",
     "torchao==0.13.0",
     "kernels>=0.10.4",
+    "triton; sys_platform != 'win32'",
+    "triton-windows; sys_platform == 'win32'",
 ]
 
 [project.scripts]
