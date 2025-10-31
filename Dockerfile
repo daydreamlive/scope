@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    python3-dev \
     # Cleanup
     && rm -rf /var/lib/apt/lists/*
 
