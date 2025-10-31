@@ -3,7 +3,8 @@ import time
 
 import torch
 
-from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
+from ..base.wan2_1.vae_factory import create_vae_wrapper
+from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
@@ -24,6 +25,7 @@ class LongLivePipeline(Pipeline):
         generator_path = getattr(config, "generator_path", None)
         lora_path = getattr(config, "lora_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
+        vae_model = getattr(config, "vae", "wan2.1")
 
         # Load diffusion model
         start = time.time()
@@ -57,9 +59,9 @@ class LongLivePipeline(Pipeline):
         )
         print(f"Loaded text encoder in {time.time() - start:3f}s")
 
+        # Create VAE wrapper using factory (handles validation, download, and instantiation)
         start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
+        vae = create_vae_wrapper(vae_model=vae_model, model_dir=model_dir)
 
         seed = getattr(config, "seed", 42)
 

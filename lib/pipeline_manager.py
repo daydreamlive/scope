@@ -151,6 +151,12 @@ class PipelineManager:
                 self._load_params = load_params
                 self._status = PipelineStatus.LOADED
 
+                vae_obj = getattr(pipeline.stream, "vae", None)
+                if vae_obj is not None:
+                    logger.info(
+                        f"_load_pipeline_sync_wrapper: Using VAE {vae_obj.__class__.__name__}"
+                    )
+
                 logger.info(f"Pipeline {pipeline_id} loaded successfully")
                 return True
 

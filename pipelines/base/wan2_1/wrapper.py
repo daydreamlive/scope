@@ -107,7 +107,7 @@ class WanTextEncoder(torch.nn.Module):
 
 
 class WanVAEWrapper(torch.nn.Module):
-    def __init__(self, model_dir: str | None = None):
+    def __init__(self, model_dir: str | None = None, vae_path: str | None = None):
         super().__init__()
 
         # Use provided model_dir or default to "wan_models"
@@ -153,7 +153,8 @@ class WanVAEWrapper(torch.nn.Module):
         self.std = torch.tensor(std, dtype=torch.float32)
 
         # init model
-        vae_path = os.path.join(model_dir, "Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+        if vae_path is None:
+            vae_path = os.path.join(model_dir, "Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
         self.model = (
             _video_vae(
                 pretrained_path=vae_path,

@@ -1,3 +1,4 @@
+# Wan 2.1 base configuration for LongLive
 model_name: Wan2.1-T2V-1.3B
 model_kwargs:
   local_attn_size: 12
@@ -10,6 +11,11 @@ denoising_step_list:
 - 250
 warp_denoising_step: true
 num_frame_per_block: 3
+
+# VAE configuration
+# Available models: 'wan2.1' (default, full model) or 'lightvae2.1' (75% pruned, lower VRAM)
+# The checkpoint will be auto-downloaded from lightx2v/Autoencoders if missing
+vae: lightvae2.1
 
 adapter:
   type: "lora"

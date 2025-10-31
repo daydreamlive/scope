@@ -7,3 +7,4 @@ denoising_step_list:
 num_frame_per_block: 1
 num_kv_cache: 6
 warp_denoising_step: false
+vae: lightvae2.1
