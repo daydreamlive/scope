@@ -31,6 +31,7 @@ interface PromptInputWithTimelineProps {
   settings?: SettingsState;
   onSettingsImport?: (settings: Partial<SettingsState>) => void;
   onPlayPauseRef?: React.RefObject<(() => Promise<void>) | null>;
+  onVideoPlayingCallbackRef?: React.RefObject<(() => void) | null>;
   onResetCache?: () => void;
   onTimelinePromptsChange?: (prompts: TimelinePrompt[]) => void;
   onTimelineCurrentTimeChange?: (currentTime: number) => void;
@@ -61,6 +62,7 @@ export function PromptInputWithTimeline({
   settings,
   onSettingsImport,
   onPlayPauseRef,
+  onVideoPlayingCallbackRef,
   onResetCache,
   onTimelinePromptsChange,
   onTimelineCurrentTimeChange,
@@ -106,7 +108,11 @@ export function PromptInputWithTimeline({
 
   // Complete live prompt and reset to beginning
   const completeLivePrompt = useCallback(() => {
-    if (!isLive) return;
+    // Check if there's actually a live prompt in the timeline
+    const hasLivePrompt =
+      prompts.length > 0 && prompts[prompts.length - 1].isLive;
+
+    if (!hasLivePrompt) return;
 
     setIsLive(false);
     onLiveStateChange?.(false);
@@ -127,7 +133,7 @@ export function PromptInputWithTimeline({
         },
       ];
     });
-  }, [isLive, onLiveStateChange, currentTime, setPrompts]);
+  }, [prompts, onLiveStateChange, currentTime, setPrompts]);
 
   // Reset to first prompt
   const resetToFirstPrompt = useCallback(() => {
@@ -285,18 +291,25 @@ export function PromptInputWithTimeline({
           setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
         }
       }
+    }
 
+    // Set callback to start playback when video actually starts playing
+    if (onVideoPlayingCallbackRef) {
+      onVideoPlayingCallbackRef.current = () => {
+        togglePlayback();
+      };
+      // Unpause video immediately so it can start playing and fire the 'playing' event
+      if (isVideoPaused) {
+        onVideoPlayPauseToggle?.();
+      }
+    } else {
+      // Fallback to old behavior if ref not provided
       setTimeout(() => {
         togglePlayback();
         if (isVideoPaused) {
           onVideoPlayPauseToggle?.();
         }
       }, 0);
-    } else {
-      togglePlayback();
-      if (isVideoPaused) {
-        onVideoPlayPauseToggle?.();
-      }
     }
 
     if (!hasStartedPlayback) {
@@ -315,6 +328,7 @@ export function PromptInputWithTimeline({
     isVideoPaused,
     onVideoPlayPauseToggle,
     hasStartedPlayback,
+    onVideoPlayingCallbackRef,
   ]);
 
   // Handle pausing playback
