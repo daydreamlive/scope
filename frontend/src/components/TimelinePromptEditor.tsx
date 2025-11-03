@@ -9,12 +9,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Slider } from "./ui/slider";
 
 import type { TimelinePrompt } from "./PromptTimeline";
 import { usePromptManager } from "../hooks/usePromptManager";
 import { PromptField } from "./shared/PromptField";
 import { WeightSlider } from "./shared/WeightSlider";
+import { TemporalTransitionControls } from "./shared/TemporalTransitionControls";
 
 interface TimelinePromptEditorProps {
   className?: string;
@@ -175,55 +175,20 @@ export function TimelinePromptEditor({
       prompt?.temporalInterpolationMethod ?? "slerp";
 
     return (
-      <div className="space-y-3 pt-3 border-t border-border">
-        <div className="text-xs font-medium text-muted-foreground">
-          Temporal Transition Settings
-        </div>
-
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground w-16">Steps:</span>
-          <Slider
-            value={[effectiveTransitionSteps]}
-            onValueChange={([value]: number[]) =>
-              handleTransitionStepsChange(value)
-            }
-            min={0}
-            max={10}
-            step={1}
-            disabled={disabled || isFirstBlock}
-            className="flex-1"
-          />
-          <span className="text-xs text-muted-foreground w-8 text-right">
-            {effectiveTransitionSteps}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground w-16">Method:</span>
-          <Select
-            value={effectiveTemporalMethod}
-            onValueChange={value =>
-              handleTemporalInterpolationMethodChange(
-                value as "linear" | "slerp"
-              )
-            }
-            disabled={disabled || isFirstBlock}
-          >
-            <SelectTrigger className="flex-1 h-7 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="linear">Linear</SelectItem>
-              <SelectItem value="slerp">Slerp</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {isFirstBlock && (
-          <div className="text-xs text-muted-foreground italic">
-            First block cannot have transitions
-          </div>
-        )}
+      <div className="pt-3 border-t border-border">
+        <TemporalTransitionControls
+          transitionSteps={effectiveTransitionSteps}
+          onTransitionStepsChange={handleTransitionStepsChange}
+          temporalInterpolationMethod={effectiveTemporalMethod}
+          onTemporalInterpolationMethodChange={
+            handleTemporalInterpolationMethodChange
+          }
+          disabled={disabled || isFirstBlock}
+          showHeader={true}
+          showDisabledMessage={true}
+          maxSteps={10}
+          className="space-y-3"
+        />
       </div>
     );
   };
