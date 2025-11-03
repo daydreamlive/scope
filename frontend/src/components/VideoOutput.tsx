@@ -13,6 +13,7 @@ interface VideoOutputProps {
   isDownloading?: boolean;
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
+  onVideoPlaying?: () => void;
 }
 
 export function VideoOutput({
@@ -25,6 +26,7 @@ export function VideoOutput({
   isDownloading = false,
   onPlayPauseToggle,
   onStartStream,
+  onVideoPlaying,
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
@@ -36,6 +38,28 @@ export function VideoOutput({
       videoRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
+
+  // Listen for video playing event to notify parent
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !remoteStream) return;
+
+    const handlePlaying = () => {
+      onVideoPlaying?.();
+    };
+
+    // Check if video is already playing when effect runs
+    // This handles cases where the video was already playing before the callback was set
+    if (!video.paused && video.currentTime > 0 && !video.ended) {
+      // Use setTimeout to avoid calling during render
+      setTimeout(() => onVideoPlaying?.(), 0);
+    }
+
+    video.addEventListener("playing", handlePlaying);
+    return () => {
+      video.removeEventListener("playing", handlePlaying);
+    };
+  }, [onVideoPlaying, remoteStream]);
 
   const triggerPlayPause = useCallback(() => {
     if (onPlayPauseToggle && remoteStream) {

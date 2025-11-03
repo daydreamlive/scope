@@ -391,6 +391,9 @@ export function StreamPage() {
 
   // Ref to access the timeline's play/pause handler
   const timelinePlayPauseRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Ref to store callback that should execute when video starts playing
+  const onVideoPlayingCallbackRef = useRef<(() => void) | null>(null);
   // Sync resolution with videoResolution when video source changes
   // Only sync for video-input pipelines
   useEffect(() => {
@@ -628,6 +631,13 @@ export function StreamPage() {
                   timelinePlayPauseRef.current();
                 }
               }}
+              onVideoPlaying={() => {
+                // Execute callback when video starts playing
+                if (onVideoPlayingCallbackRef.current) {
+                  onVideoPlayingCallbackRef.current();
+                  onVideoPlayingCallbackRef.current = null; // Clear after execution
+                }
+              }}
             />
           </div>
           {/* Timeline area - compact, always visible */}
@@ -704,6 +714,7 @@ export function StreamPage() {
               settings={settings}
               onSettingsImport={updateSettings}
               onPlayPauseRef={timelinePlayPauseRef}
+              onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
               onResetCache={handleResetCache}
               onTimelinePromptsChange={handleTimelinePromptsChange}
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
