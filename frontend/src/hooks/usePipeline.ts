@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { loadPipeline, getPipelineStatus } from "../lib/api";
 import type { PipelineStatusResponse, PipelineLoadParams } from "../lib/api";
+import { toast } from "sonner";
 
 interface UsePipelineOptions {
   pollInterval?: number; // milliseconds
@@ -20,6 +21,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   const pollTimeoutRef = useRef<number | null>(null);
   const loadTimeoutRef = useRef<number | null>(null);
   const isPollingRef = useRef(false);
+  const shownErrorRef = useRef<string | null>(null); // Track which error we've shown
 
   // Check initial pipeline status
   const checkStatus = useCallback(async () => {
@@ -29,15 +31,34 @@ export function usePipeline(options: UsePipelineOptions = {}) {
       setPipelineInfo(statusResponse);
 
       if (statusResponse.status === "error") {
-        setError(statusResponse.error || "Unknown pipeline error");
+        const errorMessage = statusResponse.error || "Unknown pipeline error";
+        // Show toast if we haven't shown this error yet
+        if (shownErrorRef.current !== errorMessage) {
+          toast.error("Pipeline Error", {
+            description: errorMessage,
+            duration: 5000,
+          });
+          shownErrorRef.current = errorMessage;
+        }
+        // Don't set error in state - it's shown as toast and cleared on backend
+        setError(null);
       } else {
         setError(null);
+        shownErrorRef.current = null; // Reset when status is not error
       }
     } catch (err) {
       console.error("Failed to get pipeline status:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to get pipeline status"
-      );
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to get pipeline status";
+      // Show toast for API errors
+      if (shownErrorRef.current !== errorMessage) {
+        toast.error("Pipeline Error", {
+          description: errorMessage,
+          duration: 5000,
+        });
+        shownErrorRef.current = errorMessage;
+      }
+      setError(null); // Don't persist in state
     }
   }, []);
 
@@ -65,9 +86,20 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         setPipelineInfo(statusResponse);
 
         if (statusResponse.status === "error") {
-          setError(statusResponse.error || "Unknown pipeline error");
+          const errorMessage = statusResponse.error || "Unknown pipeline error";
+          // Show toast if we haven't shown this error yet
+          if (shownErrorRef.current !== errorMessage) {
+            toast.error("Pipeline Error", {
+              description: errorMessage,
+              duration: 5000,
+            });
+            shownErrorRef.current = errorMessage;
+          }
+          // Don't set error in state - it's shown as toast and cleared on backend
+          setError(null);
         } else {
           setError(null);
+          shownErrorRef.current = null; // Reset when status is not error
         }
 
         // Stop polling if loaded or error
@@ -80,9 +112,17 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         }
       } catch (err) {
         console.error("Polling error:", err);
-        setError(
-          err instanceof Error ? err.message : "Failed to get pipeline status"
-        );
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to get pipeline status";
+        // Show toast for polling errors
+        if (shownErrorRef.current !== errorMessage) {
+          toast.error("Pipeline Error", {
+            description: errorMessage,
+            duration: 5000,
+          });
+          shownErrorRef.current = errorMessage;
+        }
+        setError(null); // Don't persist in state
       }
 
       if (isPollingRef.current) {
@@ -107,6 +147,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
       try {
         setIsLoading(true);
         setError(null);
+        shownErrorRef.current = null; // Reset error tracking when starting new load
 
         // Start the load request
         await loadPipeline({
@@ -136,9 +177,16 @@ export function usePipeline(options: UsePipelineOptions = {}) {
               if (currentStatus.status === "loaded") {
                 resolve(true);
               } else if (currentStatus.status === "error") {
-                reject(
-                  new Error(currentStatus.error || "Pipeline load failed")
-                );
+                const errorMsg = currentStatus.error || "Pipeline load failed";
+                // Show toast for load completion errors
+                if (shownErrorRef.current !== errorMsg) {
+                  toast.error("Pipeline Error", {
+                    description: errorMsg,
+                    duration: 5000,
+                  });
+                  shownErrorRef.current = errorMsg;
+                }
+                reject(new Error(errorMsg));
               } else {
                 // Continue polling
                 setTimeout(checkComplete, pollInterval);
@@ -165,7 +213,15 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to load pipeline";
         console.error("Pipeline load error:", errorMessage);
-        setError(errorMessage);
+        // Show toast for load errors
+        if (shownErrorRef.current !== errorMessage) {
+          toast.error("Pipeline Error", {
+            description: errorMessage,
+            duration: 5000,
+          });
+          shownErrorRef.current = errorMessage;
+        }
+        setError(null); // Don't persist in state
 
         stopPolling();
 
