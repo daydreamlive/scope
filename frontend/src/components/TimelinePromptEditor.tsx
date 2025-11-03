@@ -184,7 +184,9 @@ export function TimelinePromptEditor({
           <span className="text-xs text-muted-foreground w-16">Steps:</span>
           <Slider
             value={[effectiveTransitionSteps]}
-            onValueChange={([value]: number[]) => handleTransitionStepsChange(value)}
+            onValueChange={([value]: number[]) =>
+              handleTransitionStepsChange(value)
+            }
             min={0}
             max={10}
             step={1}
