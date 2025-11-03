@@ -8,8 +8,8 @@ import threading
 from enum import Enum
 from typing import Any
 
-import torch  # type: ignore[import-untyped]
-from omegaconf import OmegaConf  # type: ignore[import-untyped]
+import torch
+from omegaconf import OmegaConf
 
 logger = logging.getLogger(__name__)
 
