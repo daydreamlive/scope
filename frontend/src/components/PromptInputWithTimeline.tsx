@@ -459,6 +459,8 @@ export function PromptInputWithTimeline({
       onLiveStateChange,
       scrollToTimeFn,
       prompts,
+      transitionSteps,
+      temporalInterpolationMethod,
     ]
   );
 
