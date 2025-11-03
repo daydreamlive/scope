@@ -106,7 +106,11 @@ export function PromptInputWithTimeline({
 
   // Complete live prompt and reset to beginning
   const completeLivePrompt = useCallback(() => {
-    if (!isLive) return;
+    // Check if there's actually a live prompt in the timeline
+    const hasLivePrompt =
+      prompts.length > 0 && prompts[prompts.length - 1].isLive;
+
+    if (!hasLivePrompt) return;
 
     setIsLive(false);
     onLiveStateChange?.(false);
@@ -127,7 +131,7 @@ export function PromptInputWithTimeline({
         },
       ];
     });
-  }, [isLive, onLiveStateChange, currentTime, setPrompts]);
+  }, [prompts, onLiveStateChange, currentTime, setPrompts]);
 
   // Reset to first prompt
   const resetToFirstPrompt = useCallback(() => {
