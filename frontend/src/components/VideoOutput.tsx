@@ -21,7 +21,7 @@ export function VideoOutput({
   remoteStream,
   isPipelineLoading = false,
   isConnecting = false,
-  pipelineError = null,
+  pipelineError: _pipelineError = null,
   isPlaying = true,
   isDownloading = false,
   onPlayPauseToggle,
@@ -158,11 +158,6 @@ export function VideoOutput({
                 </div>
               </div>
             )}
-          </div>
-        ) : pipelineError ? (
-          <div className="text-center text-red-500 text-lg">
-            <p>Pipeline Error</p>
-            <p className="text-sm mt-2 max-w-md mx-auto">{pipelineError}</p>
           </div>
         ) : isDownloading ? (
           <div className="text-center text-muted-foreground text-lg">

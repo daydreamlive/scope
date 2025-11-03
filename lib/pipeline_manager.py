@@ -8,8 +8,8 @@ import threading
 from enum import Enum
 from typing import Any
 
-import torch
-from omegaconf import OmegaConf
+import torch  # type: ignore[import-untyped]
+from omegaconf import OmegaConf  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -65,13 +65,33 @@ class PipelineManager:
             return self._pipeline
 
     def get_status_info(self) -> dict[str, Any]:
-        """Get detailed status information (thread-safe)."""
+        """Get detailed status information (thread-safe).
+
+        Note: If status is ERROR, the error message is returned once and then cleared
+        to prevent persistence across page reloads.
+        """
         with self._lock:
+            # Capture current state before clearing
+            current_status = self._status
+            error_message = self._error_message
+            pipeline_id = self._pipeline_id
+            load_params = self._load_params
+
+            # If there's an error, clear it after capturing it
+            # This ensures errors don't persist across page reloads
+            if self._status == PipelineStatus.ERROR and error_message:
+                self._error_message = None
+                # Reset status to NOT_LOADED after error is retrieved
+                self._status = PipelineStatus.NOT_LOADED
+                self._pipeline_id = None
+                self._load_params = None
+
+            # Return the captured state (with error status if it was an error)
             return {
-                "status": self._status.value,
-                "pipeline_id": self._pipeline_id,
-                "load_params": self._load_params,
-                "error": self._error_message,
+                "status": current_status.value,
+                "pipeline_id": pipeline_id,
+                "load_params": load_params,
+                "error": error_message,
             }
 
     async def get_pipeline_async(self):

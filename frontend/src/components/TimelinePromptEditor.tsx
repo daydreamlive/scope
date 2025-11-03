@@ -53,7 +53,7 @@ export function TimelinePromptEditor({
   // Initialize prompts from prompt prop (memoized to avoid recalculation)
   const initialPrompts = useMemo(
     () => getPromptsFromTimelinePrompt(prompt),
-    [prompt?.id]
+    [prompt]
   );
 
   // Use shared prompt management hook (uncontrolled mode)
