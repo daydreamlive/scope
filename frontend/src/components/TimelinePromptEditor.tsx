@@ -175,21 +175,19 @@ export function TimelinePromptEditor({
       prompt?.temporalInterpolationMethod ?? "slerp";
 
     return (
-      <div className="pt-3 border-t border-border">
-        <TemporalTransitionControls
-          transitionSteps={effectiveTransitionSteps}
-          onTransitionStepsChange={handleTransitionStepsChange}
-          temporalInterpolationMethod={effectiveTemporalMethod}
-          onTemporalInterpolationMethodChange={
-            handleTemporalInterpolationMethodChange
-          }
-          disabled={disabled || isFirstBlock}
-          showHeader={true}
-          showDisabledMessage={true}
-          maxSteps={10}
-          className="space-y-3"
-        />
-      </div>
+      <TemporalTransitionControls
+        transitionSteps={effectiveTransitionSteps}
+        onTransitionStepsChange={handleTransitionStepsChange}
+        temporalInterpolationMethod={effectiveTemporalMethod}
+        onTemporalInterpolationMethodChange={
+          handleTemporalInterpolationMethodChange
+        }
+        disabled={disabled || isFirstBlock}
+        showHeader={false}
+        showDisabledMessage={false}
+        maxSteps={16}
+        className="space-y-2"
+      />
     );
   };
   // Render single prompt mode
@@ -211,24 +209,26 @@ export function TimelinePromptEditor({
           />
         </div>
 
-        {prompts.length < 4 && (
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              onMouseDown={e => {
-                e.preventDefault();
-                handleAddPrompt();
-              }}
-              disabled={disabled}
-              size="sm"
-              variant="ghost"
-              className="rounded-full w-8 h-8 p-0"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
+        <div className="space-y-2">
+          {renderTransitionSettings()}
 
-        {renderTransitionSettings()}
+          {prompts.length < 4 && (
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleAddPrompt();
+                }}
+                disabled={disabled}
+                size="sm"
+                variant="ghost"
+                className="rounded-full w-8 h-8 p-0"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -264,9 +264,10 @@ export function TimelinePromptEditor({
           );
         })}
 
-        <div className="flex items-center justify-between gap-2">
-          {prompts.length >= 2 ? (
-            <div className="flex items-center gap-2">
+        <div className="space-y-2">
+          {/* Spatial Blend - only for multiple prompts */}
+          {prompts.length >= 2 && (
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">
                 Spatial Blend:
               </span>
@@ -277,7 +278,7 @@ export function TimelinePromptEditor({
                 }
                 disabled={disabled}
               >
-                <SelectTrigger className="w-24 h-7 text-xs">
+                <SelectTrigger className="w-24 h-6 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -288,12 +289,13 @@ export function TimelinePromptEditor({
                 </SelectContent>
               </Select>
             </div>
-          ) : (
-            <div />
           )}
 
+          {renderTransitionSettings()}
+
+          {/* Add button - Bottom row */}
           {prompts.length < 4 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-2">
               <Button
                 onMouseDown={e => {
                   e.preventDefault();
@@ -309,8 +311,6 @@ export function TimelinePromptEditor({
             </div>
           )}
         </div>
-
-        {renderTransitionSettings()}
       </div>
     );
   };
