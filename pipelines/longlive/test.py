@@ -6,14 +6,13 @@ from omegaconf import OmegaConf
 
 from lib.models_config import get_model_file_path, get_models_dir
 
-from ..memory import is_cuda_low_memory
 from .pipeline import LongLivePipeline
 
 config = OmegaConf.load("pipelines/longlive/model.yaml")
 
 models_dir = get_models_dir()
-height = 480
-width = 832
+height = 320
+width = 576
 
 config["model_dir"] = str(models_dir)
 config["generator_path"] = get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
@@ -26,7 +25,7 @@ config["width"] = width
 
 device = torch.device("cuda")
 pipeline = LongLivePipeline(
-    config, low_memory=is_cuda_low_memory(device), device=device, dtype=torch.bfloat16
+    config, low_memory=False, device=device, dtype=torch.bfloat16
 )
 
 prompts = [
