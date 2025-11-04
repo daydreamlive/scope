@@ -4,9 +4,14 @@ import time
 
 import torch
 
+from diffusers.modular_pipelines import PipelineState
+from diffusers.modular_pipelines import ModularPipeline
+
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
+from .modular_blocks import StreamDiffusionV2Blocks
+from .modular_pipeline_wrapper import StreamDiffusionV2ModularPipeline
 from .vendor.causvid.models.wan.causal_stream_inference import (
     CausalStreamInferencePipeline,
 )
@@ -76,6 +81,10 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.last_frame = None
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
+
+        # Initialize Modular Diffusers blocks
+        self.modular_blocks = StreamDiffusionV2Blocks()
+        self.modular_pipeline = StreamDiffusionV2ModularPipeline(self.stream)
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         if should_prepare:
@@ -252,46 +261,67 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if noise_controller:
             self._apply_motion_aware_noise_controller(input)
 
+        # Use Modular Diffusers blocks to process the input
+        state = PipelineState()
+
+        # Set up state for modular blocks
+        state.set("input", input)
+        state.set("noise_scale", self.noise_scale)
+        state.set("base_seed", self.base_seed)
+        state.set("current_start", self.current_start)
+        state.set("current_end", self.current_end)
+        state.set("denoising_step_list", self.stream.denoising_step_list)
+
         # Determine the number of denoising steps
-        # Higher noise scale -> more denoising steps, more intense changes to input
-        # Lower noise scale -> less denoising steps, less intense changes to input
         current_step = int(1000 * self.noise_scale) - 100
+        state.set("current_step", current_step)
 
-        # Encode frames to latents using VAE
-        latents = self.stream.vae.model.stream_encode(input)
-        # Transpose latents
-        latents = latents.transpose(2, 1)
+        # Execute modular blocks (returns tuple: components, state)
+        _, state = self.modular_blocks(self.modular_pipeline, state)
 
-        # Create generator from seed for reproducible generation
-        # Derive unique seed per chunk using current_start as offset
-        frame_seed = self.base_seed + self.current_start
-        rng = torch.Generator(device=latents.device).manual_seed(frame_seed)
+        # Get output from state
+        output = state.values.get("output")
+        if output is None:
+            # Fallback to original implementation if modular blocks didn't produce output
+            # Determine the number of denoising steps
+            current_step = int(1000 * self.noise_scale) - 100
 
-        noise = torch.randn(
-            latents.shape,
-            device=latents.device,
-            dtype=latents.dtype,
-            generator=rng,
-        )
-        # Determine how noisy the latents should be
-        # Higher noise scale -> noiser latents, less of inputs preserved
-        # Lower noise scale -> less noisy latents, more of inputs preserved
-        noisy_latents = noise * self.noise_scale + latents * (1 - self.noise_scale)
-        denoised_pred = self.stream.inference(
-            noise=noisy_latents,
-            current_start=self.current_start,
-            current_end=self.current_end,
-            current_step=current_step,
-            generator=rng,
-        )
+            # Encode frames to latents using VAE
+            latents = self.stream.vae.model.stream_encode(input)
+            # Transpose latents
+            latents = latents.transpose(2, 1)
 
-        # # Update tracking variables for next input
+            # Create generator from seed for reproducible generation
+            frame_seed = self.base_seed + self.current_start
+            rng = torch.Generator(device=latents.device).manual_seed(frame_seed)
+
+            noise = torch.randn(
+                latents.shape,
+                device=latents.device,
+                dtype=latents.dtype,
+                generator=rng,
+            )
+            noisy_latents = noise * self.noise_scale + latents * (1 - self.noise_scale)
+            denoised_pred = self.stream.inference(
+                noise=noisy_latents,
+                current_start=self.current_start,
+                current_end=self.current_end,
+                current_step=current_step,
+                generator=rng,
+            )
+
+            # Decode to pixel space
+            output = self.stream.vae.stream_decode_to_pixel(denoised_pred)
+        else:
+            # Ensure output is in the right format
+            if not isinstance(output, torch.Tensor):
+                output = output[0] if isinstance(output, list) else output
+
+        # Update tracking variables for next input
         self.last_frame = input[:, :, [-1]]
         self.current_start = self.current_end
         self.current_end += (self.chunk_size // 4) * self.stream.frame_seq_length
 
-        # Decode to pixel space
-        output = self.stream.vae.stream_decode_to_pixel(denoised_pred)
         return postprocess_chunk(output)
 
     def _initialize_stream_caches(self):
