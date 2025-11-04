@@ -13,23 +13,22 @@
 # limitations under the License.
 
 import html
-from typing import List, Optional, Union, Dict
-import logging
 
 import regex as re
 import torch
-from transformers import AutoTokenizer, UMT5EncoderModel
-
-from diffusers.configuration_utils import FrozenDict
-from diffusers.guiders import ClassifierFreeGuidance
-from diffusers.utils import is_ftfy_available, logging as diffusers_logging
-from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState, SequentialPipelineBlocks
+from diffusers.modular_pipelines import (
+    ModularPipelineBlocks,
+    PipelineState,
+    SequentialPipelineBlocks,
+)
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     ConfigSpec,
     InputParam,
     OutputParam,
 )
+from diffusers.utils import is_ftfy_available
+from diffusers.utils import logging as diffusers_logging
 
 if is_ftfy_available():
     import ftfy
@@ -63,17 +62,17 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
         return "Text Encoder step that generates text_embeddings to guide the video generation"
 
     @property
-    def expected_components(self) -> List[ComponentSpec]:
+    def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("stream", torch.nn.Module),
         ]
 
     @property
-    def expected_configs(self) -> List[ConfigSpec]:
+    def expected_configs(self) -> list[ConfigSpec]:
         return []
 
     @property
-    def inputs(self) -> List[InputParam]:
+    def inputs(self) -> list[InputParam]:
         return [
             InputParam("prompt"),
             InputParam("negative_prompt"),
@@ -91,7 +90,7 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
         ]
 
     @property
-    def intermediate_outputs(self) -> List[OutputParam]:
+    def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
                 "prompt_embeds",
@@ -118,9 +117,7 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
             )
 
     @torch.no_grad()
-    def __call__(
-        self, components, state: PipelineState
-    ) -> PipelineState:
+    def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
         self.check_inputs(block_state)
 
@@ -130,8 +127,10 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
         # We just need to ensure prompt_embeds is in the state
         if block_state.prompt_embeds is None:
             # Use the stream's text encoder if needed
-            if hasattr(block_state, 'prompt') and block_state.prompt is not None:
-                conditional_dict = components.stream.text_encoder(text_prompts=[block_state.prompt])
+            if hasattr(block_state, "prompt") and block_state.prompt is not None:
+                conditional_dict = components.stream.text_encoder(
+                    text_prompts=[block_state.prompt]
+                )
                 block_state.prompt_embeds = conditional_dict["prompt_embeds"]
             else:
                 # Default empty prompt
@@ -147,7 +146,7 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
     model_name = "StreamDiffusionV2"
 
     @property
-    def expected_components(self) -> List[ComponentSpec]:
+    def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("stream", torch.nn.Module),
         ]
@@ -157,7 +156,7 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
         return "Preprocess step that encodes input frames to latents and adds noise"
 
     @property
-    def inputs(self) -> List[InputParam]:
+    def inputs(self) -> list[InputParam]:
         return [
             InputParam(
                 "input",
@@ -190,7 +189,7 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
         ]
 
     @property
-    def intermediate_outputs(self) -> List[OutputParam]:
+    def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
                 "latents",
@@ -210,9 +209,7 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
         ]
 
     @torch.no_grad()
-    def __call__(
-        self, components, state: PipelineState
-    ) -> PipelineState:
+    def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
 
         # Encode frames to latents using VAE
@@ -231,7 +228,9 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
             generator=rng,
         )
         # Determine how noisy the latents should be
-        noisy_latents = noise * block_state.noise_scale + latents * (1 - block_state.noise_scale)
+        noisy_latents = noise * block_state.noise_scale + latents * (
+            1 - block_state.noise_scale
+        )
 
         # Determine the number of denoising steps
         current_step = int(1000 * block_state.noise_scale) - 100
@@ -249,7 +248,7 @@ class StreamDiffusionV2DenoiseStep(ModularPipelineBlocks):
     model_name = "StreamDiffusionV2"
 
     @property
-    def expected_components(self) -> List[ComponentSpec]:
+    def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("stream", torch.nn.Module),
         ]
@@ -259,7 +258,7 @@ class StreamDiffusionV2DenoiseStep(ModularPipelineBlocks):
         return "Denoise step that performs inference using the stream pipeline"
 
     @property
-    def inputs(self) -> List[InputParam]:
+    def inputs(self) -> list[InputParam]:
         return [
             InputParam(
                 "noisy_latents",
@@ -292,7 +291,7 @@ class StreamDiffusionV2DenoiseStep(ModularPipelineBlocks):
         ]
 
     @property
-    def intermediate_outputs(self) -> List[OutputParam]:
+    def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
                 "denoised_pred",
@@ -302,9 +301,7 @@ class StreamDiffusionV2DenoiseStep(ModularPipelineBlocks):
         ]
 
     @torch.no_grad()
-    def __call__(
-        self, components, state: PipelineState
-    ) -> PipelineState:
+    def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
 
         # Use the stream's inference method
@@ -325,7 +322,7 @@ class StreamDiffusionV2PostprocessStep(ModularPipelineBlocks):
     model_name = "StreamDiffusionV2"
 
     @property
-    def expected_components(self) -> List[ComponentSpec]:
+    def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("stream", torch.nn.Module),
         ]
@@ -335,7 +332,7 @@ class StreamDiffusionV2PostprocessStep(ModularPipelineBlocks):
         return "Postprocess step that decodes denoised latents to pixel space"
 
     @property
-    def inputs(self) -> List[InputParam]:
+    def inputs(self) -> list[InputParam]:
         return [
             InputParam(
                 "denoised_pred",
@@ -346,7 +343,7 @@ class StreamDiffusionV2PostprocessStep(ModularPipelineBlocks):
         ]
 
     @property
-    def intermediate_outputs(self) -> List[OutputParam]:
+    def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
                 "output",
@@ -356,9 +353,7 @@ class StreamDiffusionV2PostprocessStep(ModularPipelineBlocks):
         ]
 
     @torch.no_grad()
-    def __call__(
-        self, components, state: PipelineState
-    ) -> PipelineState:
+    def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
 
         # Decode to pixel space
@@ -386,5 +381,5 @@ ALL_BLOCKS = {
 
 
 class StreamDiffusionV2Blocks(SequentialPipelineBlocks):
-    block_classes = list(VIDEO2VIDEO_BLOCKS.copy().values())
-    block_names = list(VIDEO2VIDEO_BLOCKS.copy().keys())
+    block_classes = list(VIDEO2VIDEO_BLOCKS.values())
+    block_names = list(VIDEO2VIDEO_BLOCKS.keys())

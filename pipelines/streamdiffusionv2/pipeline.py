@@ -1,6 +1,4 @@
 import logging
-import os
-import time
 
 import torch
 from diffusers.modular_pipelines import PipelineState
@@ -10,9 +8,6 @@ from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modular_pipeline_wrapper import StreamDiffusionV2ModularPipeline
-from .vendor.causvid.models.wan.causal_stream_inference import (
-    CausalStreamInferencePipeline,
-)
 
 # https://github.com/daydreamlive/scope/blob/0cf1766186be3802bf97ce550c2c978439f22068/pipelines/streamdiffusionv2/vendor/causvid/models/wan/causal_model.py#L306
 MAX_ROPE_FREQ_TABLE_SEQ_LEN = 1024
@@ -49,19 +44,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
         config["height"] = self.height
         config["width"] = self.width
 
-        self.stream = CausalStreamInferencePipeline(config, device).to(
-            device=device, dtype=dtype
-        )
         self.device = device
         self.dtype = dtype
-
-        start = time.time()
-        state_dict = torch.load(
-            os.path.join(config.model_dir, "StreamDiffusionV2/model.pt"),
-            map_location="cpu",
-        )["generator"]
-        self.stream.generator.load_state_dict(state_dict, strict=True)
-        print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
 
         self.chunk_size = chunk_size
         self.start_chunk_size = start_chunk_size
@@ -71,6 +55,12 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
+        # Initialize Modular Diffusers blocks and pipeline
+        self.modular_blocks = StreamDiffusionV2Blocks()
+        self.modular_pipeline = StreamDiffusionV2ModularPipeline(
+            config, device, dtype, config.model_dir
+        )
+
         # Prompt blending with cache reset callback for transitions
         self.prompt_blender = PromptBlender(
             device, dtype, cache_reset_callback=self._initialize_stream_caches
@@ -78,10 +68,6 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         self.last_frame = None
         self.current_start = 0
-
-        # Initialize Modular Diffusers blocks
-        self.modular_blocks = StreamDiffusionV2Blocks()
-        self.modular_pipeline = StreamDiffusionV2ModularPipeline(self.stream)
         self.current_end = self.modular_pipeline.stream.frame_seq_length * 2
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
