@@ -3,9 +3,13 @@ import time
 
 import torch
 
-from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
+from ..wan2_1.components.wrapper import (
+    WanDiffusionWrapper,
+    WanTextEncoder,
+    WanVAEWrapper,
+)
 from .inference import InferencePipeline
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
 
