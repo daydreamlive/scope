@@ -89,6 +89,9 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 
 2. **Select your GPU**: Choose a GPU that meets the [system requirements](#system-requirements). Please note that your driver must support CUDA >= 12.8.
 
+> [!IMPORTANT]
+> **H100 GPU Requirement**: When selecting an H100 GPU, you **must** select CUDA 12.8. CUDA 12.9 does not work with H100 GPUs.
+
 3. **Configure environment variables**:
    - Click "Edit Template"
    - Add an environment variable:
