@@ -93,6 +93,8 @@ dev = [
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
     "twine>=5.0.0",
+    "pytest>=8.4.2",
+    "freezegun>=1.5.5",
 ]
 
 [tool.ruff]
