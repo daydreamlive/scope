@@ -51,6 +51,10 @@ interface SettingsPanelProps {
   onManageCacheChange?: (enabled: boolean) => void;
   quantization?: "fp8_e4m3fn" | null;
   onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
+  compileMode?: "none" | "default" | "fast" | "aggressive";
+  onCompileModeChange?: (
+    compileMode: "none" | "default" | "fast" | "aggressive"
+  ) => void;
   onResetCache?: () => void;
 }
 
@@ -74,6 +78,8 @@ export function SettingsPanel({
   onManageCacheChange,
   quantization = "fp8_e4m3fn",
   onQuantizationChange,
+  compileMode = "none",
+  onCompileModeChange,
   onResetCache,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
@@ -452,6 +458,39 @@ export function SettingsPanel({
                     <p className="text-xs text-red-500 ml-16">{seedError}</p>
                   )}
                 </div>
+
+                {pipelineId === "streamdiffusionv2" && (
+                  <div className="space-y-1">
+                    <LabelWithTooltip
+                      label="Compile"
+                      tooltip="torch.compile optimization mode. 'none' = disabled (baseline), 'default' = balanced (~20-30% faster), 'fast' = reduce overhead, 'aggressive' = max optimization. First chunk slower (compilation), then faster."
+                      className="text-sm text-foreground"
+                    />
+                    <Select
+                      value={compileMode}
+                      onValueChange={value =>
+                        onCompileModeChange?.(
+                          value as "none" | "default" | "fast" | "aggressive"
+                        )
+                      }
+                      disabled={isStreaming}
+                    >
+                      <SelectTrigger className="w-full h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None (Baseline)</SelectItem>
+                        <SelectItem value="default">
+                          Default (Balanced)
+                        </SelectItem>
+                        <SelectItem value="fast">Fast (Low Latency)</SelectItem>
+                        <SelectItem value="aggressive">
+                          Aggressive (Max Performance)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             </div>
           </div>

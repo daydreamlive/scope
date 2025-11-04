@@ -35,6 +35,7 @@ export interface SettingsState {
   noiseController?: boolean;
   manageCache?: boolean;
   quantization?: "fp8_e4m3fn" | null;
+  compileMode?: "none" | "default" | "fast" | "aggressive";
   paused?: boolean;
 }
 

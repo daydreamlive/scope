@@ -46,12 +46,20 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
 }
 
+export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
+  height?: number;
+  width?: number;
+  seed?: number;
+  compile_mode?: "none" | "default" | "fast" | "aggressive";
+}
+
 export interface PipelineLoadRequest {
   pipeline_id?: string;
   load_params?:
     | PassthroughLoadParams
     | LongLiveLoadParams
     | KreaRealtimeVideoLoadParams
+    | StreamDiffusionV2LoadParams
     | null;
 }
 

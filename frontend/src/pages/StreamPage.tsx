@@ -299,6 +299,13 @@ export function StreamPage() {
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
+  const handleCompileModeChange = (
+    compileMode: "none" | "default" | "fast" | "aggressive"
+  ) => {
+    updateSettings({ compileMode });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -453,9 +460,10 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          compile_mode: settings.compileMode || "none",
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, compile_mode: ${loadParams.compile_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -752,6 +760,8 @@ export function StreamPage() {
                 : "fp8_e4m3fn"
             }
             onQuantizationChange={handleQuantizationChange}
+            compileMode={settings.compileMode || "none"}
+            onCompileModeChange={handleCompileModeChange}
             onResetCache={handleResetCache}
           />
         </div>
