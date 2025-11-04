@@ -88,17 +88,20 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 1. **Click the Runpod template link**: [Template](https://console.runpod.io/deploy?template=aca8mw9ivw&ref=5k8hxjq3)
 
 2. **Select your GPU**: Choose a GPU that meets the [system requirements](#system-requirements). Please note that your driver must support CUDA >= 12.8.
+   
+   > [!WARNING]
+   > **H100 GPU Requirement**: When selecting an H100 GPU, you **must** select CUDA 12.8. CUDA 12.9 does not work with H100 GPUs.
 
-3. **Configure environment variables**:
+4. **Configure environment variables**:
    - Click "Edit Template"
    - Add an environment variable:
      - Set name to `HF_TOKEN`
      - Set value to your HuggingFace access token
    - Click "Set Overrides"
 
-4. **Deploy**: Click "Deploy On-Demand"
+5. **Deploy**: Click "Deploy On-Demand"
 
-5. **Access the app**: Wait for deployment to complete, then open the app at port 8000
+6. **Access the app**: Wait for deployment to complete, then open the app at port 8000
 
 The template will configure everything needed and the frontend will present a dialog for downloading model weights for pipelines when running them (by pressing play with the pipeline selected) for the first time.
 
