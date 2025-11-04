@@ -285,16 +285,13 @@ class WanDiffusionWrapper(torch.nn.Module):
         # For non-causal diffusion, all frames share the same timestep
         self.uniform_timestep = not is_causal
 
-        self.scheduler = FlowMatchScheduler(
-            shift=timestep_shift, sigma_min=0.0, extra_one_step=True
-        )
-        self.scheduler.set_timesteps(1000, training=True)
+        # Scheduler will be set externally by pipeline
+        self.scheduler = None
 
         # self.seq_len = 1560 * local_attn_size if local_attn_size != -1 else 32760 # [1, 21, 16, 60, 104]
         self.seq_len = (
             1560 * local_attn_size if local_attn_size > 21 else 32760
         )  # [1, 21, 16, 60, 104]
-        self.post_init()
 
     def enable_gradient_checkpointing(self) -> None:
         self.model.enable_gradient_checkpointing()
@@ -456,28 +453,3 @@ class WanDiffusionWrapper(torch.nn.Module):
             return flow_pred, pred_x0, logits
 
         return flow_pred, pred_x0
-
-    def get_scheduler(self) -> SchedulerInterface:
-        """
-        Update the current scheduler with the interface's static method
-        """
-        scheduler = self.scheduler
-        scheduler.convert_x0_to_noise = types.MethodType(
-            SchedulerInterface.convert_x0_to_noise, scheduler
-        )
-        scheduler.convert_noise_to_x0 = types.MethodType(
-            SchedulerInterface.convert_noise_to_x0, scheduler
-        )
-        scheduler.convert_velocity_to_x0 = types.MethodType(
-            SchedulerInterface.convert_velocity_to_x0, scheduler
-        )
-        self.scheduler = scheduler
-        return scheduler
-
-    def post_init(self):
-        """
-        A few custom initialization steps that should be called after the object is created.
-        Currently, the only one we have is to bind a few methods to scheduler.
-        We can gradually add more methods here if needed.
-        """
-        self.get_scheduler()
