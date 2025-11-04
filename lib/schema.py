@@ -137,6 +137,10 @@ class StreamDiffusionV2LoadParams(PipelineLoadParams):
     height: int = Field(default=512, description="Target video height", ge=64, le=2048)
     width: int = Field(default=512, description="Target video width", ge=64, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    compile_mode: Literal["none", "default", "fast", "aggressive"] = Field(
+        default="none",
+        description="torch.compile optimization mode: none (disabled), default (balanced), fast (reduce-overhead), aggressive (max-autotune)",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):

@@ -229,10 +229,12 @@ class PipelineManager:
             height = 512
             width = 512
             seed = 42
+            compile_mode = "none"
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
                 seed = load_params.get("seed", 42)
+                compile_mode = load_params.get("compile_mode", "none")
 
             config["height"] = height
             config["width"] = width
@@ -241,6 +243,17 @@ class PipelineManager:
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
             )
+
+            # Apply torch.compile if requested
+            if compile_mode != "none":
+                try:
+                    from pipelines.streamdiffusionv2.compile_utils import apply_to_pipeline
+                    logger.info(f"Applying torch.compile with mode='{compile_mode}'...")
+                    apply_to_pipeline(pipeline, preset=compile_mode, verbose=True)
+                    logger.info(f"✓ torch.compile enabled (mode={compile_mode})")
+                except Exception as e:
+                    logger.warning(f"Failed to apply torch.compile: {e}. Continuing without optimization.")
+
             logger.info("StreamDiffusionV2 pipeline initialized")
             return pipeline
 
