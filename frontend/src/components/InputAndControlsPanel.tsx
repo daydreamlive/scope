@@ -239,6 +239,9 @@ export function InputAndControlsPanel({
                     disabled={false}
                     interpolationMethod={interpolationMethod}
                     onInterpolationMethodChange={onInterpolationMethodChange}
+                    promptIndex={_timelinePrompts.findIndex(
+                      p => p.id === selectedTimelinePrompt.id
+                    )}
                   />
                 ) : (
                   <PromptInput
