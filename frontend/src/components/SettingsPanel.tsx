@@ -236,7 +236,7 @@ export function SettingsPanel({
 
               <div>
                 {(currentPipeline.about ||
-                  currentPipeline.projectUrl ||
+                  currentPipeline.docsUrl ||
                   currentPipeline.modified) && (
                   <div className="flex items-stretch gap-1 h-6">
                     {currentPipeline.about && (
@@ -276,9 +276,9 @@ export function SettingsPanel({
                         </Tooltip>
                       </TooltipProvider>
                     )}
-                    {currentPipeline.projectUrl && (
+                    {currentPipeline.docsUrl && (
                       <a
-                        href={currentPipeline.projectUrl}
+                        href={currentPipeline.docsUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-block h-full"
@@ -287,7 +287,7 @@ export function SettingsPanel({
                           variant="outline"
                           className="hover:bg-accent cursor-pointer h-full flex items-center"
                         >
-                          Project Page
+                          Docs
                         </Badge>
                       </a>
                     )}
