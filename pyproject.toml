@@ -44,7 +44,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "accelerate>=1.1.1",
     "flash-attn==2.8.3; sys_platform == 'linux' or sys_platform == 'win32'",
-    "sageattention==2.2.0; sys_platform == 'linux'",
+    "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
     "peft>=0.17.1",
@@ -84,6 +84,8 @@ flash-attn = [
 sageattention = [
     # Local prebuilt wheel
     { path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+    # Prebuilt Windows wheels from https://github.com/woct0rdho/SageAttention/releases
+    { path = "libs/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
 
 [[tool.uv.index]]
@@ -100,7 +102,7 @@ dev = [
     "twine>=5.0.0",
 ]
 sageattention = [
-    "sageattention==2.2.0; sys_platform == 'linux'",
+    "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
 [tool.ruff]
