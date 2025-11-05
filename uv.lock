@@ -538,7 +538,8 @@ dependencies = [
     { name = "omegaconf" },
     { name = "peft" },
     { name = "safetensors" },
-    { name = "sageattention", marker = "sys_platform == 'linux'" },
+    { name = "sageattention", version = "2.2.0", source = { path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
+    { name = "sageattention", version = "2.2.0+cu128torch2.8.0.post3", source = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "torchao" },
@@ -560,9 +561,6 @@ dev = [
     { name = "ruff" },
     { name = "twine" },
 ]
-sageattention = [
-    { name = "sageattention", marker = "sys_platform == 'linux'" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -583,6 +581,7 @@ requires-dist = [
     { name = "peft", specifier = ">=0.17.1" },
     { name = "safetensors", specifier = ">=0.6.2" },
     { name = "sageattention", marker = "sys_platform == 'linux'", path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" },
+    { name = "sageattention", marker = "sys_platform == 'win32'", url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==2.8.0" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.8.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchao", specifier = "==0.13.0" },
@@ -604,7 +603,6 @@ dev = [
     { name = "ruff", specifier = ">=0.8.0" },
     { name = "twine", specifier = ">=5.0.0" },
 ]
-sageattention = [{ name = "sageattention", marker = "sys_platform == 'linux'", path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" }]
 
 [[package]]
 name = "diffusers"
@@ -2390,8 +2388,26 @@ wheels = [
 name = "sageattention"
 version = "2.2.0"
 source = { path = "libs/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
     { filename = "sageattention-2.2.0-cp310-cp310-linux_x86_64.whl", hash = "sha256:5de168b5a1650bcb3f006b6c8254036e6fab78db2c0830bf0907dc1313a1197b" },
+]
+
+[[package]]
+name = "sageattention"
+version = "2.2.0+cu128torch2.8.0.post3"
+source = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version < '3.11' and sys_platform == 'win32'",
+]
+wheels = [
+    { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl", hash = "sha256:7dabcd00e63229b28f046c5a69ec37cf4756afb375dbadd1975dadec045ae21c" },
 ]
 
 [[package]]
