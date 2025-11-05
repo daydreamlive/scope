@@ -80,4 +80,5 @@ This test outputs a video file.
 
 ## Release Process
 
-TBD
+1. Update the `version` field in `package.json` for the frontend.
+2. Update the `version` field in `pyproject.toml` for the server.
