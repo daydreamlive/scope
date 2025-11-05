@@ -18,7 +18,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-if platform.system() != "Windows":
+if not FLASH_ATTN_3_AVAILABLE and platform.system() != "Windows":
     try:
         from kernels import get_kernel
 
