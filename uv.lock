@@ -519,7 +519,7 @@ wheels = [
 
 [[package]]
 name = "daydream-scope"
-version = "0.1.0a1"
+version = "0.1.0a5"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
