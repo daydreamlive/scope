@@ -34,7 +34,12 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
-from .sage import sageattn_func, SAGEATTN_AVAILABLE
+sageattn_func = None
+SAGEATTN_AVAILABLE = False
+# Do not try to load SageAttention on Hopper GPUs because at the moment
+# loading SageAttention 2.2.0 in the sage module causes static on a H100
+if not is_hopper_gpu():
+    from .sage import sageattn_func, SAGEATTN_AVAILABLE
 
 import warnings
 
