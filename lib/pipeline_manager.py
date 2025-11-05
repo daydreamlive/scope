@@ -127,11 +127,20 @@ class PipelineManager:
     ) -> bool:
         """Synchronous wrapper for pipeline loading with proper locking."""
         with self._lock:
-            # If already loaded with same type and same params, return success
+            # If already loading, someone else is handling it
+            if self._status == PipelineStatus.LOADING:
+                logger.info("Pipeline already loading by another thread")
+                return False
+
+            # Determine pipeline type
+            if pipeline_id is None:
+                pipeline_id = os.getenv("PIPELINE", "longlive")
+
             # Normalize None to empty dict for comparison
             current_params = self._load_params or {}
             new_params = load_params or {}
 
+            # If already loaded with same type and same params, return success
             if (
                 self._status == PipelineStatus.LOADED
                 and self._pipeline_id == pipeline_id
@@ -142,24 +151,40 @@ class PipelineManager:
                 )
                 return True
 
-            # If a different pipeline is loaded OR same pipeline with different params, unload it first
-            if self._status == PipelineStatus.LOADED and (
-                self._pipeline_id != pipeline_id or current_params != new_params
+            # If same pipeline but different params, try to update instead of reloading
+            if (
+                self._status == PipelineStatus.LOADED
+                and self._pipeline_id == pipeline_id
+                and current_params != new_params
             ):
-                self._unload_pipeline_unsafe()
+                try:
+                    logger.info(
+                        f"Updating pipeline {pipeline_id} parameters without reloading models"
+                    )
+                    updated = self._update_pipeline_params(pipeline_id, new_params)
+                    if updated:
+                        self._load_params = load_params
+                        logger.info(f"Pipeline {pipeline_id} parameters updated successfully")
+                        return True
+                    else:
+                        # Update failed, fall through to reload
+                        logger.info(
+                            f"Pipeline update not supported, reloading pipeline {pipeline_id}"
+                        )
+                        self._unload_pipeline_unsafe()
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to update pipeline parameters: {e}. Reloading pipeline."
+                    )
+                    self._unload_pipeline_unsafe()
 
-            # If already loading, someone else is handling it
-            if self._status == PipelineStatus.LOADING:
-                logger.info("Pipeline already loading by another thread")
-                return False
+            # If a different pipeline is loaded, unload it first
+            if self._status == PipelineStatus.LOADED and self._pipeline_id != pipeline_id:
+                self._unload_pipeline_unsafe()
 
             try:
                 self._status = PipelineStatus.LOADING
                 self._error_message = None
-
-                # Determine pipeline type
-                if pipeline_id is None:
-                    pipeline_id = os.getenv("PIPELINE", "longlive")
 
                 logger.info(f"Loading pipeline: {pipeline_id}")
 
@@ -185,6 +210,43 @@ class PipelineManager:
                 self._load_params = None
 
                 return False
+
+    def _update_pipeline_params(self, pipeline_id: str, load_params: dict) -> bool:
+        """
+        Update pipeline parameters without reloading models.
+
+        Args:
+            pipeline_id: ID of the pipeline to update
+            load_params: New load parameters
+
+        Returns:
+            bool: True if update was successful, False if not supported
+        """
+        if self._pipeline is None:
+            return False
+
+        # Only streamdiffusionv2 currently supports parameter updates
+        if pipeline_id == "streamdiffusionv2":
+            try:
+                from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+
+                if isinstance(self._pipeline, StreamDiffusionV2Pipeline):
+                    height = load_params.get("height")
+                    width = load_params.get("width")
+                    seed = load_params.get("seed")
+
+                    self._pipeline.update_params(
+                        height=height,
+                        width=width,
+                        seed=seed
+                    )
+                    return True
+            except Exception as e:
+                logger.error(f"Error updating streamdiffusionv2 pipeline params: {e}")
+                return False
+
+        # Other pipelines don't support parameter updates yet
+        return False
 
     def _unload_pipeline_unsafe(self):
         """Unload the current pipeline. Must be called with lock held."""
