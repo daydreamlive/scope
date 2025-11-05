@@ -30,6 +30,14 @@ https://github.com/user-attachments/assets/facdc365-87a4-40a9-a6e3-cfb1b88583b3
 
 [Timeline JSON file](./examples/timeline-krea-flower-bloom-low-res.json)
 
+## Acceleration
+
+The pipeline uses different attention kernels to accelerate inference depending on the hardware used:
+
+- [SageAttention 2](https://github.com/thu-ml/SageAttention) is used on all GPUs *except* for Hopper GPUs (eg H100). If you run into video quality issues (which some folks have reported while using SageAttention) you can restart the server with `DISABLE_SAGEATTENTION=1` (eg `DISABLE_SAGEATTENTION=1 uv run daydream-scope`) to fallback to Flash Attention 2.
+- [Flash Attention 2](https://github.com/Dao-AILab/flash-attention) is the fallback if SageAttention 2 is disabled.
+- [Flash Attention 3](https://github.com/Dao-AILab/flash-attention?tab=readme-ov-file#flashattention-3-beta-release) is used on Hopper GPUs (eg H100).
+
 ## Resolution
 
 The generation will be faster for smaller resolutions resulting in smoother video. The visual quality will be better at higher resolutsion (eg 480x832 and larger), but you may need a more powerful GPU in order to achieve a higher FPS.
