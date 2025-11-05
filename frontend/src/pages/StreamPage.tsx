@@ -299,6 +299,14 @@ export function StreamPage() {
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
+  const handleKvCacheAttentionBiasChange = (bias: number) => {
+    updateSettings({ kvCacheAttentionBias: bias });
+    // Send KV cache attention bias update to backend
+    sendParameterUpdate({
+      kv_cache_attention_bias: bias,
+    });
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -520,6 +528,7 @@ export function StreamPage() {
         noise_scale?: number;
         noise_controller?: boolean;
         manage_cache?: boolean;
+        kv_cache_attention_bias?: number;
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -537,6 +546,12 @@ export function StreamPage() {
         settings.pipelineId === "longlive"
       ) {
         initialParameters.manage_cache = settings.manageCache ?? true;
+      }
+
+      // Krea-realtime-video-specific parameters
+      if (settings.pipelineId === "krea-realtime-video") {
+        initialParameters.kv_cache_attention_bias =
+          settings.kvCacheAttentionBias ?? 0.0;
       }
 
       // StreamDiffusionV2-specific parameters
@@ -775,6 +790,8 @@ export function StreamPage() {
                 : "fp8_e4m3fn"
             }
             onQuantizationChange={handleQuantizationChange}
+            kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.0}
+            onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
           />
         </div>
