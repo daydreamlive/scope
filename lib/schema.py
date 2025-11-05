@@ -76,6 +76,12 @@ class Parameters(BaseModel):
         description="Enable automatic cache management for parameter updates",
     )
     reset_cache: bool | None = Field(default=None, description="Trigger a cache reset")
+    kv_cache_attention_bias: float | None = Field(
+        default=None,
+        description="Negative attention bias applied to past frame tokens during sampling. Set to 0.0 to disable. Typical values: -1.0 to -30.0.",
+        ge=-50.0,
+        le=0.0,
+    )
 
 
 class WebRTCOfferRequest(BaseModel):

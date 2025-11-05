@@ -22,6 +22,7 @@ PREPARE_ONLY_PARAMS = frozenset(
         "transition",
         "denoising_step_list",
         "noise_scale",
+        "kv_cache_attention_bias",
     }
 )
 

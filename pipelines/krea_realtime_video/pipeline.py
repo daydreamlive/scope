@@ -147,6 +147,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         )
         transition = kwargs.get("transition", None)
         denoising_step_list = kwargs.get("denoising_step_list", None)
+        kv_cache_attention_bias = kwargs.get("kv_cache_attention_bias", None)
 
         # Check if prompts changed using prompt blender
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
@@ -180,7 +181,11 @@ class KreaRealtimeVideoPipeline(Pipeline):
             # Apply prompt blending and prepare stream
             # (PromptBlender.blend() returns None if transitioning, which skips preparation)
             self._apply_prompt_blending(
-                prompts, prompt_interpolation_method, denoising_step_list, init_cache
+                prompts,
+                prompt_interpolation_method,
+                denoising_step_list,
+                init_cache,
+                kv_cache_attention_bias,
             )
 
         return None
@@ -210,6 +215,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         interpolation_method="linear",
         denoising_step_list=None,
         init_cache: bool = False,
+        kv_cache_attention_bias: float | None = None,
     ):
         """Apply weighted blending of cached prompt embeddings."""
         # autocast to target dtype since we the text encoder weights dtype
@@ -230,5 +236,8 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         # Call stream prepare to update the pipeline with denoising steps
         self.stream.prepare(
-            prompts=None, denoising_step_list=denoising_step_list, init_cache=init_cache
+            prompts=None,
+            denoising_step_list=denoising_step_list,
+            init_cache=init_cache,
+            kv_cache_attention_bias=kv_cache_attention_bias,
         )
