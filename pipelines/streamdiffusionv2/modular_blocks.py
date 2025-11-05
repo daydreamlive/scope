@@ -119,13 +119,13 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
-        self.check_inputs(block_state)
 
         # For streamdiffusionv2, prompt encoding is handled by prompt_blender
-        # This block is a placeholder to maintain compatibility with Modular Diffusers
-        # The actual prompt_embeds are set via conditional_dict in the pipeline
-        # We just need to ensure prompt_embeds is in the state
+        # The actual prompt_embeds are set via conditional_dict in the pipeline before blocks execute
+        # Skip all work if prompt_embeds already exist (which they should via conditional_dict)
         if block_state.prompt_embeds is None:
+            # Only check inputs if we actually need to encode
+            self.check_inputs(block_state)
             # Use the stream's text encoder if needed
             if hasattr(block_state, "prompt") and block_state.prompt is not None:
                 conditional_dict = components.stream.text_encoder(
@@ -136,9 +136,9 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
                 # Default empty prompt
                 conditional_dict = components.stream.text_encoder(text_prompts=[""])
                 block_state.prompt_embeds = conditional_dict["prompt_embeds"]
+            self.set_block_state(state, block_state)
+        # If prompt_embeds already exists, skip state update to reduce overhead
 
-        # Add outputs
-        self.set_block_state(state, block_state)
         return components, state
 
 
@@ -235,6 +235,7 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
         # Determine the number of denoising steps
         current_step = int(1000 * block_state.noise_scale) - 100
 
+        # Update state directly without intermediate variables where possible
         block_state.latents = latents
         block_state.noisy_latents = noisy_latents
         block_state.current_step = current_step
@@ -304,8 +305,8 @@ class StreamDiffusionV2DenoiseStep(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
 
-        # Use the stream's inference method
-        denoised_pred = components.stream.inference(
+        # Use the stream's inference method - direct call without intermediate variable
+        block_state.denoised_pred = components.stream.inference(
             noise=block_state.noisy_latents,
             current_start=block_state.current_start,
             current_end=block_state.current_end,
@@ -313,7 +314,6 @@ class StreamDiffusionV2DenoiseStep(ModularPipelineBlocks):
             generator=block_state.generator,
         )
 
-        block_state.denoised_pred = denoised_pred
         self.set_block_state(state, block_state)
         return components, state
 
@@ -356,9 +356,8 @@ class StreamDiffusionV2PostprocessStep(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
 
-        # Decode to pixel space
-        output = components.stream.vae.stream_decode_to_pixel(block_state.denoised_pred)
-        block_state.output = output
+        # Decode to pixel space - direct assignment to reduce overhead
+        block_state.output = components.stream.vae.stream_decode_to_pixel(block_state.denoised_pred)
 
         self.set_block_state(state, block_state)
         return components, state
