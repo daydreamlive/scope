@@ -1,4 +1,5 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
+import platform
 import torch
 from flash_attn import flash_attn_func
 
@@ -8,21 +9,24 @@ def is_hopper_gpu():
     device_name = torch.cuda.get_device_name(0).lower()
     return "h100" in device_name or "hopper" in device_name
 
+FLASH_ATTN_3_AVAILABLE = False
+
 try:
     import flash_attn_interface
 
     FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
 except ModuleNotFoundError:
-    FLASH_ATTN_3_AVAILABLE = False
+    pass
 
-try:
-    from kernels import get_kernel
+if platform.system() != "Windows":
+    try:
+        from kernels import get_kernel
 
-    flash_attn_3_hub = get_kernel("kernels-community/flash-attn3", revision="fake-ops-return-probs")
-    flash_attn_interface = flash_attn_3_hub
-    FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
-except ModuleNotFoundError:
-    FLASH_ATTN_3_AVAILABLE = False
+        flash_attn_3_hub = get_kernel("kernels-community/flash-attn3", revision="fake-ops-return-probs")
+        flash_attn_interface = flash_attn_3_hub
+        FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
+    except Exception:
+        pass
 
 try:
     import flash_attn

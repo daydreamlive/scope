@@ -5,13 +5,18 @@ import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
 import { generateRandomColor } from "../utils/promptColors";
+import { submitTimelinePrompt } from "../utils/timelinePromptSubmission";
 
 interface PromptInputWithTimelineProps {
   className?: string;
   currentPrompt: string;
   currentPromptItems?: PromptItem[];
   onPromptSubmit?: (prompt: string) => void;
-  onPromptItemsSubmit?: (prompts: PromptItem[]) => void;
+  onPromptItemsSubmit?: (
+    prompts: PromptItem[],
+    transitionSteps?: number,
+    temporalInterpolationMethod?: "linear" | "slerp"
+  ) => void;
   disabled?: boolean;
   isStreaming?: boolean;
   isVideoPaused?: boolean;
@@ -31,11 +36,14 @@ interface PromptInputWithTimelineProps {
   settings?: SettingsState;
   onSettingsImport?: (settings: Partial<SettingsState>) => void;
   onPlayPauseRef?: React.RefObject<(() => Promise<void>) | null>;
+  onVideoPlayingCallbackRef?: React.RefObject<(() => void) | null>;
   onResetCache?: () => void;
   onTimelinePromptsChange?: (prompts: TimelinePrompt[]) => void;
   onTimelineCurrentTimeChange?: (currentTime: number) => void;
   onTimelinePlayingChange?: (isPlaying: boolean) => void;
   isDownloading?: boolean;
+  transitionSteps?: number;
+  temporalInterpolationMethod?: "linear" | "slerp";
 }
 
 export function PromptInputWithTimeline({
@@ -61,11 +69,14 @@ export function PromptInputWithTimeline({
   settings,
   onSettingsImport,
   onPlayPauseRef,
+  onVideoPlayingCallbackRef,
   onResetCache,
   onTimelinePromptsChange,
   onTimelineCurrentTimeChange,
   onTimelinePlayingChange,
   isDownloading = false,
+  transitionSteps,
+  temporalInterpolationMethod,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -106,7 +117,11 @@ export function PromptInputWithTimeline({
 
   // Complete live prompt and reset to beginning
   const completeLivePrompt = useCallback(() => {
-    if (!isLive) return;
+    // Check if there's actually a live prompt in the timeline
+    const hasLivePrompt =
+      prompts.length > 0 && prompts[prompts.length - 1].isLive;
+
+    if (!hasLivePrompt) return;
 
     setIsLive(false);
     onLiveStateChange?.(false);
@@ -127,24 +142,17 @@ export function PromptInputWithTimeline({
         },
       ];
     });
-  }, [isLive, onLiveStateChange, currentTime, setPrompts]);
+  }, [prompts, onLiveStateChange, currentTime, setPrompts]);
 
   // Reset to first prompt
   const resetToFirstPrompt = useCallback(() => {
     const firstPrompt = prompts.find(p => !p.isLive);
 
     if (firstPrompt) {
-      // If the prompt has blend data, send it as PromptItems
-      if (firstPrompt.prompts && firstPrompt.prompts.length > 0) {
-        const promptItems: PromptItem[] = firstPrompt.prompts.map(p => ({
-          text: p.text,
-          weight: p.weight,
-        }));
-        onPromptItemsSubmit?.(promptItems);
-      } else {
-        // Simple prompt, just send the text
-        onPromptSubmit?.(firstPrompt.text);
-      }
+      submitTimelinePrompt(firstPrompt, {
+        onPromptSubmit,
+        onPromptItemsSubmit,
+      });
     }
   }, [prompts, onPromptSubmit, onPromptItemsSubmit]);
 
@@ -208,6 +216,8 @@ export function PromptInputWithTimeline({
         startTime: start,
         endTime: end,
         isLive: true,
+        transitionSteps,
+        temporalInterpolationMethod,
       };
 
       if (currentPromptItems?.length > 0) {
@@ -226,7 +236,12 @@ export function PromptInputWithTimeline({
         text: currentPrompt || "Live...",
       };
     },
-    [currentPromptItems, currentPrompt]
+    [
+      currentPromptItems,
+      currentPrompt,
+      transitionSteps,
+      temporalInterpolationMethod,
+    ]
   );
 
   // Initialize stream if needed
@@ -285,18 +300,25 @@ export function PromptInputWithTimeline({
           setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
         }
       }
+    }
 
+    // Set callback to start playback when video actually starts playing
+    if (onVideoPlayingCallbackRef) {
+      onVideoPlayingCallbackRef.current = () => {
+        togglePlayback();
+      };
+      // Unpause video immediately so it can start playing and fire the 'playing' event
+      if (isVideoPaused) {
+        onVideoPlayPauseToggle?.();
+      }
+    } else {
+      // Fallback to old behavior if ref not provided
       setTimeout(() => {
         togglePlayback();
         if (isVideoPaused) {
           onVideoPlayPauseToggle?.();
         }
       }, 0);
-    } else {
-      togglePlayback();
-      if (isVideoPaused) {
-        onVideoPlayPauseToggle?.();
-      }
     }
 
     if (!hasStartedPlayback) {
@@ -315,6 +337,7 @@ export function PromptInputWithTimeline({
     isVideoPaused,
     onVideoPlayPauseToggle,
     hasStartedPlayback,
+    onVideoPlayingCallbackRef,
   ]);
 
   // Handle pausing playback
@@ -418,6 +441,8 @@ export function PromptInputWithTimeline({
           endTime: startTime,
           isLive: true,
           prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })),
+          transitionSteps,
+          temporalInterpolationMethod,
         };
 
         return [...updatedPrompts, newLivePrompt];
@@ -434,6 +459,8 @@ export function PromptInputWithTimeline({
       onLiveStateChange,
       scrollToTimeFn,
       prompts,
+      transitionSteps,
+      temporalInterpolationMethod,
     ]
   );
 

@@ -391,6 +391,9 @@ export function StreamPage() {
 
   // Ref to access the timeline's play/pause handler
   const timelinePlayPauseRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Ref to store callback that should execute when video starts playing
+  const onVideoPlayingCallbackRef = useRef<(() => void) | null>(null);
   // Sync resolution with videoResolution when video source changes
   // Only sync for video-input pipelines
   useEffect(() => {
@@ -628,6 +631,13 @@ export function StreamPage() {
                   timelinePlayPauseRef.current();
                 }
               }}
+              onVideoPlaying={() => {
+                // Execute callback when video starts playing
+                if (onVideoPlayingCallbackRef.current) {
+                  onVideoPlayingCallbackRef.current();
+                  onVideoPlayingCallbackRef.current = null; // Clear after execution
+                }
+              }}
             />
           </div>
           {/* Timeline area - compact, always visible */}
@@ -635,6 +645,8 @@ export function StreamPage() {
             <PromptInputWithTimeline
               currentPrompt={promptItems[0]?.text || ""}
               currentPromptItems={promptItems}
+              transitionSteps={transitionSteps}
+              temporalInterpolationMethod={temporalInterpolationMethod}
               onPromptSubmit={text => {
                 // Update the left panel's prompt state to reflect current timeline prompt
                 const prompts = [{ text, weight: 100 }];
@@ -659,18 +671,39 @@ export function StreamPage() {
                   });
                 }
               }}
-              onPromptItemsSubmit={prompts => {
+              onPromptItemsSubmit={(
+                prompts,
+                blockTransitionSteps,
+                blockTemporalInterpolationMethod
+              ) => {
                 // Update the left panel's prompt state to reflect current timeline prompt blend
                 setPromptItems(prompts);
 
+                // Use transition params from block if provided, otherwise use global settings
+                const effectiveTransitionSteps =
+                  blockTransitionSteps ?? transitionSteps;
+                const effectiveTemporalInterpolationMethod =
+                  blockTemporalInterpolationMethod ??
+                  temporalInterpolationMethod;
+
+                // Update the left panel's transition settings to reflect current block's values
+                if (blockTransitionSteps !== undefined) {
+                  setTransitionSteps(blockTransitionSteps);
+                }
+                if (blockTemporalInterpolationMethod !== undefined) {
+                  setTemporalInterpolationMethod(
+                    blockTemporalInterpolationMethod
+                  );
+                }
+
                 // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && transitionSteps > 0) {
+                if (isStreaming && effectiveTransitionSteps > 0) {
                   sendParameterUpdate({
                     transition: {
                       target_prompts: prompts,
-                      num_steps: transitionSteps,
+                      num_steps: effectiveTransitionSteps,
                       temporal_interpolation_method:
-                        temporalInterpolationMethod,
+                        effectiveTemporalInterpolationMethod,
                     },
                   });
                 } else {
@@ -704,6 +737,7 @@ export function StreamPage() {
               settings={settings}
               onSettingsImport={updateSettings}
               onPlayPauseRef={timelinePlayPauseRef}
+              onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
               onResetCache={handleResetCache}
               onTimelinePromptsChange={handleTimelinePromptsChange}
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}

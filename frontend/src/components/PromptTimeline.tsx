@@ -115,6 +115,8 @@ export interface TimelinePrompt {
   prompts?: Array<{ text: string; weight: number }>;
   color?: string;
   isLive?: boolean;
+  transitionSteps?: number;
+  temporalInterpolationMethod?: "linear" | "slerp";
 }
 
 // Timeline reset state
@@ -252,7 +254,7 @@ export function PromptTimeline({
 
     if (currentTime > visibleEndTime - visibleTimeRange * 0.2) {
       // When the red line gets close to the right edge, scroll forward
-      setVisibleStartTime(currentTime - visibleTimeRange * 0.8);
+      setVisibleStartTime(Math.max(0, currentTime - visibleTimeRange * 0.8));
     } else if (currentTime < visibleStartTime + visibleTimeRange * 0.2) {
       // When the red line gets close to the left edge, scroll backward
       setVisibleStartTime(Math.max(0, currentTime - visibleTimeRange * 0.2));

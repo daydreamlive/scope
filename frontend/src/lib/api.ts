@@ -181,3 +181,19 @@ export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
   const result = await response.json();
   return result;
 };
+
+export const fetchCurrentLogs = async (): Promise<string> => {
+  const response = await fetch("/api/v1/logs/current", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Fetch logs failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const logsText = await response.text();
+  return logsText;
+};

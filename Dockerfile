@@ -5,6 +5,7 @@ ENV PYTHONUNBUFFERED=1
 ENV CUDA_VISIBLE_DEVICES=0
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV DAYDREAM_SCOPE_LOGS_DIR=/workspace/logs
 ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 
 WORKDIR /app
@@ -22,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    python3-dev \
     # Cleanup
     && rm -rf /var/lib/apt/lists/*
 
