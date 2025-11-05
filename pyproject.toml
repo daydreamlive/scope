@@ -1,7 +1,7 @@
 [project]
 name = "daydream-scope"
-version = "0.1.0a1"
-description = "Real-time AI video generation and streaming tool with WebRTC support"
+version = "0.1.0a5"
+description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
 requires-python = ">=3.10.12"
 authors = [
@@ -95,6 +95,8 @@ dev = [
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
     "twine>=5.0.0",
+    "pytest>=8.4.2",
+    "freezegun>=1.5.5",
 ]
 
 [tool.ruff]

@@ -54,6 +54,12 @@ Run the server with hot reloading enabled:
 uv run daydream-scope --reload
 ```
 
+## Server Tests
+
+```bash
+uv run pytest
+```
+
 ## Testing Pipelines
 
 By default, the server does not load any pipelines on startup, but you can set the `PIPELINE` environment variable to automatically load a specific pipeline on startup which can be useful for testing.
@@ -74,4 +80,5 @@ This test outputs a video file.
 
 ## Release Process
 
-TBD
+1. Update the `version` field in `package.json` for the frontend.
+2. Update the `version` field in `pyproject.toml` for the server.

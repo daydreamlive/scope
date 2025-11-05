@@ -2,7 +2,11 @@
 
 __pycache__
 
+.pytest_cache/
+
 /models
+
+/logs
 
 .DS_Store
 

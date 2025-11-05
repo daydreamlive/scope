@@ -10,17 +10,25 @@ import webbrowser
 from contextlib import asynccontextmanager
 from datetime import datetime
 from importlib.metadata import version
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import torch
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from download_models import download_models
+from lib.logs_config import (
+    cleanup_old_logs,
+    ensure_logs_dir,
+    get_current_log_file,
+    get_logs_dir,
+    get_most_recent_log_file,
+)
 from lib.models_config import get_models_dir, models_are_downloaded
 from lib.pipeline_manager import PipelineManager
 from lib.schema import (
@@ -44,9 +52,35 @@ class STUNErrorFilter(logging.Filter):
         return True
 
 
+# Ensure logs directory exists and clean up old logs
+logs_dir = ensure_logs_dir()
+cleanup_old_logs(max_age_days=1)  # Delete logs older than 1 day
+log_file = get_current_log_file()
+
+# Configure logging - set root to WARNING to keep non-app libraries quiet by default
 logging.basicConfig(
     level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# Console handler handles INFO
+root_logger = logging.getLogger()
+for handler in root_logger.handlers:
+    if isinstance(handler, logging.StreamHandler) and not isinstance(
+        handler, RotatingFileHandler
+    ):
+        handler.setLevel(logging.INFO)
+
+# Add rotating file handler
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=5 * 1024 * 1024,  # 5 MB per file
+    backupCount=5,  # Keep 5 backup files
+)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+root_logger.addHandler(file_handler)
 
 # Add the filter to suppress STUN/TURN errors
 stun_filter = STUNErrorFilter()
@@ -57,9 +91,13 @@ logging.getLogger("app").setLevel(logging.INFO)
 logging.getLogger("lib").setLevel(logging.INFO)
 logging.getLogger("pipelines").setLevel(logging.INFO)
 
-# Enable verbose logging for specific libraries when needed
+# Set INFO level for uvicorn
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+
+# Enable verbose logging for other libraries when needed
 if os.getenv("VERBOSE_LOGGING"):
-    logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
 
@@ -153,6 +191,10 @@ async def lifespan(app: FastAPI):
         )
         logger.error(error_msg)
         sys.exit(1)
+
+    # Log logs directory
+    logs_dir = get_logs_dir()
+    logger.info(f"Logs directory: {logs_dir}")
 
     # Log models directory
     models_dir = get_models_dir()
@@ -354,6 +396,37 @@ async def get_hardware_info():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/logs/current")
+async def get_current_logs():
+    """Get the most recent application log file for bug reporting."""
+    try:
+        log_file_path = get_most_recent_log_file()
+
+        if log_file_path is None or not log_file_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Log file not found. The application may not have logged anything yet.",
+            )
+
+        # Read the entire file into memory to avoid Content-Length issues
+        # with actively written log files
+        log_content = log_file_path.read_text(encoding="utf-8")
+
+        # Return as a text response with proper headers for download
+        return Response(
+            content=log_content,
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": f'attachment; filename="{log_file_path.name.replace(".log", ".txt")}"'
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving log file: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
@@ -445,7 +518,11 @@ def main():
     if is_production:
         # Create server instance for production mode
         config = uvicorn.Config(
-            "app:app", host=args.host, port=args.port, reload=args.reload
+            "app:app",
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            log_config=None,  # Use our logging config, don't override it
         )
         server = uvicorn.Server(config)
 
@@ -467,7 +544,13 @@ def main():
             pass  # Clean shutdown on Ctrl+C
     else:
         # Development mode - just run normally
-        uvicorn.run("app:app", host=args.host, port=args.port, reload=args.reload)
+        uvicorn.run(
+            "app:app",
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            log_config=None,  # Use our logging config, don't override it
+        )
 
 
 if __name__ == "__main__":
