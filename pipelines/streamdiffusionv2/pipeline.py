@@ -266,6 +266,14 @@ class StreamDiffusionV2Pipeline(Pipeline):
         current_step = int(1000 * self.noise_scale) - 100
         state.set("current_step", current_step)
 
+        # Set prompt_embeds in state if available from conditional_dict to skip text_encoder work
+        if (
+            hasattr(self.modular_pipeline.stream, "conditional_dict")
+            and self.modular_pipeline.stream.conditional_dict is not None
+            and "prompt_embeds" in self.modular_pipeline.stream.conditional_dict
+        ):
+            state.set("prompt_embeds", self.modular_pipeline.stream.conditional_dict["prompt_embeds"])
+
         # Execute modular blocks (returns tuple: components, state)
         _, state = self.modular_blocks(self.modular_pipeline, state)
 
