@@ -2,12 +2,13 @@ import logging
 
 import torch
 from diffusers.modular_pipelines import PipelineState
+from diffusers.modular_pipelines.components_manager import ComponentsManager
 
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
+from .components_loader import load_stream_component, ComponentProvider
 from .modular_blocks import StreamDiffusionV2Blocks
-from .modular_pipeline_wrapper import StreamDiffusionV2ModularPipeline
 
 # https://github.com/daydreamlive/scope/blob/0cf1766186be3802bf97ce550c2c978439f22068/pipelines/streamdiffusionv2/vendor/causvid/models/wan/causal_model.py#L306
 MAX_ROPE_FREQ_TABLE_SEQ_LEN = 1024
@@ -55,10 +56,15 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
-        # Initialize Modular Diffusers blocks and pipeline
+        # Initialize ComponentsManager
+        self.components_manager = ComponentsManager()
+
+        # Initialize Modular Diffusers blocks
         self.modular_blocks = StreamDiffusionV2Blocks()
-        self.modular_pipeline = StreamDiffusionV2ModularPipeline(
-            config, device, dtype, config.model_dir
+
+        # Load stream component using ComponentsManager
+        self.component_provider = load_stream_component(
+            config, device, dtype, config.model_dir, self.components_manager
         )
 
         # Prompt blending with cache reset callback for transitions
@@ -68,7 +74,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         self.last_frame = None
         self.current_start = 0
-        self.current_end = self.modular_pipeline.stream.frame_seq_length * 2
+        self.current_end = self.component_provider.stream.frame_seq_length * 2
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         if should_prepare:
@@ -91,7 +97,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         # Handle prompt transition requests
         should_prepare_from_transition, target_prompts = handle_transition_prepare(
-            transition, self.prompt_blender, self.modular_pipeline.stream.text_encoder
+            transition, self.prompt_blender, self.component_provider.stream.text_encoder
         )
         if target_prompts:
             self.prompts = target_prompts
@@ -123,7 +129,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # When we hit the limit we reset the caches and indices
         # See this issue for more context https://github.com/daydreamlive/scope/issues/95
         max_current_start = (
-            MAX_ROPE_FREQ_TABLE_SEQ_LEN * self.modular_pipeline.stream.frame_seq_length
+            MAX_ROPE_FREQ_TABLE_SEQ_LEN * self.component_provider.stream.frame_seq_length
         )
         # We reset at whatever is smaller the theoretically max value or some % of it
         max_current_start = min(
@@ -137,7 +143,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
             # Update internal state before preparing pipeline
             if denoising_step_list is not None:
                 self.denoising_step_list = denoising_step_list
-                self.modular_pipeline.stream.denoising_step_list = torch.tensor(
+                self.component_provider.stream.denoising_step_list = torch.tensor(
                     denoising_step_list, dtype=torch.long, device=self.device
                 )
 
@@ -156,16 +162,16 @@ class StreamDiffusionV2Pipeline(Pipeline):
     @torch.no_grad()
     def _prepare_pipeline(self, prompts=None, interpolation_method="linear"):
         # Trigger KV + cross-attn cache re-initialization in prepare()
-        self.modular_pipeline.stream.kv_cache1 = None
+        self.component_provider.stream.kv_cache1 = None
 
         # Apply prompt blending and set conditional_dict
         self._apply_prompt_blending(prompts, interpolation_method)
 
-        self.modular_pipeline.stream.vae.model.first_batch = True
+        self.component_provider.stream.vae.model.first_batch = True
 
         self.last_frame = None
         self.current_start = 0
-        self.current_end = self.modular_pipeline.stream.frame_seq_length * 2
+        self.current_end = self.component_provider.stream.frame_seq_length * 2
 
     def _apply_motion_aware_noise_controller(self, input: torch.Tensor):
         # The prev seq is the last chunk_size frames of the current input
@@ -217,11 +223,11 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # Update prompt embedding for this generation call
         # Handles both static blending and temporal transitions
         next_embedding = self.prompt_blender.get_next_embedding(
-            self.modular_pipeline.stream.text_encoder
+            self.component_provider.stream.text_encoder
         )
 
         if next_embedding is not None:
-            self.modular_pipeline.stream.conditional_dict = {
+            self.component_provider.stream.conditional_dict = {
                 "prompt_embeds": next_embedding
             }
 
@@ -259,7 +265,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         state.set("current_start", self.current_start)
         state.set("current_end", self.current_end)
         state.set(
-            "denoising_step_list", self.modular_pipeline.stream.denoising_step_list
+            "denoising_step_list", self.component_provider.stream.denoising_step_list
         )
 
         # Determine the number of denoising steps
@@ -268,14 +274,15 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         # Set prompt_embeds in state if available from conditional_dict to skip text_encoder work
         if (
-            hasattr(self.modular_pipeline.stream, "conditional_dict")
-            and self.modular_pipeline.stream.conditional_dict is not None
-            and "prompt_embeds" in self.modular_pipeline.stream.conditional_dict
+            hasattr(self.component_provider.stream, "conditional_dict")
+            and self.component_provider.stream.conditional_dict is not None
+            and "prompt_embeds" in self.component_provider.stream.conditional_dict
         ):
-            state.set("prompt_embeds", self.modular_pipeline.stream.conditional_dict["prompt_embeds"])
+            state.set("prompt_embeds", self.component_provider.stream.conditional_dict["prompt_embeds"])
 
         # Execute modular blocks (returns tuple: components, state)
-        _, state = self.modular_blocks(self.modular_pipeline, state)
+        # Pass component_provider which provides components.stream access
+        _, state = self.modular_blocks(self.component_provider, state)
 
         # Get output from state
         output = state.values.get("output")
@@ -292,28 +299,28 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = self.current_end
         self.current_end += (
             self.chunk_size // 4
-        ) * self.modular_pipeline.stream.frame_seq_length
+        ) * self.component_provider.stream.frame_seq_length
 
         return postprocess_chunk(output)
 
     def _initialize_stream_caches(self):
         """Initialize stream caches without overriding conditional_dict."""
         noise = torch.zeros(1, 1).to(self.device, self.dtype)
-        saved = self.modular_pipeline.stream.conditional_dict
-        self.modular_pipeline.stream.prepare(noise, text_prompts=[""])
-        self.modular_pipeline.stream.conditional_dict = saved
+        saved = self.component_provider.stream.conditional_dict
+        self.component_provider.stream.prepare(noise, text_prompts=[""])
+        self.component_provider.stream.conditional_dict = saved
 
     def _apply_prompt_blending(self, prompts=None, interpolation_method="linear"):
         """Apply weighted blending of cached prompt embeddings."""
         combined_embeds = self.prompt_blender.blend(
-            prompts, interpolation_method, self.modular_pipeline.stream.text_encoder
+            prompts, interpolation_method, self.component_provider.stream.text_encoder
         )
 
         if combined_embeds is None:
             return
 
         # Set the blended embeddings on the stream
-        self.modular_pipeline.stream.conditional_dict = {
+        self.component_provider.stream.conditional_dict = {
             "prompt_embeds": combined_embeds
         }
 
