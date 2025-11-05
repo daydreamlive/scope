@@ -20,6 +20,7 @@ export interface WebRTCOfferRequest {
     noise_scale?: number;
     noise_controller?: boolean;
     manage_cache?: boolean;
+    kv_cache_attention_bias?: number;
   };
 }
 

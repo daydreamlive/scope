@@ -57,4 +57,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Quantization method for the diffusion model. fp8_e4m3fn reduces memory usage and improves performance, but might affect quality. None uses full precision and uses more meory, but does not affect quality.",
   },
+  kvCacheAttentionBias: {
+    label: "KV Attention Bias:",
+    tooltip:
+      "Negative attention bias applied to past frame tokens during sampling. Helps mitigate error accumulation and prevents repetitive motion. Set to 0.0 to disable (uses original Flash/Sage Attention). Typical values: -10.0 to -20.0 for stronger bias, -1.0 to -5.0 for milder effect.",
+  },
 };

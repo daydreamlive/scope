@@ -51,6 +51,8 @@ interface SettingsPanelProps {
   onManageCacheChange?: (enabled: boolean) => void;
   quantization?: "fp8_e4m3fn" | null;
   onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
+  kvCacheAttentionBias?: number;
+  onKvCacheAttentionBiasChange?: (bias: number) => void;
   onResetCache?: () => void;
 }
 
@@ -74,12 +76,17 @@ export function SettingsPanel({
   onManageCacheChange,
   quantization = "fp8_e4m3fn",
   onQuantizationChange,
+  kvCacheAttentionBias = 0.0,
+  onKvCacheAttentionBiasChange,
   onResetCache,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
   // Local state for noise scale for immediate UI feedback
   const [localNoiseScale, setLocalNoiseScale] = useState<number>(noiseScale);
+  // Local state for KV cache attention bias for immediate UI feedback
+  const [localKvCacheAttentionBias, setLocalKvCacheAttentionBias] =
+    useState<number>(kvCacheAttentionBias);
 
   // Validation error states
   const [heightError, setHeightError] = useState<string | null>(null);
@@ -90,6 +97,10 @@ export function SettingsPanel({
   useEffect(() => {
     setLocalNoiseScale(noiseScale);
   }, [noiseScale]);
+
+  useEffect(() => {
+    setLocalKvCacheAttentionBias(kvCacheAttentionBias);
+  }, [kvCacheAttentionBias]);
 
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -195,6 +206,19 @@ export function SettingsPanel({
   // Format value to 2 decimal places
   const formatNoiseScale = (value: number) => {
     return Math.round(value * 100) / 100;
+  };
+
+  const handleKvCacheAttentionBiasValueChange = (value: number) => {
+    setLocalKvCacheAttentionBias(value);
+  };
+
+  const handleKvCacheAttentionBiasCommit = (value: number) => {
+    onKvCacheAttentionBiasChange?.(value);
+  };
+
+  // Format KV cache attention bias to 1 decimal place
+  const formatKvCacheAttentionBias = (value: number) => {
+    return Math.round(value * 10) / 10;
   };
 
   const currentPipeline = PIPELINES[pipelineId];
@@ -584,6 +608,22 @@ export function SettingsPanel({
                   </Select>
                 </div>
               </div>
+
+              <SliderWithInput
+                label={PARAMETER_METADATA.kvCacheAttentionBias.label}
+                tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
+                value={localKvCacheAttentionBias}
+                onValueChange={handleKvCacheAttentionBiasValueChange}
+                onValueCommit={handleKvCacheAttentionBiasCommit}
+                min={-30.0}
+                max={0.0}
+                step={0.1}
+                incrementAmount={0.1}
+                disabled={isStreaming}
+                labelClassName="text-sm text-foreground w-32"
+                valueFormatter={formatKvCacheAttentionBias}
+                inputParser={v => parseFloat(v) || 0.0}
+              />
             </div>
           </div>
         )}
