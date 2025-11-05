@@ -82,6 +82,7 @@ class InferencePipeline(torch.nn.Module):
 
         self.conditional_dict = None
         self.current_start = 0
+        self.kv_cache_attention_bias = config.get("kv_cache_attention_bias", 0.0)
 
     @torch.no_grad()
     def prepare(
@@ -89,7 +90,15 @@ class InferencePipeline(torch.nn.Module):
         prompts: list[str] = None,
         denoising_step_list: list[int] = None,
         init_cache: bool = False,
+        kv_cache_attention_bias: float | None = None,
     ):
+        # Update kv_cache_attention_bias if provided
+        if kv_cache_attention_bias is not None:
+            self.kv_cache_attention_bias = kv_cache_attention_bias
+            logger.info(
+                f"prepare: Updated KV cache attention bias to {kv_cache_attention_bias}"
+            )
+
         generator_param = next(self.generator.model.parameters())
 
         # CausalWanModel uses a RoPE frequency table with a max sequence length of 1024
@@ -237,6 +246,7 @@ class InferencePipeline(torch.nn.Module):
                     kv_cache=self.kv_cache1,
                     crossattn_cache=self.crossattn_cache,
                     current_start=start_frame * self.frame_seq_length,
+                    kv_cache_attention_bias=self.kv_cache_attention_bias,
                 )
                 next_timestep = self.denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -265,6 +275,7 @@ class InferencePipeline(torch.nn.Module):
                     kv_cache=self.kv_cache1,
                     crossattn_cache=self.crossattn_cache,
                     current_start=start_frame * self.frame_seq_length,
+                    kv_cache_attention_bias=self.kv_cache_attention_bias,
                 )
 
         if self.current_start == 0:
@@ -491,6 +502,7 @@ class InferencePipeline(torch.nn.Module):
             kv_cache=self.kv_cache1,
             crossattn_cache=self.crossattn_cache,
             current_start=start_frame * self.frame_seq_length,
+            kv_cache_attention_bias=self.kv_cache_attention_bias,
         )
 
         self.generator.model.block_mask = None

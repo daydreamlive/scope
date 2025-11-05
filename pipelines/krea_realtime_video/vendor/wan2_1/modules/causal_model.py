@@ -225,7 +225,8 @@ class CausalWanSelfAttention(nn.Module):
         block_mask,
         kv_cache=None,
         current_start=0,
-        cache_start=None
+        cache_start=None,
+        kv_cache_attention_bias=0.0
     ):
         r"""
         Args:
@@ -384,11 +385,90 @@ class CausalWanSelfAttention(nn.Module):
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
-            x = attention(
-                roped_query,
-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
-            )
+
+            # Choose attention mechanism based on whether negative bias is enabled
+            kv_start_idx = max(0, local_end_index - self.max_attention_size)
+            cached_k = kv_cache["k"][:, kv_start_idx:local_end_index]
+            cached_v = kv_cache["v"][:, kv_start_idx:local_end_index]
+
+            if kv_cache_attention_bias != 0.0:
+                # Use flex_attention with negative attention bias for sampling
+                # Apply bias to past frame tokens to mitigate error accumulation
+                bias_value = kv_cache_attention_bias
+
+                # Determine the start of current frame tokens
+                current_frame_start_idx = current_start
+                kv_offset = kv_start_idx
+
+                # Pad to multiple of 128 for flex_attention
+                q_len = roped_query.shape[1]
+                kv_len = cached_k.shape[1]
+                padded_length = math.ceil(max(q_len, kv_len) / 128) * 128 - max(q_len, kv_len)
+
+                padded_roped_query = torch.cat(
+                    [
+                        roped_query,
+                        torch.zeros(
+                            [roped_query.shape[0], padded_length, roped_query.shape[2], roped_query.shape[3]],
+                            device=roped_query.device,
+                            dtype=roped_query.dtype,
+                        ),
+                    ],
+                    dim=1,
+                ) if padded_length > 0 else roped_query
+
+                padded_k = torch.cat(
+                    [
+                        cached_k,
+                        torch.zeros(
+                            [cached_k.shape[0], padded_length, cached_k.shape[2], cached_k.shape[3]],
+                            device=cached_k.device,
+                            dtype=cached_k.dtype,
+                        ),
+                    ],
+                    dim=1,
+                ) if padded_length > 0 else cached_k
+
+                padded_v = torch.cat(
+                    [
+                        cached_v,
+                        torch.zeros(
+                            [cached_v.shape[0], padded_length, cached_v.shape[2], cached_v.shape[3]],
+                            device=cached_v.device,
+                            dtype=cached_v.dtype,
+                        ),
+                    ],
+                    dim=1,
+                ) if padded_length > 0 else cached_v
+
+                # Define bias function: apply negative bias to past frame tokens
+                def score_mod(score, b_idx, h_idx, q_idx, kv_idx):
+                    # Adjust kv_idx to account for windowing offset
+                    actual_kv_idx = kv_idx + kv_offset
+
+                    # Apply negative bias to past frame tokens (before current frame)
+                    return torch.where(
+                        actual_kv_idx < current_frame_start_idx,
+                        score + bias_value,
+                        score
+                    )
+
+                # Apply flex_attention with score_mod (no block_mask needed)
+                x = flex_attention(
+                    query=padded_roped_query.transpose(2, 1).contiguous(),
+                    key=padded_k.transpose(2, 1).contiguous(),
+                    value=padded_v.transpose(2, 1).contiguous(),
+                    score_mod=score_mod,
+                )[:, :, :q_len].transpose(2, 1)
+            else:
+                # Use original Flash/Sage Attention path when bias is disabled (0.0)
+                # This preserves the original behavior and avoids flex_attention overhead
+                x = attention(
+                    roped_query,
+                    cached_k,
+                    cached_v
+                )
+
             kv_cache["global_end_index"] = current_end
             kv_cache["local_end_index"] = local_end_index
 
@@ -451,7 +531,8 @@ class CausalWanAttentionBlock(nn.Module):
         kv_cache=None,
         crossattn_cache=None,
         current_start=0,
-        cache_start=None
+        cache_start=None,
+        kv_cache_attention_bias=0.0
     ):
         r"""
         Args:
@@ -471,7 +552,7 @@ class CausalWanAttentionBlock(nn.Module):
         y = self.self_attn(
             (self.norm1(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]).flatten(1, 2),
             seq_lens, grid_sizes,
-            freqs, block_mask, kv_cache, current_start, cache_start)
+            freqs, block_mask, kv_cache, current_start, cache_start, kv_cache_attention_bias)
 
         # with amp.autocast(dtype=torch.float32):
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(1, 2)
@@ -834,7 +915,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         kv_cache: dict = None,
         crossattn_cache: dict = None,
         current_start: int = 0,
-        cache_start: int = 0
+        cache_start: int = 0,
+        kv_cache_attention_bias: float = 0.0
     ):
         r"""
         Run the diffusion model with kv caching.
@@ -929,7 +1011,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                     {
                         "kv_cache": kv_cache[block_index],
                         "current_start": current_start,
-                        "cache_start": cache_start
+                        "cache_start": cache_start,
+                        "kv_cache_attention_bias": kv_cache_attention_bias
                     }
                 )
                 x = torch.utils.checkpoint.checkpoint(
@@ -943,7 +1026,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         "kv_cache": kv_cache[block_index],
                         "crossattn_cache": crossattn_cache[block_index],
                         "current_start": current_start,
-                        "cache_start": cache_start
+                        "cache_start": cache_start,
+                        "kv_cache_attention_bias": kv_cache_attention_bias
                     }
                 )
                 x = block(x, **kwargs)
