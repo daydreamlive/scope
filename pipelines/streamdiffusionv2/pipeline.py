@@ -76,6 +76,34 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = 0
         self.current_end = self.component_provider.stream.frame_seq_length * 2
 
+    def update_params(self, height: int | None = None, width: int | None = None, seed: int | None = None):
+        """
+        Update pipeline parameters without reloading model weights.
+
+        Args:
+            height: New height (will be rounded to nearest multiple of SCALE_SIZE)
+            width: New width (will be rounded to nearest multiple of SCALE_SIZE)
+            seed: New seed value
+        """
+        if height is not None or width is not None:
+            req_height = height if height is not None else self.height
+            req_width = width if width is not None else self.width
+            new_height = round(req_height / SCALE_SIZE) * SCALE_SIZE
+            new_width = round(req_width / SCALE_SIZE) * SCALE_SIZE
+
+            if new_height != self.height or new_width != self.width:
+                logger.info(f"Updating resolution from {self.width}x{self.height} to {new_width}x{new_height}")
+                self.height = new_height
+                self.width = new_width
+                # Reset caches when resolution changes
+                self.last_frame = None
+                self.current_start = 0
+                self.current_end = self.component_provider.stream.frame_seq_length * 2
+
+        if seed is not None and seed != self.base_seed:
+            logger.info(f"Updating seed from {self.base_seed} to {seed}")
+            self.base_seed = seed
+
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         if should_prepare:
             logger.info("prepare: Initiating pipeline prepare for request")
