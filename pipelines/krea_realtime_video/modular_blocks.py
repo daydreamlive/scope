@@ -16,17 +16,19 @@ from diffusers.utils import logging as diffusers_logging
 from diffusers.modular_pipelines import SequentialPipelineBlocks
 from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 
+from ..base import (
+    DenoiseBlock,
+    DecodeBlock,
+    SetTimestepsBlock,
+    SetupKVCacheBlock,
+    RecomputeKVCacheBlock,
+    PrepareLatentsBlock,
+    PrepareVideoLatentsBlock,
+)
 from .text_conditioning import TextConditioningBlock
 from .before_denoise import BeforeDenoiseBlock
 from .t2v_before_denoise import T2VBeforeDenoiseBlock
 from .v2v_before_denoise import V2VBeforeDenoiseBlock
-from .set_timesteps import SetTimestepsBlock
-from .prepare_latents import PrepareLatentsBlock
-from .prepare_video_latents import PrepareVideoLatentsBlock
-from .setup_kv_cache import SetupKVCacheBlock
-from .recompute_kv_cache import RecomputeKVCacheBlock
-from .denoise import DenoiseBlock
-from .decode import DecodeBlock
 
 logger = diffusers_logging.get_logger(__name__)
 
