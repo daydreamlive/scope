@@ -13,6 +13,12 @@ from .modular_blocks import StreamDiffusionV2Blocks
 from .vendor.causvid.models.wan.causal_stream_inference import (
     CausalStreamInferencePipeline,
 )
+from .vendor.causvid.models.wan.wan_wrapper import (
+    WanTextEncoder,
+    WanVAEWrapper,
+    CausalWanDiffusionWrapper,
+)
+from .vendor.causvid.models.sdxl.sdxl_wrapper import SDXLWrapper, SDXLTextEncoder, SDXLVAE
 
 # https://github.com/daydreamlive/scope/blob/0cf1766186be3802bf97ce550c2c978439f22068/pipelines/streamdiffusionv2/vendor/causvid/models/wan/causal_model.py#L306
 MAX_ROPE_FREQ_TABLE_SEQ_LEN = 1024
@@ -25,6 +31,40 @@ CURRENT_START_RESET_RATIO = 0.5
 SCALE_SIZE = 16
 
 logger = logging.getLogger(__name__)
+
+
+# Wrapper functions moved from vendor/causvid/models/__init__.py
+DIFFUSION_NAME_TO_CLASS = {
+    "sdxl": SDXLWrapper,
+    "wan": None,  # Not used in streamdiffusionv2
+    "causal_wan": CausalWanDiffusionWrapper,
+}
+
+
+def get_diffusion_wrapper(model_name):
+    return DIFFUSION_NAME_TO_CLASS[model_name]
+
+
+TEXTENCODER_NAME_TO_CLASS = {
+    "sdxl": SDXLTextEncoder,
+    "wan": WanTextEncoder,
+    "causal_wan": WanTextEncoder,
+}
+
+
+def get_text_encoder_wrapper(model_name):
+    return TEXTENCODER_NAME_TO_CLASS[model_name]
+
+
+VAE_NAME_TO_CLASS = {
+    "sdxl": SDXLVAE,
+    "wan": WanVAEWrapper,
+    "causal_wan": WanVAEWrapper,  # TODO: Change the VAE to the causal version
+}
+
+
+def get_vae_wrapper(model_name):
+    return VAE_NAME_TO_CLASS[model_name]
 
 
 class ComponentProvider:
@@ -95,6 +135,7 @@ def load_stream_component(
 ) -> ComponentProvider:
     """
     Load the CausalStreamInferencePipeline and add it to ComponentsManager.
+    Components (text_encoder, vae, generator) are created directly here instead of inside CausalStreamInferencePipeline.
 
     Args:
         config: Configuration dictionary for the pipeline
@@ -142,10 +183,32 @@ def load_stream_component(
         # Component doesn't exist, create and add it
         pass
 
-    # Create and initialize the stream pipeline
-    stream = CausalStreamInferencePipeline(config, device).to(
-        device=device, dtype=dtype
+    # Create components directly in pipeline.py instead of inside CausalStreamInferencePipeline
+    model_name = config.get("model_name", "causal_wan")
+    generator_model_name = config.get("generator_name", model_name)
+    text_encoder_path = config.get("text_encoder_path", None)
+    tokenizer_path = config.get("tokenizer_path", None)
+
+    # Create generator
+    start = time.time()
+    generator = get_diffusion_wrapper(model_name=generator_model_name)(
+        model_dir=model_dir
     )
+    print(f"Loaded diffusion wrapper in {time.time() - start:.3f}s")
+
+    # Create text encoder
+    start = time.time()
+    text_encoder = get_text_encoder_wrapper(model_name=model_name)(
+        model_dir=model_dir,
+        text_encoder_path=text_encoder_path,
+        tokenizer_path=tokenizer_path,
+    )
+    print(f"Loaded text encoder in {time.time() - start:.3f}s")
+
+    # Create VAE
+    start = time.time()
+    vae = get_vae_wrapper(model_name=model_name)(model_dir=model_dir)
+    print(f"Loaded VAE in {time.time() - start:.3f}s")
 
     # Load the generator state dict
     start = time.time()
@@ -164,8 +227,36 @@ def load_stream_component(
     else:
         state_dict = state_dict_data
 
-    stream.generator.load_state_dict(state_dict, strict=True)
+    generator.load_state_dict(state_dict, strict=True)
     print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
+
+    # Create and initialize the stream pipeline with the components
+    stream = CausalStreamInferencePipeline(
+        config, device, generator=generator, text_encoder=text_encoder, vae=vae
+    ).to(device=device, dtype=dtype)
+
+    # Add individual components to ComponentsManager for modular blocks first
+    # Each block should depend on only what it needs (text_encoder, vae, generator)
+    text_encoder_id = components_manager.add(
+        "text_encoder",
+        text_encoder,
+        collection=collection,
+    )
+    print(f"Added text_encoder component to ComponentsManager with ID: {text_encoder_id}")
+
+    vae_id = components_manager.add(
+        "vae",
+        vae,
+        collection=collection,
+    )
+    print(f"Added vae component to ComponentsManager with ID: {vae_id}")
+
+    generator_id = components_manager.add(
+        "generator",
+        generator,
+        collection=collection,
+    )
+    print(f"Added generator component to ComponentsManager with ID: {generator_id}")
 
     # Add stream component to ComponentsManager
     component_id = components_manager.add(
@@ -174,29 +265,6 @@ def load_stream_component(
         collection=collection,
     )
     print(f"Added stream component to ComponentsManager with ID: {component_id}")
-
-    # Add individual components to ComponentsManager for modular blocks
-    # Each block should depend on only what it needs (text_encoder, vae, generator)
-    text_encoder_id = components_manager.add(
-        "text_encoder",
-        stream.text_encoder,
-        collection=collection,
-    )
-    print(f"Added text_encoder component to ComponentsManager with ID: {text_encoder_id}")
-
-    vae_id = components_manager.add(
-        "vae",
-        stream.vae,
-        collection=collection,
-    )
-    print(f"Added vae component to ComponentsManager with ID: {vae_id}")
-
-    generator_id = components_manager.add(
-        "generator",
-        stream.generator,
-        collection=collection,
-    )
-    print(f"Added generator component to ComponentsManager with ID: {generator_id}")
 
     # Create and return provider
     return ComponentProvider(components_manager, "stream", collection)
