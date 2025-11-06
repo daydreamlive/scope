@@ -63,6 +63,10 @@ class InferencePipeline(torch.nn.Module):
         self.local_attn_size = config.model_kwargs.local_attn_size
         self.recache_buffer = None
         self.num_frame_per_block = getattr(config, "num_frame_per_block", 1)
+        self.decoded_frame_buffer = None
+        # Buffer size similar to krea_realtime_video: 1 + (local_attn_size - 1) * 4
+        # This provides enough space for the sliding window of decoded frames
+        self.decoded_frame_buffer_max_size = 1 + (self.local_attn_size - 1) * 4
 
         print(f"KV inference with {self.num_frame_per_block} frames per block")
 
@@ -118,6 +122,23 @@ class InferencePipeline(torch.nn.Module):
                 denoising_step_list, dtype=torch.long
             )
 
+        # Initialize decoded frame buffer if it doesn't exist yet (needed by decode block)
+        if self.decoded_frame_buffer is None:
+            generator_param = next(self.generator.model.parameters())
+            self.decoded_frame_buffer = torch.zeros(
+                [
+                    self.batch_size,
+                    self.decoded_frame_buffer_max_size,
+                    3,
+                    self.height,
+                    self.width,
+                ],
+                dtype=generator_param.dtype,
+                device=generator_param.device
+                if not self.low_memory
+                else torch.device("cpu"),
+            )
+
         if not init_cache:
             return
 
@@ -154,6 +175,21 @@ class InferencePipeline(torch.nn.Module):
                 16,
                 latent_height,
                 latent_width,
+            ],
+            dtype=generator_param.dtype,
+            device=generator_param.device
+            if not self.low_memory
+            else torch.device("cpu"),
+        )
+
+        # Initialize decoded frame buffer
+        self.decoded_frame_buffer = torch.zeros(
+            [
+                self.batch_size,
+                self.decoded_frame_buffer_max_size,
+                3,
+                self.height,
+                self.width,
             ],
             dtype=generator_param.dtype,
             device=generator_param.device
@@ -396,3 +432,69 @@ class InferencePipeline(torch.nn.Module):
             blk["k"].zero_()
             blk["v"].zero_()
             blk["is_init"] = False
+
+        self.generator.model.block_mask = None
+
+    def _recompute_cache(self):
+        """
+        Recompute KV cache using the recache buffer.
+        This is called by the modular pipeline block to update the cache.
+        """
+        # Reset kv cache
+        for block_idx in range(self.num_transformer_blocks):
+            cache = self.kv_cache1[block_idx]
+            cache["k"].zero_()
+            cache["v"].zero_()
+
+        # Reset cross-attention cache
+        for blk in self.crossattn_cache:
+            blk["k"].zero_()
+            blk["v"].zero_()
+            blk["is_init"] = False
+
+        # Get the number of frames to recache (min of what we've generated and buffer size)
+        num_recache_frames = min(self.current_start, self.local_attn_size)
+        recache_start = self.current_start - num_recache_frames
+
+        # With sliding window, most recent frames are always at the end
+        generator_device = next(self.generator.model.parameters()).device
+        recache_frames = (
+            self.recache_buffer[:, -num_recache_frames:]
+            .contiguous()
+            .to(generator_device)
+        )
+
+        # Prepare blockwise causal mask
+        block_mask = self.generator.model._prepare_blockwise_causal_attn_mask(
+            device=recache_frames.device,
+            num_frames=num_recache_frames,
+            frame_seqlen=self.frame_seq_length,
+            num_frame_per_block=self.num_frame_per_block,
+            local_attn_size=self.local_attn_size,
+        )
+        self.generator.model.block_mask = block_mask
+
+        context_timestep = (
+            torch.ones(
+                [self.batch_size, num_recache_frames],
+                device=recache_frames.device,
+                dtype=torch.int64,
+            )
+            * 0
+        )
+        self.generator(
+            noisy_image_or_video=recache_frames,
+            conditional_dict=self.conditional_dict,
+            timestep=context_timestep,
+            kv_cache=self.kv_cache1,
+            crossattn_cache=self.crossattn_cache,
+            current_start=recache_start * self.frame_seq_length,
+        )
+
+        # Reset cross-attention cache after recomputation
+        for blk in self.crossattn_cache:
+            blk["k"].zero_()
+            blk["v"].zero_()
+            blk["is_init"] = False
+
+        self.generator.model.block_mask = None
