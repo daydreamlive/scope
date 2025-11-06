@@ -2,12 +2,14 @@ import logging
 import time
 
 import torch
+from diffusers.modular_pipelines import PipelineState
 
 from lib.schema import Quantization
 
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
+from .modular_blocks import KreaRealtimeVideoBlocks
 from .vendor.wan2_1.vae_block3 import WanVAEWrapper
 from .vendor.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder
 
@@ -15,6 +17,39 @@ logger = logging.getLogger(__name__)
 
 WARMUP_RUNS = 3
 WARMUP_PROMPT = "a majestic sunset"
+
+
+class ComponentProvider:
+    """Simple wrapper to provide component access to modular blocks."""
+
+    def __init__(self, stream: InferencePipeline):
+        """
+        Initialize the component provider.
+
+        Args:
+            stream: The InferencePipeline instance that contains all components
+        """
+        self.stream = stream
+
+    @property
+    def text_encoder(self):
+        """Provide access to the text_encoder component."""
+        return self.stream.text_encoder
+
+    @property
+    def vae(self):
+        """Provide access to the vae component."""
+        return self.stream.vae
+
+    @property
+    def generator(self):
+        """Provide access to the generator component."""
+        return self.stream.generator
+
+    @property
+    def scheduler(self):
+        """Provide access to the scheduler component."""
+        return self.stream.scheduler
 
 
 class KreaRealtimeVideoPipeline(Pipeline):
@@ -110,6 +145,12 @@ class KreaRealtimeVideoPipeline(Pipeline):
         self.prompts = None
         self.denoising_step_list = None
 
+        # Initialize Modular Diffusers blocks
+        self.modular_blocks = KreaRealtimeVideoBlocks()
+
+        # Create component provider for modular blocks
+        self.component_provider = ComponentProvider(self.stream)
+
         # Prompt blending with cache reset callback for transitions
         self.prompt_blender = PromptBlender(
             device, dtype, cache_reset_callback=self._reset_cache_for_transition
@@ -122,7 +163,25 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         self.prepare(prompts=[{"text": WARMUP_PROMPT}], should_prepare=True)
         for _ in range(WARMUP_RUNS):
-            self.stream()
+            # Use modular blocks for warmup as well
+            state = PipelineState()
+            if (
+                hasattr(self.stream, "conditional_dict")
+                and self.stream.conditional_dict is not None
+                and "prompt_embeds" in self.stream.conditional_dict
+            ):
+                state.set("prompt_embeds", self.stream.conditional_dict["prompt_embeds"])
+            if self.stream.denoising_step_list is not None:
+                state.set("denoising_step_list", self.stream.denoising_step_list)
+            state.set("current_start", self.stream.current_start)
+            state.set("base_seed", self.stream.base_seed)
+            state.set("num_frame_per_block", self.stream.num_frame_per_block)
+            state.set("height", self.stream.height)
+            state.set("width", self.stream.width)
+            state.set("init_cache", False)
+            _, state = self.modular_blocks(self.component_provider, state)
+            # Update current_start for next warmup iteration
+            self.stream.current_start += self.stream.num_frame_per_block
 
         print(f"Warmed up in {time.time() - start:2f}s")
 
@@ -202,7 +261,47 @@ class KreaRealtimeVideoPipeline(Pipeline):
             self.stream.conditional_dict = {"prompt_embeds": next_embedding}
 
         # Note: The caller must call prepare() before __call__()
-        return self.stream()
+        # Use modular blocks instead of direct stream() call
+        state = PipelineState()
+
+        # Set up state for modular blocks
+        # Set prompt_embeds if available from conditional_dict
+        if (
+            hasattr(self.stream, "conditional_dict")
+            and self.stream.conditional_dict is not None
+            and "prompt_embeds" in self.stream.conditional_dict
+        ):
+            state.set("prompt_embeds", self.stream.conditional_dict["prompt_embeds"])
+
+        # Set denoising step list
+        if self.stream.denoising_step_list is not None:
+            state.set("denoising_step_list", self.stream.denoising_step_list)
+
+        # Set current_start
+        state.set("current_start", self.stream.current_start)
+
+        # Set configuration values
+        state.set("base_seed", self.stream.base_seed)
+        state.set("num_frame_per_block", self.stream.num_frame_per_block)
+        state.set("height", self.stream.height)
+        state.set("width", self.stream.width)
+        state.set("init_cache", False)  # Cache already initialized in prepare()
+
+        # Execute modular blocks (returns tuple: components, state)
+        _, state = self.modular_blocks(self.component_provider, state)
+
+        # Get output from state
+        output = state.values.get("output")
+
+        if output is None:
+            raise RuntimeError("Modular blocks did not produce output")
+
+        # Update current_start for next iteration
+        self.stream.current_start += self.stream.num_frame_per_block
+
+        # Postprocess output (same as stream would do)
+        from ..process import postprocess_chunk
+        return postprocess_chunk(output)
 
     def _apply_prompt_blending(
         self,
