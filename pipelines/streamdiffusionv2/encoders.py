@@ -63,7 +63,7 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
-            ComponentSpec("stream", torch.nn.Module),
+            ComponentSpec("text_encoder", torch.nn.Module),
         ]
 
     @property
@@ -125,15 +125,15 @@ class StreamDiffusionV2TextEncoderStep(ModularPipelineBlocks):
         if block_state.prompt_embeds is None:
             # Only check inputs if we actually need to encode
             self.check_inputs(block_state)
-            # Use the stream's text encoder if needed
+            # Use the text encoder if needed
             if hasattr(block_state, "prompt") and block_state.prompt is not None:
-                conditional_dict = components.stream.text_encoder(
+                conditional_dict = components.text_encoder(
                     text_prompts=[block_state.prompt]
                 )
                 block_state.prompt_embeds = conditional_dict["prompt_embeds"]
             else:
                 # Default empty prompt
-                conditional_dict = components.stream.text_encoder(text_prompts=[""])
+                conditional_dict = components.text_encoder(text_prompts=[""])
                 block_state.prompt_embeds = conditional_dict["prompt_embeds"]
             self.set_block_state(state, block_state)
         # If prompt_embeds already exists, skip state update to reduce overhead

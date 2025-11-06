@@ -42,17 +42,47 @@ class ComponentProvider:
         self.components_manager = components_manager
         self.component_name = component_name
         self.collection = collection
-        # Cache the component to avoid repeated lookups
-        self._component = None
+        # Cache components to avoid repeated lookups
+        self._stream = None
+        self._text_encoder = None
+        self._vae = None
+        self._generator = None
 
     @property
     def stream(self):
         """Provide access to the stream component."""
-        if self._component is None:
-            self._component = self.components_manager.get_one(
+        if self._stream is None:
+            self._stream = self.components_manager.get_one(
                 name=self.component_name, collection=self.collection
             )
-        return self._component
+        return self._stream
+
+    @property
+    def text_encoder(self):
+        """Provide access to the text_encoder component."""
+        if self._text_encoder is None:
+            self._text_encoder = self.components_manager.get_one(
+                name="text_encoder", collection=self.collection
+            )
+        return self._text_encoder
+
+    @property
+    def vae(self):
+        """Provide access to the vae component."""
+        if self._vae is None:
+            self._vae = self.components_manager.get_one(
+                name="vae", collection=self.collection
+            )
+        return self._vae
+
+    @property
+    def generator(self):
+        """Provide access to the generator component."""
+        if self._generator is None:
+            self._generator = self.components_manager.get_one(
+                name="generator", collection=self.collection
+            )
+        return self._generator
 
 
 def load_stream_component(
@@ -77,12 +107,37 @@ def load_stream_component(
     Returns:
         ComponentProvider: A provider that gives access to the stream component
     """
-    # Check if component already exists in ComponentsManager
+    # Check if components already exist in ComponentsManager
     try:
-        existing = components_manager.get_one(name="stream", collection=collection)
-        # Component exists, create provider for it
-        print(f"Reusing existing stream component from collection '{collection}'")
-        return ComponentProvider(components_manager, "stream", collection)
+        existing_stream = components_manager.get_one(name="stream", collection=collection)
+        # Components exist, verify individual components are also registered
+        try:
+            components_manager.get_one(name="text_encoder", collection=collection)
+            components_manager.get_one(name="vae", collection=collection)
+            components_manager.get_one(name="generator", collection=collection)
+            # All components exist, create provider for it
+            print(f"Reusing existing stream components from collection '{collection}'")
+            return ComponentProvider(components_manager, "stream", collection)
+        except Exception:
+            # Individual components not registered, register them now
+            print(f"Stream component exists but individual components missing, registering them...")
+            text_encoder_id = components_manager.add(
+                "text_encoder",
+                existing_stream.text_encoder,
+                collection=collection,
+            )
+            vae_id = components_manager.add(
+                "vae",
+                existing_stream.vae,
+                collection=collection,
+            )
+            generator_id = components_manager.add(
+                "generator",
+                existing_stream.generator,
+                collection=collection,
+            )
+            print(f"Registered individual components: text_encoder={text_encoder_id}, vae={vae_id}, generator={generator_id}")
+            return ComponentProvider(components_manager, "stream", collection)
     except Exception:
         # Component doesn't exist, create and add it
         pass
@@ -112,13 +167,36 @@ def load_stream_component(
     stream.generator.load_state_dict(state_dict, strict=True)
     print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
 
-    # Add component to ComponentsManager
+    # Add stream component to ComponentsManager
     component_id = components_manager.add(
         "stream",
         stream,
         collection=collection,
     )
     print(f"Added stream component to ComponentsManager with ID: {component_id}")
+
+    # Add individual components to ComponentsManager for modular blocks
+    # Each block should depend on only what it needs (text_encoder, vae, generator)
+    text_encoder_id = components_manager.add(
+        "text_encoder",
+        stream.text_encoder,
+        collection=collection,
+    )
+    print(f"Added text_encoder component to ComponentsManager with ID: {text_encoder_id}")
+
+    vae_id = components_manager.add(
+        "vae",
+        stream.vae,
+        collection=collection,
+    )
+    print(f"Added vae component to ComponentsManager with ID: {vae_id}")
+
+    generator_id = components_manager.add(
+        "generator",
+        stream.generator,
+        collection=collection,
+    )
+    print(f"Added generator component to ComponentsManager with ID: {generator_id}")
 
     # Create and return provider
     return ComponentProvider(components_manager, "stream", collection)

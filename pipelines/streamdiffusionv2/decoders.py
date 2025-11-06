@@ -30,7 +30,7 @@ class StreamDiffusionV2PostprocessStep(ModularPipelineBlocks):
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
-            ComponentSpec("stream", torch.nn.Module),
+            ComponentSpec("vae", torch.nn.Module),
         ]
 
     @property
@@ -63,7 +63,7 @@ class StreamDiffusionV2PostprocessStep(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         # Decode to pixel space - direct assignment to reduce overhead
-        block_state.output = components.stream.vae.stream_decode_to_pixel(block_state.denoised_pred)
+        block_state.output = components.vae.stream_decode_to_pixel(block_state.denoised_pred)
 
         self.set_block_state(state, block_state)
         return components, state

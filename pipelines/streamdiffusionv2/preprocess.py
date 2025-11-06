@@ -30,7 +30,7 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
-            ComponentSpec("stream", torch.nn.Module),
+            ComponentSpec("vae", torch.nn.Module),
         ]
 
     @property
@@ -95,7 +95,7 @@ class StreamDiffusionV2PreprocessStep(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         # Encode frames to latents using VAE
-        latents = components.stream.vae.model.stream_encode(block_state.input)
+        latents = components.vae.model.stream_encode(block_state.input)
         # Transpose latents
         latents = latents.transpose(2, 1)
 

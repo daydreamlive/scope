@@ -29,6 +29,11 @@ class StreamDiffusionV2DenoiseStep(ModularPipelineBlocks):
 
     @property
     def expected_components(self) -> list[ComponentSpec]:
+        # Note: This block depends on 'stream' rather than just 'generator' because
+        # it uses the stream.inference() method, which is a high-level orchestration
+        # method that manages internal state (kv_cache, crossattn_cache, conditional_dict,
+        # denoising_step_list, scheduler) required for the denoising loop.
+        # The stream object is a torch.nn.Module (CausalStreamInferencePipeline).
         return [
             ComponentSpec("stream", torch.nn.Module),
         ]
