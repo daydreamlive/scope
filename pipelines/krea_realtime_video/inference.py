@@ -5,6 +5,7 @@ import torch
 from einops import rearrange
 
 from ..process import postprocess_chunk
+from .vendor.wan2_1.modules.causal_model import KV_CACHE_ATTENTION_BIAS_DISABLED
 
 # The VAE compresses a pixel frame into a latent frame which consists of patches
 # The patch embedding converts spatial patches into tokens
@@ -82,7 +83,9 @@ class InferencePipeline(torch.nn.Module):
 
         self.conditional_dict = None
         self.current_start = 0
-        self.kv_cache_attention_bias = config.get("kv_cache_attention_bias", 1.0)
+        self.kv_cache_attention_bias = config.get(
+            "kv_cache_attention_bias", KV_CACHE_ATTENTION_BIAS_DISABLED
+        )
 
     @torch.no_grad()
     def prepare(
@@ -495,9 +498,7 @@ class InferencePipeline(torch.nn.Module):
             )
             * 0
         )
-        # During cache recomputation, use no bias (set to 1.0)
-        # Bias is only applied during sampling/denoising, not when storing context frames
-        # This ensures the cache faithfully represents frame relationships
+        # Cache recomputation: no bias to faithfully store context frames
         self.generator(
             noisy_image_or_video=context_frames,
             conditional_dict=self.conditional_dict,
@@ -505,7 +506,7 @@ class InferencePipeline(torch.nn.Module):
             kv_cache=self.kv_cache1,
             crossattn_cache=self.crossattn_cache,
             current_start=start_frame * self.frame_seq_length,
-            kv_cache_attention_bias=1.0,
+            kv_cache_attention_bias=KV_CACHE_ATTENTION_BIAS_DISABLED,
         )
 
         self.generator.model.block_mask = None
