@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -24,6 +24,7 @@ import { PIPELINES } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
+import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type { PipelineId } from "../types";
 
 const MIN_DIMENSION = 16;
@@ -82,25 +83,18 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
-  // Local state for noise scale for immediate UI feedback
-  const [localNoiseScale, setLocalNoiseScale] = useState<number>(noiseScale);
-  // Local state for KV cache attention bias for immediate UI feedback
-  const [localKvCacheAttentionBias, setLocalKvCacheAttentionBias] =
-    useState<number>(kvCacheAttentionBias);
+
+  // Local slider state management hooks
+  const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
+  const kvCacheAttentionBiasSlider = useLocalSliderValue(
+    kvCacheAttentionBias,
+    onKvCacheAttentionBiasChange
+  );
 
   // Validation error states
   const [heightError, setHeightError] = useState<string | null>(null);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
-
-  // Sync with external value changes
-  useEffect(() => {
-    setLocalNoiseScale(noiseScale);
-  }, [noiseScale]);
-
-  useEffect(() => {
-    setLocalKvCacheAttentionBias(kvCacheAttentionBias);
-  }, [kvCacheAttentionBias]);
 
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -193,32 +187,6 @@ export function SettingsPanel({
     const minValue = 0;
     const newValue = Math.max(minValue, seed - 1);
     handleSeedChange(newValue);
-  };
-
-  const handleNoiseScaleValueChange = (value: number) => {
-    setLocalNoiseScale(value);
-  };
-
-  const handleNoiseScaleCommit = (value: number) => {
-    onNoiseScaleChange?.(value);
-  };
-
-  // Format value to 2 decimal places
-  const formatNoiseScale = (value: number) => {
-    return Math.round(value * 100) / 100;
-  };
-
-  const handleKvCacheAttentionBiasValueChange = (value: number) => {
-    setLocalKvCacheAttentionBias(value);
-  };
-
-  const handleKvCacheAttentionBiasCommit = (value: number) => {
-    onKvCacheAttentionBiasChange?.(value);
-  };
-
-  // Format KV cache attention bias to 2 decimal places
-  const formatKvCacheAttentionBias = (value: number) => {
-    return Math.round(value * 100) / 100;
   };
 
   const currentPipeline = PIPELINES[pipelineId];
@@ -563,16 +531,16 @@ export function SettingsPanel({
               <SliderWithInput
                 label={PARAMETER_METADATA.noiseScale.label}
                 tooltip={PARAMETER_METADATA.noiseScale.tooltip}
-                value={localNoiseScale}
-                onValueChange={handleNoiseScaleValueChange}
-                onValueCommit={handleNoiseScaleCommit}
+                value={noiseScaleSlider.localValue}
+                onValueChange={noiseScaleSlider.handleValueChange}
+                onValueCommit={noiseScaleSlider.handleValueCommit}
                 min={0.0}
                 max={1.0}
                 step={0.01}
                 incrementAmount={0.01}
                 disabled={noiseController}
                 labelClassName="text-sm text-foreground w-20"
-                valueFormatter={formatNoiseScale}
+                valueFormatter={noiseScaleSlider.formatValue}
                 inputParser={v => parseFloat(v) || 0.0}
               />
             </div>
@@ -612,16 +580,16 @@ export function SettingsPanel({
               <SliderWithInput
                 label={PARAMETER_METADATA.kvCacheAttentionBias.label}
                 tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
-                value={localKvCacheAttentionBias}
-                onValueChange={handleKvCacheAttentionBiasValueChange}
-                onValueCommit={handleKvCacheAttentionBiasCommit}
+                value={kvCacheAttentionBiasSlider.localValue}
+                onValueChange={kvCacheAttentionBiasSlider.handleValueChange}
+                onValueCommit={kvCacheAttentionBiasSlider.handleValueCommit}
                 min={0.01}
                 max={1.0}
                 step={0.01}
                 incrementAmount={0.01}
                 disabled={isStreaming}
                 labelClassName="text-sm text-foreground w-32"
-                valueFormatter={formatKvCacheAttentionBias}
+                valueFormatter={kvCacheAttentionBiasSlider.formatValue}
                 inputParser={v => parseFloat(v) || 1.0}
               />
             </div>
