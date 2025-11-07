@@ -23,22 +23,19 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from einops import rearrange
-
 
 class PrepareVideoLatentsBlock(ModularPipelineBlocks):
-    """Base Prepare Video Latents block that generates noisy latents based on input frames for video-to-video across pipelines."""
+    """Base Prepare Video Latents block that generates noisy latents based on encoded latents for video-to-video across pipelines."""
 
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
-            ComponentSpec("vae", torch.nn.Module),
             ComponentSpec("generator", torch.nn.Module),
         ]
 
     @property
     def description(self) -> str:
-        return "Base Prepare Video Latents block that generates noisy latents based on input frames for video-to-video"
+        return "Base Prepare Video Latents block that generates noisy latents based on encoded latents for video-to-video"
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -49,10 +46,10 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                 description="Trigger input to determine if this block should execute",
             ),
             InputParam(
-                "video_tensor",
+                "latents",
                 type_hint=torch.Tensor,
                 required=False,
-                description="Input video tensor (N frames)",
+                description="Encoded latents from video frames",
             ),
             InputParam(
                 "base_seed",
@@ -84,7 +81,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
             OutputParam(
                 "latents",
                 type_hint=torch.Tensor,
-                description="Generated noisy latents based on input frames",
+                description="Generated noisy latents based on encoded latents",
             ),
         ]
 
@@ -98,31 +95,23 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
 
         block_state = self.get_block_state(state)
 
-        # Validate video_tensor is present for V2V path
-        if not hasattr(block_state, "video_tensor") or block_state.video_tensor is None:
-            raise ValueError("video_tensor is required for V2V path")
-
-        generator_param = next(components.generator.model.parameters())
-
-        # Encode video frames to latents using VAE
-        # video_tensor is expected to be in BCTHW format
-        latents = components.vae.encode_to_latent(
-            rearrange(block_state.video_tensor, "B T C H W -> B C T H W")
-        )
+        # Validate latents are present for V2V path
+        if not hasattr(block_state, "latents") or block_state.latents is None:
+            raise ValueError("latents are required for V2V path")
 
         # Create generator from seed for reproducible generation
         frame_seed = block_state.base_seed + block_state.current_start
-        rng = torch.Generator(device=latents.device).manual_seed(frame_seed)
+        rng = torch.Generator(device=block_state.latents.device).manual_seed(frame_seed)
 
         # Add noise to latents
         noise = torch.randn(
-            latents.shape,
-            device=latents.device,
-            dtype=latents.dtype,
+            block_state.latents.shape,
+            device=block_state.latents.device,
+            dtype=block_state.latents.dtype,
             generator=rng,
         )
         # Determine how noisy the latents should be
-        noisy_latents = noise * block_state.noise_scale + latents * (
+        noisy_latents = noise * block_state.noise_scale + block_state.latents * (
             1 - block_state.noise_scale
         )
 

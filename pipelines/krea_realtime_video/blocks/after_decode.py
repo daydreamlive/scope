@@ -24,27 +24,29 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 )
 
 
-class DecodeBlock(ModularPipelineBlocks):
-    """Base Decode block that decodes denoised latents to pixel space across pipelines."""
+class AfterDecodeBlock(ModularPipelineBlocks):
+    """Block that handles stream buffer operations after VAE decoding."""
+
+    model_name = "KreaRealtimeVideo"
 
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
-            ComponentSpec("vae", torch.nn.Module),
+            ComponentSpec("stream", torch.nn.Module),
         ]
 
     @property
     def description(self) -> str:
-        return "Base Decode block that decodes denoised latents to pixel space"
+        return "Block that pushes decoded frames to the decoded frame buffer (sliding window)"
 
     @property
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "denoised_pred",
+                "output",
                 required=True,
                 type_hint=torch.Tensor,
-                description="Denoised latents",
+                description="Decoded video frames from VAE",
             ),
         ]
 
@@ -62,12 +64,20 @@ class DecodeBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
 
-        # Decode to pixel space
-        output = components.vae.decode_to_pixel(
-            block_state.denoised_pred, use_cache=True
-        )
+        # Push the decoded frames to the decoded frame buffer (sliding window)
+        components.stream.decoded_frame_buffer = torch.cat(
+            [
+                components.stream.decoded_frame_buffer,
+                block_state.output.to(
+                    components.stream.decoded_frame_buffer.device,
+                    components.stream.decoded_frame_buffer.dtype,
+                ),
+            ],
+            dim=1,
+        )[:, -components.stream.decoded_frame_buffer_max_size :]
 
-        block_state.output = output
+        # Keep the output in state for downstream blocks
+        block_state.output = block_state.output
 
         self.set_block_state(state, block_state)
         return components, state

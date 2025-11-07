@@ -29,6 +29,7 @@ from .text_conditioning import TextConditioningBlock
 from .before_denoise import BeforeDenoiseBlock
 from .t2v_before_denoise import T2VBeforeDenoiseBlock
 from .v2v_before_denoise import V2VBeforeDenoiseBlock
+from .after_decode import AfterDecodeBlock
 
 logger = diffusers_logging.get_logger(__name__)
 
@@ -44,6 +45,7 @@ T2V_BLOCKS = InsertableDict(
         ("recompute_kv_cache", RecomputeKVCacheBlock),
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),
+        ("after_decode", AfterDecodeBlock),
     ]
 )
 
@@ -59,6 +61,7 @@ V2V_BLOCKS = InsertableDict(
         ("recompute_kv_cache", RecomputeKVCacheBlock),
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),
+        ("after_decode", AfterDecodeBlock),
     ]
 )
 
@@ -78,6 +81,7 @@ ALL_BLOCKS = InsertableDict(
         ("recompute_kv_cache", RecomputeKVCacheBlock),
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),
+        ("after_decode", AfterDecodeBlock),
     ]
 )
 

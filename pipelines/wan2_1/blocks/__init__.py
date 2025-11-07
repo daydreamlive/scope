@@ -6,6 +6,7 @@ from .set_timesteps import SetTimestepsBlock
 from .setup_kv_cache import SetupKVCacheBlock
 from .recompute_kv_cache import RecomputeKVCacheBlock
 from .prepare_latents import PrepareLatentsBlock
+from .encode_video import EncodeVideoBlock
 from .prepare_video_latents import PrepareVideoLatentsBlock
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "SetupKVCacheBlock",
     "RecomputeKVCacheBlock",
     "PrepareLatentsBlock",
+    "EncodeVideoBlock",
     "PrepareVideoLatentsBlock",
 ]
