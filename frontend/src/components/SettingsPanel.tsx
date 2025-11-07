@@ -77,7 +77,7 @@ export function SettingsPanel({
   onManageCacheChange,
   quantization = "fp8_e4m3fn",
   onQuantizationChange,
-  kvCacheAttentionBias = 1.0,
+  kvCacheAttentionBias = 0.3,
   onKvCacheAttentionBiasChange,
   onResetCache,
 }: SettingsPanelProps) {
