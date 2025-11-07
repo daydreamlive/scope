@@ -78,7 +78,7 @@ class Parameters(BaseModel):
     reset_cache: bool | None = Field(default=None, description="Trigger a cache reset")
     kv_cache_attention_bias: float | None = Field(
         default=None,
-        description="Attention bias scale applied to past frame tokens during sampling. Uses log scale: 1.0 = no bias (disabled), smaller values (e.g., 0.1-0.5) = stronger bias. Range: 0.01 to 1.0.",
+        description="Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
         ge=0.01,
         le=1.0,
     )
