@@ -58,8 +58,8 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
       "Quantization method for the diffusion model. fp8_e4m3fn reduces memory usage and improves performance, but might affect quality. None uses full precision and uses more meory, but does not affect quality.",
   },
   kvCacheAttentionBias: {
-    label: "KV Attention Bias:",
+    label: "Cache Bias:",
     tooltip:
-      "Attention bias scale applied to past frame tokens during sampling. Helps mitigate error accumulation and prevents repetitive motion. Uses log scale: 1.0 = no bias (disabled), smaller values = stronger bias. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for stronger bias.",
+      "Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
   },
 };

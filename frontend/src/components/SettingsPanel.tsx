@@ -455,6 +455,23 @@ export function SettingsPanel({
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
+                {pipelineId === "krea-realtime-video" && (
+                  <SliderWithInput
+                    label={PARAMETER_METADATA.kvCacheAttentionBias.label}
+                    tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
+                    value={kvCacheAttentionBiasSlider.localValue}
+                    onValueChange={kvCacheAttentionBiasSlider.handleValueChange}
+                    onValueCommit={kvCacheAttentionBiasSlider.handleValueCommit}
+                    min={0.01}
+                    max={1.0}
+                    step={0.01}
+                    incrementAmount={0.01}
+                    labelClassName="text-sm text-foreground w-20"
+                    valueFormatter={kvCacheAttentionBiasSlider.formatValue}
+                    inputParser={v => parseFloat(v) || 1.0}
+                  />
+                )}
+
                 <div className="flex items-center justify-between gap-2">
                   <LabelWithTooltip
                     label={PARAMETER_METADATA.manageCache.label}
@@ -576,21 +593,6 @@ export function SettingsPanel({
                   </Select>
                 </div>
               </div>
-
-              <SliderWithInput
-                label={PARAMETER_METADATA.kvCacheAttentionBias.label}
-                tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
-                value={kvCacheAttentionBiasSlider.localValue}
-                onValueChange={kvCacheAttentionBiasSlider.handleValueChange}
-                onValueCommit={kvCacheAttentionBiasSlider.handleValueCommit}
-                min={0.01}
-                max={1.0}
-                step={0.01}
-                incrementAmount={0.01}
-                labelClassName="text-sm text-foreground w-32"
-                valueFormatter={kvCacheAttentionBiasSlider.formatValue}
-                inputParser={v => parseFloat(v) || 1.0}
-              />
             </div>
           </div>
         )}
