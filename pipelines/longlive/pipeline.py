@@ -4,7 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
-from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
+from ..wan2_1.components.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
