@@ -428,10 +428,14 @@ class CausalWanSelfAttention(nn.Module):
                 padded_k = _pad_tensor_for_flex_attention(cached_k, target_padded_length, pad_dim=1)
                 padded_v = _pad_tensor_for_flex_attention(cached_v, target_padded_length, pad_dim=1)
 
+                # Convert scalars to tensors to avoid ShapeAsConstantBuffer dtype issues during compilation
+                frame_seqlen_tensor = torch.tensor(frame_seqlen, dtype=torch.int32, device=roped_query.device)
+                cache_current_block_start_tensor = torch.tensor(cache_current_block_start, dtype=torch.int32, device=roped_query.device)
+
                 def score_mod(score, b_idx, h_idx, q_idx, kv_idx):
                     # Apply bias only to past frames (exclude first frame and current block)
                     return torch.where(
-                        (kv_idx >= frame_seqlen) & (kv_idx < cache_current_block_start),
+                        (kv_idx >= frame_seqlen_tensor) & (kv_idx < cache_current_block_start_tensor),
                         score + log_scale,
                         score
                     )
