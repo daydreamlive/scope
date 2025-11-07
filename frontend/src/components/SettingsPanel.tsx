@@ -587,7 +587,6 @@ export function SettingsPanel({
                 max={1.0}
                 step={0.01}
                 incrementAmount={0.01}
-                disabled={isStreaming}
                 labelClassName="text-sm text-foreground w-32"
                 valueFormatter={kvCacheAttentionBiasSlider.formatValue}
                 inputParser={v => parseFloat(v) || 1.0}
