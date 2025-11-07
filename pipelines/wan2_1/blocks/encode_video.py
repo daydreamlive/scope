@@ -22,7 +22,6 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
-
 from einops import rearrange
 
 
@@ -43,14 +42,9 @@ class EncodeVideoBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "block_trigger_input",
-                type_hint=str,
-                description="Trigger input to determine if this block should execute",
-            ),
-            InputParam(
                 "video_tensor",
                 type_hint=torch.Tensor,
-                required=False,
+                required=True,
                 description="Input video tensor (N frames)",
             ),
         ]
@@ -67,17 +61,7 @@ class EncodeVideoBlock(ModularPipelineBlocks):
 
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> PipelineState:
-        # Check trigger first before validating required inputs
-        block_trigger = state.values.get("block_trigger_input")
-        if block_trigger != "v2v":
-            # Skip if not V2V path - return state as-is
-            return components, state
-
         block_state = self.get_block_state(state)
-
-        # Validate video_tensor is present for V2V path
-        if not hasattr(block_state, "video_tensor") or block_state.video_tensor is None:
-            raise ValueError("video_tensor is required for V2V path")
 
         # Encode video frames to latents using VAE
         # video_tensor is expected to be in BCTHW format

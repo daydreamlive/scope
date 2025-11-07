@@ -41,14 +41,9 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "block_trigger_input",
-                type_hint=str,
-                description="Trigger input to determine if this block should execute",
-            ),
-            InputParam(
                 "latents",
                 type_hint=torch.Tensor,
-                required=False,
+                required=True,
                 description="Encoded latents from video frames",
             ),
             InputParam(
@@ -87,17 +82,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
 
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> PipelineState:
-        # Check trigger first before validating required inputs
-        block_trigger = state.values.get("block_trigger_input")
-        if block_trigger != "v2v":
-            # Skip if not V2V path - return state as-is
-            return components, state
-
         block_state = self.get_block_state(state)
-
-        # Validate latents are present for V2V path
-        if not hasattr(block_state, "latents") or block_state.latents is None:
-            raise ValueError("latents are required for V2V path")
 
         # Create generator from seed for reproducible generation
         frame_seed = block_state.base_seed + block_state.current_start

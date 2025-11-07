@@ -44,11 +44,6 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "block_trigger_input",
-                type_hint=str,
-                description="Trigger input to determine if this block should execute",
-            ),
-            InputParam(
                 "base_seed",
                 type_hint=int,
                 default=42,
@@ -94,12 +89,6 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
 
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> PipelineState:
-        # Check trigger first before validating required inputs
-        block_trigger = state.values.get("block_trigger_input")
-        if block_trigger != "t2v":
-            # Skip if not T2V path - return state as-is
-            return components, state
-
         block_state = self.get_block_state(state)
 
         generator_param = next(components.generator.model.parameters())

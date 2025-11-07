@@ -22,9 +22,8 @@ from ...wan2_1.blocks import (
     SetTimestepsBlock,
     SetupKVCacheBlock,
     RecomputeKVCacheBlock,
-    PrepareLatentsBlock,
-    PrepareVideoLatentsBlock,
 )
+from ...wan2_1.blocks.prepare_latents_auto import PrepareLatentsAutoBlocks
 from .denoise import LongLiveDenoiseBlock
 
 logger = diffusers_logging.get_logger(__name__)
@@ -33,8 +32,8 @@ logger = diffusers_logging.get_logger(__name__)
 LONGLIVE_BLOCKS = InsertableDict(
     [
         ("set_timesteps", SetTimestepsBlock),
-        ("prepare_latents", PrepareLatentsBlock),
-        ("prepare_video_latents", PrepareVideoLatentsBlock),
+        # AutoPipelineBlocks that routes to PrepareLatentsBlock or PrepareVideoLatentsBlock based on latents
+        ("prepare_latents", PrepareLatentsAutoBlocks),
         ("setup_kv_cache", SetupKVCacheBlock),
         ("recompute_kv_cache", RecomputeKVCacheBlock),
         ("denoise", LongLiveDenoiseBlock),

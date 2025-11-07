@@ -19,8 +19,6 @@ from diffusers.modular_pipelines import (
 )
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
-    InputParam,
-    OutputParam,
 )
 
 
@@ -35,35 +33,10 @@ class V2VBeforeDenoiseBlock(ModularPipelineBlocks):
     def description(self) -> str:
         return "V2V Before Denoise block - path for video-to-video when input video tensor (N frames) is provided"
 
-    @property
-    def inputs(self) -> list[InputParam]:
-        return [
-            InputParam(
-                "block_trigger_input",
-                type_hint=str,
-                description="Trigger input to determine if this block should execute",
-            ),
-            InputParam(
-                "video_tensor",
-                type_hint=torch.Tensor,
-                description="Input video tensor (N frames) for video-to-video",
-            ),
-        ]
-
-    @property
-    def intermediate_outputs(self) -> list[OutputParam]:
-        return []
-
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
-
-        # Only execute if this is the V2V path
-        if hasattr(block_state, "block_trigger_input") and block_state.block_trigger_input == "v2v":
-            # This block is a pass-through for V2V path
-            # The actual work is done in subsequent blocks (Set Timesteps, Prepare Video Latents, etc.)
-            pass
-        # If not V2V path, skip execution
-
+        # This block is a pass-through for V2V path
+        # The actual work is done in subsequent blocks (Set Timesteps, Prepare Video Latents, etc.)
         self.set_block_state(state, block_state)
         return components, state

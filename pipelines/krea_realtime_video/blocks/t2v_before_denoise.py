@@ -19,8 +19,6 @@ from diffusers.modular_pipelines import (
 )
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
-    InputParam,
-    OutputParam,
 )
 
 
@@ -35,30 +33,10 @@ class T2VBeforeDenoiseBlock(ModularPipelineBlocks):
     def description(self) -> str:
         return "T2V Before Denoise block - default path for text-to-video when no input video is provided"
 
-    @property
-    def inputs(self) -> list[InputParam]:
-        return [
-            InputParam(
-                "block_trigger_input",
-                type_hint=str,
-                description="Trigger input to determine if this block should execute",
-            ),
-        ]
-
-    @property
-    def intermediate_outputs(self) -> list[OutputParam]:
-        return []
-
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
-
-        # Only execute if this is the T2V path
-        if hasattr(block_state, "block_trigger_input") and block_state.block_trigger_input == "t2v":
-            # This block is a pass-through for T2V path
-            # The actual work is done in subsequent blocks (Set Timesteps, Prepare Latents, etc.)
-            pass
-        # If not T2V path, skip execution
-
+        # This block is a pass-through for T2V path
+        # The actual work is done in subsequent blocks (Set Timesteps, Prepare Latents, etc.)
         self.set_block_state(state, block_state)
         return components, state

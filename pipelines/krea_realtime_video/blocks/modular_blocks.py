@@ -12,71 +12,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from diffusers.utils import logging as diffusers_logging
 from diffusers.modular_pipelines import SequentialPipelineBlocks
 from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
+from diffusers.utils import logging as diffusers_logging
 
 from ...wan2_1.blocks import (
-    DenoiseBlock,
     DecodeBlock,
+    DenoiseBlock,
+    RecomputeKVCacheBlock,
     SetTimestepsBlock,
     SetupKVCacheBlock,
-    RecomputeKVCacheBlock,
-    PrepareLatentsBlock,
-    PrepareVideoLatentsBlock,
 )
-from .text_conditioning import TextConditioningBlock
-from .before_denoise import BeforeDenoiseBlock
-from .t2v_before_denoise import T2VBeforeDenoiseBlock
-from .v2v_before_denoise import V2VBeforeDenoiseBlock
+from ...wan2_1.blocks.encode_video_auto import EncodeVideoAutoBlocks
+from ...wan2_1.blocks.prepare_latents_auto import PrepareLatentsAutoBlocks
 from .after_decode import AfterDecodeBlock
+from .before_denoise import BeforeDenoiseBlock
+from .before_denoise_auto import BeforeDenoiseAutoBlocks
+from .text_conditioning import TextConditioningBlock
 
 logger = diffusers_logging.get_logger(__name__)
 
-# Define T2V (Text-to-Video) path blocks
-T2V_BLOCKS = InsertableDict(
-    [
-        ("text_conditioning", TextConditioningBlock),
-        ("before_denoise", BeforeDenoiseBlock),
-        ("t2v_before_denoise", T2VBeforeDenoiseBlock),
-        ("set_timesteps", SetTimestepsBlock),
-        ("prepare_latents", PrepareLatentsBlock),
-        ("setup_kv_cache", SetupKVCacheBlock),
-        ("recompute_kv_cache", RecomputeKVCacheBlock),
-        ("denoise", DenoiseBlock),
-        ("decode", DecodeBlock),
-        ("after_decode", AfterDecodeBlock),
-    ]
-)
-
-# Define V2V (Video-to-Video) path blocks
-V2V_BLOCKS = InsertableDict(
-    [
-        ("text_conditioning", TextConditioningBlock),
-        ("before_denoise", BeforeDenoiseBlock),
-        ("v2v_before_denoise", V2VBeforeDenoiseBlock),
-        ("set_timesteps", SetTimestepsBlock),
-        ("prepare_video_latents", PrepareVideoLatentsBlock),
-        ("setup_kv_cache", SetupKVCacheBlock),
-        ("recompute_kv_cache", RecomputeKVCacheBlock),
-        ("denoise", DenoiseBlock),
-        ("decode", DecodeBlock),
-        ("after_decode", AfterDecodeBlock),
-    ]
-)
-
-# Main pipeline blocks - use T2V as default, but blocks will check trigger
+# Main pipeline blocks - use AutoPipelineBlocks for conditional routing
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("before_denoise", BeforeDenoiseBlock),
-        # Conditional blocks - they check block_trigger_input internally
-        ("t2v_before_denoise", T2VBeforeDenoiseBlock),
-        ("v2v_before_denoise", V2VBeforeDenoiseBlock),
+        # AutoPipelineBlocks that routes to T2V or V2V based on video_tensor
+        ("before_denoise_auto", BeforeDenoiseAutoBlocks),
+        # AutoPipelineBlocks that routes to EncodeVideoBlock or PassThroughBlock based on video_tensor
+        ("encode_video", EncodeVideoAutoBlocks),
         # Common blocks for both paths
         ("set_timesteps", SetTimestepsBlock),
-        ("prepare_latents", PrepareLatentsBlock),
-        ("prepare_video_latents", PrepareVideoLatentsBlock),
+        # AutoPipelineBlocks that routes to PrepareLatentsBlock or PrepareVideoLatentsBlock based on latents
+        ("prepare_latents", PrepareLatentsAutoBlocks),
         ("setup_kv_cache", SetupKVCacheBlock),
         ("recompute_kv_cache", RecomputeKVCacheBlock),
         ("denoise", DenoiseBlock),
