@@ -1,4 +1,3 @@
-
 # individual timeline
 # uv run render.py timelines/0.01bias.json -o timelines/output --width 416 --height 240
 # all timelines in directory
@@ -97,7 +96,14 @@ def group_timelines_by_pipeline(
     return dict(grouped)
 
 
-def _setup_base_config(config, settings, default_height: int, default_width: int, override_width: int | None = None, override_height: int | None = None):
+def _setup_base_config(
+    config,
+    settings,
+    default_height: int,
+    default_width: int,
+    override_width: int | None = None,
+    override_height: int | None = None,
+):
     """Apply common config settings: model_dir, resolution, and seed."""
     models_dir = get_models_dir()
     config["model_dir"] = str(models_dir)
@@ -118,12 +124,19 @@ def _setup_base_config(config, settings, default_height: int, default_width: int
     config["seed"] = settings.get("seed", 42)
 
 
-def load_pipeline(pipeline_id: str, settings: dict, override_width: int | None = None, override_height: int | None = None):
+def load_pipeline(
+    pipeline_id: str,
+    settings: dict,
+    override_width: int | None = None,
+    override_height: int | None = None,
+):
     """Load the specified pipeline with settings."""
     logger.info(f"Loading pipeline: {pipeline_id}")
 
     if override_width is not None or override_height is not None:
-        logger.info(f"Using resolution overrides: width={override_width}, height={override_height}")
+        logger.info(
+            f"Using resolution overrides: width={override_width}, height={override_height}"
+        )
 
     device = torch.device("cuda")
     dtype = torch.bfloat16
@@ -133,7 +146,14 @@ def load_pipeline(pipeline_id: str, settings: dict, override_width: int | None =
         from pipelines.memory import is_cuda_low_memory
 
         config = OmegaConf.load("pipelines/longlive/model.yaml")
-        _setup_base_config(config, settings, default_height=320, default_width=576, override_width=override_width, override_height=override_height)
+        _setup_base_config(
+            config,
+            settings,
+            default_height=320,
+            default_width=576,
+            override_width=override_width,
+            override_height=override_height,
+        )
 
         config["generator_path"] = get_model_file_path(
             "LongLive-1.3B/models/longlive_base.pt"
@@ -154,7 +174,14 @@ def load_pipeline(pipeline_id: str, settings: dict, override_width: int | None =
         from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
 
         config = OmegaConf.load("pipelines/krea_realtime_video/model.yaml")
-        _setup_base_config(config, settings, default_height=512, default_width=512, override_width=override_width, override_height=override_height)
+        _setup_base_config(
+            config,
+            settings,
+            default_height=512,
+            default_width=512,
+            override_width=override_width,
+            override_height=override_height,
+        )
 
         config["generator_path"] = str(
             get_model_file_path(
@@ -188,7 +215,14 @@ def load_pipeline(pipeline_id: str, settings: dict, override_width: int | None =
         from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
         config = OmegaConf.load("pipelines/streamdiffusionv2/model.yaml")
-        _setup_base_config(config, settings, default_height=512, default_width=512, override_width=override_width, override_height=override_height)
+        _setup_base_config(
+            config,
+            settings,
+            default_height=512,
+            default_width=512,
+            override_width=override_width,
+            override_height=override_height,
+        )
 
         config["text_encoder_path"] = str(
             get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
@@ -361,7 +395,13 @@ def determine_output_path(
     return str(output_path / f"{timeline_file.stem}.mp4")
 
 
-def render_timelines(timeline_path: str, output_arg: str | None = None, fps: int = 16, override_width: int | None = None, override_height: int | None = None):
+def render_timelines(
+    timeline_path: str,
+    output_arg: str | None = None,
+    fps: int = 16,
+    override_width: int | None = None,
+    override_height: int | None = None,
+):
     """Render timeline(s) from a file or directory, grouped by pipeline for efficiency."""
     # Discover timeline files
     timeline_files = discover_timeline_files(timeline_path)
@@ -390,7 +430,12 @@ def render_timelines(timeline_path: str, output_arg: str | None = None, fps: int
 
         # Load pipeline once for all timelines
         first_timeline = timeline_list[0][1]
-        pipeline = load_pipeline(pipeline_id, first_timeline["settings"], override_width=override_width, override_height=override_height)
+        pipeline = load_pipeline(
+            pipeline_id,
+            first_timeline["settings"],
+            override_width=override_width,
+            override_height=override_height,
+        )
 
         # Render each timeline with the loaded pipeline
         for idx, (timeline_file, timeline) in enumerate(timeline_list):
@@ -408,7 +453,9 @@ def render_timelines(timeline_path: str, output_arg: str | None = None, fps: int
                 # Get kv_cache_attention_bias from timeline settings
                 # New scale: 0.01 to 1.0, where 1.0 = no bias (disabled)
                 # Handle both old (negativeAttentionBias) and new (kvCacheAttentionBias) field names
-                kv_cache_attention_bias = settings.get("kvCacheAttentionBias") or settings.get("negativeAttentionBias")
+                kv_cache_attention_bias = settings.get(
+                    "kvCacheAttentionBias"
+                ) or settings.get("negativeAttentionBias")
 
                 manage_cache = settings.get("manageCache")
                 denoising_step_list = settings.get("denoisingSteps")
@@ -474,13 +521,13 @@ def main():
         "--width",
         type=int,
         default=None,
-        help="Override video width (ignores JSON settings)"
+        help="Override video width (ignores JSON settings)",
     )
     parser.add_argument(
         "--height",
         type=int,
         default=None,
-        help="Override video height (ignores JSON settings)"
+        help="Override video height (ignores JSON settings)",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
@@ -498,7 +545,9 @@ def main():
 
     # Render timeline(s)
     try:
-        render_timelines(args.timeline_path, args.output, args.fps, args.width, args.height)
+        render_timelines(
+            args.timeline_path, args.output, args.fps, args.width, args.height
+        )
         logger.info("\nAll timelines rendered successfully!")
     except Exception as e:
         logger.error(f"Failed to render timelines: {e}")
