@@ -1,0 +1,49 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 2.5,
+      "transitionSteps": 4,
+      "temporalInterpolationMethod": "linear",
+      "prompts": [
+        {
+          "text": "A 3D animated scene. A woman with long, flowing black hair walks forward along a stone path through a park on a spring day. She moves at a steady pace directly toward the camera, her bright, clear eyes framed by natural features and remaining focused straight ahead throughout her walk. Her body sways subtly with each step as her feet alternate in a smooth, rhythmic motion. Cherry blossom trees line the path, their pink-laden branches swaying gently and releasing petals that drift through the air. Green grass spreads calmly on both sides of the path, with beds of colorful tulips and daffodils standing bright and still. The camera remains in a fixed position as the woman approaches, her forward-gazing eyes clearly visible and alert, never looking away or blinking. Spring sunlight filters through the moving tree branches, creating shifting shadows on the path and illuminating her expressive eyes. Her hair and clothing catch the light as she continues walking forward with calm confidence, maintaining steady eye contact with the camera. Pink petals occasionally land on her hair and shoulders before sliding off. The scene captures the peaceful atmosphere of a spring afternoon in the park, with cherry blossoms floating down around her steady, focused forward progress along the stone path.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 2.5,
+      "endTime": 10.0,
+      "prompts": [
+        {
+          "text": "A 3D animated scene. A bird with sleek, shimmering feathers walks forward along a stone path through a park on a spring day. The bird moves at a steady pace directly toward the camera, its bright, clear eyes remaining focused straight ahead throughout its walk. Its small body shifts with each step as its talons tap lightly against the stones in a regular rhythm. Cherry blossom trees line the path, their pink-laden branches swaying gently and releasing petals that drift through the air. Green grass spreads calmly on both sides of the path, with beds of colorful tulips and daffodils standing bright and still. The camera remains in a fixed position as the bird approaches, its forward-gazing eyes sharp and alert, never looking away or blinking. Spring sunlight filters through the moving tree branches, creating shifting shadows on the path and illuminating the iridescent hues of the bird's feathers. The feathers catch the light as the bird continues walking forward with steady determination, maintaining unwavering eye contact with the camera. Pink petals occasionally land on its wings and head before sliding off. The scene captures the peaceful atmosphere of a spring afternoon in the park, with cherry blossoms floating down around the bird's calm, focused progress along the stone path.",
+          "weight": 100
+        }
+      ],
+      "transitionSteps": 4,
+      "temporalInterpolationMethod": "linear"
+    }
+  ],
+  "settings": {
+    "pipelineId": "krea-realtime-video",
+    "resolution": {
+      "height": 240,
+      "width": 416
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750,
+      500,
+      250
+    ],
+    "noiseScale": 0.7,
+    "noiseController": true,
+    "manageCache": true,
+    "quantization": "fp8_e4m3fn",
+    "negativeAttentionBias": 0.21
+  },
+  "version": "2.0",
+  "exportedAt": "2025-11-06T00:46:20.733Z"
+}
