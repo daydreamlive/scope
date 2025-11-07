@@ -246,7 +246,7 @@ class CausalWanSelfAttention(nn.Module):
         kv_cache=None,
         current_start=0,
         cache_start=None,
-        kv_cache_attention_bias=0.0
+        kv_cache_attention_bias=1.0
     ):
         r"""
         Args:
@@ -412,7 +412,7 @@ class CausalWanSelfAttention(nn.Module):
 
             if kv_cache_attention_bias != KV_CACHE_ATTENTION_BIAS_DISABLED:
                 # Use flex_attention with bias to mitigate error accumulation in past frames
-                # log_scale in (0, 1]: smaller values = stronger bias to past frame tokens
+                # log_scale in (0, 1]: smaller values = less attention to past frame tokens
                 log_scale = math.log(kv_cache_attention_bias)
 
                 # Exclude first frame and current block from bias
@@ -518,7 +518,7 @@ class CausalWanAttentionBlock(nn.Module):
         crossattn_cache=None,
         current_start=0,
         cache_start=None,
-        kv_cache_attention_bias=0.0
+        kv_cache_attention_bias=1.0
     ):
         r"""
         Args:
@@ -902,7 +902,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         crossattn_cache: dict = None,
         current_start: int = 0,
         cache_start: int = 0,
-        kv_cache_attention_bias: float = 0.0
+        kv_cache_attention_bias: float = 1.0
     ):
         r"""
         Run the diffusion model with kv caching.
