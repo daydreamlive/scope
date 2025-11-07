@@ -7,8 +7,8 @@ from diffusers.modular_pipelines import PipelineState
 from ..wan2_1.components.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
-from .inference import InferencePipeline
-from .modular_blocks import LongLiveBlocks
+from .components.inference import InferencePipeline
+from .blocks.modular_blocks import LongLiveBlocks
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
 
 logger = logging.getLogger(__name__)

@@ -8,10 +8,10 @@ from lib.schema import Quantization
 
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
-from .inference import InferencePipeline
-from .modular_blocks import KreaRealtimeVideoBlocks
-from .vendor.wan2_1.vae_block3 import WanVAEWrapper
-from .vendor.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder
+from .components.inference import InferencePipeline
+from .blocks.modular_blocks import KreaRealtimeVideoBlocks
+from .components.vendor.wan2_1.vae_block3 import WanVAEWrapper
+from .components.vendor.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder
 
 logger = logging.getLogger(__name__)
 

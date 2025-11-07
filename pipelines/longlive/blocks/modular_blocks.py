@@ -16,7 +16,7 @@ from diffusers.utils import logging as diffusers_logging
 from diffusers.modular_pipelines import SequentialPipelineBlocks
 from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 
-from ..wan2_1.blocks import (
+from ...wan2_1.blocks import (
     DenoiseBlock,
     DecodeBlock,
     SetTimestepsBlock,
