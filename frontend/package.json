@@ -1,7 +1,7 @@
 {
   "name": "daydream-scope-frontend",
   "private": true,
-  "version": "0.1.0a5",
+  "version": "0.1.0a6",
   "type": "module",
   "scripts": {
     "dev": "vite",
