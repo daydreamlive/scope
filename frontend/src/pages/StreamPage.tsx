@@ -551,7 +551,7 @@ export function StreamPage() {
       // Krea-realtime-video-specific parameters
       if (settings.pipelineId === "krea-realtime-video") {
         initialParameters.kv_cache_attention_bias =
-          settings.kvCacheAttentionBias ?? 0.0;
+          settings.kvCacheAttentionBias ?? 1.0;
       }
 
       // StreamDiffusionV2-specific parameters
@@ -790,7 +790,7 @@ export function StreamPage() {
                 : "fp8_e4m3fn"
             }
             onQuantizationChange={handleQuantizationChange}
-            kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.0}
+            kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 1.0}
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
           />

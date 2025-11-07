@@ -60,6 +60,6 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   kvCacheAttentionBias: {
     label: "KV Attention Bias:",
     tooltip:
-      "Negative attention bias applied to past frame tokens during sampling. Helps mitigate error accumulation and prevents repetitive motion. Set to 0.0 to disable (uses original Flash/Sage Attention). Typical values: -10.0 to -20.0 for stronger bias, -1.0 to -5.0 for milder effect.",
+      "Attention bias scale applied to past frame tokens during sampling. Helps mitigate error accumulation and prevents repetitive motion. Uses log scale: 1.0 = no bias (disabled), smaller values = stronger bias. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for stronger bias.",
   },
 };
