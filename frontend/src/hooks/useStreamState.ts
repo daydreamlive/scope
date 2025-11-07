@@ -31,6 +31,7 @@ export function useStreamState() {
     noiseController: true, // Default noise controller for StreamDiffusionV2
     manageCache: true, // Default manage cache for StreamDiffusionV2
     quantization: null,
+    kvCacheAttentionBias: 0.3, // Default cache bias
     paused: false, // Default to not paused (generating)
   });
 
