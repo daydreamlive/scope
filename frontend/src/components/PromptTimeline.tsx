@@ -415,6 +415,7 @@ export function PromptTimeline({
             noiseController: settings.noiseController,
             manageCache: settings.manageCache,
             quantization: settings.quantization,
+            kvCacheAttentionBias: settings.kvCacheAttentionBias,
             // Exclude paused state as it's runtime-specific
           }
         : undefined,
