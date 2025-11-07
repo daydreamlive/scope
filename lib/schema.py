@@ -78,9 +78,9 @@ class Parameters(BaseModel):
     reset_cache: bool | None = Field(default=None, description="Trigger a cache reset")
     kv_cache_attention_bias: float | None = Field(
         default=None,
-        description="Negative attention bias applied to past frame tokens during sampling. Set to 0.0 to disable. Typical values: -1.0 to -30.0.",
-        ge=-50.0,
-        le=0.0,
+        description="Attention bias scale applied to past frame tokens during sampling. Uses log scale: 1.0 = no bias (disabled), smaller values (e.g., 0.1-0.5) = stronger bias. Range: 0.01 to 1.0.",
+        ge=0.01,
+        le=1.0,
     )
 
 

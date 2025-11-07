@@ -391,14 +391,19 @@ class CausalWanSelfAttention(nn.Module):
             cached_k = kv_cache["k"][:, kv_start_idx:local_end_index]
             cached_v = kv_cache["v"][:, kv_start_idx:local_end_index]
 
-            if kv_cache_attention_bias != 0.0:
+            if kv_cache_attention_bias != 1.0:
                 # Use flex_attention with negative attention bias for sampling
                 # Apply bias to past frame tokens to mitigate error accumulation
-                bias_value = kv_cache_attention_bias
+                # Following Krea's approach: use log of scale value between ]0, 1]
 
-                # Determine the start of current frame tokens
-                current_frame_start_idx = current_start
-                kv_offset = kv_start_idx
+                # Convert bias value to log scale
+                # Scale range: (0.01, 1.0] where 1.0 = no bias, smaller values = stronger bias
+                log_scale = math.log(kv_cache_attention_bias)
+
+                # Calculate cache-relative position of current block
+                # Exclude the current block (num_frame_per_block frames) and first frame from bias
+                cache_len = local_end_index - kv_start_idx
+                cache_current_block_start = cache_len - frame_seqlen * self.num_frame_per_block
 
                 # Pad to multiple of 128 for flex_attention
                 q_len = roped_query.shape[1]
@@ -441,15 +446,17 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1,
                 ) if padded_length > 0 else cached_v
 
-                # Define bias function: apply negative bias to past frame tokens
+                # Define bias function: apply bias to past frames only
+                # FIX: Use cache-relative indices instead of global token positions
+                # Following Krea: exclude first frame and current block from bias
                 def score_mod(score, b_idx, h_idx, q_idx, kv_idx):
-                    # Adjust kv_idx to account for windowing offset
-                    actual_kv_idx = kv_idx + kv_offset
-
-                    # Apply negative bias to past frame tokens (before current frame)
+                    # kv_idx is the position within the cache (0 to cache_len-1)
+                    # First frame: [0, frame_seqlen) - excluded
+                    # Past frames (biased): [frame_seqlen, cache_current_block_start)
+                    # Current block: [cache_current_block_start, cache_len) - excluded
                     return torch.where(
-                        actual_kv_idx < current_frame_start_idx,
-                        score + bias_value,
+                        (kv_idx >= frame_seqlen) & (kv_idx < cache_current_block_start),
+                        score + log_scale,
                         score
                     )
 

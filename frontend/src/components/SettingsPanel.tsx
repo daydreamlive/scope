@@ -76,7 +76,7 @@ export function SettingsPanel({
   onManageCacheChange,
   quantization = "fp8_e4m3fn",
   onQuantizationChange,
-  kvCacheAttentionBias = 0.0,
+  kvCacheAttentionBias = 1.0,
   onKvCacheAttentionBiasChange,
   onResetCache,
 }: SettingsPanelProps) {
@@ -216,9 +216,9 @@ export function SettingsPanel({
     onKvCacheAttentionBiasChange?.(value);
   };
 
-  // Format KV cache attention bias to 1 decimal place
+  // Format KV cache attention bias to 2 decimal places
   const formatKvCacheAttentionBias = (value: number) => {
-    return Math.round(value * 10) / 10;
+    return Math.round(value * 100) / 100;
   };
 
   const currentPipeline = PIPELINES[pipelineId];
@@ -615,14 +615,14 @@ export function SettingsPanel({
                 value={localKvCacheAttentionBias}
                 onValueChange={handleKvCacheAttentionBiasValueChange}
                 onValueCommit={handleKvCacheAttentionBiasCommit}
-                min={-30.0}
-                max={0.0}
-                step={0.1}
-                incrementAmount={0.1}
+                min={0.01}
+                max={1.0}
+                step={0.01}
+                incrementAmount={0.01}
                 disabled={isStreaming}
                 labelClassName="text-sm text-foreground w-32"
                 valueFormatter={formatKvCacheAttentionBias}
-                inputParser={v => parseFloat(v) || 0.0}
+                inputParser={v => parseFloat(v) || 1.0}
               />
             </div>
           </div>
