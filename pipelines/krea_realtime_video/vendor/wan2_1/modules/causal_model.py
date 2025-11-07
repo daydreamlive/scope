@@ -23,6 +23,26 @@ import copy
 flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
+# Constants for flex_attention operations
+FLEX_ATTENTION_ALIGNMENT = 128
+KV_CACHE_ATTENTION_BIAS_DISABLED = 1.0
+
+
+def _pad_tensor_for_flex_attention(tensor: torch.Tensor, target_length: int, pad_dim: int = 1) -> torch.Tensor:
+    """Pad tensor to target_length along pad_dim. Returns original if no padding needed."""
+    current_length = tensor.shape[pad_dim]
+    padded_length = target_length - current_length
+
+    if padded_length <= 0:
+        return tensor
+
+    pad_shape = list(tensor.shape)
+    pad_shape[pad_dim] = padded_length
+
+    padding = torch.zeros(pad_shape, device=tensor.device, dtype=tensor.dtype)
+    return torch.cat([tensor, padding], dim=pad_dim)
+
+
 def rope_params_riflex(max_seq_len, dim, theta=10000, k=0, L_test=None):
     assert dim % 2 == 0
     omega = 1.0 / torch.pow(theta,
@@ -386,81 +406,36 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
-            # Choose attention mechanism based on whether negative bias is enabled
             kv_start_idx = max(0, local_end_index - self.max_attention_size)
             cached_k = kv_cache["k"][:, kv_start_idx:local_end_index]
             cached_v = kv_cache["v"][:, kv_start_idx:local_end_index]
 
-            if kv_cache_attention_bias != 1.0:
-                # Use flex_attention with negative attention bias for sampling
-                # Apply bias to past frame tokens to mitigate error accumulation
-                # Following Krea's approach: use log of scale value between ]0, 1]
-
-                # Convert bias value to log scale
-                # Scale range: (0.01, 1.0] where 1.0 = no bias, smaller values = stronger bias
+            if kv_cache_attention_bias != KV_CACHE_ATTENTION_BIAS_DISABLED:
+                # Use flex_attention with bias to mitigate error accumulation in past frames
+                # log_scale in (0, 1]: smaller values = stronger bias to past frame tokens
                 log_scale = math.log(kv_cache_attention_bias)
 
-                # Calculate cache-relative position of current block
-                # Exclude the current block (num_frame_per_block frames) and first frame from bias
+                # Exclude first frame and current block from bias
                 cache_len = local_end_index - kv_start_idx
                 cache_current_block_start = cache_len - frame_seqlen * self.num_frame_per_block
 
-                # Pad to multiple of 128 for flex_attention
+                # Pad to multiple of FLEX_ATTENTION_ALIGNMENT
                 q_len = roped_query.shape[1]
                 kv_len = cached_k.shape[1]
-                padded_length = math.ceil(max(q_len, kv_len) / 128) * 128 - max(q_len, kv_len)
+                target_padded_length = math.ceil(max(q_len, kv_len) / FLEX_ATTENTION_ALIGNMENT) * FLEX_ATTENTION_ALIGNMENT
 
-                padded_roped_query = torch.cat(
-                    [
-                        roped_query,
-                        torch.zeros(
-                            [roped_query.shape[0], padded_length, roped_query.shape[2], roped_query.shape[3]],
-                            device=roped_query.device,
-                            dtype=roped_query.dtype,
-                        ),
-                    ],
-                    dim=1,
-                ) if padded_length > 0 else roped_query
+                padded_roped_query = _pad_tensor_for_flex_attention(roped_query, target_padded_length, pad_dim=1)
+                padded_k = _pad_tensor_for_flex_attention(cached_k, target_padded_length, pad_dim=1)
+                padded_v = _pad_tensor_for_flex_attention(cached_v, target_padded_length, pad_dim=1)
 
-                padded_k = torch.cat(
-                    [
-                        cached_k,
-                        torch.zeros(
-                            [cached_k.shape[0], padded_length, cached_k.shape[2], cached_k.shape[3]],
-                            device=cached_k.device,
-                            dtype=cached_k.dtype,
-                        ),
-                    ],
-                    dim=1,
-                ) if padded_length > 0 else cached_k
-
-                padded_v = torch.cat(
-                    [
-                        cached_v,
-                        torch.zeros(
-                            [cached_v.shape[0], padded_length, cached_v.shape[2], cached_v.shape[3]],
-                            device=cached_v.device,
-                            dtype=cached_v.dtype,
-                        ),
-                    ],
-                    dim=1,
-                ) if padded_length > 0 else cached_v
-
-                # Define bias function: apply bias to past frames only
-                # FIX: Use cache-relative indices instead of global token positions
-                # Following Krea: exclude first frame and current block from bias
                 def score_mod(score, b_idx, h_idx, q_idx, kv_idx):
-                    # kv_idx is the position within the cache (0 to cache_len-1)
-                    # First frame: [0, frame_seqlen) - excluded
-                    # Past frames (biased): [frame_seqlen, cache_current_block_start)
-                    # Current block: [cache_current_block_start, cache_len) - excluded
+                    # Apply bias only to past frames (exclude first frame and current block)
                     return torch.where(
                         (kv_idx >= frame_seqlen) & (kv_idx < cache_current_block_start),
                         score + log_scale,
                         score
                     )
 
-                # Apply flex_attention with score_mod (no block_mask needed)
                 x = flex_attention(
                     query=padded_roped_query.transpose(2, 1).contiguous(),
                     key=padded_k.transpose(2, 1).contiguous(),
@@ -468,7 +443,7 @@ class CausalWanSelfAttention(nn.Module):
                     score_mod=score_mod,
                 )[:, :, :q_len].transpose(2, 1)
             else:
-                # Use original Flash/Sage Attention path when bias is disabled (0.0)
+                # Use original Flash/Sage Attention path when bias is disabled (1.0)
                 # This preserves the original behavior and avoids flex_attention overhead
                 x = attention(
                     roped_query,

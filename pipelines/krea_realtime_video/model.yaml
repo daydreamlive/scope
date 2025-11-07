@@ -1,6 +1,7 @@
 model_name: Wan2.1-T2V-1.3B
 model_kwargs:
   timestep_shift: 5.0
+# KV cache attention bias: 1.0 = disabled (default), smaller values (0.1-0.7) apply bias to past frames
 kv_cache_attention_bias: 1.0
 denoising_step_list:
 - 1000

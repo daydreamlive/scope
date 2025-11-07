@@ -8,7 +8,7 @@ import torch
 from safetensors.torch import load_file as load_safetensors
 from torch import nn
 
-from .modules.causal_model import CausalWanModel
+from .modules.causal_model import CausalWanModel, KV_CACHE_ATTENTION_BIAS_DISABLED
 from .modules.model import GanAttentionBlock, RegisterTokens, WanModel
 from .modules.t5 import umt5_xxl
 from .modules.tokenizers import HuggingfaceTokenizer
@@ -389,7 +389,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         clean_x: torch.Tensor | None = None,
         aug_t: torch.Tensor | None = None,
         cache_start: int | None = None,
-        kv_cache_attention_bias: float = 0.0,
+        kv_cache_attention_bias: float = KV_CACHE_ATTENTION_BIAS_DISABLED,
     ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
 
