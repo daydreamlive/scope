@@ -1,18 +1,40 @@
+from .. import (
+    get_diffusion_wrapper,
+    get_text_encoder_wrapper,
+    get_vae_wrapper,
+)
 from typing import List, Optional
 import torch
 import time
 
 
 class CausalStreamInferencePipeline(torch.nn.Module):
-    def __init__(self, args, device, generator=None, text_encoder=None, vae=None):
+    def __init__(self, args, device):
         super().__init__()
-        # Components are now passed in instead of created here
-        if generator is None or text_encoder is None or vae is None:
-            raise ValueError("generator, text_encoder, and vae must be provided")
+        # Step 1: Initialize all models
+        self.generator_model_name = getattr(args, "generator_name", args.model_name)
 
-        self.generator = generator
-        self.text_encoder = text_encoder
-        self.vae = vae
+        model_dir = getattr(args, "model_dir", None)
+        text_encoder_path = getattr(args, "text_encoder_path", None)
+        tokenizer_path = getattr(args, "tokenizer_path", None)
+
+        start = time.time()
+        self.generator = get_diffusion_wrapper(model_name=self.generator_model_name)(
+            model_dir=model_dir
+        )
+        print(f"Loaded diffusion wrapper in {time.time() - start:3f}s")
+
+        start = time.time()
+        self.text_encoder = get_text_encoder_wrapper(model_name=args.model_name)(
+            model_dir=model_dir,
+            text_encoder_path=text_encoder_path,
+            tokenizer_path=tokenizer_path,
+        )
+        print(f"Loaded text encoder in {time.time() - start:3f}s")
+
+        start = time.time()
+        self.vae = get_vae_wrapper(model_name=args.model_name)(model_dir=model_dir)
+        print(f"Loaded VAE in {time.time() - start:3f}s")
 
         # Step 2: Initialize all causal hyperparmeters
         self.denoising_step_list = torch.tensor(

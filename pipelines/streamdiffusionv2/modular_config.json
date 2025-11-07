@@ -1,7 +1,0 @@
-{
-  "_class_name": "StreamDiffusionV2Blocks",
-  "_diffusers_version": "0.36.0.dev0",
-  "auto_map": {
-    "ModularPipelineBlocks": "modular_blocks.StreamDiffusionV2Blocks"
-  }
-}
