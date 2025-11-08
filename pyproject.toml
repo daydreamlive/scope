@@ -58,6 +58,7 @@ dependencies = [
 [project.scripts]
 daydream-scope = "app:main"
 build = "build:main"
+download_models = "download_models:main"
 
 [project.urls]
 Homepage = "https://github.com/daydreamlive/scope"
