@@ -150,12 +150,15 @@ class CausalWanSelfAttention(nn.Module):
                 dim=1,
             )
 
-            x = flex_attention(
+            attn_out = flex_attention(
                 query=padded_roped_query.transpose(2, 1),
                 key=padded_roped_key.transpose(2, 1),
                 value=padded_v.transpose(2, 1),
                 block_mask=block_mask,
-            )[:, :, :-padded_length].transpose(2, 1)
+            )
+            if padded_length > 0:
+                attn_out = attn_out[:, :, :-padded_length]
+            x = attn_out.transpose(2, 1)
         else:
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
             sink_tokens = self.sink_size * frame_seqlen
