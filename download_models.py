@@ -209,7 +209,8 @@ def download_models(pipeline_id: str | None = None) -> None:
     print("\nAll downloads complete.")
 
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the download_models script."""
     parser = argparse.ArgumentParser(
         description="Download models for Daydream Scope pipelines",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -242,3 +243,7 @@ Examples:
     except Exception as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
