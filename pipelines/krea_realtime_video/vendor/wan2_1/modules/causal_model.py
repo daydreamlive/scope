@@ -130,7 +130,6 @@ def get_block_mask(
     device: str , num_frames: int = 21,
     frame_seqlen: int = 1560, num_frame_per_block=3, local_attn_size=-1
 ):
-    print("Generating block mask")
     total_length = num_frames * frame_seqlen
 
     # we do right padding to get to a multiple of 128
@@ -357,8 +356,7 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1
                 )
 
-
-                x = flex_attention(
+                attn_out = flex_attention(
                     query=padded_roped_query.transpose(2, 1).contiguous(),
                     key=padded_roped_key.transpose(2, 1).contiguous(),
                     value=padded_v.transpose(2, 1).contiguous(),
@@ -366,8 +364,11 @@ class CausalWanSelfAttention(nn.Module):
                     kernel_options={
                         "BLOCKS_ARE_CONTIGUOUS": True,
                     }
-
-                )[:, :, :-padded_length].transpose(2, 1)
+                )
+                if padded_length > 0:
+                    x = attn_out[:, :, :-padded_length].transpose(2, 1)
+                else:
+                    x = attn_out.transpose(2, 1)
         else:
             # frame_seqlen = math.prod(grid_sizes[0][1:]).item() # torch compile doesn't like this
             frame_seqlen = self.frame_seq_length
