@@ -73,3 +73,23 @@ If your base prompt is:
 Then, the extended prompt could be:
 
 "A cartoon dog with big expressive eyes and floppy ears suddenly leaps into the frame, tail wagging, and then sprints joyfully toward the camera. Its oversized paws pound playfully on the ground, tongue hanging out in excitement. The animation style is colorful, smooth, and bouncy, with exaggerated motion to emphasize energy and fun. The background blurs slightly with speed lines, giving a lively, comic-style effect as if the dog is about to jump right into the viewer."
+
+## Offline Generation
+
+A test [script](../test.py) can be used for offline generation.
+
+If the model weights are not downloaded yet:
+
+```
+# Run from scope directory
+uv run download_models --pipeline krea-realtime-video
+```
+
+Then:
+
+```
+# Run from scope directory
+uv run -m pipelines.krea_realtime_video.test
+```
+
+This will create an `output.mp4` file in the `krea_realtime_video` directory.
