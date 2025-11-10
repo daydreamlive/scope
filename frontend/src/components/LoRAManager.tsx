@@ -16,12 +16,14 @@ interface LoRAManagerProps {
   loras: LoRAConfig[];
   onLorasChange: (loras: LoRAConfig[]) => void;
   disabled?: boolean;
+  isStreaming?: boolean;
 }
 
 export function LoRAManager({
   loras,
   onLorasChange,
   disabled,
+  isStreaming = false,
 }: LoRAManagerProps) {
   const [availableLoRAs, setAvailableLoRAs] = useState<LoRAFileInfo[]>([]);
   const [isLoadingLoRAs, setIsLoadingLoRAs] = useState(false);
@@ -82,9 +84,9 @@ export function LoRAManager({
             size="sm"
             variant="outline"
             onClick={handleAddLora}
-            disabled={disabled}
+            disabled={disabled || isStreaming}
             className="h-6 px-2"
-            title="Add LoRA"
+            title={isStreaming ? "Cannot add LoRAs while streaming" : "Add LoRA"}
           >
             <Plus className="h-3 w-3" />
           </Button>
@@ -109,7 +111,7 @@ export function LoRAManager({
                   value={lora.path}
                   onChange={path => handleLoraChange(lora.id, { path })}
                   files={availableLoRAs}
-                  disabled={disabled}
+                  disabled={disabled || isStreaming}
                   placeholder="Select LoRA file"
                   emptyMessage="No LoRA files found"
                 />
@@ -118,8 +120,9 @@ export function LoRAManager({
                 size="sm"
                 variant="ghost"
                 onClick={() => handleRemoveLora(lora.id)}
-                disabled={disabled}
+                disabled={disabled || isStreaming}
                 className="h-6 w-6 p-0"
+                title={isStreaming ? "Cannot remove LoRAs while streaming" : "Remove LoRA"}
               >
                 <X className="h-3 w-3" />
               </Button>
@@ -146,7 +149,7 @@ export function LoRAManager({
                   </TooltipTrigger>
                   <TooltipContent>
                     <p className="text-xs">
-                      Adjust LoRA strength in real-time. 0.0 = no effect, 1.0 =
+                      Adjust LoRA strength in real-time (even during streaming). 0.0 = no effect, 1.0 =
                       full strength
                     </p>
                   </TooltipContent>

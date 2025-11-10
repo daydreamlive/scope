@@ -608,6 +608,7 @@ export function SettingsPanel({
               loras={loras}
               onLorasChange={onLorasChange || (() => {})}
               disabled={isDownloading}
+              isStreaming={isStreaming}
             />
           </div>
         )}
