@@ -17,6 +17,7 @@ import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId, LoRAConfig } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
@@ -313,23 +314,12 @@ export function StreamPage() {
     updateSettings({ loras });
 
     // If streaming, send scale updates to backend for runtime adjustment
-    if (isStreaming && pipelineInfo?.loaded_lora_adapters) {
-      // Get set of loaded LoRA paths for fast lookup
-      const loadedPaths = new Set(
-        pipelineInfo.loaded_lora_adapters.map(adapter => adapter.path)
+    if (isStreaming) {
+      sendLoRAScaleUpdates(
+        loras,
+        pipelineInfo?.loaded_lora_adapters,
+        sendParameterUpdate
       );
-
-      // Only send updates for LoRAs that are actually loaded in the pipeline
-      const lora_scales = loras
-        .filter(lora => loadedPaths.has(lora.path))
-        .map(lora => ({
-          path: lora.path,
-          scale: lora.scale,
-        }));
-
-      if (lora_scales.length > 0) {
-        sendParameterUpdate({ lora_scales });
-      }
     }
     // Note: Adding/removing LoRAs requires pipeline reload
   };
@@ -790,28 +780,12 @@ export function StreamPage() {
                 }
 
                 // Send LoRA scale updates if streaming and LoRAs are provided
-                if (
-                  isStreaming &&
-                  loras &&
-                  pipelineInfo?.loaded_lora_adapters
-                ) {
-                  const loadedPaths = new Set(
-                    pipelineInfo.loaded_lora_adapters.map(
-                      adapter => adapter.path
-                    )
+                if (isStreaming && loras) {
+                  sendLoRAScaleUpdates(
+                    loras,
+                    pipelineInfo?.loaded_lora_adapters,
+                    sendParameterUpdate
                   );
-                  const lora_scales = loras
-                    .filter((lora: { path: string; scale: number }) =>
-                      loadedPaths.has(lora.path)
-                    )
-                    .map((lora: { path: string; scale: number }) => ({
-                      path: lora.path,
-                      scale: lora.scale,
-                    }));
-
-                  if (lora_scales.length > 0) {
-                    sendParameterUpdate({ lora_scales });
-                  }
                 }
               }}
               disabled={
