@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Plus, X, RefreshCw } from "lucide-react";
+import { Plus, X, RefreshCw, Check } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -27,6 +27,7 @@ export function LoRAManager({
 }: LoRAManagerProps) {
   const [availableLoRAs, setAvailableLoRAs] = useState<LoRAFileInfo[]>([]);
   const [isLoadingLoRAs, setIsLoadingLoRAs] = useState(false);
+  const [localScales, setLocalScales] = useState<Record<string, number>>({});
 
   const loadAvailableLoRAs = async () => {
     setIsLoadingLoRAs(true);
@@ -44,6 +45,23 @@ export function LoRAManager({
     loadAvailableLoRAs();
   }, []);
 
+  // Sync localScales from loras prop when it changes from outside
+  useEffect(() => {
+    const newLocalScales: Record<string, number> = {};
+    loras.forEach(lora => {
+      newLocalScales[lora.id] = lora.scale;
+    });
+    setLocalScales(newLocalScales);
+  }, [loras]);
+
+  // Check if there are unsaved scale changes
+  const hasUnsavedScales = loras.some(lora => {
+    const localScale = localScales[lora.id];
+    return (
+      localScale !== undefined && Math.abs(localScale - lora.scale) > 0.001
+    );
+  });
+
   const handleAddLora = () => {
     const newLora: LoRAConfig = {
       id: crypto.randomUUID(),
@@ -60,6 +78,19 @@ export function LoRAManager({
   const handleLoraChange = (id: string, updates: Partial<LoRAConfig>) => {
     onLorasChange(
       loras.map(lora => (lora.id === id ? { ...lora, ...updates } : lora))
+    );
+  };
+
+  const handleLocalScaleChange = (id: string, scale: number) => {
+    setLocalScales(prev => ({ ...prev, [id]: scale }));
+  };
+
+  const handleApplyScales = () => {
+    onLorasChange(
+      loras.map(lora => ({
+        ...lora,
+        scale: localScales[lora.id] ?? lora.scale,
+      }))
     );
   };
 
@@ -141,9 +172,9 @@ export function LoRAManager({
                   <TooltipTrigger asChild>
                     <div className="flex-1">
                       <SliderWithInput
-                        value={lora.scale}
+                        value={localScales[lora.id] ?? lora.scale}
                         onValueChange={value => {
-                          handleLoraChange(lora.id, { scale: value });
+                          handleLocalScaleChange(lora.id, value);
                         }}
                         min={-10}
                         max={10}
@@ -155,8 +186,8 @@ export function LoRAManager({
                   </TooltipTrigger>
                   <TooltipContent>
                     <p className="text-xs">
-                      Adjust LoRA strength in real-time (even during streaming).
-                      0.0 = no effect, 1.0 = full strength
+                      Adjust LoRA strength. Click Apply to update during
+                      streaming. 0.0 = no effect, 1.0 = full strength
                     </p>
                   </TooltipContent>
                 </Tooltip>
@@ -165,6 +196,18 @@ export function LoRAManager({
           </div>
         ))}
       </div>
+
+      {hasUnsavedScales && (
+        <Button
+          size="sm"
+          onClick={handleApplyScales}
+          disabled={disabled}
+          className="w-full"
+        >
+          <Check className="h-3 w-3 mr-1" />
+          Apply Scale Changes
+        </Button>
+      )}
     </div>
   );
 }
