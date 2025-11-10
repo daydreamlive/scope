@@ -86,7 +86,9 @@ export function LoRAManager({
             onClick={handleAddLora}
             disabled={disabled || isStreaming}
             className="h-6 px-2"
-            title={isStreaming ? "Cannot add LoRAs while streaming" : "Add LoRA"}
+            title={
+              isStreaming ? "Cannot add LoRAs while streaming" : "Add LoRA"
+            }
           >
             <Plus className="h-3 w-3" />
           </Button>
@@ -122,7 +124,11 @@ export function LoRAManager({
                 onClick={() => handleRemoveLora(lora.id)}
                 disabled={disabled || isStreaming}
                 className="h-6 w-6 p-0"
-                title={isStreaming ? "Cannot remove LoRAs while streaming" : "Remove LoRA"}
+                title={
+                  isStreaming
+                    ? "Cannot remove LoRAs while streaming"
+                    : "Remove LoRA"
+                }
               >
                 <X className="h-3 w-3" />
               </Button>
@@ -149,8 +155,8 @@ export function LoRAManager({
                   </TooltipTrigger>
                   <TooltipContent>
                     <p className="text-xs">
-                      Adjust LoRA strength in real-time (even during streaming). 0.0 = no effect, 1.0 =
-                      full strength
+                      Adjust LoRA strength in real-time (even during streaming).
+                      0.0 = no effect, 1.0 = full strength
                     </p>
                   </TooltipContent>
                 </Tooltip>

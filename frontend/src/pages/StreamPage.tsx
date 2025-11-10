@@ -733,9 +733,10 @@ export function StreamPage() {
                 }
               }}
               onPromptItemsSubmit={(
-                prompts,
-                blockTransitionSteps,
-                blockTemporalInterpolationMethod
+                prompts: PromptItem[],
+                blockTransitionSteps?: number,
+                blockTemporalInterpolationMethod?: "linear" | "slerp",
+                loras?: Array<{ path: string; scale: number }>
               ) => {
                 // Update the left panel's prompt state to reflect current timeline prompt blend
                 setPromptItems(prompts);
@@ -757,6 +758,18 @@ export function StreamPage() {
                   );
                 }
 
+                // Sync LoRA config from timeline prompt to settings
+                if (loras !== undefined) {
+                  const lorasWithIds = loras.map(
+                    (lora: { path: string; scale: number }) => ({
+                      id: crypto.randomUUID(),
+                      path: lora.path,
+                      scale: lora.scale,
+                    })
+                  );
+                  updateSettings({ loras: lorasWithIds });
+                }
+
                 // Send to backend - use transition if streaming and transition steps > 0
                 if (isStreaming && effectiveTransitionSteps > 0) {
                   sendParameterUpdate({
@@ -774,6 +787,31 @@ export function StreamPage() {
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
                   });
+                }
+
+                // Send LoRA scale updates if streaming and LoRAs are provided
+                if (
+                  isStreaming &&
+                  loras &&
+                  pipelineInfo?.loaded_lora_adapters
+                ) {
+                  const loadedPaths = new Set(
+                    pipelineInfo.loaded_lora_adapters.map(
+                      adapter => adapter.path
+                    )
+                  );
+                  const lora_scales = loras
+                    .filter((lora: { path: string; scale: number }) =>
+                      loadedPaths.has(lora.path)
+                    )
+                    .map((lora: { path: string; scale: number }) => ({
+                      path: lora.path,
+                      scale: lora.scale,
+                    }));
+
+                  if (lora_scales.length > 0) {
+                    sendParameterUpdate({ lora_scales });
+                  }
                 }
               }}
               disabled={

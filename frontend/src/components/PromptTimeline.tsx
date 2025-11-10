@@ -117,6 +117,7 @@ export interface TimelinePrompt {
   isLive?: boolean;
   transitionSteps?: number;
   temporalInterpolationMethod?: "linear" | "slerp";
+  loras?: Array<{ path: string; scale: number }>;
 }
 
 // Timeline reset state
@@ -416,6 +417,7 @@ export function PromptTimeline({
             manageCache: settings.manageCache,
             quantization: settings.quantization,
             kvCacheAttentionBias: settings.kvCacheAttentionBias,
+            loras: settings.loras,
             // Exclude paused state as it's runtime-specific
           }
         : undefined,

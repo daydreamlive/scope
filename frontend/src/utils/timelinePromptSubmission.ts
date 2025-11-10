@@ -9,7 +9,8 @@ export interface PromptSubmissionCallbacks {
   onPromptItemsSubmit?: (
     prompts: PromptItem[],
     transitionSteps?: number,
-    temporalInterpolationMethod?: "linear" | "slerp"
+    temporalInterpolationMethod?: "linear" | "slerp",
+    loras?: Array<{ path: string; scale: number }>
   ) => void;
 }
 
@@ -35,14 +36,16 @@ export function submitTimelinePrompt(
     callbacks.onPromptItemsSubmit(
       promptItems,
       prompt.transitionSteps,
-      prompt.temporalInterpolationMethod
+      prompt.temporalInterpolationMethod,
+      prompt.loras
     );
   } else if (callbacks.onPromptItemsSubmit) {
     const promptItems: PromptItem[] = [{ text: prompt.text, weight: 100 }];
     callbacks.onPromptItemsSubmit(
       promptItems,
       prompt.transitionSteps,
-      prompt.temporalInterpolationMethod
+      prompt.temporalInterpolationMethod,
+      prompt.loras
     );
   } else if (callbacks.onPromptSubmit) {
     callbacks.onPromptSubmit(prompt.text);

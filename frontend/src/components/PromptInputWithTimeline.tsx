@@ -15,7 +15,8 @@ interface PromptInputWithTimelineProps {
   onPromptItemsSubmit?: (
     prompts: PromptItem[],
     transitionSteps?: number,
-    temporalInterpolationMethod?: "linear" | "slerp"
+    temporalInterpolationMethod?: "linear" | "slerp",
+    loras?: Array<{ path: string; scale: number }>
   ) => void;
   disabled?: boolean;
   isStreaming?: boolean;
@@ -443,6 +444,7 @@ export function PromptInputWithTimeline({
           prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })),
           transitionSteps,
           temporalInterpolationMethod,
+          loras: settings?.loras?.map(l => ({ path: l.path, scale: l.scale })),
         };
 
         return [...updatedPrompts, newLivePrompt];
