@@ -40,6 +40,40 @@ class LoRAManager:
         return LoRAManager._model_states[model_id]
 
     @staticmethod
+    def _normalize_lora_key(lora_base_key: str) -> str:
+        """
+        Normalize LoRA base key to match model state dict format.
+
+        Handles various LoRA naming conventions:
+        - lora_unet_blocks_0_cross_attn_k -> blocks.0.cross_attn.k
+        - diffusion_model.blocks.0.cross_attn.k -> blocks.0.cross_attn.k
+        - blocks.0.cross_attn.k -> blocks.0.cross_attn.k
+
+        Args:
+            lora_base_key: Base key from LoRA file (without .lora_A/B/up/down.weight)
+
+        Returns:
+            Normalized key that matches model state dict format
+        """
+        # Handle lora_unet_* format (with underscores)
+        if lora_base_key.startswith("lora_unet_"):
+            # Remove lora_unet_ prefix
+            key = lora_base_key[len("lora_unet_"):]
+            # Convert underscores to dots for block/layer numbering
+            # Pattern: blocks_N_ -> blocks.N.
+            import re
+            key = re.sub(r'_(\d+)_', r'.\1.', key)
+            # Convert remaining underscores to dots for layer names
+            key = key.replace('_', '.')
+            return key
+
+        # Handle diffusion_model prefix
+        if lora_base_key.startswith("diffusion_model."):
+            return lora_base_key[len("diffusion_model."):]
+
+        return lora_base_key
+
+    @staticmethod
     def _build_key_map(model_state_dict: Dict[str, torch.Tensor]) -> Dict[str, str]:
         """
         Build mapping from LoRA keys to model state dict keys.
@@ -48,6 +82,7 @@ class LoRAManager:
         - Standard: LoRA keys like "blocks.0.attn.k" -> model "blocks.0.attn.k.weight"
         - ComfyUI: LoRA keys like "diffusion_model.blocks.0.attn.k" -> model "blocks.0.attn.k.weight"
         - PEFT-wrapped: LoRA keys like "diffusion_model.blocks.0.attn.k" -> model "base_model.model.blocks.0.attn.k.base_layer.weight"
+        - Underscore format: LoRA keys like "lora_unet_blocks_0_attn_k" -> model "blocks.0.attn.k.weight"
 
         Args:
             model_state_dict: Model's state dict
@@ -188,12 +223,18 @@ class LoRAManager:
                     logger.warning(f"load_adapter: Missing down weight for {lora_key}, expected {down_key}")
                 continue
 
-            # Find the model weight key
-            model_key = key_map.get(base_key)
+            # Normalize the base key to match model format
+            normalized_key = LoRAManager._normalize_lora_key(base_key)
+
+            # Find the model weight key (try normalized key first, then with diffusion_model prefix)
+            model_key = key_map.get(normalized_key)
+            if model_key is None:
+                model_key = key_map.get(f"diffusion_model.{normalized_key}")
+
             if model_key is None or model_key not in model_state:
                 skipped_no_model_key += 1
-                if skipped_no_model_key == 1:
-                    logger.debug(f"load_adapter: No model key found for base_key={base_key} (further mismatches logged at debug level)")
+                if skipped_no_model_key <= 3:
+                    logger.debug(f"load_adapter: No model key found for base_key={base_key}, normalized={normalized_key}")
                 continue
 
             # Get alpha if present
