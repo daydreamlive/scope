@@ -20,12 +20,13 @@ import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import { PIPELINES } from "../data/pipelines";
+import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type { PipelineId } from "../types";
+import type { PipelineId, LoRAConfig } from "../types";
+import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
 
@@ -55,6 +56,8 @@ interface SettingsPanelProps {
   kvCacheAttentionBias?: number;
   onKvCacheAttentionBiasChange?: (bias: number) => void;
   onResetCache?: () => void;
+  loras?: LoRAConfig[];
+  onLorasChange?: (loras: LoRAConfig[]) => void;
 }
 
 export function SettingsPanel({
@@ -80,6 +83,8 @@ export function SettingsPanel({
   kvCacheAttentionBias = 0.3,
   onKvCacheAttentionBiasChange,
   onResetCache,
+  loras = [],
+  onLorasChange,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
@@ -594,6 +599,16 @@ export function SettingsPanel({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {pipelineSupportsLoRA(pipelineId) && (
+          <div className="space-y-4">
+            <LoRAManager
+              loras={loras}
+              onLorasChange={onLorasChange || (() => {})}
+              disabled={isDownloading}
+            />
           </div>
         )}
       </CardContent>

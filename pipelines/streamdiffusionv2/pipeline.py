@@ -4,6 +4,7 @@ import time
 
 import torch
 
+from ..base.lora_mixin import LoRAEnabledPipeline
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
@@ -24,7 +25,7 @@ SCALE_SIZE = 16
 logger = logging.getLogger(__name__)
 
 
-class StreamDiffusionV2Pipeline(Pipeline):
+class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
@@ -60,6 +61,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.stream.generator.load_state_dict(state_dict, strict=True)
         print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
 
+        # Load LoRA adapters if provided (from UI via load_params)
+        self._init_loras(config, self.stream.generator.model)
+
         self.chunk_size = chunk_size
         self.start_chunk_size = start_chunk_size
         self.noise_scale = noise_scale
@@ -90,6 +94,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
         denoising_step_list = kwargs.get("denoising_step_list", None)
         noise_controller = kwargs.get("noise_controller", None)
         noise_scale = kwargs.get("noise_scale", None)
+
+        # Handle LoRA scale updates
+        self._handle_lora_scale_updates(kwargs, self.stream.generator.model)
 
         # Check if prompts changed using prompt blender
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):

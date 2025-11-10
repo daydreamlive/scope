@@ -5,6 +5,7 @@ import torch
 
 from lib.schema import Quantization
 
+from ..base.lora_mixin import LoRAEnabledPipeline
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
 from .inference import InferencePipeline
@@ -17,7 +18,7 @@ WARMUP_RUNS = 3
 WARMUP_PROMPT = "a majestic sunset"
 
 
-class KreaRealtimeVideoPipeline(Pipeline):
+class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
@@ -48,6 +49,9 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
+
+        # Load LoRA adapters if provided (from UI via load_params, before quantization)
+        self._init_loras(config, generator.model)
 
         if quantization == Quantization.FP8_E4M3FN:
             # Cast before optional quantization
@@ -148,6 +152,9 @@ class KreaRealtimeVideoPipeline(Pipeline):
         transition = kwargs.get("transition", None)
         denoising_step_list = kwargs.get("denoising_step_list", None)
         kv_cache_attention_bias = kwargs.get("kv_cache_attention_bias", None)
+
+        # Handle LoRA scale updates
+        self._handle_lora_scale_updates(kwargs, self.stream.generator.model)
 
         # Check if prompts changed using prompt blender
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):

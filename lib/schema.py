@@ -82,6 +82,9 @@ class Parameters(BaseModel):
         ge=0.01,
         le=1.0,
     )
+    lora_scales: list["LoRAScaleUpdate"] | None = Field(
+        default=None, description="Update scales for loaded LoRA adapters"
+    )
 
 
 class WebRTCOfferRequest(BaseModel):
@@ -131,6 +134,33 @@ class Quantization(str, Enum):
     FP8_E4M3FN = "fp8_e4m3fn"
 
 
+class LoRAConfig(BaseModel):
+    """Configuration for LoRA (Low-Rank Adaptation) adapters."""
+
+    path: str = Field(
+        ...,
+        description="Local path to LoRA weights file (.safetensors or .bin). Must be in models/lora/ directory.",
+    )
+    scale: float = Field(
+        default=1.0,
+        ge=-10.0,
+        le=10.0,
+        description="Adapter strength/weight (-10.0 to 10.0, 0.0 = disabled, 1.0 = full strength)",
+    )
+
+
+class LoRAScaleUpdate(BaseModel):
+    """Update scale for a loaded LoRA adapter."""
+
+    path: str = Field(..., description="Path of the LoRA to update")
+    scale: float = Field(
+        ...,
+        ge=-10.0,
+        le=10.0,
+        description="New adapter strength/weight (-10.0 to 10.0, 0.0 = disabled, 1.0 = full strength)",
+    )
+
+
 class PipelineLoadParams(BaseModel):
     """Base class for pipeline load parameters."""
 
@@ -143,6 +173,9 @@ class StreamDiffusionV2LoadParams(PipelineLoadParams):
     height: int = Field(default=512, description="Target video height", ge=64, le=2048)
     width: int = Field(default=512, description="Target video width", ge=64, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    loras: list[LoRAConfig] | None = Field(
+        default=None, description="List of LoRA adapter configurations"
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -163,6 +196,9 @@ class LongLiveLoadParams(PipelineLoadParams):
     height: int = Field(default=320, description="Target video height", ge=16, le=2048)
     width: int = Field(default=576, description="Target video width", ge=16, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    loras: list[LoRAConfig] | None = Field(
+        default=None, description="List of LoRA adapter configurations"
+    )
 
 
 class KreaRealtimeVideoLoadParams(PipelineLoadParams):
@@ -174,6 +210,9 @@ class KreaRealtimeVideoLoadParams(PipelineLoadParams):
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    loras: list[LoRAConfig] | None = Field(
+        default=None, description="List of LoRA adapter configurations"
     )
 
 
@@ -193,6 +232,13 @@ class PipelineLoadRequest(BaseModel):
     ) = Field(default=None, description="Pipeline-specific load parameters")
 
 
+class LoadedLoRAAdapter(BaseModel):
+    """Information about a loaded LoRA adapter."""
+
+    path: str = Field(..., description="Local path to LoRA weights file")
+    scale: float = Field(..., description="Current scale value")
+
+
 class PipelineStatusResponse(BaseModel):
     """Pipeline status response schema."""
 
@@ -200,6 +246,10 @@ class PipelineStatusResponse(BaseModel):
     pipeline_id: str | None = Field(default=None, description="ID of loaded pipeline")
     load_params: dict | None = Field(
         default=None, description="Load parameters used when loading the pipeline"
+    )
+    loaded_lora_adapters: list[LoadedLoRAAdapter] | None = Field(
+        default=None,
+        description="List of loaded LoRA adapters",
     )
     error: str | None = Field(
         default=None, description="Error message if status is error"

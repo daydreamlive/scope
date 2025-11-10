@@ -12,9 +12,9 @@ import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
-import { PIPELINES } from "../data/pipelines";
+import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
-import type { PipelineId } from "../types";
+import type { PipelineId, LoRAConfig } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 
@@ -76,6 +76,7 @@ export function StreamPage() {
     isLoading: isPipelineLoading,
     error: pipelineError,
     loadPipeline,
+    pipelineInfo,
   } = usePipeline();
 
   // WebRTC for streaming
@@ -173,6 +174,7 @@ export function StreamPage() {
       pipelineId,
       denoisingSteps: newDenoisingSteps,
       resolution: newResolution,
+      loras: [],
     });
   };
 
@@ -307,6 +309,31 @@ export function StreamPage() {
     });
   };
 
+  const handleLorasChange = (loras: LoRAConfig[]) => {
+    updateSettings({ loras });
+
+    // If streaming, send scale updates to backend for runtime adjustment
+    if (isStreaming && pipelineInfo?.loaded_lora_adapters) {
+      // Get set of loaded LoRA paths for fast lookup
+      const loadedPaths = new Set(
+        pipelineInfo.loaded_lora_adapters.map(adapter => adapter.path)
+      );
+
+      // Only send updates for LoRAs that are actually loaded in the pipeline
+      const lora_scales = loras
+        .filter(lora => loadedPaths.has(lora.path))
+        .map(lora => ({
+          path: lora.path,
+          scale: lora.scale,
+        }));
+
+      if (lora_scales.length > 0) {
+        sendParameterUpdate({ lora_scales });
+      }
+    }
+    // Note: Adding/removing LoRAs requires pipeline reload
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -429,6 +456,22 @@ export function StreamPage() {
     // Use override pipeline ID if provided, otherwise use current settings
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
+    // Validate LoRAs have paths selected (only for pipelines that support LoRA)
+    if (pipelineSupportsLoRA(pipelineIdToUse)) {
+      const invalidLoras = (settings.loras || []).filter(
+        l => !l.path || l.path.trim() === ""
+      );
+      if (invalidLoras.length > 0) {
+        console.error(
+          `handleStartStream: ${invalidLoras.length} LoRA(s) have no file selected`
+        );
+        alert(
+          `Please select a file for all LoRA adapters or remove them before starting the stream.`
+        );
+        return false;
+      }
+    }
+
     try {
       // Check if models are needed but not downloaded
       const pipelineInfo = PIPELINES[pipelineIdToUse];
@@ -461,6 +504,7 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          loras: settings.loras?.map(({ path, scale }) => ({ path, scale })),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
@@ -478,6 +522,7 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          loras: settings.loras?.map(({ path, scale }) => ({ path, scale })),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
@@ -491,6 +536,7 @@ export function StreamPage() {
             settings.quantization !== undefined
               ? settings.quantization
               : "fp8_e4m3fn",
+          loras: settings.loras?.map(({ path, scale }) => ({ path, scale })),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
@@ -793,6 +839,8 @@ export function StreamPage() {
             kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
+            loras={settings.loras || []}
+            onLorasChange={handleLorasChange}
           />
         </div>
       </div>

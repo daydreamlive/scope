@@ -9,6 +9,7 @@ export interface PipelineInfo {
   defaultPrompt?: string;
   estimatedVram?: number; // GB
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
+  supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
 }
@@ -25,6 +26,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultPrompt: "A dog in the grass looking around, photorealistic",
     estimatedVram: 20,
     requiresModels: true,
+    supportsLoRA: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
   },
@@ -40,6 +42,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 20,
     requiresModels: true,
+    supportsLoRA: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
   },
@@ -55,6 +58,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 32,
     requiresModels: true,
+    supportsLoRA: true,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
   },
@@ -72,3 +76,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
   //   category: "no-video-input",
   // },
 };
+
+export function pipelineSupportsLoRA(pipelineId: string): boolean {
+  return PIPELINES[pipelineId]?.supportsLoRA === true;
+}

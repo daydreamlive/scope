@@ -3,6 +3,7 @@ import {
   sendWebRTCOffer,
   type PromptItem,
   type PromptTransition,
+  type LoRAScaleUpdate,
 } from "../lib/api";
 import { toast } from "sonner";
 
@@ -237,6 +238,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;
+      lora_scales?: LoRAScaleUpdate[];
     }) => {
       if (
         dataChannelRef.current &&

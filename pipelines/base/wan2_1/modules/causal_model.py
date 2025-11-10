@@ -5,6 +5,7 @@ import math
 import torch
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
+from diffusers.loaders import PeftAdapterMixin
 from diffusers.models.modeling_utils import ModelMixin
 from torch.nn.attention.flex_attention import (
     BlockMask,
@@ -579,9 +580,10 @@ class CausalHead(nn.Module):
         return x
 
 
-class CausalWanModel(ModelMixin, ConfigMixin):
+class CausalWanModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
+    Includes PeftAdapterMixin for LoRA support via diffusers integration.
     """
 
     ignore_for_config = ["patch_size", "cross_attn_norm", "qk_norm", "text_dim"]

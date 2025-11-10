@@ -3,6 +3,7 @@ import time
 
 import torch
 
+from ..base.lora_mixin import LoRAEnabledPipeline
 from ..base.wan2_1.wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
@@ -12,7 +13,7 @@ from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
 logger = logging.getLogger(__name__)
 
 
-class LongLivePipeline(Pipeline):
+class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
@@ -40,16 +41,23 @@ class LongLivePipeline(Pipeline):
         )
         generator.load_state_dict(generator_state_dict["generator"])
         print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
-        # Configure LoRA for LongLive model
-        start = time.time()
-        generator.model = configure_lora_for_model(
-            generator.model,
-            model_name="generator",
-            lora_config=config.adapter,
-        )
-        # Load LoRA weights
-        load_lora_checkpoint(generator.model, lora_path)
-        print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
+
+        # Configure and load performance LoRA (required for LongLive to work)
+        # Uses PEFT-based approach for the functional performance adapter
+        if lora_path:
+            start = time.time()
+            generator.model = configure_lora_for_model(
+                generator.model,
+                model_name="generator",
+                lora_config=config.adapter,
+            )
+            # Load LoRA weights
+            load_lora_checkpoint(generator.model, lora_path)
+            print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
+
+        # Load optional style LoRAs if provided (from UI via load_params)
+        # Uses direct weight patching approach for style customization
+        self._init_loras(config, generator.model)
 
         start = time.time()
         text_encoder = WanTextEncoder(
@@ -95,6 +103,9 @@ class LongLivePipeline(Pipeline):
         )
         transition = kwargs.get("transition", None)
         denoising_step_list = kwargs.get("denoising_step_list", None)
+
+        # Handle LoRA scale updates
+        self._handle_lora_scale_updates(kwargs, self.stream.generator.model)
 
         # Check if prompts changed using prompt blender
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):

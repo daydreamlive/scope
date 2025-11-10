@@ -77,6 +77,11 @@ class PipelineManager:
             pipeline_id = self._pipeline_id
             load_params = self._load_params
 
+            # Get loaded LoRA adapters from pipeline if available
+            loaded_lora_adapters = None
+            if self._pipeline and hasattr(self._pipeline, "loaded_lora_adapters"):
+                loaded_lora_adapters = self._pipeline.loaded_lora_adapters
+
             # If there's an error, clear it after capturing it
             # This ensures errors don't persist across page reloads
             if self._status == PipelineStatus.ERROR and error_message:
@@ -91,6 +96,7 @@ class PipelineManager:
                 "status": current_status.value,
                 "pipeline_id": pipeline_id,
                 "load_params": load_params,
+                "loaded_lora_adapters": loaded_lora_adapters,
                 "error": error_message,
             }
 
@@ -229,14 +235,20 @@ class PipelineManager:
             height = 512
             width = 512
             seed = 42
+            loras = None
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
                 seed = load_params.get("seed", 42)
+                loras = load_params.get("loras", None)
 
             config["height"] = height
             config["width"] = width
             config["seed"] = seed
+
+            # Add LoRAs to config if provided
+            if loras:
+                config["loras"] = loras
 
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -302,14 +314,20 @@ class PipelineManager:
             height = 320
             width = 576
             seed = 42
+            loras = None
             if load_params:
                 height = load_params.get("height", 320)
                 width = load_params.get("width", 576)
                 seed = load_params.get("seed", 42)
+                loras = load_params.get("loras", None)
 
             config["height"] = height
             config["width"] = width
             config["seed"] = seed
+
+            # Add LoRAs to config if provided
+            if loras:
+                config["loras"] = loras
 
             pipeline = LongLivePipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -345,15 +363,21 @@ class PipelineManager:
             width = 512
             seed = 42
             quantization = None
+            loras = None
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
                 seed = load_params.get("seed", 42)
                 quantization = load_params.get("quantization", None)
+                loras = load_params.get("loras", None)
 
             config["height"] = height
             config["width"] = width
             config["seed"] = seed
+
+            # Add LoRAs to config if provided
+            if loras:
+                config["loras"] = loras
 
             pipeline = KreaRealtimeVideoPipeline(
                 config,

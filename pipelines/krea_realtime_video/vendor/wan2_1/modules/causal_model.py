@@ -14,6 +14,7 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from torch.nn.attention.flex_attention import BlockMask
 from diffusers.models.modeling_utils import ModelMixin
+from diffusers.loaders import PeftAdapterMixin
 import torch.nn as nn
 import torch
 import math
@@ -357,8 +358,7 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1
                 )
 
-
-                x = flex_attention(
+                attn_out = flex_attention(
                     query=padded_roped_query.transpose(2, 1).contiguous(),
                     key=padded_roped_key.transpose(2, 1).contiguous(),
                     value=padded_v.transpose(2, 1).contiguous(),
@@ -366,8 +366,11 @@ class CausalWanSelfAttention(nn.Module):
                     kernel_options={
                         "BLOCKS_ARE_CONTIGUOUS": True,
                     }
-
-                )[:, :, :-padded_length].transpose(2, 1)
+                )
+                if padded_length > 0:
+                    x = attn_out[:, :, :-padded_length].transpose(2, 1)
+                else:
+                    x = attn_out.transpose(2, 1)
         else:
             # frame_seqlen = math.prod(grid_sizes[0][1:]).item() # torch compile doesn't like this
             frame_seqlen = self.frame_seq_length
@@ -591,9 +594,10 @@ class CausalHead(nn.Module):
         return x
 
 
-class CausalWanModel(ModelMixin, ConfigMixin):
+class CausalWanModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
+    Supports LoRA adapters via PeftAdapterMixin.
     """
 
     ignore_for_config = [

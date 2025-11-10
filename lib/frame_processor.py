@@ -23,6 +23,7 @@ PREPARE_ONLY_PARAMS = frozenset(
         "denoising_step_list",
         "noise_scale",
         "kv_cache_attention_bias",
+        "lora_scales",
     }
 )
 
