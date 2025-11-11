@@ -17,6 +17,8 @@ import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import { createCloudStream } from "../lib/daydream";
+import { startWhip } from "../lib/whip";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
@@ -40,6 +42,14 @@ export function StreamPage() {
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
   const [selectedTimelinePrompt, setSelectedTimelinePrompt] =
     useState<TimelinePrompt | null>(null);
+
+  // Cloud mode state (WHIP)
+  const [isCloudLoading, setIsCloudLoading] = useState(false);
+  const [isConnectingCloud, setIsConnectingCloud] = useState(false);
+  const [isStreamingCloud, setIsStreamingCloud] = useState(false);
+  const [cloudRemoteStream, setCloudRemoteStream] = useState<MediaStream | null>(null);
+  const cloudStopRef = useRef<null | (() => Promise<void>)>(null);
+  const cloudStreamIdRef = useRef<string | null>(null);
 
   // Timeline state for left panel
   const [timelinePrompts, setTimelinePrompts] = useState<TimelinePrompt[]>([]);
@@ -421,15 +431,104 @@ export function StreamPage() {
   const handleStartStream = async (
     overridePipelineId?: PipelineId
   ): Promise<boolean> => {
-    if (isStreaming) {
-      stopStream();
-      return true;
+    if (!settings.cloudMode) {
+      if (isStreaming) {
+        stopStream();
+        return true;
+      }
+    } else {
+      if (isStreamingCloud) {
+        if (cloudStopRef.current) {
+          await cloudStopRef.current();
+          cloudStopRef.current = null;
+        }
+        setCloudRemoteStream(null);
+        setIsStreamingCloud(false);
+        setIsConnectingCloud(false);
+        return true;
+      }
+      // Ignore new start requests while a cloud connection is being established
+      if (isConnectingCloud) {
+        return false;
+      }
     }
 
     // Use override pipeline ID if provided, otherwise use current settings
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
+      // Cloud mode via WHIP
+      if (settings.cloudMode) {
+        // Prepare load parameters based on pipeline
+        let loadParams: Record<string, unknown> | null = null;
+        const resolution = settings.resolution || videoResolution;
+        if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
+          loadParams = {
+            height: resolution.height,
+            width: resolution.width,
+            seed: settings.seed ?? 42,
+          };
+        } else if (pipelineIdToUse === "passthrough" && resolution) {
+          loadParams = {
+            height: resolution.height,
+            width: resolution.width,
+          };
+        } else if (pipelineIdToUse === "longlive" && resolution) {
+          loadParams = {
+            height: resolution.height,
+            width: resolution.width,
+            seed: settings.seed ?? 42,
+          };
+        } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
+          loadParams = {
+            height: resolution.height,
+            width: resolution.width,
+            seed: settings.seed ?? 42,
+            quantization:
+              settings.quantization !== undefined
+                ? settings.quantization
+                : "fp8_e4m3fn",
+          };
+        }
+
+        setIsCloudLoading(true);
+        setIsConnectingCloud(true);
+        const created = await createCloudStream({
+          pipeline_id: 'pip_SDXL-turbo',
+          load_params: loadParams || undefined,
+        });
+        cloudStreamIdRef.current = created.id;
+        setIsCloudLoading(false);
+
+        const needsVideoInput =
+          PIPELINES[pipelineIdToUse]?.category === "video-input";
+        const streamToSend = needsVideoInput ? localStream || undefined : undefined;
+        if (needsVideoInput && !localStream) {
+          console.error("Video input required but no local stream available");
+          setIsConnectingCloud(false);
+          return false;
+        }
+
+        const endpoint = created.whip_url;
+        if (!endpoint) {
+          console.error("Create stream response missing whip_url");
+          setIsConnectingCloud(false);
+          return false;
+        }
+
+        const { remoteStream: cloudStream, stop } = await startWhip({
+          endpoint,
+          localStream: streamToSend,
+        });
+        cloudStopRef.current = stop;
+        setCloudRemoteStream(cloudStream);
+
+        updateSettings({ paused: false });
+        setIsConnectingCloud(false);
+        setIsStreamingCloud(true);
+        return true;
+      }
+
       // Check if models are needed but not downloaded
       const pipelineInfo = PIPELINES[pipelineIdToUse];
       if (pipelineInfo?.requiresModels) {
@@ -628,9 +727,11 @@ export function StreamPage() {
           <div className="flex-1 min-h-0">
             <VideoOutput
               className="h-full"
-              remoteStream={remoteStream}
-              isPipelineLoading={isPipelineLoading}
-              isConnecting={isConnecting}
+              remoteStream={settings.cloudMode ? cloudRemoteStream : remoteStream}
+              isPipelineLoading={
+                settings.cloudMode ? isCloudLoading : isPipelineLoading
+              }
+              isConnecting={settings.cloudMode ? isConnectingCloud : isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
               isDownloading={isDownloading}
@@ -770,6 +871,23 @@ export function StreamPage() {
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
             isDownloading={isDownloading}
+            cloudMode={settings.cloudMode ?? false}
+            onCloudModeChange={enabled => {
+              // Stop any active stream when switching modes to avoid mixed state
+              (async () => {
+                if (isStreaming) {
+                  stopStream();
+                }
+                if (isStreamingCloud && cloudStopRef.current) {
+                  await cloudStopRef.current();
+                  cloudStopRef.current = null;
+                  setCloudRemoteStream(null);
+                  setIsStreamingCloud(false);
+                  setIsConnectingCloud(false);
+                }
+              })();
+              updateSettings({ cloudMode: enabled });
+            }}
             resolution={
               settings.resolution || getDefaultResolution(settings.pipelineId)
             }

@@ -20,6 +20,14 @@ interface InitialParameters {
 interface UseWebRTCOptions {
   /** Callback function called when the stream stops on the backend */
   onStreamStop?: () => void;
+  /** Custom offer sender (e.g., Daydream). Defaults to local sendWebRTCOffer */
+  sendOffer?: (
+    req: {
+      sdp?: string;
+      type?: string;
+      initialParameters?: InitialParameters;
+    }
+  ) => Promise<RTCSessionDescriptionInit>;
 }
 
 /**
@@ -159,7 +167,15 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             // ICE gathering complete - now send the offer
             console.log("ICE gathering complete, sending offer to server");
             try {
-              const answer = await sendWebRTCOffer({
+              const offerSender =
+                options?.sendOffer ||
+                (async (req: {
+                  sdp?: string;
+                  type?: string;
+                  initialParameters?: InitialParameters;
+                }) => sendWebRTCOffer(req));
+
+              const answer = await offerSender({
                 sdp: pc.localDescription!.sdp,
                 type: pc.localDescription!.type,
                 initialParameters,

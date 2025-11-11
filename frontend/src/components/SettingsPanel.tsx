@@ -35,6 +35,8 @@ interface SettingsPanelProps {
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
+  cloudMode?: boolean;
+  onCloudModeChange?: (enabled: boolean) => void;
   resolution?: {
     height: number;
     width: number;
@@ -63,6 +65,8 @@ export function SettingsPanel({
   onPipelineIdChange,
   isStreaming = false,
   isDownloading = false,
+  cloudMode = false,
+  onCloudModeChange,
   resolution,
   onResolutionChange,
   seed = 42,
@@ -197,6 +201,23 @@ export function SettingsPanel({
         <CardTitle className="text-base font-medium">Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium">Cloud mode</h3>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm text-foreground">Use Daydream (WebRTC)</span>
+            <Toggle
+              pressed={cloudMode}
+              onPressedChange={onCloudModeChange || (() => {})}
+              variant="outline"
+              size="sm"
+              className="h-7"
+              disabled={isStreaming || isDownloading}
+            >
+              {cloudMode ? "ON" : "OFF"}
+            </Toggle>
+          </div>
+        </div>
+
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Pipeline ID</h3>
           <Select
