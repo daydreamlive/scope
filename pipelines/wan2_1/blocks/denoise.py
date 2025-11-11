@@ -1,16 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+from typing import Any
 
 import torch
 from diffusers.modular_pipelines import (
@@ -19,14 +7,13 @@ from diffusers.modular_pipelines import (
 )
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
+    ConfigSpec,
     InputParam,
     OutputParam,
 )
 
 
 class DenoiseBlock(ModularPipelineBlocks):
-    """Base Denoise block that performs iterative denoising across pipelines."""
-
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
@@ -35,8 +22,15 @@ class DenoiseBlock(ModularPipelineBlocks):
         ]
 
     @property
+    def expected_configs(self) -> list[ConfigSpec]:
+        return [
+            ConfigSpec("patch_embedding_spatial_downsample_factor", 2),
+            ConfigSpec("vae_spatial_downsample_factor", 8),
+        ]
+
+    @property
     def description(self) -> str:
-        return "Base Denoise block that performs iterative denoising"
+        return "Denoise block that performs iterative denoising"
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -48,26 +42,60 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="Noisy latents to denoise",
             ),
             InputParam(
-                "timesteps",
+                "denoising_step_list",
                 required=True,
                 type_hint=torch.Tensor,
-                description="Timesteps for denoising",
+                description="List of denoising steps",
             ),
             InputParam(
                 "prompt_embeds",
                 required=True,
                 type_hint=torch.Tensor,
-                description="Prompt embeddings for conditioning",
+                description="Text embeddings used to conditiong denoising",
             ),
             InputParam(
-                "current_start",
+                "current_start_frame",
                 required=True,
                 type_hint=int,
-                description="Current start position",
+                description="Current starting frame index for current block",
+            ),
+            InputParam(
+                "start_frame",
+                type_hint=int | None,
+                description="Starting frame index that overrides current_start_frame",
+            ),
+            InputParam(
+                "kv_cache",
+                required=True,
+                type_hint=list[dict],
+                description="Initialized KV cache",
+            ),
+            InputParam(
+                "crossattn_cache",
+                required=True,
+                type_hint=list[dict],
+                description="Initialized cross-attention cache",
+            ),
+            InputParam(
+                "height",
+                type_hint=int,
+                description="Height of the video",
+            ),
+            InputParam(
+                "width",
+                type_hint=int,
+                description="Width of the video",
             ),
             InputParam(
                 "generator",
+                required=True,
                 description="Random number generator",
+            ),
+            InputParam(
+                "kv_cache_attention_bias",
+                default=1.0,
+                type_hint=float,
+                description="Controls how much to rely on past frames in the cache during generation",
             ),
         ]
 
@@ -75,34 +103,45 @@ class DenoiseBlock(ModularPipelineBlocks):
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
-                "denoised_pred",
+                "latents",
                 type_hint=torch.Tensor,
-                description="Denoised prediction",
+                description="Denoised latents",
+            ),
+            OutputParam(
+                "current_start_frame",
+                type_hint=int,
+                description="Current starting frame index for current block",
             ),
         ]
 
     @torch.no_grad()
-    def __call__(self, components, state: PipelineState) -> PipelineState:
+    def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
+        scale_size = (
+            components.config.vae_spatial_downsample_factor
+            * components.config.patch_embedding_spatial_downsample_factor
+        )
+        frame_seq_length = (block_state.height // scale_size) * (
+            block_state.width // scale_size
+        )
+
         noise = block_state.latents
-        denoising_step_list = block_state.timesteps
-        num_frame_per_block = noise.shape[1]
         batch_size = noise.shape[0]
+        num_frames = noise.shape[1]
+        denoising_step_list = block_state.denoising_step_list
 
-        # Set conditional dict for generator
         conditional_dict = {"prompt_embeds": block_state.prompt_embeds}
-        components.generator.conditional_dict = conditional_dict
 
-        # Calculate start_frame for kv_cache
-        kv_cache_num_frames = getattr(components.generator, "kv_cache_num_frames", 3)
-        start_frame = min(block_state.current_start, kv_cache_num_frames)
+        start_frame = block_state.current_start_frame
+        if block_state.start_frame is not None:
+            start_frame = block_state.start_frame
 
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
             timestep = (
                 torch.ones(
-                    [batch_size, num_frame_per_block],
+                    [batch_size, num_frames],
                     device=noise.device,
                     dtype=torch.int64,
                 )
@@ -114,9 +153,10 @@ class DenoiseBlock(ModularPipelineBlocks):
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
                     timestep=timestep,
-                    kv_cache=components.generator.kv_cache1,
-                    crossattn_cache=components.generator.crossattn_cache,
-                    current_start=start_frame * components.generator.frame_seq_length,
+                    kv_cache=block_state.kv_cache,
+                    crossattn_cache=block_state.crossattn_cache,
+                    current_start=start_frame * frame_seq_length,
+                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                 )
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -132,7 +172,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     random_noise,
                     next_timestep
                     * torch.ones(
-                        [batch_size * num_frame_per_block],
+                        [batch_size * num_frames],
                         device=noise.device,
                         dtype=torch.long,
                     ),
@@ -142,29 +182,14 @@ class DenoiseBlock(ModularPipelineBlocks):
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
                     timestep=timestep,
-                    kv_cache=components.generator.kv_cache1,
-                    crossattn_cache=components.generator.crossattn_cache,
-                    current_start=start_frame * components.generator.frame_seq_length,
+                    kv_cache=block_state.kv_cache,
+                    crossattn_cache=block_state.crossattn_cache,
+                    current_start=start_frame * frame_seq_length,
+                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                 )
 
-        # Store first context frame if this is the first iteration
-        if block_state.current_start == 0:
-            components.generator.first_context_frame = denoised_pred[:, :1]
-
-        # Push the generated latents to the context frame buffer (sliding window)
-        if components.generator.context_frame_buffer_max_size > 0:
-            components.generator.context_frame_buffer = torch.cat(
-                [
-                    components.generator.context_frame_buffer,
-                    denoised_pred.to(
-                        components.generator.context_frame_buffer.device,
-                        components.generator.context_frame_buffer.dtype,
-                    ),
-                ],
-                dim=1,
-            )[:, -components.generator.context_frame_buffer_max_size :]
-
-        block_state.denoised_pred = denoised_pred
+        block_state.latents = denoised_pred
+        block_state.current_start_frame += num_frames
 
         self.set_block_state(state, block_state)
         return components, state

@@ -113,7 +113,8 @@ target-version = "py310"
 exclude = [
     "*/vendor/*",
     "**/vendor/**",
-    "pipelines/wan2_1/components",
+    "*/modules/*",
+    "**/modules/**",
     ".venv",
     "__pycache__",
 ]
