@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-export type VideoSourceMode = "video" | "camera";
+export type VideoSourceMode = "video" | "camera" | "image";
 
 interface UseVideoSourceProps {
   onStreamUpdate?: (stream: MediaStream) => Promise<boolean>;

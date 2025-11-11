@@ -15,6 +15,7 @@ interface InitialParameters {
   noise_controller?: boolean;
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
+  input_image?: string; // Base64 encoded image data for img2img
 }
 
 interface UseWebRTCOptions {
@@ -237,6 +238,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;
+      input_image?: string; // Base64 encoded image data for img2img
     }) => {
       if (
         dataChannelRef.current &&

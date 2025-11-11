@@ -4,9 +4,13 @@ import threading
 import time
 from collections import deque
 from typing import Any
+import base64
+from io import BytesIO
 
 import torch
 from aiortc.mediastreams import VideoFrame
+from PIL import Image
+import numpy as np
 
 from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
@@ -23,6 +27,7 @@ PREPARE_ONLY_PARAMS = frozenset(
         "denoising_step_list",
         "noise_scale",
         "kv_cache_attention_bias",
+        "input_image",  # Image data is processed and converted to frames
     }
 )
 
@@ -78,6 +83,55 @@ class FrameProcessor:
         self.fps_lock = threading.Lock()  # Lock for thread-safe FPS updates
 
         self.paused = False
+
+        # Store image data for img2img mode
+        self.current_image_data = None
+        self.image_frames_cache = None  # Cache converted image frames
+
+    def _convert_base64_image_to_frames(
+        self, base64_data: str, chunk_size: int
+    ) -> list[torch.Tensor]:
+        """
+        Convert base64 encoded image data to a list of tensor frames.
+
+        Args:
+            base64_data: Base64 encoded image string (with or without data URI prefix)
+            chunk_size: Number of frames to generate (will repeat the same image)
+
+        Returns:
+            List of tensor frames in THWC format [0-255] range
+        """
+        try:
+            # Remove data URI prefix if present (e.g., "data:image/png;base64,")
+            if "," in base64_data:
+                base64_data = base64_data.split(",", 1)[1]
+
+            # Decode base64 to bytes
+            image_bytes = base64.b64decode(base64_data)
+
+            # Load image using PIL
+            image = Image.open(BytesIO(image_bytes))
+
+            # Convert to RGB if necessary
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+
+            # Convert to numpy array
+            image_array = np.array(image)
+
+            # Convert to tensor: HWC -> THWC (add time dimension)
+            # Values are in [0, 255] range as uint8
+            image_tensor = torch.from_numpy(image_array).float().unsqueeze(0)
+
+            # Repeat the image chunk_size times to match expected input
+            frames = [image_tensor for _ in range(chunk_size)]
+
+            logger.info(f"Converted base64 image to {chunk_size} frames, shape: {image_tensor.shape}")
+            return frames
+
+        except Exception as e:
+            logger.error(f"Failed to convert base64 image to frames: {e}")
+            raise
 
     def start(self):
         if self.running:
@@ -242,6 +296,14 @@ class FrameProcessor:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
+        # Check for image input mode
+        input_image = self.parameters.get("input_image", None)
+        if input_image and input_image != self.current_image_data:
+            # New image data received, clear cache
+            self.current_image_data = input_image
+            self.image_frames_cache = None
+            logger.info("New image data received for img2img mode")
+
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
 
@@ -264,12 +326,24 @@ class FrameProcessor:
 
         if requirements is not None:
             current_chunk_size = requirements.input_size
-            with self.frame_buffer_lock:
-                if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
-                    # Sleep briefly to avoid busy waiting
-                    self.shutdown_event.wait(SLEEP_TIME)
-                    return
-                input = self.prepare_chunk(current_chunk_size)
+
+            # Use image input if available, otherwise use video frames
+            if self.current_image_data:
+                # Generate frames from image
+                if self.image_frames_cache is None:
+                    # Convert and cache image frames
+                    self.image_frames_cache = self._convert_base64_image_to_frames(
+                        self.current_image_data, current_chunk_size
+                    )
+                input = self.image_frames_cache
+            else:
+                # Use video frames from buffer
+                with self.frame_buffer_lock:
+                    if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
+                        # Sleep briefly to avoid busy waiting
+                        self.shutdown_event.wait(SLEEP_TIME)
+                        return
+                    input = self.prepare_chunk(current_chunk_size)
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = {

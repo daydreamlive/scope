@@ -11,6 +11,7 @@ export interface PipelineInfo {
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
+  supportsImageInput?: boolean; // Whether this pipeline supports image-to-image generation
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
@@ -27,6 +28,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
+    supportsImageInput: true, // Supports img2img via Wan2.1 base model
   },
   longlive: {
     name: "LongLive",
