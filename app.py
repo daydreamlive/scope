@@ -12,12 +12,14 @@ from datetime import datetime
 from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+import signal
+from typing import Optional
 
 import torch
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -106,6 +108,12 @@ PIPELINE = os.getenv("PIPELINE", None)
 
 logger = logging.getLogger(__name__)
 
+# Global flag for dev reload mode (vite)
+RELOAD_MODE = False
+# Track vite process for cleanup
+vite_process: Optional[subprocess.Popen] = None
+# Port where Vite dev server runs
+VITE_PORT = int(os.getenv("VITE_PORT", "5173"))
 
 def get_git_commit_hash() -> str:
     """
@@ -149,6 +157,10 @@ def print_version_info():
 
 def configure_static_files():
     """Configure static file serving for production."""
+    if RELOAD_MODE:
+        # In reload mode we use Vite dev server; do not mount static files
+        logger.info("Reload mode enabled - skipping static file mounting (using Vite)")
+        return
     frontend_dist = Path(__file__).parent / "frontend" / "dist"
     if frontend_dist.exists():
         app.mount(
@@ -261,6 +273,9 @@ async def health_check():
 @app.get("/")
 async def root():
     """Serve the frontend at the root URL."""
+    # In reload mode, redirect to Vite dev server
+    if RELOAD_MODE:
+        return RedirectResponse(url=f"http://localhost:{VITE_PORT}")
     frontend_dist = Path(__file__).parent / "frontend" / "dist"
 
     # Only serve SPA if frontend dist exists (production mode)
@@ -430,6 +445,9 @@ async def get_current_logs():
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
+    # In reload mode, redirect all non-API routes to Vite dev server
+    if RELOAD_MODE:
+        return RedirectResponse(url=f"http://localhost:{VITE_PORT}/{path}")
     frontend_dist = Path(__file__).parent / "frontend" / "dist"
 
     # Only serve SPA if frontend dist exists (production mode)
@@ -503,6 +521,28 @@ def main():
 
     args = parser.parse_args()
 
+    # Set reload mode flag early
+    global RELOAD_MODE
+    RELOAD_MODE = bool(args.reload)
+
+    # If reload is enabled, start the Vite dev server
+    global vite_process
+    if RELOAD_MODE:
+        try:
+            logger.info("Starting Vite dev server (npm run dev)...")
+            vite_process = subprocess.Popen(
+                ["npm", "run", "dev"],
+                cwd=str(Path(__file__).parent / "frontend"),
+                stdout=None,
+                stderr=None,
+            )
+        except FileNotFoundError:
+            logger.error(
+                "Failed to start Vite dev server. Ensure Node.js and npm are installed."
+            )
+        except Exception as e:
+            logger.error(f"Error starting Vite dev server: {e}")
+
     # Handle version flag
     if args.version:
         print_version_info()
@@ -515,42 +555,59 @@ def main():
     frontend_dist = Path(__file__).parent / "frontend" / "dist"
     is_production = frontend_dist.exists()
 
-    if is_production:
-        # Create server instance for production mode
-        config = uvicorn.Config(
-            "app:app",
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
-            log_config=None,  # Use our logging config, don't override it
-        )
-        server = uvicorn.Server(config)
-
-        # Start browser opening thread (unless disabled)
-        if not args.no_browser:
-            browser_thread = threading.Thread(
-                target=open_browser_when_ready,
-                args=(args.host, args.port, server),
-                daemon=True,
+    try:
+        if is_production and not RELOAD_MODE:
+            # Create server instance for production mode
+            config = uvicorn.Config(
+                "app:app",
+                host=args.host,
+                port=args.port,
+                reload=args.reload,
+                log_config=None,  # Use our logging config, don't override it
             )
-            browser_thread.start()
-        else:
-            logger.info("main: Skipping browser auto-launch due to --no-browser")
+            server = uvicorn.Server(config)
 
-        # Run the server
-        try:
-            server.run()
-        except KeyboardInterrupt:
-            pass  # Clean shutdown on Ctrl+C
-    else:
-        # Development mode - just run normally
-        uvicorn.run(
-            "app:app",
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
-            log_config=None,  # Use our logging config, don't override it
-        )
+            # Start browser opening thread (unless disabled)
+            if not args.no_browser:
+                browser_thread = threading.Thread(
+                    target=open_browser_when_ready,
+                    args=(args.host, args.port, server),
+                    daemon=True,
+                )
+                browser_thread.start()
+            else:
+                logger.info("main: Skipping browser auto-launch due to --no-browser")
+
+            # Run the server
+            try:
+                server.run()
+            except KeyboardInterrupt:
+                pass  # Clean shutdown on Ctrl+C
+        else:
+            # Development mode or reload with Vite - just run normally
+            uvicorn.run(
+                "app:app",
+                host=args.host,
+                port=args.port,
+                reload=args.reload,
+                log_config=None,  # Use our logging config, don't override it
+            )
+    finally:
+        # Ensure Vite process is terminated on shutdown
+        if vite_process and vite_process.poll() is None:
+            try:
+                logger.info("Stopping Vite dev server...")
+                # Send SIGINT for graceful shutdown if possible
+                if os.name == "nt":
+                    vite_process.terminate()
+                else:
+                    vite_process.send_signal(signal.SIGINT)
+                vite_process.wait(timeout=5)
+            except Exception:
+                try:
+                    vite_process.kill()
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":
