@@ -62,7 +62,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
 
         # Load LoRA adapters if provided (from UI via load_params)
-        self._init_loras(config, self.stream.generator.model)
+        # The method returns the potentially-wrapped model
+        self.stream.generator.model = self._init_loras(
+            config, self.stream.generator.model
+        )
 
         self.chunk_size = chunk_size
         self.start_chunk_size = start_chunk_size

@@ -47,6 +47,12 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   width?: number;
   seed?: number;
   loras?: LoRAConfig[];
+  lora_merge_mode?:
+    | "permanent_merge"
+    | "runtime_peft"
+    | "gpu_reconstruct"
+    | "premerged_tensor_fusion"
+    | "cuda_graph_recapture";
 }
 
 export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
@@ -54,6 +60,12 @@ export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
   width?: number;
   seed?: number;
   loras?: LoRAConfig[];
+  lora_merge_mode?:
+    | "permanent_merge"
+    | "runtime_peft"
+    | "gpu_reconstruct"
+    | "premerged_tensor_fusion"
+    | "cuda_graph_recapture";
 }
 
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
@@ -62,6 +74,12 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   seed?: number;
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
+  lora_merge_mode?:
+    | "permanent_merge"
+    | "runtime_peft"
+    | "gpu_reconstruct"
+    | "premerged_tensor_fusion"
+    | "cuda_graph_recapture";
 }
 
 export interface PipelineLoadRequest {

@@ -324,6 +324,17 @@ export function StreamPage() {
     // Note: Adding/removing LoRAs requires pipeline reload
   };
 
+  const handleLoraMergeStrategyChange = (
+    loraMergeStrategy:
+      | "permanent_merge"
+      | "runtime_peft"
+      | "gpu_reconstruct"
+      | "cuda_graph_recapture"
+  ) => {
+    updateSettings({ loraMergeStrategy });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -495,9 +506,10 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed ?? 42,
           loras: settings.loras?.map(({ path, scale }) => ({ path, scale })),
+          lora_merge_mode: settings.loraMergeStrategy ?? "cuda_graph_recapture",
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -513,9 +525,10 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed ?? 42,
           loras: settings.loras?.map(({ path, scale }) => ({ path, scale })),
+          lora_merge_mode: settings.loraMergeStrategy ?? "cuda_graph_recapture",
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -527,9 +540,10 @@ export function StreamPage() {
               ? settings.quantization
               : "fp8_e4m3fn",
           loras: settings.loras?.map(({ path, scale }) => ({ path, scale })),
+          lora_merge_mode: settings.loraMergeStrategy ?? "cuda_graph_recapture",
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       }
 
@@ -853,6 +867,8 @@ export function StreamPage() {
             onResetCache={handleResetCache}
             loras={settings.loras || []}
             onLorasChange={handleLorasChange}
+            loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
+            onLoraMergeStrategyChange={handleLoraMergeStrategyChange}
           />
         </div>
       </div>

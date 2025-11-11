@@ -10,3 +10,5 @@ denoising_step_list:
 - 250
 warp_denoising_step: true
 num_frame_per_block: 3
+# LoRA merge mode: runtime_peft (instant updates, ~2-5% overhead), gpu_reconstruct (~2s updates, no overhead), permanent_merge (no updates, zero overhead)
+lora_merge_mode: runtime_peft

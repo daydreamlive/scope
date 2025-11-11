@@ -23,6 +23,12 @@ export interface PromptData {
   isProcessing: boolean;
 }
 
+export type LoraMergeStrategy =
+  | "permanent_merge"
+  | "runtime_peft"
+  | "gpu_reconstruct"
+  | "cuda_graph_recapture";
+
 export interface LoRAConfig {
   id: string;
   path: string;
@@ -44,6 +50,7 @@ export interface SettingsState {
   kvCacheAttentionBias?: number;
   paused?: boolean;
   loras?: LoRAConfig[];
+  loraMergeStrategy?: LoraMergeStrategy;
 }
 
 export type PipelineCategory = "video-input" | "no-video-input";

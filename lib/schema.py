@@ -134,6 +134,15 @@ class Quantization(str, Enum):
     FP8_E4M3FN = "fp8_e4m3fn"
 
 
+class LoRAMergeMode(str, Enum):
+    """LoRA merge mode enumeration."""
+
+    RUNTIME_PEFT = "runtime_peft"
+    GPU_RECONSTRUCT = "gpu_reconstruct"
+    PERMANENT_MERGE = "permanent_merge"
+    CUDA_GRAPH_RECAPTURE = "cuda_graph_recapture"
+
+
 class LoRAConfig(BaseModel):
     """Configuration for LoRA (Low-Rank Adaptation) adapters."""
 
@@ -176,6 +185,10 @@ class StreamDiffusionV2LoadParams(PipelineLoadParams):
     loras: list[LoRAConfig] | None = Field(
         default=None, description="List of LoRA adapter configurations"
     )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge mode: permanent_merge (no updates, zero overhead, 9.15 FPS), runtime_peft (instant updates, ~50% overhead, 4.34 FPS), gpu_reconstruct (60s updates, zero overhead, 10.3 FPS), cuda_graph_recapture (1-5s updates, minimal overhead, ~9-10 FPS).",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -199,6 +212,10 @@ class LongLiveLoadParams(PipelineLoadParams):
     loras: list[LoRAConfig] | None = Field(
         default=None, description="List of LoRA adapter configurations"
     )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge mode: permanent_merge (no updates, zero overhead, 9.15 FPS), runtime_peft (instant updates, ~50% overhead, 4.34 FPS), gpu_reconstruct (60s updates, zero overhead, 10.3 FPS), cuda_graph_recapture (1-5s updates, minimal overhead, ~9-10 FPS).",
+    )
 
 
 class KreaRealtimeVideoLoadParams(PipelineLoadParams):
@@ -213,6 +230,10 @@ class KreaRealtimeVideoLoadParams(PipelineLoadParams):
     )
     loras: list[LoRAConfig] | None = Field(
         default=None, description="List of LoRA adapter configurations"
+    )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge mode: permanent_merge (no updates, zero overhead, 9.15 FPS), runtime_peft (instant updates, ~50% overhead, 4.34 FPS), gpu_reconstruct (60s updates, zero overhead, 10.3 FPS), cuda_graph_recapture (1-5s updates, minimal overhead, ~9-10 FPS).",
     )
 
 
