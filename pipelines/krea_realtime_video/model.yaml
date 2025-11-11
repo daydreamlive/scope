@@ -1,12 +1,10 @@
-model_name: Wan2.1-T2V-1.3B
-model_kwargs:
+base_model_name: Wan2.1-T2V-14B
+base_model_kwargs:
   timestep_shift: 5.0
-# KV cache attention bias: 1.0 = disabled (default), smaller values (0.1-0.7) apply bias to past frames
-kv_cache_attention_bias: 1.0
-denoising_step_list:
-- 1000
-- 750
-- 500
-- 250
-warp_denoising_step: true
 num_frame_per_block: 3
+kv_cache_num_frames: 3
+local_attn_size: 6
+vae_spatial_downsample_factor: 8
+patch_embedding_spatial_downsample_factor: 2
+warp_denoising_step: true
+max_rope_freq_table_seq_len: 1024

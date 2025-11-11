@@ -5,41 +5,39 @@ from diffusers.utils import export_to_video
 from omegaconf import OmegaConf
 
 from lib.models_config import get_model_file_path, get_models_dir
+from lib.schema import Quantization
 
-from ..memory import is_cuda_low_memory
 from .pipeline import KreaRealtimeVideoPipeline
 
-config = OmegaConf.load("pipelines/krea_realtime_video/model.yaml")
-
-models_dir = get_models_dir()
-# 320 should work with 32GB VRAM
-height = 480
-# 576 should work with 32GB VRAM
-width = 832
-
-config["model_dir"] = str(models_dir)
-config["generator_path"] = str(
-    get_model_file_path("krea-realtime-video/krea-realtime-video-14b.safetensors")
+config = OmegaConf.create(
+    {
+        "model_dir": str(get_models_dir()),
+        "generator_path": str(
+            get_model_file_path(
+                "krea-realtime-video/krea-realtime-video-14b.safetensors"
+            )
+        ),
+        "text_encoder_path": str(
+            get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
+        ),
+        "tokenizer_path": str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")),
+        "vae_path": str(get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")),
+        "model_config": OmegaConf.load("pipelines/krea_realtime_video/model.yaml"),
+    }
 )
-config["text_encoder_path"] = str(
-    get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
-)
-config["tokenizer_path"] = str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl"))
-config["vae_path"] = str(get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth"))
-config["height"] = height
-config["width"] = width
 
 device = torch.device("cuda")
 pipeline = KreaRealtimeVideoPipeline(
     config,
-    low_memory=is_cuda_low_memory(device),
     # Set quantization to Quantization.FP8_E4M3FN to work with 32GB VRAM
-    # quantization=Quantization.FP8_E4M3FN,
-    # Only enable compile diffusion model for hopper right now
-    compile=any(x in torch.cuda.get_device_name(0).lower() for x in ("h100", "hopper")),
+    quantization=Quantization.FP8_E4M3FN,
+    compile=False,
     device=device,
     dtype=torch.bfloat16,
 )
+
+height = 320
+width = 576
 
 prompts = [
     "A realistic video of a Texas Hold'em poker event at a casino. A male player in his late 30s with a medium build, short dark hair, light stubble, and a sharp jawline wears a fitted navy blazer over a charcoal crew-neck tee, dark jeans, and a stainless-steel watch. He sits at a well-lit poker table and tightly grips his hole cards, wearing a tense, serious expression. The table is filled with chips of various colors, the dealer is seen dealing cards, and several rows of slot machines glow in the background. The camera focuses on the player's strained concentration. Wide shot to medium close-up.",
@@ -51,17 +49,13 @@ prompts = [
 ]
 
 outputs = []
-for i, prompt in enumerate(prompts):
-    should_prepare = i == 0
-
-    pipeline.prepare(prompts=[{"text": prompt}], should_prepare=should_prepare)
-
+for _, prompt in enumerate(prompts):
     num_frames = 0
     max_output_frames = 81
     while num_frames < max_output_frames:
         start = time.time()
 
-        output = pipeline()
+        output = pipeline(height=height, width=width, prompt=prompt)
 
         num_output_frames, _, _, _ = output.shape
         latency = time.time() - start

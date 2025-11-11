@@ -1,16 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+from typing import Any
 
 import torch
 from diffusers.modular_pipelines import (
@@ -19,13 +7,14 @@ from diffusers.modular_pipelines import (
 )
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
+    ConfigSpec,
     InputParam,
     OutputParam,
 )
 
 
 class PrepareLatentsBlock(ModularPipelineBlocks):
-    """Base Prepare Latents block that generates empty latents (noise) for text-to-video across pipelines."""
+    model_name = "Wan2.1"
 
     @property
     def expected_components(self) -> list[ComponentSpec]:
@@ -34,8 +23,15 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
         ]
 
     @property
+    def expected_configs(self) -> list[ConfigSpec]:
+        return [
+            ConfigSpec("num_frame_per_block", 3),
+            ConfigSpec("vae_spatial_downsample_factor", 8),
+        ]
+
+    @property
     def description(self) -> str:
-        return "Base Prepare Latents block that generates empty latents (noise) for text-to-video"
+        return "Prepare Latents block that generates empty latents (noise) for video generation"
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -47,16 +43,10 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
                 description="Base seed for random number generation",
             ),
             InputParam(
-                "current_start",
+                "current_start_frame",
+                required=True,
                 type_hint=int,
-                default=0,
-                description="Current start position for seed offset",
-            ),
-            InputParam(
-                "num_frame_per_block",
-                type_hint=int,
-                default=1,
-                description="Number of frames per block",
+                description="Current starting frame index for current block",
             ),
             InputParam(
                 "height",
@@ -68,10 +58,6 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
                 type_hint=int,
                 description="Width of the video",
             ),
-            InputParam(
-                "generator",
-                description="Random number generator",
-            ),
         ]
 
     @property
@@ -80,30 +66,38 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
             OutputParam(
                 "latents",
                 type_hint=torch.Tensor,
-                description="Generated empty latents (noise)",
+                description="Noisy latents to denoise",
             ),
+            OutputParam("generator", description="Random number generator"),
         ]
 
     @torch.no_grad()
-    def __call__(self, components, state: PipelineState) -> PipelineState:
-        # Import here to avoid circular import
-        from ..pipeline import VAE_SPATIAL_DOWNSAMPLE_FACTOR
-
+    def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
         generator_param = next(components.generator.model.parameters())
-        latent_height = block_state.height // VAE_SPATIAL_DOWNSAMPLE_FACTOR
-        latent_width = block_state.width // VAE_SPATIAL_DOWNSAMPLE_FACTOR
+        latent_height = (
+            block_state.height // components.config.vae_spatial_downsample_factor
+        )
+        latent_width = (
+            block_state.width // components.config.vae_spatial_downsample_factor
+        )
+
+        # The default param for InputParam does not work right now
+        # The workaround is to set the default values here
+        base_seed = block_state.base_seed
+        if base_seed is None:
+            base_seed = 42
 
         # Create generator from seed for reproducible generation
-        frame_seed = block_state.base_seed + block_state.current_start
-        rng = torch.Generator(device=generator_param.device).manual_seed(frame_seed)
+        block_seed = base_seed + block_state.current_start_frame
+        rng = torch.Generator(device=generator_param.device).manual_seed(block_seed)
 
         # Generate empty latents (noise)
         latents = torch.randn(
             [
                 1,  # batch_size
-                block_state.num_frame_per_block,
+                components.config.num_frame_per_block,
                 16,
                 latent_height,
                 latent_width,

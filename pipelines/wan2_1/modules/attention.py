@@ -1,18 +1,37 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
+import platform
+
 import torch
+from flash_attn import flash_attn_func
+
+
+def is_hopper_gpu():
+    if not torch.cuda.is_available():
+        return False
+    device_name = torch.cuda.get_device_name(0).lower()
+    return "h100" in device_name or "hopper" in device_name
+
+
+FLASH_ATTN_3_AVAILABLE = False
 
 try:
     import flash_attn_interface
 
-    def is_hopper_gpu():
-        if not torch.cuda.is_available():
-            return False
-        device_name = torch.cuda.get_device_name(0).lower()
-        return "h100" in device_name or "hopper" in device_name
-
     FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
 except ModuleNotFoundError:
-    FLASH_ATTN_3_AVAILABLE = False
+    pass
+
+if not FLASH_ATTN_3_AVAILABLE and platform.system() != "Windows":
+    try:
+        from kernels import get_kernel
+
+        flash_attn_3_hub = get_kernel(
+            "kernels-community/flash-attn3", revision="fake-ops-return-probs"
+        )
+        flash_attn_interface = flash_attn_3_hub
+        FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
+    except Exception:
+        pass
 
 try:
     import flash_attn
@@ -21,14 +40,25 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
-# FLASH_ATTN_3_AVAILABLE = False
+sageattn_func = None
+SAGEATTN_AVAILABLE = False
+# Do not try to load SageAttention on Hopper GPUs because at the moment
+# loading SageAttention 2.2.0 in the sage module causes static on a H100
+if not is_hopper_gpu():
+    from .sage import SAGEATTN_AVAILABLE, sageattn_func
 
 import warnings
 
 __all__ = [
     "flash_attention",
     "attention",
+    "sageattn_func",
+    "SAGEATTN_AVAILABLE",
 ]
+
+print("flash attn 2 available", FLASH_ATTN_2_AVAILABLE)
+print("flash attn 3 available", FLASH_ATTN_3_AVAILABLE)
+print("sage attn available", SAGEATTN_AVAILABLE)
 
 
 def flash_attention(
@@ -59,6 +89,12 @@ def flash_attention(
     deterministic:  bool. If True, slightly slower and uses more memory.
     dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
     """
+    if not FLASH_ATTN_3_AVAILABLE:
+        return flash_attn_func(
+            q,
+            k,
+            v,
+        )
     half_dtypes = (torch.float16, torch.bfloat16)
     assert dtype in half_dtypes
     assert q.device.type == "cuda" and q.size(-1) <= 256
@@ -118,7 +154,7 @@ def flash_attention(
             softmax_scale=softmax_scale,
             causal=causal,
             deterministic=deterministic,
-        )[0].unflatten(0, (b, lq))
+        ).unflatten(0, (b, lq))
     else:
         assert FLASH_ATTN_2_AVAILABLE
         x = flash_attn.flash_attn_varlen_func(
@@ -145,9 +181,9 @@ def flash_attention(
 
 
 def attention(
-    q,
-    k,
-    v,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
     q_lens=None,
     k_lens=None,
     dropout_p=0.0,
@@ -158,8 +194,25 @@ def attention(
     deterministic=False,
     dtype=torch.bfloat16,
     fa_version=None,
+    # og_dtype=torch.bfloat16,
 ):
-    if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    if SAGEATTN_AVAILABLE:
+        # print("Using sageattention")
+        attn_mask = None
+
+        og_dtype = q.dtype
+        q = q.transpose(1, 2).to(dtype)
+        k = k.transpose(1, 2).to(dtype)
+        v = v.transpose(1, 2).to(dtype)
+
+        out = sageattn_func(
+            q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p
+        )
+
+        out = out.transpose(1, 2).contiguous().to(og_dtype)
+        return out
+
+    elif FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
         return flash_attention(
             q=q,
             k=k,
