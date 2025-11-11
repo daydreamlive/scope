@@ -20,10 +20,14 @@ class LoRAEnabledPipeline:
             model: The model to apply LoRAs to (typically generator.model)
         """
         lora_configs = config.get("loras", [])
+        print(f"_init_loras: Found {len(lora_configs)} LoRA configs to load")
         self.loaded_lora_adapters = LoRAManager.load_adapters_from_list(
             model=model,
             lora_configs=lora_configs,
             logger_prefix=f"{self.__class__.__name__}.__init__: ",
+        )
+        print(
+            f"_init_loras: Completed, loaded {len(self.loaded_lora_adapters)} LoRA adapters"
         )
 
     def _handle_lora_scale_updates(self, kwargs: dict, model) -> None:

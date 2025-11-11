@@ -110,44 +110,71 @@ class LoRAManager:
 
     @staticmethod
     def _backup_original_weights(model: torch.nn.Module, keys_to_backup: List[str]) -> None:
-        """Backup original model weights before any LoRA patching."""
+        """Backup original model weights before any LoRA patching using direct parameter access."""
         state = LoRAManager._get_model_state(model)
 
         if state["backed_up"]:
             return  # Already backed up
 
-        model_state = model.state_dict()
+        print(f"_backup_original_weights: Backing up {len(keys_to_backup)} weights using direct parameter access...")
+
+        # Build map of parameter names to actual parameters
+        param_dict = dict(model.named_parameters())
+
         for key in keys_to_backup:
-            if key in model_state and key not in state["original_weights"]:
-                # Clone and detach to avoid issues
-                state["original_weights"][key] = model_state[key].clone()
+            # named_parameters() keys already include .weight suffix, use key directly
+            if key in param_dict and key not in state["original_weights"]:
+                # Clone the actual parameter tensor directly (no full state_dict copy)
+                state["original_weights"][key] = param_dict[key].data.clone()
 
         state["backed_up"] = True
+        print(f"_backup_original_weights: Backed up {len(state['original_weights'])} weights")
         logger.debug(f"_backup_original_weights: Backed up {len(state['original_weights'])} original weights")
 
     @staticmethod
     def _apply_all_loras(model: torch.nn.Module) -> None:
-        """Recompute patched weights from originals + all loaded LoRA diffs."""
+        """Recompute patched weights from originals + all loaded LoRA diffs using direct parameter access."""
         state = LoRAManager._get_model_state(model)
 
         if not state["backed_up"]:
             return  # Nothing to apply
 
-        model_state = model.state_dict()
+        print(f"_apply_all_loras: Building parameter map for direct access...")
+        # Build map of parameter names to actual parameters (fast, no copying)
+        param_dict = dict(model.named_parameters())
+        print(f"_apply_all_loras: Got {len(param_dict)} parameters")
 
-        # Start from originals
+        # Compute and apply each weight directly (no intermediate cloning!)
+        print(f"_apply_all_loras: Computing and applying {len(state['original_weights'])} weights with {len(state['loras'])} LoRA(s)...")
+        updated_count = 0
+
         for key, original in state["original_weights"].items():
-            model_state[key] = original.clone()
+            if key not in param_dict:
+                continue
 
-        # Apply all LoRA diffs with their scales
-        for path, lora_info in state["loras"].items():
-            scale = lora_info["scale"]
-            for key, diff in lora_info["diffs"].items():
-                if key in model_state:
-                    model_state[key] = model_state[key] + (scale * diff).to(model_state[key].dtype)
+            current_param = param_dict[key]
 
-        # Reload into model
-        model.load_state_dict(model_state, strict=True)
+            # Start with original (no clone yet - compute in-place if possible)
+            # Move original to target device/dtype first
+            new_weight = original.to(device=current_param.device, dtype=current_param.dtype)
+
+            # Add all LoRA contributions directly
+            for path, lora_info in state["loras"].items():
+                if key in lora_info["diffs"]:
+                    scale = lora_info["scale"]
+                    diff = lora_info["diffs"][key]
+                    # Add scaled diff directly (converted to correct device/dtype)
+                    new_weight = new_weight + (scale * diff).to(device=current_param.device, dtype=current_param.dtype)
+
+            # Ensure tensor is contiguous for efficient downstream operations (e.g., quantization)
+            if not new_weight.is_contiguous():
+                new_weight = new_weight.contiguous()
+
+            # Assign the final computed weight directly to parameter
+            current_param.data = new_weight
+            updated_count += 1
+
+        print(f"_apply_all_loras: Successfully updated {updated_count} parameters")
 
     @staticmethod
     def load_adapter(
@@ -177,21 +204,37 @@ class LoRAManager:
             ...     strength=1.0
             ... )
         """
+        print(f"load_adapter: Starting to load {lora_path}")
         if not os.path.exists(lora_path):
             raise FileNotFoundError(f"load_adapter: LoRA file not found: {lora_path}")
 
         state = LoRAManager._get_model_state(model)
 
         # Load LoRA weights
+        print(f"load_adapter: Loading LoRA weights from file...")
         if lora_path.endswith('.safetensors'):
             lora_state = load_file(lora_path)
         else:
             lora_state = torch.load(lora_path, map_location='cpu')
 
+        print(f"load_adapter: Loaded {len(lora_state)} keys from LoRA file")
         logger.debug(f"load_adapter: Loaded {len(lora_state)} keys from {lora_path}")
 
-        model_state = model.state_dict()
-        key_map = LoRAManager._build_key_map(model_state)
+        print(f"load_adapter: Building parameter map (fast, no full copy)...")
+        # Build map from named_parameters instead of state_dict (much faster!)
+        param_dict = dict(model.named_parameters())
+        print(f"load_adapter: Got {len(param_dict)} parameters")
+        if param_dict:
+            example_param_name = next(iter(param_dict.keys()))
+            print(f"load_adapter: Example parameter name: {example_param_name}")
+
+        # Create a lightweight "fake" state dict with just keys (no actual tensors)
+        # named_parameters() already includes .weight/.bias suffixes, so use them directly
+        print(f"load_adapter: Building key map for LoRA matching...")
+        fake_state_dict = {name: None for name in param_dict.keys()}
+        key_map = LoRAManager._build_key_map(fake_state_dict)
+
+        print(f"load_adapter: Built key map with {len(key_map)} entries")
         logger.debug(f"load_adapter: Built key map with {len(key_map)} entries")
 
         # First pass: collect all affected keys and compute diffs
@@ -201,6 +244,14 @@ class LoRAManager:
         skipped_no_match = 0
         skipped_no_down = 0
         skipped_no_model_key = 0
+
+        print(f"load_adapter: Processing {len(lora_state)} LoRA keys...")
+        first_lora_up_key = None
+        for lora_key in lora_state.keys():
+            if first_lora_up_key is None and ('.lora_up.weight' in lora_key or '.lora_B.weight' in lora_key):
+                first_lora_up_key = lora_key
+        if first_lora_up_key:
+            print(f"load_adapter: Example LoRA key: {first_lora_up_key}")
 
         for lora_key in lora_state.keys():
             # Look for lora_up/lora_B weights
@@ -231,11 +282,24 @@ class LoRAManager:
             if model_key is None:
                 model_key = key_map.get(f"diffusion_model.{normalized_key}")
 
-            if model_key is None or model_key not in model_state:
+            if model_key is None:
                 skipped_no_model_key += 1
                 if skipped_no_model_key <= 3:
+                    print(f"load_adapter: DEBUG - No model key found for base_key={base_key}, normalized={normalized_key}")
                     logger.debug(f"load_adapter: No model key found for base_key={base_key}, normalized={normalized_key}")
                 continue
+
+            # Get the actual parameter directly using model_key
+            # (named_parameters already includes .weight suffix, so model_key should match)
+            if model_key not in param_dict:
+                skipped_no_model_key += 1
+                if skipped_no_model_key <= 3:
+                    print(f"load_adapter: DEBUG - Parameter {model_key} not found in param_dict")
+                    logger.debug(f"load_adapter: Parameter {model_key} not found in model")
+                continue
+
+            # Get original weight directly from parameter (no state_dict copy!)
+            original_weight = param_dict[model_key].data
 
             # Get alpha if present
             alpha = lora_state.get(alpha_key)
@@ -245,7 +309,6 @@ class LoRAManager:
             # Compute the LoRA diff (without strength, we'll apply that later)
             lora_up = lora_state[lora_key]
             lora_down = lora_state[down_key]
-            original_weight = model_state[model_key]
 
             # Move LoRA weights to same device as model weight
             lora_up = lora_up.to(device=original_weight.device)
@@ -269,9 +332,17 @@ class LoRAManager:
             keys_to_backup.append(model_key)
             applied_count += 1
 
+            if applied_count <= 3:
+                print(f"load_adapter: DEBUG - Successfully matched: lora_key={base_key} -> model_key={model_key}")
+
+        print(f"load_adapter: Finished processing LoRA keys. Applied {applied_count} patches.")
+        print(f"load_adapter: Skipped: no_match={skipped_no_match}, no_down={skipped_no_down}, no_model_key={skipped_no_model_key}")
+
         # Backup original weights before first LoRA
         if keys_to_backup:
+            print(f"load_adapter: Backing up {len(keys_to_backup)} original weights...")
             LoRAManager._backup_original_weights(model, keys_to_backup)
+            print(f"load_adapter: Backup complete")
 
         # Store this LoRA's diffs and initial strength (use path as key)
         state["loras"][str(lora_path)] = {
@@ -280,7 +351,9 @@ class LoRAManager:
         }
 
         # Apply all LoRAs with their current scales
+        print(f"load_adapter: Applying all LoRAs to model weights...")
         LoRAManager._apply_all_loras(model)
+        print(f"load_adapter: LoRA application complete")
 
         if applied_count > 0:
             logger.info(f"load_adapter: Applied {applied_count} LoRA weight patches")
@@ -321,9 +394,12 @@ class LoRAManager:
         loaded_adapters = []
 
         if not lora_configs:
+            print(f"load_adapters_from_list: No LoRA configs provided")
             return loaded_adapters
 
-        for lora_config in lora_configs:
+        print(f"load_adapters_from_list: Loading {len(lora_configs)} LoRA adapter(s)...")
+        for idx, lora_config in enumerate(lora_configs):
+            print(f"load_adapters_from_list: Processing LoRA {idx + 1}/{len(lora_configs)}")
             lora_path = lora_config.get("path")
             if not lora_path:
                 logger.warning(f"{logger_prefix}Skipping LoRA config with no path specified")

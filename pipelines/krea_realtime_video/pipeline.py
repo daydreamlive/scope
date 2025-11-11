@@ -47,11 +47,26 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
 
         print(f"Loaded diffusion wrapper in {time.time() - start:.3f}s")
 
+        print(
+            f"KreaRealtimeVideoPipeline.__init__: Starting projection fusion for {len(generator.model.blocks)} blocks"
+        )
+        start = time.time()
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
+        print(
+            f"KreaRealtimeVideoPipeline.__init__: Completed projection fusion in {time.time() - start:.3f}s"
+        )
 
         # Load LoRA adapters if provided (from UI via load_params, before quantization)
+        print("KreaRealtimeVideoPipeline.__init__: Starting LoRA initialization")
+        print(
+            f"KreaRealtimeVideoPipeline.__init__: LoRA configs: {config.get('loras', [])}"
+        )
+        start = time.time()
         self._init_loras(config, generator.model)
+        print(
+            f"KreaRealtimeVideoPipeline.__init__: Completed LoRA initialization in {time.time() - start:.3f}s"
+        )
 
         if quantization == Quantization.FP8_E4M3FN:
             # Cast before optional quantization
