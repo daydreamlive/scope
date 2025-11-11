@@ -1,6 +1,6 @@
-import torch
-from typing import Optional
 import os
+
+import torch
 
 SAGEATTN_AVAILABLE = False
 try:
@@ -9,10 +9,20 @@ try:
 
     from sageattention import sageattn
 
-    @torch.library.custom_op("mylib::sageattn", mutates_args={"q", "k", "v"}, device_types="cuda")
-    def sageattn_func(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-                      attn_mask: Optional[torch.Tensor] = None , dropout_p: float = 0, is_causal: bool = False) -> torch.Tensor:
-        return sageattn(q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal)
+    @torch.library.custom_op(
+        "mylib::sageattn", mutates_args={"q", "k", "v"}, device_types="cuda"
+    )
+    def sageattn_func(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        dropout_p: float = 0,
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        return sageattn(
+            q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal
+        )
 
     @sageattn_func.register_fake
     def _sageattn_fake(q, k, v, attn_mask=None, dropout_p=0, is_causal=False):
