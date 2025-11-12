@@ -6,6 +6,7 @@ from ..wan2_1.blocks import (
     DecodeBlock,
     DenoiseBlock,
     PrepareLatentsBlock,
+    PrepareNextBlock,
     SetTimestepsBlock,
     SetupCachesBlock,
     TextConditioningBlock,
@@ -33,6 +34,7 @@ ALL_BLOCKS = InsertableDict(
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),
         ("prepare_recache_frames", PrepareRecacheFramesBlock),
+        ("prepare_next", PrepareNextBlock),
     ]
 )
 

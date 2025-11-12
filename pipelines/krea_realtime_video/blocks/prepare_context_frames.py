@@ -2,7 +2,6 @@ import torch
 from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
-    ConfigSpec,
     InputParam,
     OutputParam,
 )
@@ -13,12 +12,6 @@ class PrepareContextFramesBlock(ModularPipelineBlocks):
     def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("generator", torch.nn.Module),
-        ]
-
-    @property
-    def expected_configs(self) -> list[ConfigSpec]:
-        return [
-            ConfigSpec("num_frame_per_block", 3),
         ]
 
     @property
@@ -97,8 +90,7 @@ class PrepareContextFramesBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[any, PipelineState]:
         block_state = self.get_block_state(state)
 
-        # This means we just denoised the first block
-        if block_state.current_start_frame == components.config.num_frame_per_block:
+        if block_state.current_start_frame == 0:
             block_state.first_context_frame = block_state.latents[:, :1]
 
         if block_state.context_frame_buffer_max_size > 0:

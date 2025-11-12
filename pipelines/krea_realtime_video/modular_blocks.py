@@ -6,12 +6,12 @@ from ..wan2_1.blocks import (
     DecodeBlock,
     DenoiseBlock,
     PrepareLatentsBlock,
+    PrepareNextBlock,
     SetTimestepsBlock,
     SetupCachesBlock,
     TextConditioningBlock,
 )
-from .blocks.prepare_context_frames import PrepareContextFramesBlock
-from .blocks.recompute_kv_cache import RecomputeKVCacheBlock
+from .blocks import PrepareContextFramesBlock, RecomputeKVCacheBlock
 
 logger = diffusers_logging.get_logger(__name__)
 
@@ -26,6 +26,7 @@ ALL_BLOCKS = InsertableDict(
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),
         ("prepare_context_frames", PrepareContextFramesBlock),
+        ("prepare_next", PrepareNextBlock),
     ]
 )
 

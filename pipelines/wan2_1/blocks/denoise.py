@@ -189,7 +189,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                 )
 
         block_state.latents = denoised_pred
-        block_state.current_start_frame += num_frames
 
         self.set_block_state(state, block_state)
         return components, state
