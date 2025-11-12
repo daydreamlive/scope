@@ -258,25 +258,23 @@ class CausalStreamInferencePipeline(torch.nn.Module):
 
         return denoised_pred
 
-    def encode_image_for_i2v(self, image_tensor: torch.Tensor, num_latent_frames: int = 2):
+    def encode_image_for_i2v(self, image_tensor: torch.Tensor):
         """
-        Encode image for I2V conditioning.
+        Encode image for I2V conditioning using CLIP visual features.
+
+        Note: The base Wan 2.1 1.3B model only supports I2V through CLIP cross-attention.
+        It does NOT support VAE-based channel concatenation (which would require in_dim=33).
 
         Args:
             image_tensor: Preprocessed image [3, H, W] in [-1, 1] range
-            num_latent_frames: Number of temporal latent frames (default 2 for start_chunk_size=5)
 
         Returns:
-            visual_context: CLIP features [1, 257, 1280]
-            cond_concat: Conditioning with mask [T, 17, H/8, W/8] in FCHW format
-                        (T=num frames, 17=1 mask + 16 latent channels)
+            visual_context: CLIP features [1, 257, 1280] for cross-attention conditioning
         """
         if not self.enable_i2v or self.clip is None:
             raise RuntimeError("I2V mode not enabled or CLIP not available")
 
         device = next(self.generator.model.parameters()).device
-        h, w = image_tensor.shape[1:]
-        lat_h, lat_w = h // 8, w // 8
 
         # Move image to device
         image_seq = image_tensor[:, None, :, :].to(device, dtype=torch.bfloat16)
@@ -290,40 +288,6 @@ class CausalStreamInferencePipeline(torch.nn.Module):
         # Offload CLIP to save VRAM
         self.clip.model.cpu()
 
-        # VAE encode the single image frame
-        # Convert to BCTHW format: [3, 1, H, W] -> [1, 3, 1, H, W]
-        image_bcthw = image_seq.unsqueeze(0)  # [1, 3, 1, H, W]
+        logger.info(f"Encoded image for I2V: visual_context={visual_context.shape}")
 
-        with torch.no_grad():
-            # Encode single frame to latent space
-            cond_latent = self.vae.model.encode(
-                image_bcthw,
-                scale=[self.vae.mean.to(device), 1.0 / self.vae.std.to(device)]
-            )  # [1, 16, 1, H/8, W/8]
-
-        # Expand cond_latent to match temporal dimension
-        # [1, 16, 1, H/8, W/8] -> [1, 16, T, H/8, W/8]
-        cond_latent_expanded = torch.zeros(
-            1, 16, num_latent_frames, lat_h, lat_w,
-            device=device, dtype=cond_latent.dtype
-        )
-        cond_latent_expanded[:, :, 0, :, :] = cond_latent[:, :, 0, :, :]
-
-        # Create mask: [1, 1, T, H/8, W/8]
-        # 1 for first temporal frame (conditioned), 0 for rest (to be generated)
-        mask = torch.zeros(1, 1, num_latent_frames, lat_h, lat_w, device=device, dtype=cond_latent.dtype)
-        mask[:, :, 0, :, :] = 1.0
-
-        # Concatenate mask and latent along channel dimension
-        # [1, 1, T, H/8, W/8] + [1, 16, T, H/8, W/8] -> [1, 17, T, H/8, W/8]
-        cond_concat = torch.cat([mask, cond_latent_expanded], dim=1)
-
-        # Convert from BCFHW [1, 17, T, H/8, W/8] to FCHW [T, 17, H/8, W/8] format
-        # The wrapper permutes noise to BFCHW, so after batch iteration we get FCHW
-        # Our conditioning must match this FCHW format for concatenation to work
-        cond_concat = cond_concat.squeeze(0)  # Remove batch: [17, T, H/8, W/8] CFHW
-        cond_concat = cond_concat.permute(1, 0, 2, 3)  # Permute to FCHW: [T, 17, H/8, W/8]
-
-        logger.info(f"Encoded image for I2V: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")
-
-        return visual_context, cond_concat
+        return visual_context

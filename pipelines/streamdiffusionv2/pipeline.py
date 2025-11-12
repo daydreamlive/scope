@@ -79,9 +79,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
 
-        # I2V conditioning cache
+        # I2V conditioning cache (CLIP visual features only)
         self.i2v_visual_context = None
-        self.i2v_cond_concat = None
         self.i2v_first_chunk = True
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
@@ -183,17 +182,19 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if self.enable_i2v:
             self.i2v_first_chunk = True
 
-    def set_i2v_conditioning(self, visual_context: torch.Tensor, cond_concat: torch.Tensor):
-        """Set I2V conditioning that will be used for subsequent generations."""
+    def set_i2v_conditioning(self, visual_context: torch.Tensor):
+        """
+        Set I2V conditioning that will be used for subsequent generations.
+
+        Note: The base Wan 2.1 1.3B model only supports I2V through CLIP visual features.
+        """
         self.i2v_visual_context = visual_context
-        self.i2v_cond_concat = cond_concat
         self.i2v_first_chunk = True  # Reset for new image
-        logger.info(f"I2V conditioning set: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")
+        logger.info(f"I2V conditioning set: visual_context={visual_context.shape}")
 
     def clear_i2v_conditioning(self):
         """Clear I2V conditioning (e.g., when switching modes)."""
         self.i2v_visual_context = None
-        self.i2v_cond_concat = None
         self.i2v_first_chunk = True
         logger.info("I2V conditioning cleared")
 
@@ -277,7 +278,6 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # Determine if we're using I2V mode (only for first chunk)
         use_i2v = (self.enable_i2v and
                    self.i2v_visual_context is not None and
-                   self.i2v_cond_concat is not None and
                    self.i2v_first_chunk)
 
         if noise_controller and not use_i2v:
@@ -295,7 +295,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         if use_i2v:
             # I2V mode: Start from pure noise, don't encode input frames
-            # The conditioning comes from the pre-encoded image (i2v_cond_concat)
+            # The conditioning comes from CLIP visual features (cross-attention only)
             # Input shape should match expected latent dimensions
             # For start_chunk_size=5 frames: [B, 16, 5//4+1=2, H//8, W//8]
             batch_size = 1
@@ -338,7 +338,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
                 current_step=current_step,
                 generator=rng,
                 visual_context=self.i2v_visual_context,
-                cond_concat=self.i2v_cond_concat,
+                cond_concat=None,  # Not used by base Wan 2.1 1.3B model
             )
             # Mark that we've processed the first chunk
             self.i2v_first_chunk = False

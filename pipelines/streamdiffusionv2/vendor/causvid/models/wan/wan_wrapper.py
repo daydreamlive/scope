@@ -186,15 +186,19 @@ class WanVAEWrapper(VAEInterface):
         return output
 
     def stream_decode_to_pixel(self, latent: torch.Tensor) -> torch.Tensor:
-        zs = latent.permute(0, 2, 1, 3, 4)
-        zs = zs.to(torch.bfloat16).to("cuda")
+        # latent: [B, C, F, H, W] from model
+        # VAE stream_decode expects: [B, C, T, H, W] - same format!
+        # No permutation needed
+        zs = latent.to(torch.bfloat16).to("cuda")
         device, dtype = latent.device, latent.dtype
         scale = [
             self.mean.to(device=device, dtype=dtype),
             1.0 / self.std.to(device=device, dtype=dtype),
         ]
         output = self.model.stream_decode(zs, scale).float().clamp_(-1, 1)
-        output = output.permute(0, 2, 1, 3, 4)
+        # output: [B, C, T, H, W]
+        # Pipeline expects: [B, F, C, H, W]
+        output = output.permute(0, 2, 1, 3, 4)  # [B, C, F, H, W] -> [B, F, C, H, W]
         return output
 
 
@@ -302,17 +306,14 @@ class WanDiffusionWrapper(DiffusionModelInterface):
             "seq_len": self.seq_len,
         }
 
-        # Add I2V conditioning if provided
+        # Add I2V conditioning if provided and model supports it
+        # Only pass clip_fea if visual_context is provided (I2V mode)
+        # The model will check if it has img_emb module and warn if not
         if visual_context is not None:
             model_kwargs["clip_fea"] = visual_context
-        if cond_concat is not None:
-            # Debug: Log the shape before passing
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"wan_wrapper: cond_concat shape before passing to model: {cond_concat.shape}")
-            # CRITICAL: y must be passed as a LIST of tensors, not a single tensor
-            # Each tensor in the list should have shape [C, F, H, W]
-            model_kwargs["y"] = [cond_concat]  # Wrap in list
+
+        # Note: cond_concat (VAE-based conditioning) is not used because
+        # the base model has in_dim=16 and doesn't support channel concatenation
 
         if kv_cache is not None:
             model_kwargs.update({
@@ -321,26 +322,23 @@ class WanDiffusionWrapper(DiffusionModelInterface):
                 "current_start": current_start,
                 "current_end": current_end,
             })
-            # Debug logging before model forward
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"wan_wrapper: noisy_image_or_video shape before permute: {noisy_image_or_video.shape}")
-            permuted_noise = noisy_image_or_video.permute(0, 2, 1, 3, 4)
-            logger.info(f"wan_wrapper: noisy_image_or_video shape after permute: {permuted_noise.shape}")
-            if "y" in model_kwargs:
-                logger.info(f"wan_wrapper: y parameter type: {type(model_kwargs['y'])}, length: {len(model_kwargs['y']) if isinstance(model_kwargs['y'], list) else 'N/A'}")
-                if isinstance(model_kwargs['y'], list) and len(model_kwargs['y']) > 0:
-                    logger.info(f"wan_wrapper: y[0] shape: {model_kwargs['y'][0].shape}")
-
+            # Model expects [B, C, F, H, W] format (will be split to list of [C, F, H, W])
+            # No permutation needed - pass directly
             flow_pred = self.model(
-                permuted_noise,
+                noisy_image_or_video,
                 **model_kwargs
-            ).permute(0, 2, 1, 3, 4)
+            )
         else:
             flow_pred = self.model(
-                noisy_image_or_video.permute(0, 2, 1, 3, 4),
+                noisy_image_or_video,
                 **model_kwargs
-            ).permute(0, 2, 1, 3, 4)
+            )
+
+        # Debug: Log shapes
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"wan_wrapper: flow_pred shape: {flow_pred.shape}")
+        logger.info(f"wan_wrapper: noisy_image_or_video shape: {noisy_image_or_video.shape}")
 
         pred_x0 = self._convert_flow_pred_to_x0(
             flow_pred=flow_pred.flatten(0, 1),
@@ -348,6 +346,7 @@ class WanDiffusionWrapper(DiffusionModelInterface):
             timestep=timestep.flatten(0, 1),
         ).unflatten(0, flow_pred.shape[:2])
 
+        logger.info(f"wan_wrapper: pred_x0 shape: {pred_x0.shape}")
         return pred_x0
 
 

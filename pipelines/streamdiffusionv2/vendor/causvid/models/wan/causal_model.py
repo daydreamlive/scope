@@ -636,16 +636,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
-        # Debug logging at the very start
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"causal_model._forward_inference: ENTRY")
-        logger.info(f"  x type: {type(x)}, x is tensor: {isinstance(x, torch.Tensor)}")
-        if isinstance(x, torch.Tensor):
-            logger.info(f"  x shape (as tensor): {x.shape}")
-        elif isinstance(x, list):
-            logger.info(f"  x length (as list): {len(x)}, x[0] shape: {x[0].shape if len(x) > 0 else 'empty'}")
-
         if self.model_type == "i2v":
             assert clip_fea is not None and y is not None
         # params
@@ -653,30 +643,51 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if self.freqs.device != device:
             self.freqs = self.freqs.to(device)
 
+        target_dtype = self.patch_embedding.weight.dtype
+
+        def _tensor_to_list(value):
+            if isinstance(value, torch.Tensor):
+                if value.dim() == 5:
+                    # Treat leading dimension as batch
+                    return [value[i] for i in range(value.shape[0])]
+                if value.dim() == 4:
+                    return [value]
+                raise ValueError(
+                    f"Unsupported tensor rank {value.dim()} for diffusion input."
+                )
+            if isinstance(value, (list, tuple)):
+                tensors = []
+                for item in value:
+                    tensors.extend(_tensor_to_list(item))
+                return tensors
+            raise TypeError(f"Unsupported input type {type(value)} for diffusion input.")
+
+        x_tensors = _tensor_to_list(x)
+        if not x_tensors:
+            raise ValueError("Received empty latent tensor list for diffusion input.")
+
+        processed_x = [
+            tensor.to(device=device, dtype=target_dtype)
+            if tensor.dtype != target_dtype or tensor.device != device
+            else tensor
+            for tensor in x_tensors
+        ]
+
+        # Note: The base Wan 2.1 1.3B model has in_dim=16 and model_type="t2v"
+        # It does NOT support I2V channel concatenation (which would require in_dim=33)
+        # I2V conditioning is handled ONLY through CLIP visual features in cross-attention
+        # The y parameter is ignored for this model configuration
         if y is not None:
-            # Debug logging
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"causal_model: x type: {type(x)}, length: {len(x) if isinstance(x, list) else 'not a list'}")
-            logger.info(f"causal_model: y type: {type(y)}, length: {len(y) if isinstance(y, list) else 'not a list'}")
-            if isinstance(x, list) and len(x) > 0:
-                logger.info(f"causal_model: x[0] shape: {x[0].shape}")
-            if isinstance(y, list) and len(y) > 0:
-                logger.info(f"causal_model: y[0] shape: {y[0].shape}")
-
-            # Concatenate x and y
-            try:
-                x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
-                logger.info(f"causal_model: After concatenation, x[0] shape: {x[0].shape}")
-            except Exception as e:
-                logger.error(f"causal_model: Concatenation failed!")
-                logger.error(f"  Attempted to concatenate along dim=0:")
-                for i, (u, v) in enumerate(zip(x, y)):
-                    logger.error(f"  pair {i}: u.shape={u.shape}, v.shape={v.shape}")
-                raise
+            logger.warning(
+                "I2V channel concatenation (y parameter) is not supported by this model. "
+                "The model has in_dim=16 and expects only 16-channel latent inputs. "
+                "I2V conditioning should be done through CLIP visual features only."
+            )
 
         # embeddings
-        x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
+        x = [self.patch_embedding(t.unsqueeze(0)) for t in processed_x]
         grid_sizes = torch.stack(
             [torch.tensor(u.shape[2:], dtype=torch.long) for u in x]
         )
@@ -715,8 +726,18 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-            context = torch.concat([context_clip, context], dim=1)
+            # Only use CLIP features if model was initialized with I2V support
+            if hasattr(self, 'img_emb'):
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context = torch.concat([context_clip, context], dim=1)
+            else:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "CLIP features provided but model does not have img_emb module. "
+                    "Model was likely initialized with model_type='t2v' instead of 'i2v'. "
+                    "Ignoring CLIP features."
+                )
 
         # arguments
         kwargs = dict(
@@ -846,8 +867,18 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-            context = torch.concat([context_clip, context], dim=1)
+            # Only use CLIP features if model was initialized with I2V support
+            if hasattr(self, 'img_emb'):
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context = torch.concat([context_clip, context], dim=1)
+            else:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "CLIP features provided but model does not have img_emb module. "
+                    "Model was likely initialized with model_type='t2v' instead of 'i2v'. "
+                    "Ignoring CLIP features."
+                )
 
         # arguments
         kwargs = dict(
