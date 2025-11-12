@@ -31,7 +31,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 description="Current prompt or prompts conditioning denoising",
             ),
             InputParam(
-                "prompt",
+                "prompts",
                 required=True,
                 type_hint=str | list[str],
                 description="New prompt or prompts to condition denoising",
@@ -66,12 +66,12 @@ class TextConditioningBlock(ModularPipelineBlocks):
     @staticmethod
     def check_inputs(block_state: BlockState):
         if (
-            block_state.prompt is not None
-            and not isinstance(block_state.prompt, str)
-            and not isinstance(block_state.prompt, list)
+            block_state.prompts is not None
+            and not isinstance(block_state.prompts, str)
+            and not isinstance(block_state.prompts, list)
         ):
             raise ValueError(
-                f"`prompt` has to be of type `str` or `list` but is {type(block_state.prompt)}"
+                f"`prompt` has to be of type `str` or `list` but is {type(block_state.prompts)}"
             )
 
     @torch.no_grad()
@@ -84,18 +84,18 @@ class TextConditioningBlock(ModularPipelineBlocks):
         # Only run text_encoder if prompt changed
         if (
             block_state.current_prompt is None
-            or block_state.current_prompt != block_state.prompt
+            or block_state.current_prompt != block_state.prompts
         ):
             with torch.autocast(
                 str(components.config.device), dtype=components.config.dtype
             ):
                 conditional_dict = components.text_encoder(
-                    text_prompts=[block_state.prompt]
-                    if isinstance(block_state.prompt, str)
-                    else block_state.prompt
+                    text_prompts=[block_state.prompts]
+                    if isinstance(block_state.prompts, str)
+                    else block_state.prompts
                 )
             block_state.prompt_embeds = conditional_dict["prompt_embeds"]
-            block_state.current_prompt = block_state.prompt
+            block_state.current_prompt = block_state.prompts
             block_state.prompt_embeds_updated = True
 
         self.set_block_state(state, block_state)
