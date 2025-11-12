@@ -106,7 +106,19 @@ class LongLivePipeline(Pipeline):
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))
 
-    def __call__(self, **kwargs):
+        self.first_call = True
+
+    def __call__(self, **kwargs) -> torch.Tensor:
+        if self.first_call:
+            self.state.set("init_cache", True)
+            self.first_call = False
+        else:
+            # This will be overriden if the init_cache is passed in kwargs
+            self.state.set("init_cache", False)
+
+        return self._generate(**kwargs)
+
+    def _generate(self, **kwargs) -> torch.Tensor:
         for k, v in kwargs.items():
             self.state.set(k, v)
 
