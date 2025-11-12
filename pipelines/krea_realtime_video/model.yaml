@@ -6,5 +6,4 @@ kv_cache_num_frames: 3
 local_attn_size: 6
 vae_spatial_downsample_factor: 8
 patch_embedding_spatial_downsample_factor: 2
-warp_denoising_step: true
 max_rope_freq_table_seq_len: 1024
