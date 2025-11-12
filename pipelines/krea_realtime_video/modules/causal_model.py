@@ -12,7 +12,7 @@ from torch.nn.attention.flex_attention import (
 )
 
 from ...wan2_1.modules.attention import attention
-from ...wan2_1.modules.model import (
+from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
     WanLayerNorm,
@@ -541,11 +541,11 @@ class CausalWanSelfAttention(nn.Module):
                 frame_seqlen_tensor = torch.tensor(
                     frame_seqlen, dtype=torch.int32, device=roped_query.device
                 )
-                cache_current_block_start_tensor = torch.tensor(
-                    cache_current_block_start,
-                    dtype=torch.int32,
-                    device=roped_query.device,
-                )
+                # cache_current_block_start might already be a tensor([0]) based on the way local_end_index is initialized
+                # in the KV cache but we want a scalar tensor so we check for that case and convert if needed
+                cache_current_block_start_tensor = cache_current_block_start
+                if isinstance(cache_current_block_start_tensor, torch.Tensor) and cache_current_block_start_tensor.ndim > 0:
+                    cache_current_block_start_tensor = cache_current_block_start_tensor.squeeze()
 
                 def score_mod(score, b_idx, h_idx, q_idx, kv_idx):
                     # Apply bias only to past frames (exclude first frame and current block)

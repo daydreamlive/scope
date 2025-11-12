@@ -54,7 +54,7 @@ for _, prompt in enumerate(prompts):
     while num_frames < max_output_frames:
         start = time.time()
 
-        output = pipeline(prompts=prompt)
+        output = pipeline(prompts=prompt, kv_cache_attention_bias=0.3)
 
         num_output_frames, _, _, _ = output.shape
         latency = time.time() - start

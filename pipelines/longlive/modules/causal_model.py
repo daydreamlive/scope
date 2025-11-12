@@ -13,7 +13,7 @@ from torch.nn.attention.flex_attention import (
 )
 
 from ...wan2_1.modules.attention import attention
-from ...wan2_1.modules.model import (
+from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
     WanLayerNorm,
