@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import types
@@ -18,6 +19,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         sink_size=0,
         model_dir: str | None = None,
         generator_path: str | None = None,
+        generator_model_name: str | None = None,
     ):
         super().__init__()
 
@@ -33,6 +35,11 @@ class WanDiffusionWrapper(torch.nn.Module):
             config.update({"local_attn_size": local_attn_size, "sink_size": sink_size})
 
             state_dict = load_state_dict(generator_path)
+            # Handle case where the dict with required keys is nested under a specific key
+            # eg state_dict["generator"]
+            if generator_model_name is not None:
+                state_dict = state_dict[generator_model_name]
+
             # Remove 'model.' prefix if present (from wrapped models)
             if all(k.startswith("model.") for k in state_dict.keys()):
                 state_dict = {
@@ -143,6 +150,17 @@ class WanDiffusionWrapper(torch.nn.Module):
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
 
+    def _call_model(self, *args, **kwargs):
+        # HACK!
+        # __call__() and forward() accept *args, **kwargs so inspection doesn't tell us anything
+        # As a workaround we inspect the internal _forward_inference() function to determine what the accepted params are
+        # This allows us to filter out params that might not work with the underlying CausalWanModel impl
+        sig = inspect.signature(self.model._forward_inference)
+        accepted = {
+            name: value for name, value in kwargs.items() if name in sig.parameters
+        }
+        return self.model(*args, **accepted)
+
     def forward(
         self,
         noisy_image_or_video: torch.Tensor,
@@ -169,7 +187,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         logits = None
         # X0 prediction
         if kv_cache is not None:
-            flow_pred = self.model(
+            flow_pred = self._call_model(
                 noisy_image_or_video.permute(0, 2, 1, 3, 4),
                 t=input_timestep,
                 context=prompt_embeds,
@@ -183,7 +201,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         else:
             if clean_x is not None:
                 # teacher forcing
-                flow_pred = self.model(
+                flow_pred = self._call_model(
                     noisy_image_or_video.permute(0, 2, 1, 3, 4),
                     t=input_timestep,
                     context=prompt_embeds,
@@ -193,7 +211,7 @@ class WanDiffusionWrapper(torch.nn.Module):
                 ).permute(0, 2, 1, 3, 4)
             else:
                 if classify_mode:
-                    flow_pred, logits = self.model(
+                    flow_pred, logits = self._call_model(
                         noisy_image_or_video.permute(0, 2, 1, 3, 4),
                         t=input_timestep,
                         context=prompt_embeds,
@@ -206,7 +224,7 @@ class WanDiffusionWrapper(torch.nn.Module):
                     )
                     flow_pred = flow_pred.permute(0, 2, 1, 3, 4)
                 else:
-                    flow_pred = self.model(
+                    flow_pred = self._call_model(
                         noisy_image_or_video.permute(0, 2, 1, 3, 4),
                         t=input_timestep,
                         context=prompt_embeds,
