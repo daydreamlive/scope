@@ -79,8 +79,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
 
-        # I2V conditioning cache (CLIP visual features only)
-        self.i2v_visual_context = None
+        # I2V conditioning cache
+        self.i2v_visual_context = None  # CLIP visual features for cross-attention
+        self.i2v_cond_concat = None  # VAE latent for channel concatenation
         self.i2v_first_chunk = True
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
@@ -182,19 +183,23 @@ class StreamDiffusionV2Pipeline(Pipeline):
         if self.enable_i2v:
             self.i2v_first_chunk = True
 
-    def set_i2v_conditioning(self, visual_context: torch.Tensor):
+    def set_i2v_conditioning(self, visual_context: torch.Tensor, cond_concat: torch.Tensor):
         """
         Set I2V conditioning that will be used for subsequent generations.
 
-        Note: The base Wan 2.1 1.3B model only supports I2V through CLIP visual features.
+        The Wan 2.1 I2V architecture uses two types of conditioning:
+        1. CLIP visual features for cross-attention
+        2. VAE-encoded latent for channel concatenation
         """
         self.i2v_visual_context = visual_context
+        self.i2v_cond_concat = cond_concat
         self.i2v_first_chunk = True  # Reset for new image
-        logger.info(f"I2V conditioning set: visual_context={visual_context.shape}")
+        logger.info(f"I2V conditioning set: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")
 
     def clear_i2v_conditioning(self):
         """Clear I2V conditioning (e.g., when switching modes)."""
         self.i2v_visual_context = None
+        self.i2v_cond_concat = None
         self.i2v_first_chunk = True
         logger.info("I2V conditioning cleared")
 
@@ -311,9 +316,28 @@ class StreamDiffusionV2Pipeline(Pipeline):
                 generator=rng,
             )
             logger.info(f"I2V first chunk: Using pure noise with shape {noisy_latents.shape}")
+
+            # Mark that we'll need to reset encoder cache after decode
+            self._i2v_just_decoded = True
         else:
             # T2V mode or subsequent chunks: Encode frames to latents using VAE
-            latents = self.stream.vae.model.stream_encode(input)
+            # If this is the first encode after I2V, use non-streaming encode to avoid cache issues
+            if self.enable_i2v and hasattr(self, '_i2v_just_decoded'):
+                logger.info("First encode after I2V - using non-streaming VAE encode")
+                # Use non-streaming encode for this chunk to avoid cache corruption
+                # Convert BCTHW to list of [C, T, H, W]
+                input_list = [input[0]]  # Remove batch dim
+                latents_list = self.stream.vae.model.encode(
+                    input_list,
+                    scale=[self.stream.vae.mean.to(self.device), 1.0 / self.stream.vae.std.to(self.device)]
+                )
+                latents = latents_list[0].unsqueeze(0)  # Add batch dim back
+
+                # Reset VAE to streaming mode for subsequent chunks
+                self.stream.vae.model.first_batch = True
+                delattr(self, '_i2v_just_decoded')
+            else:
+                latents = self.stream.vae.model.stream_encode(input)
             # Transpose latents
             latents = latents.transpose(2, 1)
 
@@ -338,7 +362,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
                 current_step=current_step,
                 generator=rng,
                 visual_context=self.i2v_visual_context,
-                cond_concat=None,  # Not used by base Wan 2.1 1.3B model
+                cond_concat=self.i2v_cond_concat,
             )
             # Mark that we've processed the first chunk
             self.i2v_first_chunk = False

@@ -673,18 +673,17 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             for tensor in x_tensors
         ]
 
-        # Note: The base Wan 2.1 1.3B model has in_dim=16 and model_type="t2v"
-        # It does NOT support I2V channel concatenation (which would require in_dim=33)
-        # I2V conditioning is handled ONLY through CLIP visual features in cross-attention
-        # The y parameter is ignored for this model configuration
+        # I2V: Concatenate condition latent (y) with noise latent (x) along channel dimension
+        # This is done before patch embedding, so the model still receives 16-channel input per token
         if y is not None:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                "I2V channel concatenation (y parameter) is not supported by this model. "
-                "The model has in_dim=16 and expects only 16-channel latent inputs. "
-                "I2V conditioning should be done through CLIP visual features only."
-            )
+            y_tensors = _tensor_to_list(y)
+            processed_y = [
+                tensor.to(device=device, dtype=target_dtype)
+                if tensor.dtype != target_dtype or tensor.device != device
+                else tensor
+                for tensor in y_tensors
+            ]
+            processed_x = [torch.cat([u, v], dim=0) for u, v in zip(processed_x, processed_y)]
 
         # embeddings
         x = [self.patch_embedding(t.unsqueeze(0)) for t in processed_x]

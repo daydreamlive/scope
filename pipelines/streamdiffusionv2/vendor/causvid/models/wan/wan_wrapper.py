@@ -306,14 +306,12 @@ class WanDiffusionWrapper(DiffusionModelInterface):
             "seq_len": self.seq_len,
         }
 
-        # Add I2V conditioning if provided and model supports it
-        # Only pass clip_fea if visual_context is provided (I2V mode)
-        # The model will check if it has img_emb module and warn if not
+        # Add I2V conditioning if provided
         if visual_context is not None:
             model_kwargs["clip_fea"] = visual_context
 
-        # Note: cond_concat (VAE-based conditioning) is not used because
-        # the base model has in_dim=16 and doesn't support channel concatenation
+        if cond_concat is not None:
+            model_kwargs["y"] = cond_concat
 
         if kv_cache is not None:
             model_kwargs.update({

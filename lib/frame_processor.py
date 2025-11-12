@@ -280,7 +280,15 @@ class FrameProcessor:
             if new_parameters != self.parameters:
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
-                logger.info(f"Updated parameters: {self.parameters}")
+                # Create a safe version for logging that truncates base64 images
+                safe_params = {}
+                for key, value in self.parameters.items():
+                    if key == "input_image" and isinstance(value, str) and len(value) > 100:
+                        # Truncate base64 images to first 50 chars + ellipsis + last 10 chars
+                        safe_params[key] = value[:50] + "..." + value[-10:] if len(value) > 60 else value
+                    else:
+                        safe_params[key] = value
+                logger.info(f"Updated parameters: {safe_params}")
         except queue.Empty:
             pass
 
@@ -436,6 +444,10 @@ class FrameProcessor:
         """
         Process uploaded image for I2V mode.
         Returns tuple of (visual_context, cond_concat) for conditioning.
+
+        The Wan 2.1 I2V architecture uses:
+        1. CLIP visual features for cross-attention
+        2. VAE-encoded latent for channel concatenation
         """
         try:
             # 1. Decode base64 to PIL Image
@@ -453,7 +465,7 @@ class FrameProcessor:
             import torchvision.transforms.functional as TF
             image_tensor = TF.to_tensor(image).sub_(0.5).div_(0.5)  # [-1, 1]
 
-            # 4. Encode using pipeline's I2V encoder (handles VAE + CLIP)
+            # 4. Encode using pipeline's I2V encoder (CLIP + VAE)
             visual_context, cond_concat = pipeline.stream.encode_image_for_i2v(image_tensor)
 
             logger.info(f"Processed image for I2V: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")

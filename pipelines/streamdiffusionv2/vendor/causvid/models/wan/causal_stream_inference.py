@@ -260,34 +260,48 @@ class CausalStreamInferencePipeline(torch.nn.Module):
 
     def encode_image_for_i2v(self, image_tensor: torch.Tensor):
         """
-        Encode image for I2V conditioning using CLIP visual features.
+        Encode image for I2V conditioning using both CLIP and VAE.
 
-        Note: The base Wan 2.1 1.3B model only supports I2V through CLIP cross-attention.
-        It does NOT support VAE-based channel concatenation (which would require in_dim=33).
+        The Wan 2.1 I2V architecture uses two types of conditioning:
+        1. CLIP visual features for cross-attention
+        2. VAE-encoded latent for channel concatenation
 
         Args:
             image_tensor: Preprocessed image [3, H, W] in [-1, 1] range
 
         Returns:
-            visual_context: CLIP features [1, 257, 1280] for cross-attention conditioning
+            tuple: (visual_context, cond_concat)
+                - visual_context: CLIP features [1, 257, 1280] for cross-attention
+                - cond_concat: VAE latent [16, 1, H/8, W/8] for channel concatenation
         """
         if not self.enable_i2v or self.clip is None:
             raise RuntimeError("I2V mode not enabled or CLIP not available")
 
         device = next(self.generator.model.parameters()).device
+        h, w = image_tensor.shape[1:]
 
-        # Move image to device
+        # 1. CLIP encode for cross-attention
+        # Add single frame dimension for CLIP: [3, H, W] -> [3, 1, H, W]
         image_seq = image_tensor[:, None, :, :].to(device, dtype=torch.bfloat16)
 
-        # CLIP encode for visual context
-        # Add single frame dimension for CLIP: [3, H, W] -> [3, 1, H, W]
         self.clip.model.to(device)
         with torch.no_grad():
             visual_context = self.clip.visual([image_seq])  # [1, 257, 1280]
-
-        # Offload CLIP to save VRAM
         self.clip.model.cpu()
 
-        logger.info(f"Encoded image for I2V: visual_context={visual_context.shape}")
+        # 2. VAE encode for channel concatenation
+        # Create single-frame video: [3, H, W] -> [1, 3, 1, H, W] (BCTHW format)
+        image_video = image_tensor[None, :, None, :, :].to(device, dtype=torch.bfloat16)
 
-        return visual_context
+        with torch.no_grad():
+            cond_latent = self.vae.model.encode(
+                image_video,
+                scale=[self.vae.mean.to(device), 1.0 / self.vae.std.to(device)]
+            )  # [1, 16, 1, H/8, W/8]
+
+        # Remove batch dimension: [1, 16, 1, H/8, W/8] -> [16, 1, H/8, W/8]
+        cond_concat = cond_latent.squeeze(0)
+
+        logger.info(f"Encoded image for I2V: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")
+
+        return visual_context, cond_concat
