@@ -249,7 +249,6 @@ class FrameProcessor:
         # Transition is consumed by prepare()
         self.parameters.pop("transition", None)
         self.is_prepared = True
-        input = None
 
         if requirements is not None:
             current_chunk_size = requirements.input_size
@@ -258,11 +257,16 @@ class FrameProcessor:
                     # Sleep briefly to avoid busy waiting
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
-                input = self.prepare_chunk(current_chunk_size)
+                self.prepare_chunk(current_chunk_size)
         try:
             # Pass parameters (excluding prepare-only parameters)
             # print parameters
-            call_params = {k: v for k, v in self.parameters.items()}
+            call_params = dict(self.parameters.items())
+
+            # If pipeline doesn't have prepare(), pass reset_cache as init_cache
+            if not hasattr(pipeline, "prepare") and reset_cache is not None:
+                call_params["init_cache"] = reset_cache
+
             # TODO: Fix multiple prompts in text_conditioning block
             # Temp workaround until we support multiple prompts in text_conditioning block
             call_params["prompts"] = self.parameters.get(
