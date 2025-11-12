@@ -1,10 +1,7 @@
 from typing import Any
 
 import torch
-from diffusers.modular_pipelines import (
-    ModularPipelineBlocks,
-    PipelineState,
-)
+from diffusers.modular_pipelines import BlockState, ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     InputParam,
@@ -72,26 +69,17 @@ class SetTimestepsBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         denoising_step_list = block_state.denoising_step_list
-        if not isinstance(denoising_step_list, torch.Tensor):
+        # Allow user to input list
+        # Convert this to float32 for now
+        if isinstance(denoising_step_list, list):
             denoising_step_list = torch.tensor(
                 denoising_step_list,
-                dtype=torch.long,
+                dtype=torch.float32,
             )
 
         block_state.init_cache = False
 
-        if (
-            block_state.current_denoising_step_list is None
-            or block_state.current_denoising_step_list.shape
-            != denoising_step_list.shape
-            or not torch.allclose(
-                block_state.current_denoising_step_list.to(torch.float32),
-                denoising_step_list.to(torch.float32),
-                atol=1e-1,
-            )
-        ):
-            block_state.denoising_step_list = denoising_step_list
-
+        if denoising_step_list_changed(denoising_step_list, block_state):
             if components.config.warp_denoising_step:
                 # Add 0 as the final step
                 timesteps = torch.cat(
@@ -101,10 +89,11 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                     )
                 )
                 # Reverse direction
-                block_state.denoising_step_list = timesteps[
-                    1000 - block_state.denoising_step_list
-                ]
+                # Cast denoising_step_list to long for indexing
+                denoising_step_list = timesteps[1000 - denoising_step_list.long()]
 
+            # These will always be float32
+            block_state.denoising_step_list = denoising_step_list
             block_state.current_denoising_step_list = denoising_step_list
 
             if block_state.manage_cache:
@@ -112,3 +101,20 @@ class SetTimestepsBlock(ModularPipelineBlocks):
 
         self.set_block_state(state, block_state)
         return components, state
+
+
+def denoising_step_list_changed(
+    denoising_step_list: torch.Tensor, state: BlockState
+) -> bool:
+    if state.current_denoising_step_list is None:
+        return True
+
+    if state.current_denoising_step_list.shape != state.denoising_step_list.shape:
+        return True
+
+    if not torch.allclose(
+        state.current_denoising_step_list, denoising_step_list, atol=1e-1
+    ):
+        return True
+
+    return False
