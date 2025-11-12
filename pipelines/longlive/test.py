@@ -20,14 +20,13 @@ config = OmegaConf.create(
         ),
         "tokenizer_path": str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")),
         "model_config": OmegaConf.load("pipelines/longlive/model.yaml"),
+        "height": 480,
+        "width": 832,
     }
 )
 
 device = torch.device("cuda")
 pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
-
-height = 480
-width = 832
 
 prompts = [
     "A realistic video of a Texas Hold'em poker event at a casino. A male player in his late 30s with a medium build, short dark hair, light stubble, and a sharp jawline wears a fitted navy blazer over a charcoal crew-neck tee, dark jeans, and a stainless-steel watch. He sits at a well-lit poker table and tightly grips his hole cards, wearing a tense, serious expression. The table is filled with chips of various colors, the dealer is seen dealing cards, and several rows of slot machines glow in the background. The camera focuses on the player's strained concentration. Wide shot to medium close-up.",
@@ -45,7 +44,7 @@ for _, prompt in enumerate(prompts):
     while num_frames < max_output_frames:
         start = time.time()
 
-        output = pipeline(height=height, width=width, prompt=prompt)
+        output = pipeline(prompts=prompt)
 
         num_output_frames, _, _, _ = output.shape
         latency = time.time() - start
