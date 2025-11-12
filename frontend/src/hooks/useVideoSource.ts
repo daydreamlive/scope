@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-export type VideoSourceMode = "video" | "camera" | "image";
+export type VideoSourceMode = "video" | "camera";
 
 interface UseVideoSourceProps {
   onStreamUpdate?: (stream: MediaStream) => Promise<boolean>;
@@ -175,7 +175,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
           console.error("Failed to create video file stream:", error);
           setError("Failed to load test video");
         }
-      } else {
+      } else if (newMode === "camera") {
         // Switch to camera mode
         try {
           newStream = await requestCameraAccess();

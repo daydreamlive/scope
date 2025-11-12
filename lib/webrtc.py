@@ -156,7 +156,15 @@ class WebRTCManager:
                 initial_parameters = request.initialParameters.model_dump(
                     exclude_none=True
                 )
-            logger.info(f"Received initial parameters: {initial_parameters}")
+            # Create a safe version for logging that truncates base64 images
+            safe_params = {}
+            for key, value in initial_parameters.items():
+                if key in ("input_image", "adapter_image") and isinstance(value, str) and len(value) > 100:
+                    # Truncate base64 images to first 50 chars + ellipsis + last 10 chars
+                    safe_params[key] = value[:50] + "..." + value[-10:] if len(value) > 60 else value
+                else:
+                    safe_params[key] = value
+            logger.info(f"Received initial parameters: {safe_params}")
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)

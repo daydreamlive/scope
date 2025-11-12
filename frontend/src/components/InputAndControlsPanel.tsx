@@ -32,6 +32,7 @@ interface InputAndControlsPanelProps {
   onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
   onImageFileUpload?: (file: File) => Promise<boolean>; // New prop for image upload
+  onImageClear?: () => void; // New prop for clearing image
   uploadedImage?: string | null; // New prop for displaying uploaded image (base64 or URL)
   pipelineId: string;
   prompts: PromptItem[];
@@ -69,6 +70,7 @@ export function InputAndControlsPanel({
   onStopStream: _onStopStream,
   onVideoFileUpload,
   onImageFileUpload,
+  onImageClear,
   uploadedImage,
   pipelineId,
   prompts,
@@ -103,9 +105,8 @@ export function InputAndControlsPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
-  // Get pipeline category, deafault to video-input
+  // Get pipeline category, default to video-input
   const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
-  const supportsImageInput = PIPELINES[pipelineId]?.supportsImageInput || false;
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -160,7 +161,9 @@ export function InputAndControlsPanel({
 
   const handleClearImage = () => {
     setImagePreview(null);
-    // TODO: Notify parent component to clear the uploaded image
+    if (onImageClear) {
+      onImageClear();
+    }
   };
 
   return (
@@ -190,9 +193,6 @@ export function InputAndControlsPanel({
                 <>
                   <SelectItem value="video">Video</SelectItem>
                   <SelectItem value="camera">Camera</SelectItem>
-                  {supportsImageInput && (
-                    <SelectItem value="image">Image</SelectItem>
-                  )}
                 </>
               ) : (
                 <SelectItem value="text">Text</SelectItem>
@@ -203,45 +203,50 @@ export function InputAndControlsPanel({
 
         {pipelineCategory === "video-input" && (
           <div>
-            <h3 className="text-sm font-medium mb-2">Input</h3>
+            <h3 className="text-sm font-medium mb-2">Video Input</h3>
             <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
-              {mode === "image" ? (
-                // Image mode UI
+              {isInitializing ? (
+                <div className="text-center text-muted-foreground text-sm">
+                  {mode === "camera"
+                    ? "Requesting camera access..."
+                    : "Initializing video..."}
+                </div>
+              ) : error ? (
+                <div className="text-center text-red-500 text-sm p-4">
+                  <p>
+                    {mode === "camera"
+                      ? "Camera access failed:"
+                      : "Video error:"}
+                  </p>
+                  <p className="text-xs mt-1">{error}</p>
+                </div>
+              ) : localStream ? (
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-cover"
+                  autoPlay
+                  muted
+                  playsInline
+                />
+              ) : (
+                <div className="text-center text-muted-foreground text-sm">
+                  {mode === "camera" ? "Camera Preview" : "Video Preview"}
+                </div>
+              )}
+
+              {/* Upload button - only show in video mode */}
+              {mode === "video" && onVideoFileUpload && (
                 <>
-                  {imagePreview ? (
-                    <div className="relative w-full">
-                      <img
-                        src={imagePreview}
-                        alt="Uploaded preview"
-                        className="w-full h-full object-cover"
-                      />
-                      {/* Clear button */}
-                      <Button
-                        onClick={handleClearImage}
-                        disabled={isStreaming || isConnecting}
-                        size="sm"
-                        variant="ghost"
-                        className="absolute top-2 right-2 p-1 rounded-full bg-black/50 hover:bg-black/70"
-                      >
-                        <X className="h-4 w-4 text-white" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="text-center text-muted-foreground text-sm p-4">
-                      No image uploaded
-                    </div>
-                  )}
-                  {/* Upload button */}
                   <input
                     type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
+                    accept="video/*"
+                    onChange={handleFileUpload}
                     className="hidden"
-                    id="image-upload"
+                    id="video-upload"
                     disabled={isStreaming || isConnecting}
                   />
                   <label
-                    htmlFor="image-upload"
+                    htmlFor="video-upload"
                     className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
                       isStreaming || isConnecting
                         ? "opacity-50 cursor-not-allowed"
@@ -251,66 +256,59 @@ export function InputAndControlsPanel({
                     <Upload className="h-4 w-4 text-white" />
                   </label>
                 </>
-              ) : (
-                // Video/Camera mode UI
-                <>
-                  {isInitializing ? (
-                    <div className="text-center text-muted-foreground text-sm">
-                      {mode === "camera"
-                        ? "Requesting camera access..."
-                        : "Initializing video..."}
-                    </div>
-                  ) : error ? (
-                    <div className="text-center text-red-500 text-sm p-4">
-                      <p>
-                        {mode === "camera"
-                          ? "Camera access failed:"
-                          : "Video error:"}
-                      </p>
-                      <p className="text-xs mt-1">{error}</p>
-                    </div>
-                  ) : localStream ? (
-                    <video
-                      ref={videoRef}
-                      className="w-full h-full object-cover"
-                      autoPlay
-                      muted
-                      playsInline
-                    />
-                  ) : (
-                    <div className="text-center text-muted-foreground text-sm">
-                      {mode === "camera" ? "Camera Preview" : "Video Preview"}
-                    </div>
-                  )}
-
-                  {/* Upload button - only show in video mode */}
-                  {mode === "video" && onVideoFileUpload && (
-                    <>
-                      <input
-                        type="file"
-                        accept="video/*"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                        id="video-upload"
-                        disabled={isStreaming || isConnecting}
-                      />
-                      <label
-                        htmlFor="video-upload"
-                        className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                          isStreaming || isConnecting
-                            ? "opacity-50 cursor-not-allowed"
-                            : "hover:bg-black/70 cursor-pointer"
-                        }`}
-                      >
-                        <Upload className="h-4 w-4 text-white" />
-                      </label>
-                    </>
-                  )}
-                </>
               )}
             </div>
           </div>
         )}
+
+        {/* Optional Image Input - Available for all modes */}
+        <div>
+          <h3 className="text-sm font-medium mb-2">Image Input (Optional)</h3>
+          <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative min-h-[120px]">
+            {imagePreview ? (
+              <div className="relative w-full">
+                <img
+                  src={imagePreview}
+                  alt="Input image preview"
+                  className="w-full h-full object-cover"
+                />
+                {/* Clear button */}
+                <Button
+                  onClick={handleClearImage}
+                  disabled={isStreaming || isConnecting}
+                  size="sm"
+                  variant="ghost"
+                  className="absolute top-2 right-2 p-1 rounded-full bg-black/50 hover:bg-black/70"
+                >
+                  <X className="h-4 w-4 text-white" />
+                </Button>
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground text-sm p-4">
+                No image uploaded
+              </div>
+            )}
+            {/* Upload button */}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="hidden"
+              id="image-upload"
+              disabled={isStreaming || isConnecting}
+            />
+            <label
+              htmlFor="image-upload"
+              className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                isStreaming || isConnecting
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-black/70 cursor-pointer"
+              }`}
+            >
+              <Upload className="h-4 w-4 text-white" />
+            </label>
+          </div>
+        </div>
 
         <div>
           {(() => {

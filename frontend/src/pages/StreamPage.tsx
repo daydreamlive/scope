@@ -153,7 +153,7 @@ export function StreamPage() {
       setUploadedImage(base64Data);
       setImageData(base64Data);
 
-      // If streaming, send the image data to the backend
+      // If streaming, send the image data to the backend immediately
       if (isStreaming) {
         sendParameterUpdate({
           input_image: base64Data,
@@ -164,6 +164,18 @@ export function StreamPage() {
     } catch (error) {
       console.error("Failed to process image:", error);
       return false;
+    }
+  };
+
+  const handleImageClear = () => {
+    setUploadedImage(null);
+    setImageData(null);
+
+    // If streaming, send null to clear the image on backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        input_image: null,
+      });
     }
   };
 
@@ -363,6 +375,7 @@ export function StreamPage() {
       prompts,
       prompt_interpolation_method: interpolationMethod,
       denoising_step_list: settings.denoisingSteps || [700, 500],
+      input_image: imageData, // Include image data with prompt updates
     });
   };
 
@@ -578,8 +591,8 @@ export function StreamPage() {
         ];
       }
 
-      // Add image data if in image mode and image is uploaded
-      if (mode === "image" && imageData) {
+      // Add image data if image is uploaded
+      if (imageData) {
         initialParameters.input_image = imageData;
       }
 
@@ -644,6 +657,7 @@ export function StreamPage() {
             onStopStream={stopStream}
             onVideoFileUpload={handleVideoFileUpload}
             onImageFileUpload={handleImageFileUpload}
+            onImageClear={handleImageClear}
             uploadedImage={uploadedImage}
             pipelineId={settings.pipelineId}
             prompts={promptItems}
@@ -721,6 +735,7 @@ export function StreamPage() {
                       temporal_interpolation_method:
                         temporalInterpolationMethod,
                     },
+                    input_image: imageData, // Include image data with prompt updates
                   });
                 } else {
                   // Send direct prompts without transition
@@ -728,6 +743,7 @@ export function StreamPage() {
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
+                    input_image: imageData, // Include image data with prompt updates
                   });
                 }
               }}
@@ -765,6 +781,7 @@ export function StreamPage() {
                       temporal_interpolation_method:
                         effectiveTemporalInterpolationMethod,
                     },
+                    input_image: imageData, // Include image data with prompt updates
                   });
                 } else {
                   // Send direct prompts without transition
@@ -772,6 +789,7 @@ export function StreamPage() {
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
+                    input_image: imageData, // Include image data with prompt updates
                   });
                 }
               }}
