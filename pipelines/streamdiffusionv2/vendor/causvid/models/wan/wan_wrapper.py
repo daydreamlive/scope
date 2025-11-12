@@ -284,6 +284,8 @@ class WanDiffusionWrapper(DiffusionModelInterface):
         crossattn_cache: Optional[List[dict]] = None,
         current_start: Optional[int] = None,
         current_end: Optional[int] = None,
+        visual_context: Optional[torch.Tensor] = None,
+        cond_concat: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
 
@@ -293,23 +295,51 @@ class WanDiffusionWrapper(DiffusionModelInterface):
         else:
             input_timestep = timestep
 
+        # Prepare model arguments with I2V support
+        model_kwargs = {
+            "t": input_timestep,
+            "context": prompt_embeds,
+            "seq_len": self.seq_len,
+        }
+
+        # Add I2V conditioning if provided
+        if visual_context is not None:
+            model_kwargs["clip_fea"] = visual_context
+        if cond_concat is not None:
+            # Debug: Log the shape before passing
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"wan_wrapper: cond_concat shape before passing to model: {cond_concat.shape}")
+            # CRITICAL: y must be passed as a LIST of tensors, not a single tensor
+            # Each tensor in the list should have shape [C, F, H, W]
+            model_kwargs["y"] = [cond_concat]  # Wrap in list
+
         if kv_cache is not None:
+            model_kwargs.update({
+                "kv_cache": kv_cache,
+                "crossattn_cache": crossattn_cache,
+                "current_start": current_start,
+                "current_end": current_end,
+            })
+            # Debug logging before model forward
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"wan_wrapper: noisy_image_or_video shape before permute: {noisy_image_or_video.shape}")
+            permuted_noise = noisy_image_or_video.permute(0, 2, 1, 3, 4)
+            logger.info(f"wan_wrapper: noisy_image_or_video shape after permute: {permuted_noise.shape}")
+            if "y" in model_kwargs:
+                logger.info(f"wan_wrapper: y parameter type: {type(model_kwargs['y'])}, length: {len(model_kwargs['y']) if isinstance(model_kwargs['y'], list) else 'N/A'}")
+                if isinstance(model_kwargs['y'], list) and len(model_kwargs['y']) > 0:
+                    logger.info(f"wan_wrapper: y[0] shape: {model_kwargs['y'][0].shape}")
+
             flow_pred = self.model(
-                noisy_image_or_video.permute(0, 2, 1, 3, 4),
-                t=input_timestep,
-                context=prompt_embeds,
-                seq_len=self.seq_len,
-                kv_cache=kv_cache,
-                crossattn_cache=crossattn_cache,
-                current_start=current_start,
-                current_end=current_end,
+                permuted_noise,
+                **model_kwargs
             ).permute(0, 2, 1, 3, 4)
         else:
             flow_pred = self.model(
                 noisy_image_or_video.permute(0, 2, 1, 3, 4),
-                t=input_timestep,
-                context=prompt_embeds,
-                seq_len=self.seq_len,
+                **model_kwargs
             ).permute(0, 2, 1, 3, 4)
 
         pred_x0 = self._convert_flow_pred_to_x0(

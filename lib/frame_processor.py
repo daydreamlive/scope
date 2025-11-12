@@ -287,6 +287,9 @@ class FrameProcessor:
         # Get the current pipeline using sync wrapper
         pipeline = self.pipeline_manager.get_pipeline()
 
+        # Check if pipeline supports I2V
+        supports_i2v = getattr(pipeline, 'enable_i2v', False)
+
         # Pause or resume the processing
         paused = self.parameters.pop("paused", None)
         if paused is not None and paused != self.paused:
@@ -296,13 +299,41 @@ class FrameProcessor:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
-        # Check for image input mode
+        # Handle image input for I2V mode
         input_image = self.parameters.get("input_image", None)
-        if input_image and input_image != self.current_image_data:
-            # New image data received, clear cache
-            self.current_image_data = input_image
-            self.image_frames_cache = None
-            logger.info("New image data received for img2img mode")
+        using_i2v_mode = False
+
+        if input_image and supports_i2v:
+            if input_image != self.current_image_data:
+                # New image uploaded
+                self.current_image_data = input_image
+                self.image_frames_cache = None
+                logger.info("New image detected for I2V mode")
+
+            # Generate or retrieve conditioning
+            if self.image_frames_cache is None:
+                # Process image for I2V conditioning
+                try:
+                    visual_context, cond_concat = self._process_image_for_i2v(input_image, pipeline)
+                    self.image_frames_cache = (visual_context, cond_concat)
+
+                    # Set conditioning on pipeline
+                    pipeline.set_i2v_conditioning(visual_context, cond_concat)
+                except Exception as e:
+                    logger.error(f"Failed to process image for I2V: {e}", exc_info=True)
+                    # Clear image data on error
+                    self.current_image_data = None
+                    self.image_frames_cache = None
+                    input_image = None
+
+            using_i2v_mode = True
+
+        elif not input_image and supports_i2v:
+            # Image removed, clear conditioning
+            if self.image_frames_cache is not None or self.current_image_data is not None:
+                pipeline.clear_i2v_conditioning()
+                self.image_frames_cache = None
+                self.current_image_data = None
 
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
@@ -327,17 +358,16 @@ class FrameProcessor:
         if requirements is not None:
             current_chunk_size = requirements.input_size
 
-            # Use image input if available, otherwise use video frames
-            if self.current_image_data:
-                # Generate frames from image
-                if self.image_frames_cache is None:
-                    # Convert and cache image frames
-                    self.image_frames_cache = self._convert_base64_image_to_frames(
-                        self.current_image_data, current_chunk_size
-                    )
-                input = self.image_frames_cache
+            if using_i2v_mode:
+                # I2V mode: Generate dummy input for noise generation
+                # The pipeline will use I2V conditioning instead of actual input frames
+                dummy_frame = torch.zeros(
+                    1, 3, pipeline.height, pipeline.width,
+                    dtype=torch.float32
+                )
+                input = [dummy_frame for _ in range(current_chunk_size)]
             else:
-                # Use video frames from buffer
+                # Normal T2V mode: Use video frames from buffer
                 with self.frame_buffer_lock:
                     if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
                         # Sleep briefly to avoid busy waiting
@@ -401,6 +431,37 @@ class FrameProcessor:
                 logger.error(f"Error processing chunk: {e}", exc_info=True)
             else:
                 raise e
+
+    def _process_image_for_i2v(self, base64_data: str, pipeline):
+        """
+        Process uploaded image for I2V mode.
+        Returns tuple of (visual_context, cond_concat) for conditioning.
+        """
+        try:
+            # 1. Decode base64 to PIL Image
+            if "," in base64_data:
+                base64_data = base64_data.split(",", 1)[1]
+            image_bytes = base64.b64decode(base64_data)
+            image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+            # 2. Resize to target resolution (match pipeline resolution)
+            target_h = pipeline.height
+            target_w = pipeline.width
+            image = image.resize((target_w, target_h), Image.BICUBIC)
+
+            # 3. Convert to tensor and normalize to [-1, 1]
+            import torchvision.transforms.functional as TF
+            image_tensor = TF.to_tensor(image).sub_(0.5).div_(0.5)  # [-1, 1]
+
+            # 4. Encode using pipeline's I2V encoder (handles VAE + CLIP)
+            visual_context, cond_concat = pipeline.stream.encode_image_for_i2v(image_tensor)
+
+            logger.info(f"Processed image for I2V: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")
+            return visual_context, cond_concat
+
+        except Exception as e:
+            logger.error(f"Failed to process image for I2V: {e}", exc_info=True)
+            raise
 
     def prepare_chunk(self, chunk_size: int) -> list[torch.Tensor]:
         """

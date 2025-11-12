@@ -238,10 +238,13 @@ class PipelineManager:
             config["width"] = width
             config["seed"] = seed
 
+            # Check if I2V mode should be enabled
+            enable_i2v = load_params.get("enable_i2v", True) if load_params else True
+
             pipeline = StreamDiffusionV2Pipeline(
-                config, device=torch.device("cuda"), dtype=torch.bfloat16
+                config, device=torch.device("cuda"), dtype=torch.bfloat16, enable_i2v=enable_i2v
             )
-            logger.info("StreamDiffusionV2 pipeline initialized")
+            logger.info(f"StreamDiffusionV2 pipeline initialized (I2V mode: {enable_i2v})")
             return pipeline
 
         elif pipeline_id == "passthrough":

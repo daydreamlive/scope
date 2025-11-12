@@ -636,6 +636,16 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
+        # Debug logging at the very start
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"causal_model._forward_inference: ENTRY")
+        logger.info(f"  x type: {type(x)}, x is tensor: {isinstance(x, torch.Tensor)}")
+        if isinstance(x, torch.Tensor):
+            logger.info(f"  x shape (as tensor): {x.shape}")
+        elif isinstance(x, list):
+            logger.info(f"  x length (as list): {len(x)}, x[0] shape: {x[0].shape if len(x) > 0 else 'empty'}")
+
         if self.model_type == "i2v":
             assert clip_fea is not None and y is not None
         # params
@@ -644,7 +654,26 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             self.freqs = self.freqs.to(device)
 
         if y is not None:
-            x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
+            # Debug logging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"causal_model: x type: {type(x)}, length: {len(x) if isinstance(x, list) else 'not a list'}")
+            logger.info(f"causal_model: y type: {type(y)}, length: {len(y) if isinstance(y, list) else 'not a list'}")
+            if isinstance(x, list) and len(x) > 0:
+                logger.info(f"causal_model: x[0] shape: {x[0].shape}")
+            if isinstance(y, list) and len(y) > 0:
+                logger.info(f"causal_model: y[0] shape: {y[0].shape}")
+
+            # Concatenate x and y
+            try:
+                x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
+                logger.info(f"causal_model: After concatenation, x[0] shape: {x[0].shape}")
+            except Exception as e:
+                logger.error(f"causal_model: Concatenation failed!")
+                logger.error(f"  Attempted to concatenate along dim=0:")
+                for i, (u, v) in enumerate(zip(x, y)):
+                    logger.error(f"  pair {i}: u.shape={u.shape}, v.shape={v.shape}")
+                raise
 
         # embeddings
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]

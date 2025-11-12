@@ -85,6 +85,8 @@ def download_streamdiffusionv2_pipeline() -> None:
     wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
     wan_video_comfy_repo = "Kijai/WanVideo_comfy"
     wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
+    deepbeep_repo = "DeepBeepMeep/Wan2.1"
+    clip_full_file = "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
     stream_diffusion_repo = "jerryfeng/StreamDiffusionV2"
 
     # Ensure models directory exists and get paths
@@ -92,19 +94,36 @@ def download_streamdiffusionv2_pipeline() -> None:
     wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
     stream_diffusion_dst = models_root / "StreamDiffusionV2"
+    clip_tokenizer_dst = wan_video_dst / "xlm-roberta-large"
 
-    # 1) HF repo download excluding a large file
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    # 1) HF repo download excluding large files (T5 and CLIP)
+    # We'll download CLIP separately from DeepBeepMeep repo
+    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth", "open_clip_pytorch_model.bin"]
     download_hf_repo_excluding(
         wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
     )
 
-    # 2) HF single file download into a folder
+    # 2) HF single file download for UMT5 encoder
     download_hf_single_file(
         wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
     )
 
-    # 3) HF repo download for StreamDiffusionV2
+    # 3) HF single file download for full CLIP model (for I2V support)
+    download_hf_single_file(
+        deepbeep_repo, clip_full_file, wan_video_dst
+    )
+
+    # 4) Download CLIP tokenizer directory from DeepBeepMeep repo
+    # Download the xlm-roberta-large directory which contains tokenizer files
+    snapshot_download(
+        repo_id=deepbeep_repo,
+        local_dir=str(wan_video_dst),
+        local_dir_use_symlinks=False,
+        allow_patterns=["xlm-roberta-large/*"],
+    )
+    print(f"[OK] Downloaded CLIP tokenizer to: {clip_tokenizer_dst}")
+
+    # 5) HF repo download for StreamDiffusionV2
     download_hf_repo_excluding(
         stream_diffusion_repo, stream_diffusion_dst, ignore_patterns=[]
     )

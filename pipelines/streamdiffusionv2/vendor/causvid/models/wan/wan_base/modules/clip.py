@@ -550,11 +550,17 @@ class CLIPModel:
         )
         self.model = self.model.eval().requires_grad_(False)
         logging.info(f"loading {checkpoint_path}")
-        self.model.load_state_dict(torch.load(checkpoint_path, map_location="cpu"))
+
+        # Load full CLIP checkpoint from DeepBeepMeep/Wan2.1
+        state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        self.model.load_state_dict(state_dict)
 
         # init tokenizer
         self.tokenizer = HuggingfaceTokenizer(
-            name=tokenizer_path, seq_len=self.model.max_text_len - 2, clean="whitespace"
+            name=tokenizer_path,
+            seq_len=self.model.max_text_len - 2,
+            clean="whitespace",
+            local_files_only=True,
         )
 
     def visual(self, videos):

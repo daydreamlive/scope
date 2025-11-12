@@ -6,10 +6,15 @@ from .. import (
 from typing import List, Optional
 import torch
 import time
+import os
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class CausalStreamInferencePipeline(torch.nn.Module):
-    def __init__(self, args, device):
+    def __init__(self, args, device, enable_i2v: bool = False):
         super().__init__()
         # Step 1: Initialize all models
         self.generator_model_name = getattr(args, "generator_name", args.model_name)
@@ -35,6 +40,38 @@ class CausalStreamInferencePipeline(torch.nn.Module):
         start = time.time()
         self.vae = get_vae_wrapper(model_name=args.model_name)(model_dir=model_dir)
         print(f"Loaded VAE in {time.time() - start:3f}s")
+
+        self.enable_i2v = enable_i2v
+
+        # Add CLIP encoder if I2V mode is enabled
+        if enable_i2v:
+            from .wan_base.modules.clip import CLIPModel
+
+            # Full CLIP model from DeepBeepMeep/Wan2.1
+            clip_checkpoint = os.path.join(
+                model_dir, "Wan2.1-T2V-1.3B", "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+            )
+            # Tokenizer directory path (downloaded from DeepBeepMeep/Wan2.1/xlm-roberta-large)
+            clip_tokenizer = os.path.join(
+                model_dir, "Wan2.1-T2V-1.3B", "xlm-roberta-large"
+            )
+
+            if os.path.exists(clip_checkpoint):
+                start = time.time()
+                self.clip = CLIPModel(
+                    dtype=torch.bfloat16,  # Match VAE/Generator dtype
+                    device=torch.device("cpu"),  # Start on CPU to save VRAM
+                    checkpoint_path=clip_checkpoint,
+                    tokenizer_path=clip_tokenizer,
+                )
+                print(f"Loaded CLIP encoder for I2V in {time.time() - start:.3f}s")
+                logger.info("CLIP encoder initialized for I2V mode")
+            else:
+                logger.warning(f"CLIP checkpoint not found at {clip_checkpoint}. I2V mode will not work.")
+                logger.warning("Please download CLIP model: python download_models.py --pipeline streamdiffusionv2")
+                self.clip = None
+        else:
+            self.clip = None
 
         # Step 2: Initialize all causal hyperparmeters
         self.denoising_step_list = torch.tensor(
@@ -150,6 +187,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
         current_end: int,
         current_step: int,
         generator: Optional[torch.Generator] = None,
+        visual_context: Optional[torch.Tensor] = None,
+        cond_concat: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         batch_size = noise.shape[0]
 
@@ -173,6 +212,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start,
                     current_end=current_end,
+                    visual_context=visual_context,
+                    cond_concat=cond_concat,
                 )
                 next_timestep = self.denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -199,6 +240,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start,
                     current_end=current_end,
+                    visual_context=visual_context,
+                    cond_concat=cond_concat,
                 )
 
         self.generator(
@@ -209,6 +252,78 @@ class CausalStreamInferencePipeline(torch.nn.Module):
             crossattn_cache=self.crossattn_cache,
             current_start=current_start,
             current_end=current_end,
+            visual_context=visual_context,
+            cond_concat=cond_concat,
         )
 
         return denoised_pred
+
+    def encode_image_for_i2v(self, image_tensor: torch.Tensor, num_latent_frames: int = 2):
+        """
+        Encode image for I2V conditioning.
+
+        Args:
+            image_tensor: Preprocessed image [3, H, W] in [-1, 1] range
+            num_latent_frames: Number of temporal latent frames (default 2 for start_chunk_size=5)
+
+        Returns:
+            visual_context: CLIP features [1, 257, 1280]
+            cond_concat: Conditioning with mask [T, 17, H/8, W/8] in FCHW format
+                        (T=num frames, 17=1 mask + 16 latent channels)
+        """
+        if not self.enable_i2v or self.clip is None:
+            raise RuntimeError("I2V mode not enabled or CLIP not available")
+
+        device = next(self.generator.model.parameters()).device
+        h, w = image_tensor.shape[1:]
+        lat_h, lat_w = h // 8, w // 8
+
+        # Move image to device
+        image_seq = image_tensor[:, None, :, :].to(device, dtype=torch.bfloat16)
+
+        # CLIP encode for visual context
+        # Add single frame dimension for CLIP: [3, H, W] -> [3, 1, H, W]
+        self.clip.model.to(device)
+        with torch.no_grad():
+            visual_context = self.clip.visual([image_seq])  # [1, 257, 1280]
+
+        # Offload CLIP to save VRAM
+        self.clip.model.cpu()
+
+        # VAE encode the single image frame
+        # Convert to BCTHW format: [3, 1, H, W] -> [1, 3, 1, H, W]
+        image_bcthw = image_seq.unsqueeze(0)  # [1, 3, 1, H, W]
+
+        with torch.no_grad():
+            # Encode single frame to latent space
+            cond_latent = self.vae.model.encode(
+                image_bcthw,
+                scale=[self.vae.mean.to(device), 1.0 / self.vae.std.to(device)]
+            )  # [1, 16, 1, H/8, W/8]
+
+        # Expand cond_latent to match temporal dimension
+        # [1, 16, 1, H/8, W/8] -> [1, 16, T, H/8, W/8]
+        cond_latent_expanded = torch.zeros(
+            1, 16, num_latent_frames, lat_h, lat_w,
+            device=device, dtype=cond_latent.dtype
+        )
+        cond_latent_expanded[:, :, 0, :, :] = cond_latent[:, :, 0, :, :]
+
+        # Create mask: [1, 1, T, H/8, W/8]
+        # 1 for first temporal frame (conditioned), 0 for rest (to be generated)
+        mask = torch.zeros(1, 1, num_latent_frames, lat_h, lat_w, device=device, dtype=cond_latent.dtype)
+        mask[:, :, 0, :, :] = 1.0
+
+        # Concatenate mask and latent along channel dimension
+        # [1, 1, T, H/8, W/8] + [1, 16, T, H/8, W/8] -> [1, 17, T, H/8, W/8]
+        cond_concat = torch.cat([mask, cond_latent_expanded], dim=1)
+
+        # Convert from BCFHW [1, 17, T, H/8, W/8] to FCHW [T, 17, H/8, W/8] format
+        # The wrapper permutes noise to BFCHW, so after batch iteration we get FCHW
+        # Our conditioning must match this FCHW format for concatenation to work
+        cond_concat = cond_concat.squeeze(0)  # Remove batch: [17, T, H/8, W/8] CFHW
+        cond_concat = cond_concat.permute(1, 0, 2, 3)  # Permute to FCHW: [T, 17, H/8, W/8]
+
+        logger.info(f"Encoded image for I2V: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")
+
+        return visual_context, cond_concat

@@ -33,6 +33,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         noise_scale: float = 0.7,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
+        enable_i2v: bool = False,
     ):
         if device is None:
             device = torch.device("cuda")
@@ -46,7 +47,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
         config["height"] = self.height
         config["width"] = self.width
 
-        self.stream = CausalStreamInferencePipeline(config, device).to(
+        self.enable_i2v = enable_i2v
+        self.stream = CausalStreamInferencePipeline(config, device, enable_i2v=enable_i2v).to(
             device=device, dtype=dtype
         )
         self.device = device
@@ -76,6 +78,11 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.last_frame = None
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
+
+        # I2V conditioning cache
+        self.i2v_visual_context = None
+        self.i2v_cond_concat = None
+        self.i2v_first_chunk = True
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         if should_prepare:
@@ -172,6 +179,24 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
 
+        # Reset I2V first chunk flag when cache is reset
+        if self.enable_i2v:
+            self.i2v_first_chunk = True
+
+    def set_i2v_conditioning(self, visual_context: torch.Tensor, cond_concat: torch.Tensor):
+        """Set I2V conditioning that will be used for subsequent generations."""
+        self.i2v_visual_context = visual_context
+        self.i2v_cond_concat = cond_concat
+        self.i2v_first_chunk = True  # Reset for new image
+        logger.info(f"I2V conditioning set: visual_context={visual_context.shape}, cond_concat={cond_concat.shape}")
+
+    def clear_i2v_conditioning(self):
+        """Clear I2V conditioning (e.g., when switching modes)."""
+        self.i2v_visual_context = None
+        self.i2v_cond_concat = None
+        self.i2v_first_chunk = True
+        logger.info("I2V conditioning cleared")
+
     def _apply_motion_aware_noise_controller(self, input: torch.Tensor):
         # The prev seq is the last chunk_size frames of the current input
         prev_seq = input[:, :, -self.chunk_size :]
@@ -249,7 +274,13 @@ class StreamDiffusionV2Pipeline(Pipeline):
                 input, self.device, self.dtype, height=self.height, width=self.width
             )
 
-        if noise_controller:
+        # Determine if we're using I2V mode (only for first chunk)
+        use_i2v = (self.enable_i2v and
+                   self.i2v_visual_context is not None and
+                   self.i2v_cond_concat is not None and
+                   self.i2v_first_chunk)
+
+        if noise_controller and not use_i2v:
             self._apply_motion_aware_noise_controller(input)
 
         # Determine the number of denoising steps
@@ -257,33 +288,69 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # Lower noise scale -> less denoising steps, less intense changes to input
         current_step = int(1000 * self.noise_scale) - 100
 
-        # Encode frames to latents using VAE
-        latents = self.stream.vae.model.stream_encode(input)
-        # Transpose latents
-        latents = latents.transpose(2, 1)
-
         # Create generator from seed for reproducible generation
         # Derive unique seed per chunk using current_start as offset
         frame_seed = self.base_seed + self.current_start
-        rng = torch.Generator(device=latents.device).manual_seed(frame_seed)
+        rng = torch.Generator(device=self.device).manual_seed(frame_seed)
 
-        noise = torch.randn(
-            latents.shape,
-            device=latents.device,
-            dtype=latents.dtype,
-            generator=rng,
-        )
-        # Determine how noisy the latents should be
-        # Higher noise scale -> noiser latents, less of inputs preserved
-        # Lower noise scale -> less noisy latents, more of inputs preserved
-        noisy_latents = noise * self.noise_scale + latents * (1 - self.noise_scale)
-        denoised_pred = self.stream.inference(
-            noise=noisy_latents,
-            current_start=self.current_start,
-            current_end=self.current_end,
-            current_step=current_step,
-            generator=rng,
-        )
+        if use_i2v:
+            # I2V mode: Start from pure noise, don't encode input frames
+            # The conditioning comes from the pre-encoded image (i2v_cond_concat)
+            # Input shape should match expected latent dimensions
+            # For start_chunk_size=5 frames: [B, 16, 5//4+1=2, H//8, W//8]
+            batch_size = 1
+            latent_channels = 16
+            latent_t = (curr_chunk_size // 4) + 1  # 5 frames -> 2 temporal latents
+            latent_h = self.height // 8
+            latent_w = self.width // 8
+
+            noisy_latents = torch.randn(
+                (batch_size, latent_channels, latent_t, latent_h, latent_w),
+                device=self.device,
+                dtype=self.dtype,
+                generator=rng,
+            )
+            logger.info(f"I2V first chunk: Using pure noise with shape {noisy_latents.shape}")
+        else:
+            # T2V mode or subsequent chunks: Encode frames to latents using VAE
+            latents = self.stream.vae.model.stream_encode(input)
+            # Transpose latents
+            latents = latents.transpose(2, 1)
+
+            noise = torch.randn(
+                latents.shape,
+                device=latents.device,
+                dtype=latents.dtype,
+                generator=rng,
+            )
+            # Determine how noisy the latents should be
+            # Higher noise scale -> noiser latents, less of inputs preserved
+            # Lower noise scale -> less noisy latents, more of inputs preserved
+            noisy_latents = noise * self.noise_scale + latents * (1 - self.noise_scale)
+
+        if use_i2v:
+            # I2V mode: Generate frames conditioned on image (first chunk only)
+            logger.info("Using I2V conditioning for first chunk")
+            denoised_pred = self.stream.inference(
+                noise=noisy_latents,
+                current_start=self.current_start,
+                current_end=self.current_end,
+                current_step=current_step,
+                generator=rng,
+                visual_context=self.i2v_visual_context,
+                cond_concat=self.i2v_cond_concat,
+            )
+            # Mark that we've processed the first chunk
+            self.i2v_first_chunk = False
+        else:
+            # T2V mode: existing behavior (or subsequent chunks after I2V)
+            denoised_pred = self.stream.inference(
+                noise=noisy_latents,
+                current_start=self.current_start,
+                current_end=self.current_end,
+                current_step=current_step,
+                generator=rng,
+            )
 
         # # Update tracking variables for next input
         self.last_frame = input[:, :, [-1]]
