@@ -80,9 +80,15 @@ class SetTimestepsBlock(ModularPipelineBlocks):
 
         block_state.init_cache = False
 
-        # Use torch.allclose() because we might have to compare a long vs. float32 tensor
-        if block_state.current_denoising_step_list is None or not torch.allclose(
-            block_state.current_denoising_step_list, denoising_step_list, atol=1e-1
+        if (
+            block_state.current_denoising_step_list is None
+            or block_state.current_denoising_step_list.shape
+            != denoising_step_list.shape
+            or not torch.allclose(
+                block_state.current_denoising_step_list.to(torch.float32),
+                denoising_step_list.to(torch.float32),
+                atol=1e-1,
+            )
         ):
             block_state.denoising_step_list = denoising_step_list
 
@@ -99,7 +105,7 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                     1000 - block_state.denoising_step_list
                 ]
 
-            block_state.current_denoising_step_list = block_state.denoising_step_list
+            block_state.current_denoising_step_list = denoising_step_list
 
             if block_state.manage_cache:
                 block_state.init_cache = True
