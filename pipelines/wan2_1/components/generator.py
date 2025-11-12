@@ -65,7 +65,19 @@ class WanDiffusionWrapper(torch.nn.Module):
             if freqs_shape is not None and hasattr(self.model, "freqs"):
                 # Get model dimensions to recreate freqs
                 d = self.model.dim // self.model.num_heads
-                from ..modules.model import rope_params
+
+                # From Wan2.1 model.py
+                def rope_params(max_seq_len, dim, theta=10000):
+                    assert dim % 2 == 0
+                    freqs = torch.outer(
+                        torch.arange(max_seq_len),
+                        1.0
+                        / torch.pow(
+                            theta, torch.arange(0, dim, 2).to(torch.float64).div(dim)
+                        ),
+                    )
+                    freqs = torch.polar(torch.ones_like(freqs), freqs)
+                    return freqs
 
                 self.model.freqs = torch.cat(
                     [
