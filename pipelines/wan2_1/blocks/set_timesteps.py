@@ -42,6 +42,12 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                 type_hint=bool,
                 description="Whether to automatically determine to (re)initialize caches",
             ),
+            InputParam(
+                "init_cache",
+                default=False,
+                type_hint=bool,
+                description="Whether to (re)initialize caches",
+            ),
         ]
 
     @property
@@ -76,8 +82,6 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                 denoising_step_list,
                 dtype=torch.float32,
             )
-
-        block_state.init_cache = False
 
         if denoising_step_list_changed(denoising_step_list, block_state):
             block_state.denoising_step_list = denoising_step_list
