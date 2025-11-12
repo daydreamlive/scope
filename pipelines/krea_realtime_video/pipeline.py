@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
+WARMUP_RUNS = 3
+WARMUP_PROMPT = "a majestic sunset"
+
 
 class KreaRealtimeVideoPipeline(Pipeline):
     def __init__(
@@ -129,7 +132,25 @@ class KreaRealtimeVideoPipeline(Pipeline):
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))
 
-    def __call__(self, **kwargs):
+        start = time.time()
+        for _ in range(WARMUP_RUNS):
+            self._generate(prompts=WARMUP_PROMPT)
+
+        print(f"Warmed up in {time.time() - start:2f}s")
+
+        self.first_call = True
+
+    def __call__(self, **kwargs) -> torch.Tensor:
+        if self.first_call:
+            self.state.set("init_cache", True)
+            self.first_call = False
+        else:
+            # This will be overriden if the init_cache is passed in kwargs
+            self.state.set("init_cache", False)
+
+        return self._generate(**kwargs)
+
+    def _generate(self, **kwargs) -> torch.Tensor:
         for k, v in kwargs.items():
             self.state.set(k, v)
 
