@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -18,11 +18,14 @@ import type { PipelineId } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { createCloudStream } from "../lib/daydream";
-import { startWhip } from "../lib/whip";
+import { WhipConnection } from "../components/WhipConnection";
+import { useMuxer } from "@/muxer";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
   const { settings, updateSettings } = useStreamState();
+  const muxer = useMuxer();
+
 
   // Prompt state
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
@@ -48,8 +51,31 @@ export function StreamPage() {
   const [isConnectingCloud, setIsConnectingCloud] = useState(false);
   const [isStreamingCloud, setIsStreamingCloud] = useState(false);
   const [cloudRemoteStream, setCloudRemoteStream] = useState<MediaStream | null>(null);
-  const cloudStopRef = useRef<null | (() => Promise<void>)>(null);
+  const [cloudWhipUrl, setCloudWhipUrl] = useState<string | null>(null);
   const cloudStreamIdRef = useRef<string | null>(null);
+  const isStartingCloudRef = useRef(false);
+
+  // Stable callbacks for WHIP to avoid effect churn in WhipConnection
+  const onWhipConnectionStateChange = useCallback((state: RTCPeerConnectionState) => {
+    if (state === "connected") {
+      console.log("[StreamPage] WHIP connected");
+      setIsStreamingCloud(true);
+      setIsConnectingCloud(false);
+    } else if (state === "connecting" || state === "new") {
+      console.log("[StreamPage] WHIP connecting");
+      setIsConnectingCloud(true);
+    } else if (state === "failed" || state === "disconnected" || state === "closed") {
+      setIsStreamingCloud(false);
+      setIsConnectingCloud(false);
+      console.log("[StreamPage] WHIP disconnected");
+    }
+  }, [setIsStreamingCloud, setIsConnectingCloud]);
+
+  const onWhipRetryLimitExceeded = useCallback(() => {
+    setIsStreamingCloud(false);
+    setIsConnectingCloud(false);
+    setCloudWhipUrl(null);
+  }, [setIsStreamingCloud, setIsConnectingCloud, setCloudWhipUrl]);
 
   // Timeline state for left panel
   const [timelinePrompts, setTimelinePrompts] = useState<TimelinePrompt[]>([]);
@@ -438,17 +464,14 @@ export function StreamPage() {
       }
     } else {
       if (isStreamingCloud) {
-        if (cloudStopRef.current) {
-          await cloudStopRef.current();
-          cloudStopRef.current = null;
-        }
+        setCloudWhipUrl(null);
         setCloudRemoteStream(null);
         setIsStreamingCloud(false);
         setIsConnectingCloud(false);
         return true;
       }
       // Ignore new start requests while a cloud connection is being established
-      if (isConnectingCloud) {
+      if (isConnectingCloud || isStartingCloudRef.current) {
         return false;
       }
     }
@@ -493,6 +516,7 @@ export function StreamPage() {
 
         setIsCloudLoading(true);
         setIsConnectingCloud(true);
+        isStartingCloudRef.current = true;
         const created = await createCloudStream({
           pipeline_id: 'pip_SDXL-turbo',
           load_params: loadParams || undefined,
@@ -502,7 +526,6 @@ export function StreamPage() {
 
         const needsVideoInput =
           PIPELINES[pipelineIdToUse]?.category === "video-input";
-        const streamToSend = needsVideoInput ? localStream || undefined : undefined;
         if (needsVideoInput && !localStream) {
           console.error("Video input required but no local stream available");
           setIsConnectingCloud(false);
@@ -510,22 +533,18 @@ export function StreamPage() {
         }
 
         const endpoint = created.whip_url;
+        // const endpoint = "https://ai.livepeer.monster/aiWebrtc/foo3-out/whip";
         if (!endpoint) {
           console.error("Create stream response missing whip_url");
           setIsConnectingCloud(false);
           return false;
         }
 
-        const { remoteStream: cloudStream, stop } = await startWhip({
-          endpoint,
-          localStream: streamToSend,
-        });
-        cloudStopRef.current = stop;
-        setCloudRemoteStream(cloudStream);
+        // Mount WHIP connection component via state; it will manage the connection lifecycle
+        setCloudWhipUrl(endpoint);
 
         updateSettings({ paused: false });
-        setIsConnectingCloud(false);
-        setIsStreamingCloud(true);
+        // Keep connecting state true until RTCPeerConnection reports connected
         return true;
       }
 
@@ -613,7 +632,6 @@ export function StreamPage() {
       const streamToSend = needsVideoInput
         ? localStream || undefined
         : undefined;
-
       if (needsVideoInput && !localStream) {
         console.error("Video input required but no local stream available");
         return false;
@@ -669,6 +687,9 @@ export function StreamPage() {
     } catch (error) {
       console.error("Error during stream start:", error);
       return false;
+    }
+    finally {
+      isStartingCloudRef.current = false;
     }
   };
 
@@ -859,6 +880,9 @@ export function StreamPage() {
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
               isDownloading={isDownloading}
+              isStreamingCloud={isStreamingCloud}
+              isConnectingCloud={isConnectingCloud}
+              isStartingCloud={isStartingCloudRef.current}
             />
           </div>
         </div>
@@ -878,13 +902,12 @@ export function StreamPage() {
                 if (isStreaming) {
                   stopStream();
                 }
-                if (isStreamingCloud && cloudStopRef.current) {
-                  await cloudStopRef.current();
-                  cloudStopRef.current = null;
-                  setCloudRemoteStream(null);
-                  setIsStreamingCloud(false);
-                  setIsConnectingCloud(false);
-                }
+              if (isStreamingCloud) {
+                setCloudWhipUrl(null);
+                setCloudRemoteStream(null);
+                setIsStreamingCloud(false);
+                setIsConnectingCloud(false);
+              }
               })();
               updateSettings({ cloudMode: enabled });
             }}
@@ -927,6 +950,15 @@ export function StreamPage() {
           onDownload={handleDownloadModels}
         />
       )}
+      {/* WHIP Connection Mount Point (cloud mode) */}
+      {settings.cloudMode && cloudWhipUrl ? (
+        <WhipConnection
+          whipUrl={cloudWhipUrl}
+          stream={localStream ?? muxer.stream ?? null}
+          onConnectionStateChange={onWhipConnectionStateChange}
+          onRetryLimitExceeded={onWhipRetryLimitExceeded}
+        />
+      ) : null}
     </div>
   );
 }

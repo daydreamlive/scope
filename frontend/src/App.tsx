@@ -1,13 +1,16 @@
 import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
 import "./index.css";
+import { MuxerProvider } from "@/muxer";
 
 function App() {
   return (
-    <>
-      <StreamPage />
-      <Toaster />
-    </>
+    <MuxerProvider width={512} height={512} fps={30} sendFps={30}>
+      <>
+        <StreamPage />
+        <Toaster />
+      </>
+    </MuxerProvider>
   );
 }
 
