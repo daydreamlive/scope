@@ -101,8 +101,10 @@ class LongLivePipeline(Pipeline):
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", 1.0)
+
         self.state.set("height", config.height)
         self.state.set("width", config.width)
+        self.state.set("base_seed", getattr(config, "seed", 42))
 
     def __call__(self, **kwargs):
         for k, v in kwargs.items():
