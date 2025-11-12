@@ -12,6 +12,7 @@ def initialize_kv_cache(
     local_attn_size: int,
     frame_seq_length: int,
     kv_cache_existing: list[dict] | None = None,
+    reset_indices: bool = True,
 ):
     kv_cache = []
 
@@ -40,8 +41,15 @@ def initialize_kv_cache(
         for i in range(num_transformer_blocks):
             kv_cache_existing[i]["k"].zero_()
             kv_cache_existing[i]["v"].zero_()
-            kv_cache_existing[i]["global_end_index"] = 0
-            kv_cache_existing[i]["local_end_index"] = 0
+
+            if reset_indices:
+                kv_cache_existing[i]["global_end_index"] = torch.tensor(
+                    [0], dtype=torch.long, device=device
+                )
+                kv_cache_existing[i]["local_end_index"] = torch.tensor(
+                    [0], dtype=torch.long, device=device
+                )
+
         return kv_cache_existing
     else:
         # Create new cache
@@ -50,8 +58,12 @@ def initialize_kv_cache(
                 {
                     "k": torch.zeros(k_shape, dtype=dtype, device=device).contiguous(),
                     "v": torch.zeros(v_shape, dtype=dtype, device=device).contiguous(),
-                    "global_end_index": 0,
-                    "local_end_index": 0,
+                    "global_end_index": torch.tensor(
+                        [0], dtype=torch.long, device=device
+                    ),
+                    "local_end_index": torch.tensor(
+                        [0], dtype=torch.long, device=device
+                    ),
                 }
             )
         return kv_cache

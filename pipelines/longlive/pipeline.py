@@ -2,25 +2,26 @@ import logging
 import time
 
 import torch
+from diffusers.modular_pipelines import PipelineState
 
-from ..blending import PromptBlender, handle_transition_prepare
-from ..interface import Pipeline, Requirements
-from ..wan2_1.components.wrapper import (
-    WanDiffusionWrapper,
-    WanTextEncoder,
-    WanVAEWrapper,
-)
-from .inference import InferencePipeline
+from ..components import ComponentsManager
+from ..interface import Pipeline
+from ..process import postprocess_chunk
+from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
+from .components import WanVAEWrapper
+from .modular_blocks import LongLiveBlocks
+from .modules.causal_model import CausalWanModel
 from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
 class LongLivePipeline(Pipeline):
     def __init__(
         self,
         config,
-        low_memory: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
@@ -28,150 +29,88 @@ class LongLivePipeline(Pipeline):
         generator_path = getattr(config, "generator_path", None)
         lora_path = getattr(config, "lora_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
+        tokenizer_path = getattr(config, "tokenizer_path", None)
 
-        # Load diffusion model
+        model_config = getattr(config, "model_config", {})
+        base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
+        base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
+        generator_model_name = getattr(
+            model_config, "generator_model_name", "generator"
+        )
+        lora_config = getattr(model_config, "adapter", {})
+
+        # Load generator
         start = time.time()
         generator = WanDiffusionWrapper(
-            **getattr(config, "model_kwargs", {}), model_dir=model_dir, is_causal=True
+            CausalWanModel,
+            model_name=base_model_name,
+            model_dir=model_dir,
+            generator_path=generator_path,
+            generator_model_name=generator_model_name,
+            **base_model_kwargs,
         )
-        print(f"Loaded diffusion wrapper in {time.time() - start:.3f}s")
-        # Load state dict for LongLive model
-        start = time.time()
-        generator_state_dict = torch.load(
-            generator_path,
-            map_location="cpu",
-            mmap=True,
-        )
-        generator.load_state_dict(generator_state_dict["generator"])
-        print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
+
+        print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+
         # Configure LoRA for LongLive model
         start = time.time()
         generator.model = configure_lora_for_model(
-            generator.model,
-            model_name="generator",
-            lora_config=config.adapter,
+            generator.model, model_name=generator_model_name, lora_config=lora_config
         )
         # Load LoRA weights
         load_lora_checkpoint(generator.model, lora_path)
         print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
 
+        generator = generator.to(device=device, dtype=dtype)
+
         start = time.time()
-        text_encoder = WanTextEncoder(
-            model_dir=model_dir, text_encoder_path=text_encoder_path
+        text_encoder = WanTextEncoderWrapper(
+            model_name=base_model_name,
+            model_dir=model_dir,
+            text_encoder_path=text_encoder_path,
+            tokenizer_path=tokenizer_path,
         )
         print(f"Loaded text encoder in {time.time() - start:3f}s")
+        # Move text encoder to target device but use dtype of weights
+        text_encoder = text_encoder.to(device=device)
 
+        # Load VAE
         start = time.time()
         vae = WanVAEWrapper(model_dir=model_dir)
         print(f"Loaded VAE in {time.time() - start:.3f}s")
+        # Move VAE to target device and use target dtype
+        vae = vae.to(device=device, dtype=dtype)
 
-        seed = getattr(config, "seed", 42)
+        # Create components config
+        components_config = {}
+        components_config.update(model_config)
+        components_config["device"] = device
+        components_config["dtype"] = dtype
 
-        self.stream = InferencePipeline(
-            config, generator, text_encoder, vae, low_memory, seed
-        ).to(device=device, dtype=dtype)
+        components = ComponentsManager(components_config)
+        components.add("generator", generator)
+        components.add("scheduler", generator.get_scheduler())
+        components.add("vae", vae)
+        components.add("text_encoder", text_encoder)
 
-        self.prompts = None
-        self.denoising_step_list = None
+        self.blocks = LongLiveBlocks()
+        self.components = components
+        self.state = PipelineState()
+        # These need to be set right now because InputParam.default on the blocks
+        # does not work properly
+        self.state.set("current_start_frame", 0)
+        self.state.set("manage_cache", True)
+        self.state.set("kv_cache_attention_bias", 1.0)
 
-        # Prompt blending with cache reset callback for transitions
-        self.prompt_blender = PromptBlender(
-            device, dtype, cache_reset_callback=self._reset_cache_for_transition
-        )
+    def prepare(self, **kwargs):
+        pass
 
-    def _reset_cache_for_transition(self):
-        """Reset cross-attention cache for prompt transitions."""
-        # Use model's current device/dtype (should match initialization)
-        model_param = next(self.stream.generator.model.parameters())
-        self.stream._initialize_crossattn_cache(
-            batch_size=1, dtype=model_param.dtype, device=model_param.device
-        )
+    def __call__(self, **kwargs):
+        for k, v in kwargs.items():
+            self.state.set(k, v)
 
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
-        # If caller requested prepare assume cache init
-        # Otherwise no cache init
-        init_cache = should_prepare
+        if self.state.get("denoising_step_list") is None:
+            self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
-        manage_cache = kwargs.get("manage_cache", None)
-        prompts = kwargs.get("prompts", None)
-        prompt_interpolation_method = kwargs.get(
-            "prompt_interpolation_method", "linear"
-        )
-        transition = kwargs.get("transition", None)
-        denoising_step_list = kwargs.get("denoising_step_list", None)
-
-        # Check if prompts changed using prompt blender
-        if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
-            logger.info("prepare: Initiating pipeline prepare for prompt update")
-            should_prepare = True
-
-        # Handle prompt transition requests
-        should_prepare_from_transition, target_prompts = handle_transition_prepare(
-            transition, self.prompt_blender, self.stream.text_encoder
-        )
-        if target_prompts:
-            self.prompts = target_prompts
-        if should_prepare_from_transition:
-            should_prepare = True
-
-        if (
-            denoising_step_list is not None
-            and denoising_step_list != self.denoising_step_list
-        ):
-            should_prepare = True
-
-            if manage_cache:
-                init_cache = True
-
-        if should_prepare:
-            # Update internal state
-            if denoising_step_list is not None:
-                self.denoising_step_list = denoising_step_list
-
-            # Apply prompt blending and prepare stream
-            # (PromptBlender.blend() returns None if transitioning, which skips preparation)
-            self._apply_prompt_blending(
-                prompts, prompt_interpolation_method, denoising_step_list, init_cache
-            )
-
-        return None
-
-    def __call__(
-        self,
-        _: torch.Tensor | list[torch.Tensor] | None = None,
-    ):
-        # Update prompt embedding for this generation call
-        # Handles both static blending and temporal transitions
-        next_embedding = self.prompt_blender.get_next_embedding(
-            self.stream.text_encoder
-        )
-
-        if next_embedding is not None:
-            self.stream.conditional_dict = {"prompt_embeds": next_embedding}
-
-        # Note: The caller must call prepare() before __call__()
-        return self.stream()
-
-    def _apply_prompt_blending(
-        self,
-        prompts=None,
-        interpolation_method="linear",
-        denoising_step_list=None,
-        init_cache: bool = False,
-    ):
-        """Apply weighted blending of cached prompt embeddings."""
-
-        combined_embeds = self.prompt_blender.blend(
-            prompts, interpolation_method, self.stream.text_encoder
-        )
-
-        if combined_embeds is None:
-            return
-
-        # Set the blended embeddings on the stream
-        self.stream.conditional_dict = {"prompt_embeds": combined_embeds}
-
-        # Call stream prepare to update the pipeline with denoising steps
-        self.stream.prepare(
-            prompts=None, denoising_step_list=denoising_step_list, init_cache=init_cache
-        )
+        _, self.state = self.blocks(self.components, self.state)
+        return postprocess_chunk(self.state.values["video"])
