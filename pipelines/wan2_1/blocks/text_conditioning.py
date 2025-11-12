@@ -26,15 +26,15 @@ class TextConditioningBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "current_prompt",
+                "current_prompts",
                 type_hint=str | list[str] | None,
-                description="Current prompt or prompts conditioning denoising",
+                description="Current prompts conditioning denoising",
             ),
             InputParam(
                 "prompts",
                 required=True,
                 type_hint=str | list[str],
-                description="New prompt or prompts to condition denoising",
+                description="New prompts to condition denoising",
             ),
             InputParam(
                 "prompt_embeds",
@@ -47,9 +47,9 @@ class TextConditioningBlock(ModularPipelineBlocks):
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
-                "current_prompt",
+                "current_prompts",
                 type_hint=str | list[str],
-                description="Current prompt or prompts conditioning denoising",
+                description="Current prompts conditioning denoising",
             ),
             OutputParam(
                 "prompt_embeds",
@@ -71,7 +71,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
             and not isinstance(block_state.prompts, list)
         ):
             raise ValueError(
-                f"`prompt` has to be of type `str` or `list` but is {type(block_state.prompts)}"
+                f"`prompts` has to be of type `str` or `list` but is {type(block_state.prompts)}"
             )
 
     @torch.no_grad()
@@ -83,8 +83,8 @@ class TextConditioningBlock(ModularPipelineBlocks):
 
         # Only run text_encoder if prompt changed
         if (
-            block_state.current_prompt is None
-            or block_state.current_prompt != block_state.prompts
+            block_state.current_prompts is None
+            or block_state.current_prompts != block_state.prompts
         ):
             with torch.autocast(
                 str(components.config.device), dtype=components.config.dtype
@@ -95,7 +95,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
                     else block_state.prompts
                 )
             block_state.prompt_embeds = conditional_dict["prompt_embeds"]
-            block_state.current_prompt = block_state.prompts
+            block_state.current_prompts = block_state.prompts
             block_state.prompt_embeds_updated = True
 
         self.set_block_state(state, block_state)
