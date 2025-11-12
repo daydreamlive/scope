@@ -57,7 +57,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
             os.path.join(config.model_dir, "StreamDiffusionV2/model.pt"),
             map_location="cpu",
         )["generator"]
-        self.stream.generator.load_state_dict(state_dict, strict=True)
+        # Use strict=False to allow loading with new clip_img_emb layer for T2V image conditioning
+        self.stream.generator.load_state_dict(state_dict, strict=False)
         print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
 
         self.chunk_size = chunk_size

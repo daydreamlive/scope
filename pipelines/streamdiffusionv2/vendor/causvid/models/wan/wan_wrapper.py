@@ -7,12 +7,15 @@ from .wan_base.modules.tokenizers import HuggingfaceTokenizer
 from .wan_base.modules.model import WanModel
 from .wan_base.modules.vae import _video_vae
 from .wan_base.modules.t5 import umt5_xxl
+from .wan_base.modules.clip import CLIPModel
 from .flow_match import FlowMatchScheduler
 from .causal_model import CausalWanModel
 from typing import List, Tuple, Dict, Optional
 import torch
 import os
 from safetensors import safe_open
+from PIL import Image
+import numpy as np
 
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 default_model_dir = os.path.join(repo_root, "wan_models")
@@ -106,6 +109,107 @@ class WanTextEncoder(TextEncoderInterface):
             )
 
         return state_dict
+
+
+class WanCLIPImageEncoder:
+    """
+    CLIP Image Encoder for extracting visual features from images.
+    Used for image-to-video conditioning via cross-attention.
+    """
+
+    def __init__(
+        self,
+        model_dir: Optional[str] = None,
+        clip_checkpoint_path: Optional[str] = None,
+        clip_tokenizer_path: Optional[str] = None,
+        dtype: torch.dtype = torch.float16,
+        device: str = "cuda",
+    ):
+        """
+        Initialize CLIP Image Encoder.
+
+        Args:
+            model_dir: Base directory for models
+            clip_checkpoint_path: Path to CLIP checkpoint (.pth file)
+            clip_tokenizer_path: Path to CLIP tokenizer directory
+            dtype: Data type for the model
+            device: Device to load the model on
+        """
+        # Determine paths with priority: specific paths > model_dir > default
+        if model_dir is None:
+            model_dir = default_model_dir
+
+        if clip_checkpoint_path is None:
+            clip_checkpoint_path = os.path.join(
+                model_dir,
+                "Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+            )
+
+        if clip_tokenizer_path is None:
+            clip_tokenizer_path = os.path.join(
+                model_dir, "Wan2.1-T2V-1.3B/xlm-roberta-large/"
+            )
+
+        # Initialize CLIP model
+        self.clip_model = CLIPModel(
+            dtype=dtype,
+            device=device,
+            checkpoint_path=clip_checkpoint_path,
+            tokenizer_path=clip_tokenizer_path,
+        )
+
+        self.device = device
+        self.dtype = dtype
+
+    def encode_image(self, image: Image.Image) -> torch.Tensor:
+        """
+        Encode a PIL Image to CLIP features.
+
+        Args:
+            image: PIL Image to encode
+
+        Returns:
+            CLIP features with shape [1, 257, 1280]
+        """
+        # Convert PIL image to tensor and normalize
+        # CLIP expects images in range [0, 1] with specific normalization
+        image_np = np.array(image.convert("RGB")).astype(np.float32) / 255.0
+
+        # Convert to tensor: [H, W, 3] -> [1, 3, H, W]
+        image_tensor = (
+            torch.from_numpy(image_np)
+            .permute(2, 0, 1)
+            .unsqueeze(0)
+            .to(device=self.device, dtype=self.dtype)
+        )
+
+        # Normalize: convert from [0, 1] to [-1, 1]
+        image_tensor = image_tensor * 2.0 - 1.0
+
+        # Extract CLIP features
+        with torch.no_grad():
+            clip_features = self.clip_model.visual([image_tensor])
+
+        return clip_features
+
+    def encode_image_from_tensor(self, image_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Encode an image tensor to CLIP features.
+
+        Args:
+            image_tensor: Image tensor with shape [B, 3, H, W] in range [-1, 1]
+
+        Returns:
+            CLIP features with shape [B, 257, 1280]
+        """
+        with torch.no_grad():
+            # Ensure tensor is in the right format and device
+            image_tensor = image_tensor.to(device=self.device, dtype=self.dtype)
+
+            # Extract CLIP features
+            clip_features = self.clip_model.visual([image_tensor])
+
+        return clip_features
 
 
 class WanVAEWrapper(VAEInterface):
@@ -322,7 +426,14 @@ class WanDiffusionWrapper(DiffusionModelInterface):
 
 
 class CausalWanDiffusionWrapper(WanDiffusionWrapper):
-    def __init__(self, model_dir: Optional[str] = None):
+    def __init__(self, model_dir: Optional[str] = None, enable_clip: bool = False):
+        """
+        Initialize Causal Wan Diffusion Wrapper with optional CLIP support.
+
+        Args:
+            model_dir: Directory containing model checkpoints
+            enable_clip: If True, initialize CLIP encoder for image conditioning
+        """
         super().__init__(model_dir=model_dir)
 
         model_dir = model_dir if model_dir is not None else default_model_dir
@@ -332,4 +443,89 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
         )
         self.model.eval()
 
+        # Initialize CLIP embedding layer after loading pretrained weights
+        # This ensures the layer is created on the correct device
+        self.model._post_init_clip_embedding()
+
         self.uniform_timestep = False
+
+        # Initialize CLIP encoder if enabled
+        self.clip_encoder = None
+        if enable_clip:
+            try:
+                self.clip_encoder = WanCLIPImageEncoder(
+                    model_dir=model_dir,
+                    dtype=torch.float16,
+                    device="cuda",
+                )
+                print("✓ CLIP Image Encoder initialized for image conditioning")
+            except Exception as e:
+                print(f"⚠ Warning: Failed to initialize CLIP encoder: {e}")
+                print("  Image conditioning will be disabled.")
+
+    def forward(
+        self,
+        noisy_image_or_video: torch.Tensor,
+        conditional_dict: dict,
+        timestep: torch.Tensor,
+        kv_cache: Optional[List[dict]] = None,
+        crossattn_cache: Optional[List[dict]] = None,
+        current_start: Optional[int] = None,
+        current_end: Optional[int] = None,
+        clip_features: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass with optional CLIP features for image conditioning.
+
+        Args:
+            noisy_image_or_video: Noisy latent tensor
+            conditional_dict: Dictionary containing prompt embeddings
+            timestep: Timestep tensor
+            kv_cache: KV cache for efficient inference
+            crossattn_cache: Cross-attention cache
+            current_start: Start frame index for causal attention
+            current_end: End frame index for causal attention
+            clip_features: Optional CLIP image features [B, 257, 1280]
+
+        Returns:
+            Predicted clean latent tensor
+        """
+        prompt_embeds = conditional_dict["prompt_embeds"]
+
+        # [B, F] -> [B]
+        if self.uniform_timestep:
+            input_timestep = timestep[:, 0]
+        else:
+            input_timestep = timestep
+
+        # Prepare model inputs
+        model_kwargs = {
+            "t": input_timestep,
+            "context": prompt_embeds,
+            "seq_len": self.seq_len,
+            "clip_fea": clip_features,  # Add CLIP features
+        }
+
+        # Add cache arguments if provided
+        if kv_cache is not None:
+            model_kwargs.update({
+                "kv_cache": kv_cache,
+                "crossattn_cache": crossattn_cache,
+                "current_start": current_start,
+                "current_end": current_end,
+            })
+
+        # Forward through model
+        flow_pred = self.model(
+            noisy_image_or_video.permute(0, 2, 1, 3, 4),
+            **model_kwargs
+        ).permute(0, 2, 1, 3, 4)
+
+        # Convert flow prediction to x0
+        pred_x0 = self._convert_flow_pred_to_x0(
+            flow_pred=flow_pred.flatten(0, 1),
+            xt=noisy_image_or_video.flatten(0, 1),
+            timestep=timestep.flatten(0, 1),
+        ).unflatten(0, flow_pred.shape[:2])
+
+        return pred_x0

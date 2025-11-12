@@ -529,6 +529,12 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if model_type == "i2v":
             self.img_emb = MLPProj(1280, dim)
 
+        # Add CLIP image embedding for T2V mode to enable optional image conditioning
+        # This allows T2V models to optionally accept image features for I2V-like behavior
+        # Note: This layer will be initialized after loading pretrained weights
+        if model_type == "t2v":
+            self.clip_img_emb = None  # Will be created on correct device after loading
+
         # initialize weights
         self.init_weights()
 
@@ -537,6 +543,40 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         self.block_mask = None
 
         self.num_frame_per_block = 1
+
+    def _post_init_clip_embedding(self):
+        """
+        Initialize CLIP embedding layer on the correct device after model loading.
+        This is called after from_pretrained() to ensure the layer is on the right device.
+        """
+        if self.model_type == "t2v" and self.clip_img_emb is None:
+            # Get the device from existing parameters
+            device = next(self.parameters()).device
+            # Create CLIP embedding on the same device
+            self.clip_img_emb = MLPProj(1280, self.dim).to(device)
+            # Initialize weights
+            for m in self.clip_img_emb.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.normal_(m.weight, std=0.02)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
+        """
+        Override from_pretrained to handle missing clip_img_emb weights gracefully.
+        The clip_img_emb layer is a new addition for T2V image conditioning and
+        doesn't exist in pretrained checkpoints, so we load with strict=False.
+        """
+        # Force strict=False to allow missing clip_img_emb weights
+        kwargs['strict'] = False
+
+        # Call parent's from_pretrained
+        model = super(CausalWanModel, cls).from_pretrained(
+            pretrained_model_name_or_path, **kwargs
+        )
+
+        return model
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
@@ -628,7 +668,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             seq_len (`int`):
                 Maximum sequence length for positional encoding
             clip_fea (Tensor, *optional*):
-                CLIP image features for image-to-video mode
+                CLIP image features for image conditioning (optional for T2V, required for I2V)
+                Shape: [B, 257, 1280] from CLIP ViT-H/14 encoder
             y (List[Tensor], *optional*):
                 Conditional video inputs for image-to-video mode, same shape as x
 
@@ -686,7 +727,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+            # Use appropriate embedding layer based on model type
+            if self.model_type == "i2v":
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+            elif self.model_type == "t2v":
+                context_clip = self.clip_img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
         # arguments
@@ -749,7 +794,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             seq_len (`int`):
                 Maximum sequence length for positional encoding
             clip_fea (Tensor, *optional*):
-                CLIP image features for image-to-video mode
+                CLIP image features for image conditioning (optional for T2V, required for I2V)
+                Shape: [B, 257, 1280] from CLIP ViT-H/14 encoder
             y (List[Tensor], *optional*):
                 Conditional video inputs for image-to-video mode, same shape as x
 
@@ -817,7 +863,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+            # Use appropriate embedding layer based on model type
+            if self.model_type == "i2v":
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+            elif self.model_type == "t2v":
+                context_clip = self.clip_img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
         # arguments
@@ -906,6 +956,14 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         for m in self.time_embedding.modules():
             if isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, std=0.02)
+
+        # init CLIP image embedding if it exists (for T2V with image conditioning)
+        if hasattr(self, 'clip_img_emb') and self.clip_img_emb is not None:
+            for m in self.clip_img_emb.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.normal_(m.weight, std=0.02)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
 
         # init output layer
         nn.init.zeros_(self.head.head.weight)

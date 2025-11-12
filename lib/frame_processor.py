@@ -87,6 +87,7 @@ class FrameProcessor:
         # Store image data for img2img mode
         self.current_image_data = None
         self.image_frames_cache = None  # Cache converted image frames
+        self.cached_chunk_size = None  # Track chunk size of cached frames
 
     def _convert_base64_image_to_frames(
         self, base64_data: str, chunk_size: int
@@ -327,6 +328,12 @@ class FrameProcessor:
         if requirements is not None:
             current_chunk_size = requirements.input_size
 
+            # Clear image cache if chunk size changed (e.g., after prompt update that resets pipeline)
+            if self.cached_chunk_size is not None and self.cached_chunk_size != current_chunk_size:
+                logger.info(f"Chunk size changed from {self.cached_chunk_size} to {current_chunk_size}, clearing image cache")
+                self.image_frames_cache = None
+                self.cached_chunk_size = None
+
             # Use image input if available, otherwise use video frames
             if self.current_image_data:
                 # Generate frames from image
@@ -335,6 +342,7 @@ class FrameProcessor:
                     self.image_frames_cache = self._convert_base64_image_to_frames(
                         self.current_image_data, current_chunk_size
                     )
+                    self.cached_chunk_size = current_chunk_size
                 input = self.image_frames_cache
             else:
                 # Use video frames from buffer
