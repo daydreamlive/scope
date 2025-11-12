@@ -3,6 +3,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 from diffusers.utils import logging as diffusers_logging
 
 from ..wan2_1.blocks import (
+    CleanKVCacheBlock,
     DecodeBlock,
     DenoiseBlock,
     PrepareLatentsBlock,
@@ -33,6 +34,7 @@ ALL_BLOCKS = InsertableDict(
         ("recache_frames", RecacheFramesBlock),
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),
+        ("clean_kv_cache", CleanKVCacheBlock),
         ("prepare_recache_frames", PrepareRecacheFramesBlock),
         ("prepare_next", PrepareNextBlock),
     ]
