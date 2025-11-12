@@ -107,11 +107,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Denoised latents",
             ),
-            OutputParam(
-                "current_start_frame",
-                type_hint=int,
-                description="Current starting frame index for current block",
-            ),
         ]
 
     @torch.no_grad()

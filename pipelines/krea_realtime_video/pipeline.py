@@ -127,6 +127,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
+        self.state.set("base_seed", getattr(config, "seed", 42))
 
     def __call__(self, **kwargs):
         for k, v in kwargs.items():
