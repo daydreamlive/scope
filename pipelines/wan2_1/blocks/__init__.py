@@ -1,3 +1,4 @@
+from .clean_kv_cache import CleanKVCacheBlock
 from .decode import DecodeBlock
 from .denoise import DenoiseBlock
 from .prepare_latents import PrepareLatentsBlock
@@ -14,4 +15,5 @@ __all__ = [
     "SetupCachesBlock",
     "TextConditioningBlock",
     "PrepareNextBlock",
+    "CleanKVCacheBlock",
 ]
