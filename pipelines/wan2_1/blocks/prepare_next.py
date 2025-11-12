@@ -43,7 +43,13 @@ class PrepareNextBlock(ModularPipelineBlocks):
 
     @property
     def intermediate_outputs(self) -> list[OutputParam]:
-        return []
+        return [
+            OutputParam(
+                "current_start_frame",
+                type_hint=int,
+                description="Current starting frame index of current block",
+            ),
+        ]
 
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
