@@ -38,6 +38,9 @@ prompts = [
 ]
 
 outputs = []
+latency_measures = []
+fps_measures = []
+
 for _, prompt in enumerate(prompts):
     num_frames = 0
     max_output_frames = 81
@@ -54,6 +57,8 @@ for _, prompt in enumerate(prompts):
             f"Pipeline generated {num_output_frames} frames latency={latency:2f}s fps={fps}"
         )
 
+        latency_measures.append(latency)
+        fps_measures.append(fps)
         num_frames += num_output_frames
         outputs.append(output.detach().cpu())
 
@@ -62,3 +67,12 @@ output_video = torch.concat(outputs)
 print(output_video.shape)
 output_video_np = output_video.contiguous().numpy()
 export_to_video(output_video_np, "pipelines/longlive/output.mp4", fps=16)
+
+# Print statistics
+print("\n=== Performance Statistics ===")
+print(
+    f"Latency - Avg: {sum(latency_measures) / len(latency_measures):.2f}s, Max: {max(latency_measures):.2f}s, Min: {min(latency_measures):.2f}s"
+)
+print(
+    f"FPS - Avg: {sum(fps_measures) / len(fps_measures):.2f}, Max: {max(fps_measures):.2f}, Min: {min(fps_measures):.2f}"
+)
