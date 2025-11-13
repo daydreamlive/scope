@@ -4,6 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
+from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
@@ -84,6 +85,12 @@ class StreamDiffusionV2Pipeline(Pipeline):
         components.add("vae", vae)
         components.add("text_encoder", text_encoder)
 
+        embedding_blender = EmbeddingBlender(
+            device=device,
+            dtype=dtype,
+        )
+        components.add("embedding_blender", embedding_blender)
+
         self.blocks = StreamDiffusionV2Blocks()
         self.components = components
         self.state = PipelineState()
@@ -120,6 +127,10 @@ class StreamDiffusionV2Pipeline(Pipeline):
     def _generate(self, **kwargs) -> torch.Tensor:
         for k, v in kwargs.items():
             self.state.set(k, v)
+
+        # Clear transition from state if not provided to prevent stale transitions
+        if "transition" not in kwargs:
+            self.state.set("transition", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

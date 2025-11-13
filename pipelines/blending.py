@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from enum import Enum
 
 import torch
@@ -16,15 +17,6 @@ class BlenderState(Enum):
 # Numerical stability constants
 EPSILON = 1e-8  # Small value to prevent division by zero
 SLERP_PARALLEL_THRESHOLD = 1e-4  # Threshold for detecting parallel embeddings in SLERP
-
-# Cache configuration
-DEFAULT_MAX_CACHE_SIZE = 10  # Maximum number of prompts to cache
-
-# Logging configuration
-LOG_PROMPT_PREVIEW_LENGTH = 50  # Characters to show in log messages for prompt preview
-
-# Prompt defaults
-DEFAULT_PROMPT_WEIGHT = 1.0  # Default weight for prompt blending
 
 # Minimum embedding difference threshold for skipping transitions
 MIN_EMBEDDING_DIFF_THRESHOLD = 0.01
@@ -107,48 +99,54 @@ def blend_embeddings(embeddings, weights, method, dtype, device) -> torch.Tensor
     return combined_embeds
 
 
-def parse_transition_config(transition):
-    """Parse and validate transition configuration.
+@dataclass(frozen=True, slots=True)
+class TransitionConfig:
+    """Normalized transition configuration.
+
+    This value object describes *how* to transition (policy), independent of prompts.
+
+    The semantics are:
+        - num_steps > 0 → smooth transition over that many steps
+        - num_steps <= 0 → no smooth transition (snap to target)
+    """
+
+    num_steps: int
+    temporal_interpolation_method: str
+
+
+def parse_transition_config(transition: dict | None) -> TransitionConfig:
+    """Parse and normalize transition configuration.
 
     Args:
         transition: Transition config dict (from WebRTC parameters)
 
     Returns:
-        tuple: (target_prompts, num_steps, temporal_method, is_immediate)
-            - target_prompts: Target prompts list from transition
+        TransitionConfig: Normalized transition policy with:
             - num_steps: Number of steps for transition
-            - temporal_method: Interpolation method (linear or slerp)
-            - is_immediate: True if num_steps=0 (instant), False if smooth
+            - temporal_interpolation_method: Interpolation method (linear or slerp)
     """
     if transition is None:
-        return None, 0, "linear", False
+        return TransitionConfig(num_steps=0, temporal_interpolation_method="linear")
 
     # Extract from dict (Pydantic models already converted to dict at API boundary)
-    target_prompts = transition["target_prompts"]
-    num_steps = transition.get("num_steps", 0)
-    temporal_method = transition.get("temporal_interpolation_method", "linear")
-
-    # Validate target prompts
-    if not target_prompts:
+    raw_num_steps = transition.get("num_steps", 0)
+    try:
+        num_steps = int(raw_num_steps)
+    except (TypeError, ValueError):
         logger.warning(
-            "parse_transition_config: Empty target_prompts, ignoring transition"
+            "parse_transition_config: Invalid num_steps %r, defaulting to 0",
+            raw_num_steps,
         )
-        return None, 0, temporal_method, False
+        num_steps = 0
 
-    # Check if at least one prompt has non-empty text
-    has_valid_prompt = any(p.get("text", "").strip() for p in target_prompts)
-    if not has_valid_prompt:
-        logger.warning(
-            "parse_transition_config: All target prompts are empty, ignoring transition"
-        )
-        return None, 0, temporal_method, False
+    temporal_interpolation_method = transition.get(
+        "temporal_interpolation_method", "linear"
+    )
 
-    # If num_steps is 0, this is an immediate transition
-    is_immediate = num_steps <= 0
-    if is_immediate:
-        logger.debug("parse_transition_config: num_steps=0, immediate transition")
-
-    return target_prompts, num_steps, temporal_method, is_immediate
+    return TransitionConfig(
+        num_steps=num_steps,
+        temporal_interpolation_method=temporal_interpolation_method,
+    )
 
 
 class EmbeddingBlender:
@@ -165,17 +163,13 @@ class EmbeddingBlender:
     - This separation allows EmbeddingBlender to be generic and reusable
     - Intentionally separate from EmbeddingBlendingBlock to maintain
       separation between business logic (this class) and pipeline integration (the block)
-
-    Legacy Support:
-    - cache_reset_callback parameter exists for non-modular StreamDiffusionV2 pipeline
-    - Modular pipelines (LongLive, Krea) handle cache via state flags instead
+    - Cache management is handled by pipeline state flags (conditioning_embeds_updated)
     """
 
     def __init__(
         self,
         device,
         dtype,
-        cache_reset_callback=None,  # For legacy non-modular pipelines only
     ) -> None:
         self.device = device
         self.dtype = dtype
@@ -183,12 +177,9 @@ class EmbeddingBlender:
         # State management for transitions
         self._state = BlenderState.IDLE
 
-        # Temporal interpolation state (prompt transitions)
+        # Temporal interpolation state (embedding transitions)
         self._transition_queue = []  # Queue of pre-computed interpolated embeddings
         self._current_blend_embedding = None  # Cached current blend for transitions
-
-        # Pipeline-specific cache reset callback invoked during transitions
-        self._cache_reset_callback = cache_reset_callback
 
     def blend(
         self, embeddings, weights, interpolation_method, cache_result=True
@@ -225,25 +216,39 @@ class EmbeddingBlender:
 
         return result
 
+    def set_current_embedding(self, embedding: torch.Tensor) -> None:
+        """Manually set the current blend embedding used as the source for transitions.
+
+        This is useful when the caller manages spatial blending separately and wants
+        to drive temporal transitions from the last used embedding.
+        """
+        if embedding is None:
+            self._current_blend_embedding = None
+            return
+
+        self._current_blend_embedding = embedding.detach()
+
     def start_transition(
         self,
+        source_embedding,
         target_embedding,
         num_steps: int,
         temporal_interpolation_method: str,
     ) -> None:
-        """Start a temporal transition from current blend to target blend.
+        """Start a temporal transition from source embedding to target embedding.
 
         This pre-computes interpolated embeddings.
 
         Args:
+            source_embedding: Pre-encoded current embedding tensor to transition from
             target_embedding: Pre-encoded and blended target embedding tensor
             num_steps: Number of generation calls to transition over
             temporal_interpolation_method: Method for temporal interpolation (linear or slerp)
         """
 
-        if self._current_blend_embedding is None:
+        if source_embedding is None:
             logger.warning(
-                "start_transition: No current blend cached, cannot start transition"
+                "start_transition: No source embedding provided, cannot start transition"
             )
             return
 
@@ -253,12 +258,19 @@ class EmbeddingBlender:
             )
             return
 
+        if num_steps <= 0:
+            logger.warning(
+                "start_transition: num_steps=%s, expected > 0 for smooth transition",
+                num_steps,
+            )
+            return
+
+        # Cache the starting embedding for this transition
+        self._current_blend_embedding = source_embedding.detach()
+
         # Check if embeddings are actually different (skip if too similar to save computation)
         diff_norm = (target_embedding - self._current_blend_embedding).norm()
         if diff_norm < MIN_EMBEDDING_DIFF_THRESHOLD:
-            logger.info(
-                f"start_transition: Embeddings are very similar (diff_norm={diff_norm.item():.6f}), skipping transition"
-            )
             return
 
         # Pre-compute interpolation steps
@@ -282,11 +294,6 @@ class EmbeddingBlender:
         self._transition_queue = interpolated_embeddings
         self._state = BlenderState.TRANSITIONING
 
-        logger.info(
-            f"start_transition: Started transition over {num_steps} steps using {temporal_interpolation_method}. "
-            f"Queue length: {len(self._transition_queue)}, State: {self._state.value}"
-        )
-
     def get_next_embedding(self) -> torch.Tensor | None:
         """Get the next interpolated embedding during a transition.
 
@@ -300,23 +307,12 @@ class EmbeddingBlender:
         # If we have a transition in progress, pop from queue
         if self._state == BlenderState.TRANSITIONING and self._transition_queue:
             next_embedding = self._transition_queue.pop(0)
-            logger.debug(
-                f"get_next_embedding: Popping from transition queue ({len(self._transition_queue)} remaining)"
-            )
-
-            # Invoke cache reset callback if provided (critical for model to respond to new embedding)
-            if self._cache_reset_callback:
-                logger.debug("get_next_embedding: Invoking cache reset callback")
-                self._cache_reset_callback()
 
             # Update cached current blend as we progress
             self._current_blend_embedding = next_embedding
 
             if not self._transition_queue:
                 self._state = BlenderState.IDLE
-                logger.info(
-                    f"get_next_embedding: Transition completed, State: {self._state.value}"
-                )
 
             return next_embedding
 
@@ -330,8 +326,5 @@ class EmbeddingBlender:
     def cancel_transition(self) -> None:
         """Cancel any active transition and clear the queue."""
         if self._state == BlenderState.TRANSITIONING:
-            logger.info(
-                f"cancel_transition: Cancelling transition with {len(self._transition_queue)} steps remaining, State: {self._state.value} -> {BlenderState.IDLE.value}"
-            )
             self._transition_queue.clear()
             self._state = BlenderState.IDLE

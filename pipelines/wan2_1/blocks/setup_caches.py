@@ -60,10 +60,10 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 description="Whether to (re)initialize caches",
             ),
             InputParam(
-                "prompt_embeds_updated",
+                "conditioning_embeds_updated",
                 type_hint=bool,
                 default=False,
-                description="Whether text embeddings were updated (requires cross-attention cache re-initialization)",
+                description="Whether conditioning embeddings were updated (requires cross-attention cache re-initialization)",
             ),
             InputParam(
                 "height",
@@ -130,10 +130,10 @@ class SetupCachesBlock(ModularPipelineBlocks):
         if block_state.current_start_frame >= max_current_start:
             init_cache = True
 
-        # Clear KV cache when prompt changes, if manage_cache is enabled and video input is present
+        # Clear KV cache when conditioning changes, if manage_cache is enabled and video input is present
         input_video = getattr(block_state, "input_video", False)
         if (
-            block_state.prompt_embeds_updated
+            block_state.conditioning_embeds_updated
             and block_state.manage_cache
             and input_video
         ):
@@ -178,11 +178,11 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 kv_cache_existing=block_state.kv_cache,
             )
 
-        # If the prompt embeds change we need to reinitialize the crossattn cache
+        # If the conditioning embeds change we need to reinitialize the crossattn cache
         if (
             init_cache
             or block_state.crossattn_cache is None
-            or block_state.prompt_embeds_updated
+            or block_state.conditioning_embeds_updated
         ):
             block_state.crossattn_cache = initialize_crossattn_cache(
                 generator=components.generator,

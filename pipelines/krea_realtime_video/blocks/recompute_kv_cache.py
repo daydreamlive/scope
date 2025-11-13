@@ -86,10 +86,10 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
                 "width", required=True, type_hint=int, description="Width of video"
             ),
             InputParam(
-                "prompt_embeds",
+                "conditioning_embeds",
                 required=True,
                 type_hint=torch.Tensor,
-                description="Text embeddings to condition denoising",
+                description="Conditioning embeddings to condition denoising",
             ),
         ]
 
@@ -224,7 +224,7 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
         )
 
         # Cache recomputation: no bias to faithfully store context frames
-        conditional_dict = {"prompt_embeds": block_state.prompt_embeds}
+        conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
         components.generator(
             noisy_image_or_video=context_frames,
             conditional_dict=conditional_dict,
