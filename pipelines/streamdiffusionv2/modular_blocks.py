@@ -6,6 +6,7 @@ from ..wan2_1.blocks import (
     CleanKVCacheBlock,
     DecodeBlock,
     DenoiseBlock,
+    EmbeddingBlendingBlock,
     NoiseScaleControllerBlock,
     PrepareNextBlock,
     PrepareVideoLatentsBlock,
@@ -21,9 +22,10 @@ logger = diffusers_logging.get_logger(__name__)
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
+        ("embedding_blending", EmbeddingBlendingBlock),
+        ("set_timesteps", SetTimestepsBlock),
         ("preprocess_video", PreprocessVideoBlock),
         ("noise_scale_controller", NoiseScaleControllerBlock),
-        ("set_timesteps", SetTimestepsBlock),
         ("setup_caches", SetupCachesBlock),
         ("prepare_video_latents", PrepareVideoLatentsBlock),
         ("denoise", DenoiseBlock),

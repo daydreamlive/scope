@@ -245,8 +245,10 @@ class FrameProcessor:
             requirements = pipeline.prepare(
                 **self.parameters,
             )
-            # Transition is consumed by prepare() for non-modular pipelines
-            self.parameters.pop("transition", None)
+            # Transition is consumed by prepare() for non-modular pipelines only
+            # Modular pipelines have a 'blocks' attribute and handle transition in EmbeddingBlendingBlock
+            if not hasattr(pipeline, "blocks"):
+                self.parameters.pop("transition", None)
 
         video_input = None
         if requirements is not None:
@@ -274,7 +276,7 @@ class FrameProcessor:
             output = pipeline(**call_params)
 
             # For modular pipelines, clear transition after it's been processed once
-            if not hasattr(pipeline, "prepare"):
+            if hasattr(pipeline, "blocks"):
                 self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time

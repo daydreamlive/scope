@@ -4,6 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
+from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
@@ -83,6 +84,16 @@ class StreamDiffusionV2Pipeline(Pipeline):
         components.add("scheduler", generator.get_scheduler())
         components.add("vae", vae)
         components.add("text_encoder", text_encoder)
+
+        # Create embedding blender without cache reset callback
+        # Cache reset is handled by EmbeddingBlendingBlock setting prompt_embeds_updated=True
+        # which resets ONLY cross-attn cache, not the full cache (preserving KV cache for smooth transitions)
+        embedding_blender = EmbeddingBlender(
+            device=device,
+            dtype=dtype,
+            cache_reset_callback=None,  # Modular architecture handles cache via flags
+        )
+        components.add("embedding_blender", embedding_blender)
 
         self.blocks = StreamDiffusionV2Blocks()
         self.components = components
