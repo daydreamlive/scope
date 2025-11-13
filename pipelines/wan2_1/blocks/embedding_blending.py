@@ -147,10 +147,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
 
             # Step 2: Apply conditioning changes (snap or start transition)
             if conditioning_changed and target_blend is not None:
-                has_smooth_transition = (
-                    not transition_config.is_immediate
-                    and transition_config.num_steps > 0
-                )
+                has_smooth_transition = transition_config.num_steps > 0
 
                 if has_smooth_transition:
                     # Start a smooth transition from previous prompt_embeds to target_blend
@@ -166,7 +163,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                             source_embedding=source_embedding,
                             target_embedding=target_blend,
                             num_steps=transition_config.num_steps,
-                            temporal_interpolation_method=transition_config.temporal_method,
+                            temporal_interpolation_method=transition_config.temporal_interpolation_method,
                         )
                         next_embedding = (
                             components.embedding_blender.get_next_embedding()

@@ -104,11 +104,14 @@ class TransitionConfig:
     """Normalized transition configuration.
 
     This value object describes *how* to transition (policy), independent of prompts.
+
+    The semantics are:
+        - num_steps > 0 → smooth transition over that many steps
+        - num_steps <= 0 → no smooth transition (snap to target)
     """
 
     num_steps: int
-    temporal_method: str
-    is_immediate: bool
+    temporal_interpolation_method: str
 
 
 def parse_transition_config(transition: dict | None) -> TransitionConfig:
@@ -120,13 +123,10 @@ def parse_transition_config(transition: dict | None) -> TransitionConfig:
     Returns:
         TransitionConfig: Normalized transition policy with:
             - num_steps: Number of steps for transition
-            - temporal_method: Interpolation method (linear or slerp)
-            - is_immediate: True if num_steps <= 0 (instant), False if smooth
+            - temporal_interpolation_method: Interpolation method (linear or slerp)
     """
     if transition is None:
-        return TransitionConfig(
-            num_steps=0, temporal_method="linear", is_immediate=False
-        )
+        return TransitionConfig(num_steps=0, temporal_interpolation_method="linear")
 
     # Extract from dict (Pydantic models already converted to dict at API boundary)
     raw_num_steps = transition.get("num_steps", 0)
@@ -139,15 +139,13 @@ def parse_transition_config(transition: dict | None) -> TransitionConfig:
         )
         num_steps = 0
 
-    temporal_method = transition.get("temporal_interpolation_method", "linear")
-
-    # If num_steps is 0 or less, this is an immediate transition
-    is_immediate = num_steps <= 0
+    temporal_interpolation_method = transition.get(
+        "temporal_interpolation_method", "linear"
+    )
 
     return TransitionConfig(
         num_steps=num_steps,
-        temporal_method=temporal_method,
-        is_immediate=is_immediate,
+        temporal_interpolation_method=temporal_interpolation_method,
     )
 
 

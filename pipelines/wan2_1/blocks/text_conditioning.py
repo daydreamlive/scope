@@ -23,7 +23,11 @@ class TextConditioningBlock(ModularPipelineBlocks):
 
     @property
     def description(self) -> str:
-        return "Text Conditioning block that encodes prompts and transition targets into embeddings"
+        return (
+            "Text Conditioning block that encodes prompts into embeddings for downstream blending. "
+            "Transition configuration is forwarded via pipeline state and handled by the "
+            "embedding blending block."
+        )
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -47,7 +51,10 @@ class TextConditioningBlock(ModularPipelineBlocks):
             InputParam(
                 "transition",
                 type_hint=dict | None,
-                description="Optional transition config containing target prompts to encode",
+                description=(
+                    "Optional transition config for temporal blending. This block does not interpret "
+                    "the transition directly; it is consumed by downstream blending logic."
+                ),
             ),
         ]
 
