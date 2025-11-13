@@ -34,7 +34,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 "prompts",
                 required=True,
                 type_hint=str | list[str] | list[dict],
-                description="New prompts to condition denoising (list[dict] format handled by PromptBlendingBlock)",
+                description="New prompts to condition denoising (list[dict] format handled by EmbeddingBlendingBlock)",
             ),
             InputParam(
                 "prompt_embeds",
@@ -61,6 +61,16 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 type_hint=bool,
                 description="Whether text embeddings were updated (requires cross-attention cache re-initialization)",
             ),
+            OutputParam(
+                "prompt_embeds_list",
+                type_hint=list[torch.Tensor] | None,
+                description="List of individual embeddings for blending (when prompts is list[dict])",
+            ),
+            OutputParam(
+                "prompt_weights",
+                type_hint=list[float] | None,
+                description="List of weights corresponding to prompt_embeds_list",
+            ),
         ]
 
     @staticmethod
@@ -80,32 +90,55 @@ class TextConditioningBlock(ModularPipelineBlocks):
         self.check_inputs(block_state)
 
         block_state.prompt_embeds_updated = False
+        block_state.prompt_embeds_list = None
+        block_state.prompt_weights = None
 
-        # Skip if prompts are list[dict] - PromptBlendingBlock handles these
-        # Note: We check first element to distinguish list[dict] from list[str]
-        # API always sends list[dict] (PromptItem), but blocks support list[str] for internal use
-        if (
-            isinstance(block_state.prompts, list)
-            and len(block_state.prompts) > 0
-            and isinstance(block_state.prompts[0], dict)
-        ):
+        # Check if prompts changed
+        prompts_changed = (
+            block_state.current_prompts is None
+            or block_state.current_prompts != block_state.prompts
+        )
+
+        if not prompts_changed:
             self.set_block_state(state, block_state)
             return components, state
 
-        # Only run text_encoder if prompt changed
-        if (
-            block_state.current_prompts is None
-            or block_state.current_prompts != block_state.prompts
+        with torch.autocast(
+            str(components.config.device), dtype=components.config.dtype
         ):
-            with torch.autocast(
-                str(components.config.device), dtype=components.config.dtype
+            # Handle list[dict] format (for blending)
+            if (
+                isinstance(block_state.prompts, list)
+                and len(block_state.prompts) > 0
+                and isinstance(block_state.prompts[0], dict)
             ):
+                # Encode each prompt individually and extract weights
+                embeddings_list = []
+                weights_list = []
+
+                for prompt_item in block_state.prompts:
+                    text = prompt_item.get("text", "")
+                    weight = prompt_item.get("weight", 1.0)
+
+                    # Encode individual prompt
+                    conditional_dict = components.text_encoder(text_prompts=[text])
+                    embeddings_list.append(conditional_dict["prompt_embeds"])
+                    weights_list.append(weight)
+
+                # Store list of embeddings and weights for EmbeddingBlendingBlock
+                block_state.prompt_embeds_list = embeddings_list
+                block_state.prompt_weights = weights_list
+                # Don't set prompt_embeds here - EmbeddingBlendingBlock will blend and set it
+
+            # Handle simple str or list[str] format (backward compatibility)
+            else:
                 conditional_dict = components.text_encoder(
                     text_prompts=[block_state.prompts]
                     if isinstance(block_state.prompts, str)
                     else block_state.prompts
                 )
-            block_state.prompt_embeds = conditional_dict["prompt_embeds"]
+                block_state.prompt_embeds = conditional_dict["prompt_embeds"]
+
             block_state.current_prompts = block_state.prompts
             block_state.prompt_embeds_updated = True
 

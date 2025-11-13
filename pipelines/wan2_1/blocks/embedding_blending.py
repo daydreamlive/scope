@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 import torch
-from diffusers.modular_pipelines import BlockState, ModularPipelineBlocks, PipelineState
+from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     InputParam,
@@ -97,10 +97,14 @@ class PromptBlendingBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         prompts = block_state.prompts
-        prompt_interpolation_method = block_state.prompt_interpolation_method or "linear"
+        prompt_interpolation_method = (
+            block_state.prompt_interpolation_method or "linear"
+        )
         transition = block_state.transition
 
-        logger.info(f"__call__: Starting with prompts={prompts}, transition={transition is not None}, is_transitioning={components.prompt_blender.is_transitioning()}")
+        logger.info(
+            f"__call__: Starting with prompts={prompts}, transition={transition is not None}, is_transitioning={components.prompt_blender.is_transitioning()}"
+        )
 
         # Initialize flag
         block_state.prompt_embeds_updated = False
@@ -111,27 +115,42 @@ class PromptBlendingBlock(ModularPipelineBlocks):
         ):
             # Handle transition requests (temporal blending)
             # Only process transition if we're NOT already transitioning to prevent restart loops
-            if transition is not None and not components.prompt_blender.is_transitioning():
+            if (
+                transition is not None
+                and not components.prompt_blender.is_transitioning()
+            ):
                 logger.info(f"__call__: Processing transition request: {transition}")
                 should_prepare, target_prompts = handle_transition_prepare(
                     transition, components.prompt_blender, components.text_encoder
                 )
-                logger.info(f"__call__: Transition result: should_prepare={should_prepare}, target_prompts={target_prompts}, is_transitioning={components.prompt_blender.is_transitioning()}")
+                logger.info(
+                    f"__call__: Transition result: should_prepare={should_prepare}, target_prompts={target_prompts}, is_transitioning={components.prompt_blender.is_transitioning()}"
+                )
 
                 # If transition is immediate (num_steps=0), update prompts directly
                 if should_prepare and target_prompts:
                     logger.info("__call__: Applying immediate transition (num_steps=0)")
                     prompts = target_prompts
                     block_state.prompt_embeds_updated = True
-            elif transition is not None and components.prompt_blender.is_transitioning():
-                logger.info("__call__: Ignoring transition request - already transitioning")
+            elif (
+                transition is not None and components.prompt_blender.is_transitioning()
+            ):
+                logger.info(
+                    "__call__: Ignoring transition request - already transitioning"
+                )
 
             # Check if prompts or interpolation method changed
-            should_update = components.prompt_blender.should_update(prompts, prompt_interpolation_method)
-            logger.info(f"__call__: should_update={should_update}, is_transitioning={components.prompt_blender.is_transitioning()}")
+            should_update = components.prompt_blender.should_update(
+                prompts, prompt_interpolation_method
+            )
+            logger.info(
+                f"__call__: should_update={should_update}, is_transitioning={components.prompt_blender.is_transitioning()}"
+            )
 
             if should_update:
-                logger.info("__call__: Prompts or interpolation method changed, updating blend")
+                logger.info(
+                    "__call__: Prompts or interpolation method changed, updating blend"
+                )
 
                 # Blend the prompts (spatial blending)
                 blended_embeds = components.prompt_blender.blend(
@@ -142,19 +161,27 @@ class PromptBlendingBlock(ModularPipelineBlocks):
 
                 # Only update if blend succeeded (returns None during transitions)
                 if blended_embeds is not None:
-                    block_state.prompt_embeds = blended_embeds.to(dtype=components.config.dtype)
+                    block_state.prompt_embeds = blended_embeds.to(
+                        dtype=components.config.dtype
+                    )
                     block_state.prompt_embeds_updated = True
 
             # Get next embedding (handles both normal blending and transitions)
             # NOTE: During transitions, this returns interpolated embeddings
             # The PromptBlender's internal callback resets cross-attn cache (via init_cache=True)
             # We need to override this by setting prompt_embeds_updated=True which ONLY resets cross-attn cache
-            logger.info(f"__call__: Calling get_next_embedding(), is_transitioning={components.prompt_blender.is_transitioning()}")
+            logger.info(
+                f"__call__: Calling get_next_embedding(), is_transitioning={components.prompt_blender.is_transitioning()}"
+            )
             is_transitioning_before = components.prompt_blender.is_transitioning()
-            next_embedding = components.prompt_blender.get_next_embedding(components.text_encoder)
+            next_embedding = components.prompt_blender.get_next_embedding(
+                components.text_encoder
+            )
             is_transitioning_after = components.prompt_blender.is_transitioning()
 
-            logger.info(f"__call__: get_next_embedding() returned embedding: {next_embedding is not None}")
+            logger.info(
+                f"__call__: get_next_embedding() returned embedding: {next_embedding is not None}"
+            )
 
             if next_embedding is not None:
                 # Cast to pipeline dtype before storing
@@ -165,12 +192,18 @@ class PromptBlendingBlock(ModularPipelineBlocks):
                 if is_transitioning_before or is_transitioning_after:
                     block_state.prompt_embeds = next_embedding
                     block_state.prompt_embeds_updated = True
-                    logger.info("__call__: Updated prompt_embeds from transition step (cross-attn cache reset only)")
+                    logger.info(
+                        "__call__: Updated prompt_embeds from transition step (cross-attn cache reset only)"
+                    )
                 else:
                     block_state.prompt_embeds = next_embedding
-                    logger.info("__call__: Updated prompt_embeds from get_next_embedding() (no cache reset)")
+                    logger.info(
+                        "__call__: Updated prompt_embeds from get_next_embedding() (no cache reset)"
+                    )
 
-        logger.info(f"__call__: Finished, prompt_embeds_updated={block_state.prompt_embeds_updated}, is_transitioning={components.prompt_blender.is_transitioning()}")
+        logger.info(
+            f"__call__: Finished, prompt_embeds_updated={block_state.prompt_embeds_updated}, is_transitioning={components.prompt_blender.is_transitioning()}"
+        )
 
         self.set_block_state(state, block_state)
         return components, state
