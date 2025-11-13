@@ -44,9 +44,6 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("embedding_blender", EmbeddingBlender),
-            ComponentSpec(
-                "text_encoder", torch.nn.Module
-            ),  # Only for transition target encoding
         ]
 
     @property
@@ -83,9 +80,14 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 description="Existing prompt embeddings (optional)",
             ),
             InputParam(
-                "prompts",
-                type_hint=list[dict] | None,
-                description="Prompts for transition encoding (list[dict] format)",
+                "target_embeds_list",
+                type_hint=list[torch.Tensor] | None,
+                description="List of pre-encoded transition target embeddings",
+            ),
+            InputParam(
+                "target_weights",
+                type_hint=list[float] | None,
+                description="List of weights corresponding to target_embeds_list",
             ),
         ]
 
@@ -115,10 +117,13 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
             block_state.prompt_interpolation_method or "linear"
         )
         transition = block_state.transition
+        target_embeds_list = block_state.target_embeds_list
+        target_weights = block_state.target_weights
 
         logger.info(
             f"__call__: Starting with prompt_embeds_list={prompt_embeds_list is not None}, "
-            f"transition={transition is not None}, is_transitioning={components.embedding_blender.is_transitioning()}"
+            f"transition={transition is not None}, target_embeds_list={target_embeds_list is not None}, "
+            f"is_transitioning={components.embedding_blender.is_transitioning()}"
         )
 
         # Initialize flag
@@ -154,31 +159,19 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
             ):
                 logger.info("__call__: Processing transition request")
 
-                target_prompts, num_steps, temporal_method, is_immediate = (
-                    parse_transition_config(transition)
+                _, num_steps, temporal_method, is_immediate = parse_transition_config(
+                    transition
                 )
 
-                if target_prompts:
-                    # Encode and blend target prompts
+                # Use pre-encoded target embeddings from TextConditioningBlock
+                if target_embeds_list and target_weights:
                     logger.info(
-                        f"__call__: Encoding {len(target_prompts)} target prompts"
+                        f"__call__: Blending {len(target_embeds_list)} pre-encoded target embeddings"
                     )
-
-                    target_embeddings = []
-                    target_weights = []
-
-                    for prompt_item in target_prompts:
-                        text = prompt_item.get("text", "")
-                        weight = prompt_item.get("weight", 1.0)
-
-                        # Encode target prompt
-                        conditional_dict = components.text_encoder(text_prompts=[text])
-                        target_embeddings.append(conditional_dict["prompt_embeds"])
-                        target_weights.append(weight)
 
                     # Blend target embeddings (don't cache to preserve current blend for comparison)
                     target_blend = components.embedding_blender.blend(
-                        embeddings=target_embeddings,
+                        embeddings=target_embeds_list,
                         weights=target_weights,
                         interpolation_method=prompt_interpolation_method,
                         cache_result=False,
