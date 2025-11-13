@@ -245,9 +245,8 @@ class FrameProcessor:
             requirements = pipeline.prepare(
                 **self.parameters,
             )
-
-        # Transition is consumed by prepare()
-        self.parameters.pop("transition", None)
+            # Transition is consumed by prepare() for non-modular pipelines
+            self.parameters.pop("transition", None)
 
         video_input = None
         if requirements is not None:
@@ -268,17 +267,15 @@ class FrameProcessor:
             if reset_cache is not None:
                 call_params["init_cache"] = reset_cache
 
-            # TODO: Fix multiple prompts in text_conditioning block
-            # Temp workaround until we support multiple prompts in text_conditioning block
-            call_params["prompts"] = self.parameters.get(
-                "prompts", [{"text": "Sample Prompt"}]
-            )[0].get("text", "Sample Prompt")
-
             # Pass video input to pipeline
             if video_input is not None:
                 call_params["video"] = video_input
 
             output = pipeline(**call_params)
+
+            # For modular pipelines, clear transition after it's been processed once
+            if not hasattr(pipeline, "prepare"):
+                self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
             num_frames = output.shape[0]

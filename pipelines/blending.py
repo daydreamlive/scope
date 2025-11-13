@@ -197,14 +197,33 @@ def handle_transition_prepare(transition, prompt_blender, text_encoder):
 
 
 class PromptBlender:
-    """Manages prompt caching and blending for pipelines"""
+    """Manages prompt caching and blending for pipelines
+
+    This class handles the core business logic for prompt management:
+    - Spatial blending: Combining multiple weighted prompts into single embeddings
+    - Temporal blending: Smooth transitions between prompt sets over time
+    - LRU caching: Efficient prompt embedding cache management
+    - State management: Transition state machine (IDLE → TRANSITIONING → IDLE)
+
+    Architecture Notes:
+    - This class is intentionally separate from PromptBlendingBlock to maintain
+      separation between business logic (this class) and pipeline integration (the block)
+    - Even when all pipelines are modularized, keep this separate for:
+      * Easier unit testing of blending logic
+      * Cleaner separation of concerns
+      * Potential reusability in other contexts
+
+    TODO: Once all pipelines are modularized, remove the cache_reset_callback parameter
+    The callback is a vestige from non-modular implementations. In modular architecture,
+    blocks handle cache management via state flags (e.g., prompt_embeds_updated).
+    """
 
     def __init__(
         self,
         device,
         dtype,
         max_cache_size: int = DEFAULT_MAX_CACHE_SIZE,
-        cache_reset_callback=None,
+        cache_reset_callback=None,  # TODO: Remove once all pipelines modularized
     ) -> None:
         self.device = device
         self.dtype = dtype
