@@ -165,6 +165,10 @@ class KreaRealtimeVideoPipeline(Pipeline):
         for k, v in kwargs.items():
             self.state.set(k, v)
 
+        # Clear transition from state if not provided in kwargs to prevent stale transitions
+        if "transition" not in kwargs:
+            self.state.set("transition", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 

@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import torch
@@ -9,6 +10,8 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 )
 
 from ...blending import parse_transition_config
+
+logger = logging.getLogger(__name__)
 
 
 class TextConditioningBlock(ModularPipelineBlocks):
@@ -116,6 +119,13 @@ class TextConditioningBlock(ModularPipelineBlocks):
         prompts_changed = (
             block_state.current_prompts is None
             or block_state.current_prompts != block_state.prompts
+        )
+
+        # Diagnostic logging
+        logger.info(
+            f"TextConditioningBlock: current_prompts={block_state.current_prompts}, "
+            f"prompts={block_state.prompts}, prompts_changed={prompts_changed}, "
+            f"transition={block_state.transition is not None}"
         )
 
         with torch.autocast(
