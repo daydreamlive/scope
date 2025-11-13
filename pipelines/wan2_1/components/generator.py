@@ -194,6 +194,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         kv_cache: list[dict] | None = None,
         crossattn_cache: list[dict] | None = None,
         current_start: int | None = None,
+        current_end: int | None = None,
         classify_mode: bool | None = False,
         concat_time_embeddings: bool | None = False,
         clean_x: torch.Tensor | None = None,
@@ -220,6 +221,7 @@ class WanDiffusionWrapper(torch.nn.Module):
                 kv_cache=kv_cache,
                 crossattn_cache=crossattn_cache,
                 current_start=current_start,
+                current_end=current_end,
                 cache_start=cache_start,
                 kv_cache_attention_bias=kv_cache_attention_bias,
             ).permute(0, 2, 1, 3, 4)
