@@ -26,11 +26,12 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     def expected_configs(self) -> list[ConfigSpec]:
         return [
             ConfigSpec("num_frame_per_block", 3),
+            ConfigSpec("vae_temporal_downsample_factor", 4),
         ]
 
     @property
     def description(self) -> str:
-        return "Prepare Latents block that generates empty latents (noise) for video generation"
+        return "Prepare Video Latents block that generates noisy latents for a video that will be used for video generation"
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -75,6 +76,30 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
+
+        target_num_frames = (
+            components.config.num_frame_per_block
+            * components.config.vae_temporal_downsample_factor
+        )
+        # The first block will require an additional frame due to behavior of VAE
+        if block_state.current_start_frame == 0:
+            target_num_frames += 1
+
+        _, _, num_frames, _, _ = block_state.video.shape
+        # If we do not have enough frames use linear interpolation to resample existing frames
+        # to meet the required number of frames
+        if num_frames != target_num_frames:
+            indices = (
+                torch.linspace(
+                    0,
+                    num_frames - 1,
+                    target_num_frames,
+                    device=block_state.video.device,
+                )
+                .round()
+                .long()
+            )
+            block_state.video = block_state.video[:, :, indices]
 
         # Encode frames to latents using VAE
         latents = components.vae.encode_to_latent(block_state.video)
