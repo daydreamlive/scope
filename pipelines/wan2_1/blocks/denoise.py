@@ -132,6 +132,12 @@ class DenoiseBlock(ModularPipelineBlocks):
         if block_state.start_frame is not None:
             start_frame = block_state.start_frame
 
+        # TODO: start_frame when running in v2v should skip to 2 instead of 1 after this block?
+        end_frame = start_frame + 1
+        # Special case for first block
+        if start_frame == 0:
+            end_frame += 1
+
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
             timestep = (
@@ -151,6 +157,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache=block_state.kv_cache,
                     crossattn_cache=block_state.crossattn_cache,
                     current_start=start_frame * frame_seq_length,
+                    current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                 )
                 next_timestep = denoising_step_list[index + 1]
@@ -180,6 +187,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache=block_state.kv_cache,
                     crossattn_cache=block_state.crossattn_cache,
                     current_start=start_frame * frame_seq_length,
+                    current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                 )
 
