@@ -61,7 +61,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
             text_encoder_path=text_encoder_path,
             tokenizer_path=tokenizer_path,
         )
-        print(f"Loaded text encoder in {time.time() - start:3f}s")
+        print(f"Loaded text encoder in {time.time() - start:.3f}s")
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
