@@ -23,8 +23,8 @@ DEFAULT_MAX_CACHE_SIZE = 10  # Maximum number of prompts to cache
 # Logging configuration
 LOG_PROMPT_PREVIEW_LENGTH = 50  # Characters to show in log messages for prompt preview
 
-# Prompt defaults
-DEFAULT_PROMPT_WEIGHT = 1.0  # Default weight for prompt blending
+# Embedding defaults
+DEFAULT_EMBEDDING_WEIGHT = 1.0  # Default weight for embedding blending
 
 # Minimum embedding difference threshold for skipping transitions
 MIN_EMBEDDING_DIFF_THRESHOLD = 0.01
@@ -177,7 +177,7 @@ class EmbeddingBlender:
         # State management for transitions
         self._state = BlenderState.IDLE
 
-        # Temporal interpolation state (prompt transitions)
+        # Temporal interpolation state (embedding transitions)
         self._transition_queue = []  # Queue of pre-computed interpolated embeddings
         self._current_blend_embedding = None  # Cached current blend for transitions
 

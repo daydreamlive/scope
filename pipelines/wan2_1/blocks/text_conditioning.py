@@ -73,14 +73,14 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 description="Whether text embeddings were updated (requires cross-attention cache re-initialization)",
             ),
             OutputParam(
-                "prompt_embeds_list",
+                "embeds_list",
                 type_hint=list[torch.Tensor] | None,
                 description="List of individual embeddings for blending (when prompts is list[dict])",
             ),
             OutputParam(
-                "prompt_weights",
+                "embedding_weights",
                 type_hint=list[float] | None,
-                description="List of weights corresponding to prompt_embeds_list",
+                description="List of weights corresponding to embeds_list",
             ),
             OutputParam(
                 "target_embeds_list",
@@ -115,8 +115,8 @@ class TextConditioningBlock(ModularPipelineBlocks):
         self.check_inputs(block_state)
 
         block_state.prompt_embeds_updated = False
-        block_state.prompt_embeds_list = None
-        block_state.prompt_weights = None
+        block_state.embeds_list = None
+        block_state.embedding_weights = None
         block_state.target_embeds_list = None
         block_state.target_weights = None
 
@@ -145,8 +145,8 @@ class TextConditioningBlock(ModularPipelineBlocks):
                     weights_list.append(weight)
 
                 # Store list of embeddings and weights for EmbeddingBlendingBlock
-                block_state.prompt_embeds_list = embeddings_list
-                block_state.prompt_weights = weights_list
+                block_state.embeds_list = embeddings_list
+                block_state.embedding_weights = weights_list
                 # Don't set prompt_embeds here - EmbeddingBlendingBlock will blend and set it
 
                 block_state.current_prompts = block_state.prompts

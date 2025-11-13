@@ -18,6 +18,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     """Embedding Blending block that handles spatial and temporal embedding blending.
 
     This block orchestrates the EmbeddingBlender component within the modular pipeline architecture.
+    It is generic and can blend ANY type of embeddings (text, image, audio, etc.).
 
     Responsibilities:
     - Spatial blending: Combining multiple weighted embeddings into a single embedding
@@ -54,17 +55,17 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "prompt_embeds_list",
+                "embeds_list",
                 type_hint=list[torch.Tensor] | None,
                 description="List of pre-encoded embeddings to blend",
             ),
             InputParam(
-                "prompt_weights",
+                "embedding_weights",
                 type_hint=list[float] | None,
-                description="List of weights corresponding to prompt_embeds_list",
+                description="List of weights corresponding to embeds_list",
             ),
             InputParam(
-                "prompt_interpolation_method",
+                "spatial_interpolation_method",
                 type_hint=str,
                 default="linear",
                 description="Spatial interpolation method for blending: 'linear' or 'slerp'",
@@ -97,12 +98,12 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
             OutputParam(
                 "prompt_embeds",
                 type_hint=torch.Tensor,
-                description="Blended text embeddings to condition denoising",
+                description="Blended embeddings to condition denoising (pipeline state variable)",
             ),
             OutputParam(
                 "prompt_embeds_updated",
                 type_hint=bool,
-                description="Whether text embeddings were updated (requires cross-attention cache re-initialization)",
+                description="Whether embeddings were updated (requires cross-attention cache re-initialization)",
             ),
         ]
 
@@ -111,10 +112,10 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         # Get inputs from state
-        prompt_embeds_list = block_state.prompt_embeds_list
-        prompt_weights = block_state.prompt_weights
-        prompt_interpolation_method = (
-            block_state.prompt_interpolation_method or "linear"
+        embeds_list = block_state.embeds_list
+        embedding_weights = block_state.embedding_weights
+        spatial_interpolation_method = (
+            block_state.spatial_interpolation_method or "linear"
         )
         transition = block_state.transition
         target_embeds_list = block_state.target_embeds_list
@@ -127,11 +128,11 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
             str(components.config.device), dtype=components.config.dtype
         ):
             # Step 1: Spatial blending - blend pre-encoded embeddings if available
-            if prompt_embeds_list and prompt_weights:
+            if embeds_list and embedding_weights:
                 blended_embeds = components.embedding_blender.blend(
-                    embeddings=prompt_embeds_list,
-                    weights=prompt_weights,
-                    interpolation_method=prompt_interpolation_method,
+                    embeddings=embeds_list,
+                    weights=embedding_weights,
+                    interpolation_method=spatial_interpolation_method,
                 )
 
                 if blended_embeds is not None:
@@ -156,7 +157,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                     target_blend = components.embedding_blender.blend(
                         embeddings=target_embeds_list,
                         weights=target_weights,
-                        interpolation_method=prompt_interpolation_method,
+                        interpolation_method=spatial_interpolation_method,
                         cache_result=False,
                     )
 
