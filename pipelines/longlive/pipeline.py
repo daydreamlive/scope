@@ -4,6 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
+from ..blending import PromptBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
@@ -92,6 +93,20 @@ class LongLivePipeline(Pipeline):
         components.add("scheduler", generator.get_scheduler())
         components.add("vae", vae)
         components.add("text_encoder", text_encoder)
+
+        # Create prompt blender without cache reset callback
+        # Cache reset is handled by PromptBlendingBlock setting prompt_embeds_updated=True
+        # which resets ONLY cross-attn cache, not the full cache (preserving KV cache for smooth transitions)
+        # TODO: Remove cache_reset_callback parameter entirely once all pipelines are modularized
+        # The callback is a vestige from non-modular implementations where pipelines had to
+        # manually reset caches. In modular architecture, SetupCachesBlock handles this via
+        # the prompt_embeds_updated flag, making the callback unnecessary.
+        prompt_blender = PromptBlender(
+            device=device,
+            dtype=dtype,
+            cache_reset_callback=None,  # Modular architecture handles cache via flags
+        )
+        components.add("prompt_blender", prompt_blender)
 
         self.blocks = LongLiveBlocks()
         self.components = components

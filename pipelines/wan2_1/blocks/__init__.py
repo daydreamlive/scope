@@ -6,6 +6,7 @@ from .prepare_latents import PrepareLatentsBlock
 from .prepare_next import PrepareNextBlock
 from .prepare_video_latents import PrepareVideoLatentsBlock
 from .preprocess_video import PreprocessVideoBlock
+from .prompt_blending import PromptBlendingBlock
 from .set_timesteps import SetTimestepsBlock
 from .setup_caches import SetupCachesBlock
 from .text_conditioning import TextConditioningBlock
@@ -22,4 +23,5 @@ __all__ = [
     "PrepareVideoLatentsBlock",
     "NoiseScaleControllerBlock",
     "PreprocessVideoBlock",
+    "PromptBlendingBlock",
 ]

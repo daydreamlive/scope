@@ -27,14 +27,14 @@ class TextConditioningBlock(ModularPipelineBlocks):
         return [
             InputParam(
                 "current_prompts",
-                type_hint=str | list[str] | None,
+                type_hint=str | list[str] | list[dict] | None,
                 description="Current prompts conditioning denoising",
             ),
             InputParam(
                 "prompts",
                 required=True,
-                type_hint=str | list[str],
-                description="New prompts to condition denoising",
+                type_hint=str | list[str] | list[dict],
+                description="New prompts to condition denoising (list[dict] format handled by PromptBlendingBlock)",
             ),
             InputParam(
                 "prompt_embeds",
@@ -48,7 +48,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
         return [
             OutputParam(
                 "current_prompts",
-                type_hint=str | list[str],
+                type_hint=str | list[str] | list[dict],
                 description="Current prompts conditioning denoising",
             ),
             OutputParam(
@@ -80,6 +80,17 @@ class TextConditioningBlock(ModularPipelineBlocks):
         self.check_inputs(block_state)
 
         block_state.prompt_embeds_updated = False
+
+        # Skip if prompts are list[dict] - PromptBlendingBlock handles these
+        # Note: We check first element to distinguish list[dict] from list[str]
+        # API always sends list[dict] (PromptItem), but blocks support list[str] for internal use
+        if (
+            isinstance(block_state.prompts, list)
+            and len(block_state.prompts) > 0
+            and isinstance(block_state.prompts[0], dict)
+        ):
+            self.set_block_state(state, block_state)
+            return components, state
 
         # Only run text_encoder if prompt changed
         if (
