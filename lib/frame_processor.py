@@ -244,7 +244,6 @@ class FrameProcessor:
         if hasattr(pipeline, "prepare"):
             requirements = pipeline.prepare(
                 should_prepare=not self.is_prepared or reset_cache,
-                reset_cache=reset_cache if reset_cache else False,
                 **self.parameters,
             )
 
