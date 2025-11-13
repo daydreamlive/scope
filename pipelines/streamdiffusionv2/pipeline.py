@@ -86,11 +86,12 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.state = PipelineState()
         # These need to be set right now because InputParam.default on the blocks
         # does not work properly
-        self.state.set("current_start_frame", 0)
+        self.state.set("current_start_frame", 1)
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", 1.0)
         self.state.set("noise_scale", 0.7)
         self.state.set("noise_controller", True)
+        self.state.set("increment_on_zero_start", True)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
