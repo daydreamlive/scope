@@ -19,13 +19,10 @@ import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { createCloudStream } from "../lib/daydream";
 import { WhipConnection } from "../components/WhipConnection";
-import { useMuxer } from "@/muxer";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
   const { settings, updateSettings } = useStreamState();
-  const muxer = useMuxer();
-
 
   // Prompt state
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
@@ -518,7 +515,7 @@ export function StreamPage() {
         setIsConnectingCloud(true);
         isStartingCloudRef.current = true;
         const created = await createCloudStream({
-          pipeline_id: 'pip_SDXL-turbo',
+          pipeline_id: 'pip_SD-turbo',
           load_params: loadParams || undefined,
         });
         cloudStreamIdRef.current = created.id;
@@ -532,6 +529,7 @@ export function StreamPage() {
           return false;
         }
 
+        console.log("[StreamPage] created:", created.stream_key);
         const endpoint = created.whip_url;
         // const endpoint = "https://ai.livepeer.monster/aiWebrtc/foo3-out/whip";
         if (!endpoint) {
@@ -954,9 +952,10 @@ export function StreamPage() {
       {settings.cloudMode && cloudWhipUrl ? (
         <WhipConnection
           whipUrl={cloudWhipUrl}
-          stream={localStream ?? muxer.stream ?? null}
+          stream={localStream ?? null}
           onConnectionStateChange={onWhipConnectionStateChange}
           onRetryLimitExceeded={onWhipRetryLimitExceeded}
+          debugStats  // TODO remove later
         />
       ) : null}
     </div>

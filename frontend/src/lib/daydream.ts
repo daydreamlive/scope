@@ -10,6 +10,7 @@ interface CreateStreamRequest {
 interface CreateStreamResponse {
   id: string;
   whip_url?: string;
+  stream_key?: string;
   // other fields may exist; we mainly need id and whip_url
 }
 
