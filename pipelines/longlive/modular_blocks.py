@@ -33,8 +33,8 @@ ALL_BLOCKS = InsertableDict(
         ("prepare_latents", PrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),
         ("denoise", DenoiseBlock),
-        ("decode", DecodeBlock),
         ("clean_kv_cache", CleanKVCacheBlock),
+        ("decode", DecodeBlock),
         ("prepare_recache_frames", PrepareRecacheFramesBlock),
         ("prepare_next", PrepareNextBlock),
     ]
