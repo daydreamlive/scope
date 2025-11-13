@@ -210,9 +210,16 @@ class FrameProcessor:
             # Check if there are new parameters
             new_parameters = self.parameters_queue.get_nowait()
             if new_parameters != self.parameters:
+                # Clear stale transition when new prompts arrive without transition
+                if (
+                    "prompts" in new_parameters
+                    and "transition" not in new_parameters
+                    and "transition" in self.parameters
+                ):
+                    self.parameters.pop("transition", None)
+
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
-                logger.info(f"Updated parameters: {self.parameters}")
         except queue.Empty:
             pass
 
@@ -245,8 +252,6 @@ class FrameProcessor:
             requirements = pipeline.prepare(
                 **self.parameters,
             )
-            # Transition is consumed by prepare() for non-modular pipelines
-            self.parameters.pop("transition", None)
 
         video_input = None
         if requirements is not None:
@@ -259,7 +264,6 @@ class FrameProcessor:
                 video_input = self.prepare_chunk(current_chunk_size)
         try:
             # Pass parameters (excluding prepare-only parameters)
-            # print parameters
             call_params = dict(self.parameters.items())
 
             # Pass reset_cache as init_cache to pipeline
@@ -273,9 +277,16 @@ class FrameProcessor:
 
             output = pipeline(**call_params)
 
-            # For modular pipelines, clear transition after it's been processed once
-            if not hasattr(pipeline, "prepare"):
-                self.parameters.pop("transition", None)
+            # Clear transition when complete (blocks signal completion via _transition_active)
+            # Contract: Modular pipelines manage prompts internally; frame_processor manages lifecycle
+            if "transition" in call_params and "transition" in self.parameters:
+                transition_active = False
+                if hasattr(pipeline, "state"):
+                    transition_active = pipeline.state.get("_transition_active", False)
+
+                transition = call_params.get("transition")
+                if not transition_active or transition is None:
+                    self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
             num_frames = output.shape[0]
