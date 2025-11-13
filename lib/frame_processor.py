@@ -248,7 +248,6 @@ class FrameProcessor:
 
         # Transition is consumed by prepare()
         self.parameters.pop("transition", None)
-        self.is_prepared = True
 
         video_input = None
         if requirements is not None:
@@ -265,6 +264,7 @@ class FrameProcessor:
             call_params = dict(self.parameters.items())
 
             # Pass reset_cache as init_cache to pipeline
+            call_params["init_cache"] = not self.is_prepared
             if reset_cache is not None:
                 call_params["init_cache"] = reset_cache
 
@@ -330,6 +330,8 @@ class FrameProcessor:
                 logger.error(f"Error processing chunk: {e}", exc_info=True)
             else:
                 raise e
+
+        self.is_prepared = True
 
     def prepare_chunk(self, chunk_size: int) -> list[torch.Tensor]:
         """
