@@ -102,13 +102,10 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.state.set("base_seed", getattr(config, "seed", 42))
 
         self.first_call = True
-        self.has_processed_frames = False  # Track if we have processed any frames yet
 
-    def prepare(
-        self, should_prepare: bool = False, reset_cache: bool = False, **kwargs
-    ) -> Requirements:
+    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         # If cache is being reset or this is the first prepare, return 5 frames
-        if reset_cache or should_prepare or not self.has_processed_frames:
+        if should_prepare or self.first_call:
             return Requirements(input_size=START_CHUNK_SIZE)
         else:
             # Subsequent chunks need 4 frames
@@ -116,24 +113,14 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
     def __call__(
         self,
-        video: torch.Tensor | list[torch.Tensor] | None = None,
-        init_cache: bool = False,
         **kwargs,
     ) -> torch.Tensor:
-        # Handle init_cache - either from first call or explicit parameter
-        if self.first_call or init_cache:
+        if self.first_call:
             self.state.set("init_cache", True)
-            if init_cache:
-                # Reset state when cache is explicitly reset
-                self.has_processed_frames = False
             self.first_call = False
         else:
             # This will be overriden if the init_cache is passed in kwargs
             self.state.set("init_cache", False)
-
-        # Set video in state for the blocks to use
-        if video is not None:
-            self.state.set("video", video)
 
         return self._generate(**kwargs)
 
@@ -145,9 +132,4 @@ class StreamDiffusionV2Pipeline(Pipeline):
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
         _, self.state = self.blocks(self.components, self.state)
-
-        # Mark that we've processed frames (for determining chunk size in next prepare call)
-        self.has_processed_frames = True
-
-        output_video = self.state.values["video"]
-        return postprocess_chunk(output_video)
+        return postprocess_chunk(self.state.values["video"])

@@ -9,6 +9,7 @@ from ..wan2_1.blocks import (
     NoiseScaleControllerBlock,
     PrepareNextBlock,
     PrepareVideoLatentsBlock,
+    PreprocessVideoBlock,
     SetTimestepsBlock,
     SetupCachesBlock,
     TextConditioningBlock,
@@ -21,6 +22,7 @@ ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("set_timesteps", SetTimestepsBlock),
+        ("preprocess_video", PreprocessVideoBlock),
         ("noise_scale_controller", NoiseScaleControllerBlock),
         ("prepare_video_latents", PrepareVideoLatentsBlock),
         ("setup_caches", SetupCachesBlock),
