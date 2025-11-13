@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 WARMUP_RUNS = 3
-WARMUP_PROMPT = "a majestic sunset"
+WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline):
