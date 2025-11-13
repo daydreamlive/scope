@@ -24,8 +24,8 @@ ALL_BLOCKS = InsertableDict(
         ("prepare_video_latents", PrepareVideoLatentsBlock),
         ("setup_caches", SetupCachesBlock),
         ("denoise", DenoiseBlock),
-        ("decode", DecodeBlock),
         ("clean_kv_cache", CleanKVCacheBlock),
+        ("decode", DecodeBlock),
         ("prepare_next", PrepareNextBlock),
     ]
 )
