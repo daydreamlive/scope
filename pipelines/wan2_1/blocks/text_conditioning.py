@@ -9,7 +9,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ...blending import EmbeddingBlender, parse_transition_config
+from ...blending import parse_transition_config
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
     def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("text_encoder", torch.nn.Module),
-            ComponentSpec("embedding_blender", EmbeddingBlender),
         ]
 
     @property
@@ -63,16 +62,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 description="Current prompts conditioning denoising",
             ),
             OutputParam(
-                "prompt_embeds",
-                type_hint=torch.Tensor,
-                description="Text embeddings to condition denoising",
-            ),
-            OutputParam(
-                "prompt_embeds_updated",
-                type_hint=bool,
-                description="Whether text embeddings were updated (requires cross-attention cache re-initialization)",
-            ),
-            OutputParam(
                 "embeds_list",
                 type_hint=list[torch.Tensor] | None,
                 description="List of individual embeddings for blending (when prompts is list[dict])",
@@ -91,6 +80,14 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 "target_weights",
                 type_hint=list[float] | None,
                 description="List of weights corresponding to target_embeds_list",
+            ),
+            OutputParam(
+                "conditioning_changed",
+                type_hint=bool,
+                description=(
+                    "Whether conditioning inputs changed since last call. Used by "
+                    "downstream blocks (e.g. embedding blending) to manage transitions."
+                ),
             ),
         ]
 
@@ -125,6 +122,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
             block_state.current_prompts is None
             or block_state.current_prompts != block_state.prompts
         )
+        block_state.conditioning_changed = prompts_changed
 
         with torch.autocast(
             str(components.config.device), dtype=components.config.dtype
@@ -151,11 +149,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 block_state.current_prompts = block_state.prompts
 
             # Handle transition target encoding (independent of prompts_changed)
-            # Only encode if not already transitioning to avoid wasteful re-encoding
-            if (
-                block_state.transition is not None
-                and not components.embedding_blender.is_transitioning()
-            ):
+            if block_state.transition is not None:
                 target_prompts, _, _, _ = parse_transition_config(
                     block_state.transition
                 )

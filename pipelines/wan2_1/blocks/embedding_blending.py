@@ -90,6 +90,15 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 type_hint=list[float] | None,
                 description="List of weights corresponding to target_embeds_list",
             ),
+            InputParam(
+                "conditioning_changed",
+                type_hint=bool,
+                default=False,
+                description=(
+                    "Whether conditioning inputs changed since last call. Used to "
+                    "manage transitions when new conditioning arrives."
+                ),
+            ),
         ]
 
     @property
@@ -120,9 +129,17 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
         transition = block_state.transition
         target_embeds_list = block_state.target_embeds_list
         target_weights = block_state.target_weights
+        conditioning_changed = getattr(block_state, "conditioning_changed", False)
 
         # Initialize flag
         block_state.prompt_embeds_updated = False
+
+        if conditioning_changed and components.embedding_blender.is_transitioning():
+            logger.info(
+                "EmbeddingBlendingBlock: Conditioning changed during transition, "
+                "cancelling transition"
+            )
+            components.embedding_blender.cancel_transition()
 
         with torch.autocast(
             str(components.config.device), dtype=components.config.dtype
@@ -142,11 +159,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                     block_state.prompt_embeds_updated = True
 
             # Step 2: Handle transition requests (temporal blending)
-            # Only process transition if we're NOT already transitioning to prevent restart loops
-            if (
-                transition is not None
-                and not components.embedding_blender.is_transitioning()
-            ):
+            if transition is not None:
                 _, num_steps, temporal_method, is_immediate = parse_transition_config(
                     transition
                 )
