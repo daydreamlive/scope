@@ -14,6 +14,8 @@ from ...process import preprocess_chunk
 
 
 class PreprocessVideoBlock(ModularPipelineBlocks):
+    model_name = "Wan2.1"
+
     @property
     def description(self) -> str:
         return "Preprocess Video block transforms video so that it is ready for downstream blocks"
