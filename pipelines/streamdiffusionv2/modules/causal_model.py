@@ -1,5 +1,5 @@
-from .wan_base.modules.attention import attention
-from .wan_base.modules.model import (
+from ...wan2_1.modules.attention import attention
+from .model import (
     WanRMSNorm,
     rope_apply,
     WanLayerNorm,

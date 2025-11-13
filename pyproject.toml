@@ -48,7 +48,7 @@ dependencies = [
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
     "peft>=0.17.1",
-    "torchcodec>=0.7.0",
+    "torchcodec==0.7.0",
     "torchao==0.13.0",
     "kernels>=0.10.4",
     "triton==3.4.0; sys_platform != 'win32'",

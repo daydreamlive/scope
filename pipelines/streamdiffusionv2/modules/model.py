@@ -7,7 +7,7 @@ import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
-from .attention import flash_attention
+from ...wan2_1.modules.attention import flash_attention
 
 __all__ = ["WanModel"]
 
