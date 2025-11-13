@@ -15,7 +15,9 @@ start_chunk_size = 5
 config = OmegaConf.create(
     {
         "model_dir": str(get_models_dir()),
-        "generator_path": str(get_model_file_path("StreamDiffusionV2/model.pt")),
+        "generator_path": str(
+            get_model_file_path("StreamDiffusionV2/wan_causal_dmd_v2v/model.pt")
+        ),
         "text_encoder_path": str(
             get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
         ),
