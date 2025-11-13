@@ -40,10 +40,10 @@ class PrepareNextBlock(ModularPipelineBlocks):
                 description="Current starting frame index of current block",
             ),
             InputParam(
-                "increment_on_zero_start",
-                type_hint=bool,
-                default=False,
-                description="If True and current_start_frame == 0, add +1 to output current_start_frame",
+                "latents",
+                required=True,
+                type_hint=torch.Tensor,
+                description="Denoised latents",
             ),
         ]
 
@@ -61,12 +61,9 @@ class PrepareNextBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
-        # If increment_on_zero_start is True and current_start_frame == 0, add +1
-        increment_on_zero_start = getattr(block_state, "increment_on_zero_start", False)
-        if increment_on_zero_start and block_state.current_start_frame == 0:
-            block_state.current_start_frame += 1
-
-        block_state.current_start_frame += components.config.num_frame_per_block
+        _, num_frames, _, _, _ = block_state.latents.shape
+        # Increment the starting index based on the # of latents actually denoised
+        block_state.current_start_frame += num_frames
 
         self.set_block_state(state, block_state)
         return components, state
