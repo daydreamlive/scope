@@ -7,6 +7,7 @@ from ..wan2_1.blocks import (
     DenoiseBlock,
     PrepareLatentsBlock,
     PrepareNextBlock,
+    PromptBlendingBlock,
     SetTimestepsBlock,
     SetupCachesBlock,
     TextConditioningBlock,
@@ -19,6 +20,7 @@ logger = diffusers_logging.get_logger(__name__)
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
+        ("prompt_blending", PromptBlendingBlock),
         ("set_timesteps", SetTimestepsBlock),
         ("setup_caches", SetupCachesBlock),
         ("prepare_latents", PrepareLatentsBlock),
