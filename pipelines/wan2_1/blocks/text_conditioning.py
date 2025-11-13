@@ -32,14 +32,14 @@ class TextConditioningBlock(ModularPipelineBlocks):
         return [
             InputParam(
                 "current_prompts",
-                type_hint=str | list[str] | list[dict] | None,
+                type_hint=list[dict] | None,
                 description="Current prompts conditioning denoising",
             ),
             InputParam(
                 "prompts",
                 required=True,
-                type_hint=str | list[str] | list[dict],
-                description="New prompts to condition denoising (list[dict] format handled by EmbeddingBlendingBlock)",
+                type_hint=list[dict],
+                description="Prompts to condition denoising as list of dicts with 'text' and 'weight' keys",
             ),
             InputParam(
                 "prompt_embeds",
@@ -58,7 +58,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
         return [
             OutputParam(
                 "current_prompts",
-                type_hint=str | list[str] | list[dict],
+                type_hint=list[dict],
                 description="Current prompts conditioning denoising",
             ),
             OutputParam(
@@ -95,14 +95,18 @@ class TextConditioningBlock(ModularPipelineBlocks):
 
     @staticmethod
     def check_inputs(block_state: BlockState):
-        if (
-            block_state.prompts is not None
-            and not isinstance(block_state.prompts, str)
-            and not isinstance(block_state.prompts, list)
-        ):
-            raise ValueError(
-                f"`prompts` has to be of type `str` or `list` but is {type(block_state.prompts)}"
-            )
+        if block_state.prompts is not None:
+            if not isinstance(block_state.prompts, list):
+                raise ValueError(
+                    f"`prompts` must be a list[dict] but is {type(block_state.prompts)}"
+                )
+            if len(block_state.prompts) > 0 and not isinstance(
+                block_state.prompts[0], dict
+            ):
+                raise ValueError(
+                    f"`prompts` must be a list[dict] with 'text' and 'weight' keys, "
+                    f"but first element is {type(block_state.prompts[0])}"
+                )
 
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
@@ -133,38 +137,23 @@ class TextConditioningBlock(ModularPipelineBlocks):
         ):
             # Encode regular prompts if they changed
             if prompts_changed:
-                # Handle list[dict] format (for blending)
-                if (
-                    isinstance(block_state.prompts, list)
-                    and len(block_state.prompts) > 0
-                    and isinstance(block_state.prompts[0], dict)
-                ):
-                    # Encode each prompt individually and extract weights
-                    embeddings_list = []
-                    weights_list = []
+                # Encode each prompt individually and extract weights
+                embeddings_list = []
+                weights_list = []
 
-                    for prompt_item in block_state.prompts:
-                        text = prompt_item.get("text", "")
-                        weight = prompt_item.get("weight", 1.0)
+                for prompt_item in block_state.prompts:
+                    text = prompt_item.get("text", "")
+                    weight = prompt_item.get("weight", 1.0)
 
-                        # Encode individual prompt
-                        conditional_dict = components.text_encoder(text_prompts=[text])
-                        embeddings_list.append(conditional_dict["prompt_embeds"])
-                        weights_list.append(weight)
+                    # Encode individual prompt
+                    conditional_dict = components.text_encoder(text_prompts=[text])
+                    embeddings_list.append(conditional_dict["prompt_embeds"])
+                    weights_list.append(weight)
 
-                    # Store list of embeddings and weights for EmbeddingBlendingBlock
-                    block_state.prompt_embeds_list = embeddings_list
-                    block_state.prompt_weights = weights_list
-                    # Don't set prompt_embeds here - EmbeddingBlendingBlock will blend and set it
-
-                # Handle simple str or list[str] format (backward compatibility)
-                else:
-                    conditional_dict = components.text_encoder(
-                        text_prompts=[block_state.prompts]
-                        if isinstance(block_state.prompts, str)
-                        else block_state.prompts
-                    )
-                    block_state.prompt_embeds = conditional_dict["prompt_embeds"]
+                # Store list of embeddings and weights for EmbeddingBlendingBlock
+                block_state.prompt_embeds_list = embeddings_list
+                block_state.prompt_weights = weights_list
+                # Don't set prompt_embeds here - EmbeddingBlendingBlock will blend and set it
 
                 block_state.current_prompts = block_state.prompts
                 block_state.prompt_embeds_updated = True
