@@ -216,13 +216,25 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
-            config = OmegaConf.load("pipelines/streamdiffusionv2/model.yaml")
             models_dir = get_models_dir()
-            config["model_dir"] = str(models_dir)
-            config["text_encoder_path"] = str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "StreamDiffusionV2/wan_causal_dmd_v2v/model.pt"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "model_config": OmegaConf.load("pipelines/streamdiffusionv2/model.yaml"),
+                }
             )
 
             # Use load parameters for resolution and seed
