@@ -243,13 +243,16 @@ class FrameProcessor:
         requirements = None
         if hasattr(pipeline, "prepare"):
             requirements = pipeline.prepare(
-                should_prepare=not self.is_prepared or reset_cache, **self.parameters
+                should_prepare=not self.is_prepared or reset_cache,
+                reset_cache=reset_cache if reset_cache else False,
+                **self.parameters,
             )
 
         # Transition is consumed by prepare()
         self.parameters.pop("transition", None)
         self.is_prepared = True
 
+        video_input = None
         if requirements is not None:
             current_chunk_size = requirements.input_size
             with self.frame_buffer_lock:
@@ -257,14 +260,14 @@ class FrameProcessor:
                     # Sleep briefly to avoid busy waiting
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
-                self.prepare_chunk(current_chunk_size)
+                video_input = self.prepare_chunk(current_chunk_size)
         try:
             # Pass parameters (excluding prepare-only parameters)
             # print parameters
             call_params = dict(self.parameters.items())
 
-            # If pipeline doesn't have prepare(), pass reset_cache as init_cache
-            if not hasattr(pipeline, "prepare") and reset_cache is not None:
+            # Pass reset_cache as init_cache to pipeline
+            if reset_cache is not None:
                 call_params["init_cache"] = reset_cache
 
             # TODO: Fix multiple prompts in text_conditioning block
@@ -272,6 +275,10 @@ class FrameProcessor:
             call_params["prompts"] = self.parameters.get(
                 "prompts", [{"text": "Sample Prompt"}]
             )[0].get("text", "Sample Prompt")
+
+            # Pass video input to pipeline
+            if video_input is not None:
+                call_params["video"] = video_input
 
             output = pipeline(**call_params)
 
