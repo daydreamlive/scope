@@ -127,24 +127,30 @@ class TextConditioningBlock(ModularPipelineBlocks):
         with torch.autocast(
             str(components.config.device), dtype=components.config.dtype
         ):
-            # Encode regular prompts if they changed
-            if prompts_changed:
-                # Encode each prompt individually and extract weights
-                embeddings_list = []
-                weights_list = []
 
-                for prompt_item in block_state.prompts:
+            def encode_prompt_items(
+                prompt_items: list[dict],
+            ) -> tuple[list[torch.Tensor], list[float]]:
+                """Encode a list of prompt dicts into embeddings and weights."""
+                embeddings: list[torch.Tensor] = []
+                weights: list[float] = []
+
+                for prompt_item in prompt_items:
                     text = prompt_item.get("text", "")
                     weight = prompt_item.get("weight", 1.0)
 
-                    # Encode individual prompt
                     conditional_dict = components.text_encoder(text_prompts=[text])
-                    embeddings_list.append(conditional_dict["prompt_embeds"])
-                    weights_list.append(weight)
+                    embeddings.append(conditional_dict["prompt_embeds"])
+                    weights.append(weight)
 
-                # Store list of embeddings and weights for EmbeddingBlendingBlock
-                block_state.embeds_list = embeddings_list
-                block_state.embedding_weights = weights_list
+                return embeddings, weights
+
+            # Encode regular prompts if they changed
+            if prompts_changed:
+                (
+                    block_state.embeds_list,
+                    block_state.embedding_weights,
+                ) = encode_prompt_items(block_state.prompts)
 
                 block_state.current_prompts = block_state.prompts
 
@@ -155,22 +161,10 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 )
 
                 if target_prompts:
-                    # Encode each target prompt individually
-                    target_embeddings = []
-                    target_weights_list = []
-
-                    for prompt_item in target_prompts:
-                        text = prompt_item.get("text", "")
-                        weight = prompt_item.get("weight", 1.0)
-
-                        # Encode target prompt
-                        conditional_dict = components.text_encoder(text_prompts=[text])
-                        target_embeddings.append(conditional_dict["prompt_embeds"])
-                        target_weights_list.append(weight)
-
-                    # Store target embeddings and weights for EmbeddingBlendingBlock
-                    block_state.target_embeds_list = target_embeddings
-                    block_state.target_weights = target_weights_list
+                    (
+                        block_state.target_embeds_list,
+                        block_state.target_weights,
+                    ) = encode_prompt_items(target_prompts)
 
         self.set_block_state(state, block_state)
         return components, state
