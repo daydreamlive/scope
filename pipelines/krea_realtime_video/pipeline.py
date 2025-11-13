@@ -120,9 +120,6 @@ class KreaRealtimeVideoPipeline(Pipeline):
         components.add("vae", vae)
         components.add("text_encoder", text_encoder)
 
-        # Create embedding blender
-        # Cache reset is handled by EmbeddingBlendingBlock setting prompt_embeds_updated=True
-        # which resets ONLY cross-attn cache, not the full cache (preserving KV cache for smooth transitions)
         embedding_blender = EmbeddingBlender(
             device=device,
             dtype=dtype,

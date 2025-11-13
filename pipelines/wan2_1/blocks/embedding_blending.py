@@ -18,7 +18,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     """Embedding Blending block that handles spatial and temporal embedding blending.
 
     This block orchestrates the EmbeddingBlender component within the modular pipeline architecture.
-    It is generic and can blend ANY type of embeddings (text, image, audio, etc.).
+    Currently used for text prompt embeddings, but the blending logic itself is generic.
 
     Responsibilities:
     - Spatial blending: Combining multiple weighted embeddings into a single embedding

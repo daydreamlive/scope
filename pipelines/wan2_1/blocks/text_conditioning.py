@@ -114,7 +114,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
         self.check_inputs(block_state)
 
-        block_state.prompt_embeds_updated = False
+        # Initialize outputs
         block_state.embeds_list = None
         block_state.embedding_weights = None
         block_state.target_embeds_list = None
@@ -147,11 +147,8 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 # Store list of embeddings and weights for EmbeddingBlendingBlock
                 block_state.embeds_list = embeddings_list
                 block_state.embedding_weights = weights_list
-                # Don't set prompt_embeds here - EmbeddingBlendingBlock will blend and set it
 
                 block_state.current_prompts = block_state.prompts
-                # NOTE: Don't set prompt_embeds_updated here - only EmbeddingBlendingBlock
-                # should set this flag since it produces the final prompt_embeds output
 
             # Handle transition target encoding (independent of prompts_changed)
             # Only encode if not already transitioning to avoid wasteful re-encoding

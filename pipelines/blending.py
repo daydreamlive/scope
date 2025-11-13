@@ -17,15 +17,6 @@ class BlenderState(Enum):
 EPSILON = 1e-8  # Small value to prevent division by zero
 SLERP_PARALLEL_THRESHOLD = 1e-4  # Threshold for detecting parallel embeddings in SLERP
 
-# Cache configuration
-DEFAULT_MAX_CACHE_SIZE = 10  # Maximum number of prompts to cache
-
-# Logging configuration
-LOG_PROMPT_PREVIEW_LENGTH = 50  # Characters to show in log messages for prompt preview
-
-# Embedding defaults
-DEFAULT_EMBEDDING_WEIGHT = 1.0  # Default weight for embedding blending
-
 # Minimum embedding difference threshold for skipping transitions
 MIN_EMBEDDING_DIFF_THRESHOLD = 0.01
 
