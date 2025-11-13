@@ -12,8 +12,6 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ...process import preprocess_chunk
-
 
 class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     model_name = "Wan2.1"
@@ -61,16 +59,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                 default=0.7,
                 description="Amount of noise added to video",
             ),
-            InputParam(
-                "height",
-                type_hint=int,
-                description="Height of the video",
-            ),
-            InputParam(
-                "width",
-                type_hint=int,
-                description="Width of the video",
-            ),
         ]
 
     @property
@@ -88,18 +76,8 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
-        video = block_state.video
-        if isinstance(video, list):
-            video = preprocess_chunk(
-                block_state.video,
-                components.config.device,
-                components.config.dtype,
-                height=block_state.height,
-                width=block_state.width,
-            )
-
         # Encode frames to latents using VAE
-        latents = components.vae.encode_to_latent(video)
+        latents = components.vae.encode_to_latent(block_state.video)
         # Transpose latents
         latents = latents.transpose(2, 1)
 
