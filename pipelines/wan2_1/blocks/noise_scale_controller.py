@@ -55,7 +55,12 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
                 "noise_scale",
                 type_hint=float,
                 default=0.7,
-                description="Current noise scale value",
+                description="Amount of noise added to video",
+            ),
+            InputParam(
+                "current_noise_scale",
+                type_hint=float,
+                description="Current noise scale",
             ),
             InputParam(
                 "noise_controller",
@@ -69,6 +74,12 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
                 default=False,
                 description="Whether caches are being initialized (resets last_frame)",
             ),
+            InputParam(
+                "manage_cache",
+                default=True,
+                type_hint=bool,
+                description="Whether to automatically determine to (re)initialize caches",
+            ),
         ]
 
     @property
@@ -77,7 +88,17 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
             OutputParam(
                 "noise_scale",
                 type_hint=float,
-                description="Updated noise scale based on motion detection",
+                description="Amount of noise added to video",
+            ),
+            InputParam(
+                "current_noise_scale",
+                type_hint=float,
+                description="Current noise scale",
+            ),
+            OutputParam(
+                "init_cache",
+                type_hint=bool,
+                description="Whether caches are being initialized (resets last_frame)",
             ),
         ]
 
@@ -98,6 +119,13 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
             block_state.noise_scale = self._apply_motion_aware_noise_controller(
                 video, chunk_size, block_state.noise_scale
             )
+        elif (
+            block_state.manage_cache
+            and block_state.current_noise_scale != block_state.noise_scale
+        ):
+            block_state.init_cache = True
+
+        block_state.current_noise_scale = block_state.noise_scale
 
         self.set_block_state(state, block_state)
         return components, state
@@ -126,7 +154,7 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
             # Concat the last frame of the previous input with the last chunk_size
             # frames of the current input excluding the last frame
             curr_seq = torch.concat(
-                [self.last_frame, input[:, :, -chunk_size : -1]], dim=2
+                [self.last_frame, input[:, :, -chunk_size:-1]], dim=2
             )
 
         # In order to calculate the amount of motion in this chunk we calculate the max L2 distance found in the sequences defined above.
