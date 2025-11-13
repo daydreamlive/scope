@@ -6,6 +6,7 @@ from ..wan2_1.blocks import (
     CleanKVCacheBlock,
     DecodeBlock,
     DenoiseBlock,
+    NoiseScaleControllerBlock,
     PrepareNextBlock,
     PrepareVideoLatentsBlock,
     SetTimestepsBlock,
@@ -20,7 +21,7 @@ ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("set_timesteps", SetTimestepsBlock),
-        # TODO: NoiseScaleControllerBlock
+        ("noise_scale_controller", NoiseScaleControllerBlock),
         ("prepare_video_latents", PrepareVideoLatentsBlock),
         ("setup_caches", SetupCachesBlock),
         ("denoise", DenoiseBlock),

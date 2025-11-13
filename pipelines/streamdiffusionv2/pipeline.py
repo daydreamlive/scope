@@ -90,6 +90,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", 1.0)
         self.state.set("noise_scale", 0.7)
+        self.state.set("noise_controller", True)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
