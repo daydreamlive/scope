@@ -16,9 +16,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
 
-# Chunk sizes for streamdiffusionv2
-START_CHUNK_SIZE = 5  # First chunk (and after cache reset)
-CHUNK_SIZE = 4  # Subsequent chunks
+# Chunk size for streamdiffusionv2
+CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(Pipeline):
@@ -104,12 +103,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.first_call = True
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
-        # If cache is being reset or this is the first prepare, return 5 frames
-        if should_prepare or self.first_call:
-            return Requirements(input_size=START_CHUNK_SIZE)
-        else:
-            # Subsequent chunks need 4 frames
-            return Requirements(input_size=CHUNK_SIZE)
+        return Requirements(input_size=CHUNK_SIZE)
 
     def __call__(
         self,
