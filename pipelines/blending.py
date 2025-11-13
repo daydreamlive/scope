@@ -165,17 +165,13 @@ class EmbeddingBlender:
     - This separation allows EmbeddingBlender to be generic and reusable
     - Intentionally separate from EmbeddingBlendingBlock to maintain
       separation between business logic (this class) and pipeline integration (the block)
-
-    Legacy Support:
-    - cache_reset_callback parameter exists for non-modular StreamDiffusionV2 pipeline
-    - Modular pipelines (LongLive, Krea) handle cache via state flags instead
+    - Cache management is handled by pipeline state flags (prompt_embeds_updated)
     """
 
     def __init__(
         self,
         device,
         dtype,
-        cache_reset_callback=None,  # For legacy non-modular pipelines only
     ) -> None:
         self.device = device
         self.dtype = dtype
@@ -186,9 +182,6 @@ class EmbeddingBlender:
         # Temporal interpolation state (prompt transitions)
         self._transition_queue = []  # Queue of pre-computed interpolated embeddings
         self._current_blend_embedding = None  # Cached current blend for transitions
-
-        # Pipeline-specific cache reset callback invoked during transitions
-        self._cache_reset_callback = cache_reset_callback
 
     def blend(
         self, embeddings, weights, interpolation_method, cache_result=True
@@ -303,11 +296,6 @@ class EmbeddingBlender:
             logger.debug(
                 f"get_next_embedding: Popping from transition queue ({len(self._transition_queue)} remaining)"
             )
-
-            # Invoke cache reset callback if provided (critical for model to respond to new embedding)
-            if self._cache_reset_callback:
-                logger.debug("get_next_embedding: Invoking cache reset callback")
-                self._cache_reset_callback()
 
             # Update cached current blend as we progress
             self._current_blend_embedding = next_embedding

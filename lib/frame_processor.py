@@ -249,6 +249,7 @@ class FrameProcessor:
             # Modular pipelines have a 'blocks' attribute and handle transition in EmbeddingBlendingBlock
             if not hasattr(pipeline, "blocks"):
                 self.parameters.pop("transition", None)
+        self.is_prepared = True
 
         video_input = None
         if requirements is not None:
@@ -275,9 +276,10 @@ class FrameProcessor:
 
             output = pipeline(**call_params)
 
-            # For modular pipelines, clear transition after it's been processed once
-            if hasattr(pipeline, "blocks"):
-                self.parameters.pop("transition", None)
+            # Clear transition after processing - it's consumed by modular pipelines
+            # Note: Transitions only work with modular pipelines (StreamDiffusionV2, LongLive, Krea)
+            # Non-modular pipelines (Passthrough, VOD) ignore this parameter
+            self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
             num_frames = output.shape[0]

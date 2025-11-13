@@ -9,7 +9,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ...blending import parse_transition_config
+from ...blending import EmbeddingBlender, parse_transition_config
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,12 @@ class TextConditioningBlock(ModularPipelineBlocks):
     def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("text_encoder", torch.nn.Module),
+            ComponentSpec("embedding_blender", EmbeddingBlender),
         ]
 
     @property
     def description(self) -> str:
-        return "Text Conditioning block that generates text embeddings to condition denoising"
+        return "Text Conditioning block that encodes prompts and transition targets into embeddings"
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -127,7 +128,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
 
         # Diagnostic logging
         logger.info(
-            f"TextConditioningBlock: current_prompts={block_state.current_prompts}, "
+            f"__call__: current_prompts={block_state.current_prompts}, "
             f"prompts={block_state.prompts}, prompts_changed={prompts_changed}, "
             f"transition={block_state.transition is not None}"
         )
@@ -156,10 +157,15 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 # Don't set prompt_embeds here - EmbeddingBlendingBlock will blend and set it
 
                 block_state.current_prompts = block_state.prompts
-                block_state.prompt_embeds_updated = True
+                # NOTE: Don't set prompt_embeds_updated here - only EmbeddingBlendingBlock
+                # should set this flag since it produces the final prompt_embeds output
 
             # Handle transition target encoding (independent of prompts_changed)
-            if block_state.transition is not None:
+            # Only encode if not already transitioning to avoid wasteful re-encoding
+            if (
+                block_state.transition is not None
+                and not components.embedding_blender.is_transitioning()
+            ):
                 target_prompts, _, _, _ = parse_transition_config(
                     block_state.transition
                 )
