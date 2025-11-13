@@ -94,13 +94,9 @@ class LongLivePipeline(Pipeline):
         components.add("vae", vae)
         components.add("text_encoder", text_encoder)
 
-        # Create prompt blender without cache reset callback
-        # Cache reset is handled by EmbeddingBlendingBlock setting prompt_embeds_updated=True
-        # which resets ONLY cross-attn cache, not the full cache (preserving KV cache for smooth transitions)
         embedding_blender = EmbeddingBlender(
             device=device,
             dtype=dtype,
-            cache_reset_callback=None,  # Modular architecture handles cache via flags
         )
         components.add("embedding_blender", embedding_blender)
 
@@ -132,6 +128,10 @@ class LongLivePipeline(Pipeline):
     def _generate(self, **kwargs) -> torch.Tensor:
         for k, v in kwargs.items():
             self.state.set(k, v)
+
+        # Clear transition from state if not provided to prevent stale transitions
+        if "transition" not in kwargs:
+            self.state.set("transition", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
