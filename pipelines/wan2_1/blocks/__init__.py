@@ -1,6 +1,7 @@
 from .clean_kv_cache import CleanKVCacheBlock
 from .decode import DecodeBlock
 from .denoise import DenoiseBlock
+from .noise_scale_controller import NoiseScaleControllerBlock
 from .prepare_latents import PrepareLatentsBlock
 from .prepare_next import PrepareNextBlock
 from .prepare_video_latents import PrepareVideoLatentsBlock
@@ -18,4 +19,5 @@ __all__ = [
     "PrepareNextBlock",
     "CleanKVCacheBlock",
     "PrepareVideoLatentsBlock",
+    "NoiseScaleControllerBlock",
 ]
