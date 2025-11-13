@@ -120,12 +120,6 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
         target_embeds_list = block_state.target_embeds_list
         target_weights = block_state.target_weights
 
-        logger.info(
-            f"__call__: Starting with prompt_embeds_list={prompt_embeds_list is not None}, "
-            f"transition={transition is not None}, target_embeds_list={target_embeds_list is not None}, "
-            f"is_transitioning={components.embedding_blender.is_transitioning()}"
-        )
-
         # Initialize flag
         block_state.prompt_embeds_updated = False
 
@@ -134,10 +128,6 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
         ):
             # Step 1: Spatial blending - blend pre-encoded embeddings if available
             if prompt_embeds_list and prompt_weights:
-                logger.info(
-                    f"__call__: Blending {len(prompt_embeds_list)} pre-encoded embeddings"
-                )
-
                 blended_embeds = components.embedding_blender.blend(
                     embeddings=prompt_embeds_list,
                     weights=prompt_weights,
@@ -149,7 +139,6 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                         dtype=components.config.dtype
                     )
                     block_state.prompt_embeds_updated = True
-                    logger.info("__call__: Successfully blended embeddings")
 
             # Step 2: Handle transition requests (temporal blending)
             # Only process transition if we're NOT already transitioning to prevent restart loops
@@ -157,18 +146,12 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 transition is not None
                 and not components.embedding_blender.is_transitioning()
             ):
-                logger.info("__call__: Processing transition request")
-
                 _, num_steps, temporal_method, is_immediate = parse_transition_config(
                     transition
                 )
 
                 # Use pre-encoded target embeddings from TextConditioningBlock
                 if target_embeds_list and target_weights:
-                    logger.info(
-                        f"__call__: Blending {len(target_embeds_list)} pre-encoded target embeddings"
-                    )
-
                     # Blend target embeddings (don't cache to preserve current blend for comparison)
                     target_blend = components.embedding_blender.blend(
                         embeddings=target_embeds_list,
@@ -180,50 +163,27 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                     if target_blend is not None:
                         if is_immediate:
                             # Immediate transition (num_steps=0)
-                            logger.info("__call__: Applying immediate transition")
                             block_state.prompt_embeds = target_blend.to(
                                 dtype=components.config.dtype
                             )
                             block_state.prompt_embeds_updated = True
                         else:
                             # Smooth transition (num_steps>0)
-                            logger.info(
-                                f"__call__: Starting smooth transition over {num_steps} steps"
-                            )
                             components.embedding_blender.start_transition(
                                 target_embedding=target_blend,
                                 num_steps=num_steps,
                                 temporal_interpolation_method=temporal_method,
                             )
 
-            elif (
-                transition is not None
-                and components.embedding_blender.is_transitioning()
-            ):
-                logger.info(
-                    "__call__: Ignoring transition request - already transitioning"
-                )
-
             # Step 3: Get next embedding from transition queue (if transitioning)
             if components.embedding_blender.is_transitioning():
-                logger.info("__call__: Getting next embedding from transition queue")
                 next_embedding = components.embedding_blender.get_next_embedding()
-                is_transitioning_after = components.embedding_blender.is_transitioning()
 
                 if next_embedding is not None:
                     # Cast to pipeline dtype before storing
                     next_embedding = next_embedding.to(dtype=components.config.dtype)
                     block_state.prompt_embeds = next_embedding
                     block_state.prompt_embeds_updated = True
-                    logger.info(
-                        f"__call__: Updated prompt_embeds from transition "
-                        f"(still transitioning: {is_transitioning_after})"
-                    )
-
-        logger.info(
-            f"__call__: Finished, prompt_embeds_updated={block_state.prompt_embeds_updated}, "
-            f"is_transitioning={components.embedding_blender.is_transitioning()}"
-        )
 
         self.set_block_state(state, block_state)
         return components, state

@@ -145,8 +145,6 @@ def parse_transition_config(transition):
 
     # If num_steps is 0, this is an immediate transition
     is_immediate = num_steps <= 0
-    if is_immediate:
-        logger.debug("parse_transition_config: num_steps=0, immediate transition")
 
     return target_prompts, num_steps, temporal_method, is_immediate
 
@@ -249,9 +247,6 @@ class EmbeddingBlender:
         # Check if embeddings are actually different (skip if too similar to save computation)
         diff_norm = (target_embedding - self._current_blend_embedding).norm()
         if diff_norm < MIN_EMBEDDING_DIFF_THRESHOLD:
-            logger.info(
-                f"start_transition: Embeddings are very similar (diff_norm={diff_norm.item():.6f}), skipping transition"
-            )
             return
 
         # Pre-compute interpolation steps
@@ -275,11 +270,6 @@ class EmbeddingBlender:
         self._transition_queue = interpolated_embeddings
         self._state = BlenderState.TRANSITIONING
 
-        logger.info(
-            f"start_transition: Started transition over {num_steps} steps using {temporal_interpolation_method}. "
-            f"Queue length: {len(self._transition_queue)}, State: {self._state.value}"
-        )
-
     def get_next_embedding(self) -> torch.Tensor | None:
         """Get the next interpolated embedding during a transition.
 
@@ -293,18 +283,12 @@ class EmbeddingBlender:
         # If we have a transition in progress, pop from queue
         if self._state == BlenderState.TRANSITIONING and self._transition_queue:
             next_embedding = self._transition_queue.pop(0)
-            logger.debug(
-                f"get_next_embedding: Popping from transition queue ({len(self._transition_queue)} remaining)"
-            )
 
             # Update cached current blend as we progress
             self._current_blend_embedding = next_embedding
 
             if not self._transition_queue:
                 self._state = BlenderState.IDLE
-                logger.info(
-                    f"get_next_embedding: Transition completed, State: {self._state.value}"
-                )
 
             return next_embedding
 
@@ -318,8 +302,5 @@ class EmbeddingBlender:
     def cancel_transition(self) -> None:
         """Cancel any active transition and clear the queue."""
         if self._state == BlenderState.TRANSITIONING:
-            logger.info(
-                f"cancel_transition: Cancelling transition with {len(self._transition_queue)} steps remaining, State: {self._state.value} -> {BlenderState.IDLE.value}"
-            )
             self._transition_queue.clear()
             self._state = BlenderState.IDLE

@@ -126,13 +126,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
             or block_state.current_prompts != block_state.prompts
         )
 
-        # Diagnostic logging
-        logger.info(
-            f"__call__: current_prompts={block_state.current_prompts}, "
-            f"prompts={block_state.prompts}, prompts_changed={prompts_changed}, "
-            f"transition={block_state.transition is not None}"
-        )
-
         with torch.autocast(
             str(components.config.device), dtype=components.config.dtype
         ):
