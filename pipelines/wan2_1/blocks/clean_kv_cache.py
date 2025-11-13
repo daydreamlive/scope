@@ -109,11 +109,8 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             * 0
         )
 
-        # TODO: start_frame when running in v2v should skip to 2 instead of 1 after this block?
-        current_end_frame = block_state.current_start_frame
-        # Special case for first block
-        if block_state.current_start_frame == 0:
-            current_end_frame += 1
+        _, num_frames, _, _, _ = block_state.latents.shape
+        current_end_frame = block_state.current_start_frame + num_frames
 
         # Run the generator with the clean latent at timestep = 0 to update the KV cache
         conditional_dict = {"prompt_embeds": block_state.prompt_embeds}
