@@ -81,16 +81,6 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 description="Existing prompt embeddings (optional)",
             ),
             InputParam(
-                "target_embeds_list",
-                type_hint=list[torch.Tensor] | None,
-                description="List of pre-encoded transition target embeddings",
-            ),
-            InputParam(
-                "target_weights",
-                type_hint=list[float] | None,
-                description="List of weights corresponding to target_embeds_list",
-            ),
-            InputParam(
                 "conditioning_changed",
                 type_hint=bool,
                 default=False,
@@ -127,8 +117,6 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
             block_state.spatial_interpolation_method or "linear"
         )
         transition = block_state.transition
-        target_embeds_list = block_state.target_embeds_list
-        target_weights = block_state.target_weights
         conditioning_changed = getattr(block_state, "conditioning_changed", False)
 
         # Initialize flag
@@ -144,53 +132,63 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
         with torch.autocast(
             str(components.config.device), dtype=components.config.dtype
         ):
-            # Step 1: Spatial blending - blend pre-encoded embeddings if available
-            if embeds_list and embedding_weights:
-                blended_embeds = components.embedding_blender.blend(
+            # Determine transition policy (how to move), independent of prompts
+            transition_config = parse_transition_config(transition)
+
+            # Step 1: Spatial blending - compute target embedding when conditioning changes
+            target_blend = None
+            if embeds_list and embedding_weights and conditioning_changed:
+                target_blend = components.embedding_blender.blend(
                     embeddings=embeds_list,
                     weights=embedding_weights,
                     interpolation_method=spatial_interpolation_method,
+                    cache_result=False,
                 )
 
-                if blended_embeds is not None:
-                    block_state.prompt_embeds = blended_embeds.to(
+            # Step 2: Apply conditioning changes (snap or start transition)
+            if conditioning_changed and target_blend is not None:
+                has_smooth_transition = (
+                    not transition_config.is_immediate
+                    and transition_config.num_steps > 0
+                )
+
+                if has_smooth_transition:
+                    # Start a smooth transition from previous prompt_embeds to target_blend
+                    source_embedding = getattr(block_state, "prompt_embeds", None)
+                    if source_embedding is None:
+                        # No previous embedding to transition from - just snap
+                        block_state.prompt_embeds = target_blend.to(
+                            dtype=components.config.dtype
+                        )
+                        block_state.prompt_embeds_updated = True
+                    else:
+                        components.embedding_blender.start_transition(
+                            source_embedding=source_embedding,
+                            target_embedding=target_blend,
+                            num_steps=transition_config.num_steps,
+                            temporal_interpolation_method=transition_config.temporal_method,
+                        )
+                        next_embedding = (
+                            components.embedding_blender.get_next_embedding()
+                        )
+                        if next_embedding is not None:
+                            next_embedding = next_embedding.to(
+                                dtype=components.config.dtype
+                            )
+                            block_state.prompt_embeds = next_embedding
+                            block_state.prompt_embeds_updated = True
+                else:
+                    # Immediate application of new conditioning (no temporal smoothing)
+                    block_state.prompt_embeds = target_blend.to(
                         dtype=components.config.dtype
                     )
                     block_state.prompt_embeds_updated = True
 
-            # Step 2: Handle transition requests (temporal blending)
-            if transition is not None:
-                _, num_steps, temporal_method, is_immediate = parse_transition_config(
-                    transition
-                )
-
-                # Use pre-encoded target embeddings from TextConditioningBlock
-                if target_embeds_list and target_weights:
-                    # Blend target embeddings (don't cache to preserve current blend for comparison)
-                    target_blend = components.embedding_blender.blend(
-                        embeddings=target_embeds_list,
-                        weights=target_weights,
-                        interpolation_method=spatial_interpolation_method,
-                        cache_result=False,
-                    )
-
-                    if target_blend is not None:
-                        if is_immediate:
-                            # Immediate transition (num_steps=0)
-                            block_state.prompt_embeds = target_blend.to(
-                                dtype=components.config.dtype
-                            )
-                            block_state.prompt_embeds_updated = True
-                        else:
-                            # Smooth transition (num_steps>0)
-                            components.embedding_blender.start_transition(
-                                target_embedding=target_blend,
-                                num_steps=num_steps,
-                                temporal_interpolation_method=temporal_method,
-                            )
-
-            # Step 3: Get next embedding from transition queue (if transitioning)
-            if components.embedding_blender.is_transitioning():
+            # Step 3: Get next embedding from transition queue (if transitioning and no new change)
+            if (
+                not conditioning_changed
+                and components.embedding_blender.is_transitioning()
+            ):
                 next_embedding = components.embedding_blender.get_next_embedding()
 
                 if next_embedding is not None:

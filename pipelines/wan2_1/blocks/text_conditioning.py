@@ -9,8 +9,6 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ...blending import parse_transition_config
-
 logger = logging.getLogger(__name__)
 
 
@@ -72,16 +70,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 description="List of weights corresponding to embeds_list",
             ),
             OutputParam(
-                "target_embeds_list",
-                type_hint=list[torch.Tensor] | None,
-                description="List of pre-encoded transition target embeddings",
-            ),
-            OutputParam(
-                "target_weights",
-                type_hint=list[float] | None,
-                description="List of weights corresponding to target_embeds_list",
-            ),
-            OutputParam(
                 "conditioning_changed",
                 type_hint=bool,
                 description=(
@@ -114,8 +102,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
         # Initialize outputs
         block_state.embeds_list = None
         block_state.embedding_weights = None
-        block_state.target_embeds_list = None
-        block_state.target_weights = None
 
         # Check if prompts changed
         prompts_changed = (
@@ -153,18 +139,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 ) = encode_prompt_items(block_state.prompts)
 
                 block_state.current_prompts = block_state.prompts
-
-            # Handle transition target encoding (independent of prompts_changed)
-            if block_state.transition is not None:
-                target_prompts, _, _, _ = parse_transition_config(
-                    block_state.transition
-                )
-
-                if target_prompts:
-                    (
-                        block_state.target_embeds_list,
-                        block_state.target_weights,
-                    ) = encode_prompt_items(target_prompts)
 
         self.set_block_state(state, block_state)
         return components, state

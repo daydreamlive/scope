@@ -228,6 +228,16 @@ class FrameProcessor:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
+        # For pipelines that support transitions, treat transition target prompts
+        # as the next prompts. This lets embedding blending handle transitions
+        # based on old vs new conditioning without needing a separate target
+        # prompts path.
+        transition = self.parameters.get("transition")
+        if transition is not None:
+            target_prompts = transition.get("target_prompts") or None
+            if target_prompts:
+                self.parameters["prompts"] = target_prompts
+
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
 
