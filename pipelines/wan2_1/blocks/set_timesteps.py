@@ -48,6 +48,12 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                 type_hint=bool,
                 description="Whether to (re)initialize caches",
             ),
+            InputParam(
+                "noise_scale",
+                type_hint=float,
+                default=0.7,
+                description="Amount of noise added to video",
+            ),
         ]
 
     @property
@@ -82,6 +88,9 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                 denoising_step_list,
                 dtype=torch.float32,
             )
+
+        if block_state.noise_scale is not None:
+            denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
 
         if denoising_step_list_changed(denoising_step_list, block_state):
             block_state.denoising_step_list = denoising_step_list
