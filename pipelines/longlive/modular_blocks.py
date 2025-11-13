@@ -25,12 +25,12 @@ ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("set_timesteps", SetTimestepsBlock),
-        ("prepare_latents", PrepareLatentsBlock),
         ("setup_caches", SetupCachesBlock),
         (
             "set_transformer_blocks_local_attn_size",
             SetTransformerBlocksLocalAttnSizeBlock,
         ),
+        ("prepare_latents", PrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),

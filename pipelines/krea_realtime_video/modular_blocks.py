@@ -20,8 +20,8 @@ ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("set_timesteps", SetTimestepsBlock),
-        ("prepare_latents", PrepareLatentsBlock),
         ("setup_caches", SetupCachesBlock),
+        ("prepare_latents", PrepareLatentsBlock),
         ("recompute_kv_cache", RecomputeKVCacheBlock),
         ("denoise", DenoiseBlock),
         ("decode", DecodeBlock),
