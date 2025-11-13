@@ -51,6 +51,8 @@ num_chunks = (num_frames - 1) // chunk_size
 prompt = "a bear is walking on the grass"
 
 outputs = []
+latency_measures = []
+fps_measures = []
 start_idx = 0
 end_idx = start_chunk_size
 for i in range(num_chunks):
@@ -72,6 +74,8 @@ for i in range(num_chunks):
         f"Pipeline generated {num_output_frames} frames latency={latency:2f}s fps={fps}"
     )
 
+    latency_measures.append(latency)
+    fps_measures.append(fps)
     outputs.append(output.detach().cpu())
 
 # Concatenate all of the THWC tensors
@@ -79,3 +83,12 @@ output_video = torch.concat(outputs)
 print(output_video.shape)
 output_video_np = output_video.contiguous().numpy()
 export_to_video(output_video_np, "pipelines/streamdiffusionv2/output.mp4", fps=16)
+
+# Print statistics
+print("\n=== Performance Statistics ===")
+print(
+    f"Latency - Avg: {sum(latency_measures) / len(latency_measures):.2f}s, Max: {max(latency_measures):.2f}s, Min: {min(latency_measures):.2f}s"
+)
+print(
+    f"FPS - Avg: {sum(fps_measures) / len(fps_measures):.2f}, Max: {max(fps_measures):.2f}, Min: {min(fps_measures):.2f}"
+)
