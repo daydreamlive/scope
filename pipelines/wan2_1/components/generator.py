@@ -9,6 +9,13 @@ from ...utils import load_state_dict
 from .scheduler import FlowMatchScheduler, SchedulerInterface
 
 
+def filter_causal_model_cls_config(causal_model_cls, config):
+    # Filter config to only include parameters accepted by the model's __init__
+    sig = inspect.signature(causal_model_cls.__init__)
+    config = {k: v for k, v in config.items() if k in sig.parameters}
+    return config
+
+
 class WanDiffusionWrapper(torch.nn.Module):
     def __init__(
         self,
@@ -47,7 +54,9 @@ class WanDiffusionWrapper(torch.nn.Module):
                 }
 
             with torch.device("meta"):
-                self.model = causal_model_cls(**config)
+                self.model = causal_model_cls(
+                    **filter_causal_model_cls_config(causal_model_cls, config)
+                )
 
             # HACK!
             # Store freqs shape before it becomes problematic
@@ -89,7 +98,11 @@ class WanDiffusionWrapper(torch.nn.Module):
                 )
         else:
             self.model = causal_model_cls.from_pretrained(
-                model_path, local_attn_size=local_attn_size, sink_size=sink_size
+                model_path,
+                **filter_causal_model_cls_config(
+                    causal_model_cls,
+                    {"local_attn_size": local_attn_size, "sink_size": sink_size},
+                ),
             )
 
         self.model.eval()

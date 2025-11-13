@@ -9,35 +9,35 @@ from lib.models_config import get_model_file_path, get_models_dir
 from ..video import load_video
 from .pipeline import StreamDiffusionV2Pipeline
 
-config = OmegaConf.load("pipelines/streamdiffusionv2/model.yaml")
-
-models_dir = get_models_dir()
-height = 480
-width = 832
-
 chunk_size = 4
 start_chunk_size = 5
 
-config["model_dir"] = str(models_dir)
-config["text_encoder_path"] = str(
-    get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
+config = OmegaConf.create(
+    {
+        "model_dir": str(get_models_dir()),
+        "generator_path": str(get_model_file_path("StreamDiffusionV2/model.pt")),
+        "text_encoder_path": str(
+            get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
+        ),
+        "tokenizer_path": str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")),
+        "model_config": OmegaConf.load("pipelines/streamdiffusionv2/model.yaml"),
+        "height": 480,
+        "width": 832,
+    }
 )
-config["height"] = height
-config["width"] = width
 
+device = torch.device("cuda")
 pipeline = StreamDiffusionV2Pipeline(
     config,
-    chunk_size=chunk_size,
-    start_chunk_size=start_chunk_size,
-    device=torch.device("cuda"),
+    device=device,
     dtype=torch.bfloat16,
 )
-pipeline.prepare(prompts=[{"text": "a bear is walking on the grass", "weight": 1.0}])
 
 # input_video is a 1CTHW tensor
 input_video = (
     load_video(
-        "pipelines/streamdiffusionv2/assets/original.mp4", resize_hw=(height, width)
+        "pipelines/streamdiffusionv2/assets/original.mp4",
+        resize_hw=(config.height, config.width),
     )
     .unsqueeze(0)
     .to("cuda", torch.bfloat16)
@@ -45,6 +45,8 @@ input_video = (
 _, _, num_frames, _, _ = input_video.shape
 
 num_chunks = (num_frames - 1) // chunk_size
+
+prompt = "a bear is walking on the grass"
 
 outputs = []
 start_idx = 0
@@ -58,7 +60,7 @@ for i in range(num_chunks):
 
     start = time.time()
     # output is TCHW
-    output = pipeline(chunk)
+    output = pipeline(video=chunk, prompts=prompt)
 
     num_output_frames, _, _, _ = output.shape
     latency = time.time() - start
