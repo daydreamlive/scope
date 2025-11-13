@@ -62,12 +62,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                 description="Amount of noise added to video",
             ),
             InputParam(
-                "denoising_step_list",
-                required=True,
-                type_hint=torch.Tensor,
-                description="List of denoising steps",
-            ),
-            InputParam(
                 "height",
                 type_hint=int,
                 description="Height of the video",
@@ -87,11 +81,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Noisy latents to denoise",
             ),
-            InputParam(
-                "denoising_step_list",
-                type_hint=torch.Tensor,
-                description="List of denoising steps",
-            ),
             OutputParam("generator", description="Random number generator"),
         ]
 
@@ -108,11 +97,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                 height=block_state.height,
                 width=block_state.width,
             )
-
-        # Determine the number of denoising steps
-        # Higher noise scale -> more denoising steps, more intense changes to input
-        # Lower noise scale -> less denoising steps, less intense changes to input
-        block_state.denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
 
         # Encode frames to latents using VAE
         latents = components.vae.encode_to_latent(video)
