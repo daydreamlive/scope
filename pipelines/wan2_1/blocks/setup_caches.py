@@ -83,6 +83,18 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 type_hint=int,
                 description="Current starting frame index for current block",
             ),
+            InputParam(
+                "manage_cache",
+                type_hint=bool,
+                default=True,
+                description="Whether cache management is enabled",
+            ),
+            InputParam(
+                "video",
+                type_hint=list[torch.Tensor] | torch.Tensor | None,
+                default=None,
+                description="Input video (if present, indicates video input is enabled)",
+            ),
         ]
 
     @property
@@ -116,6 +128,15 @@ class SetupCachesBlock(ModularPipelineBlocks):
             - components.config.num_frame_per_block
         )
         if block_state.current_start_frame >= max_current_start:
+            init_cache = True
+
+        # Clear KV cache when prompt changes, if manage_cache is enabled and video input is present
+        input_video = getattr(block_state, "input_video", False)
+        if (
+            block_state.prompt_embeds_updated
+            and block_state.manage_cache
+            and input_video
+        ):
             init_cache = True
 
         scale_size = (
