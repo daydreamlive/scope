@@ -161,7 +161,7 @@ class KreaRealtimeVideoPipeline(Pipeline):
         for k, v in kwargs.items():
             self.state.set(k, v)
 
-        # Clear transition from state if not provided in kwargs to prevent stale transitions
+        # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
             self.state.set("transition", None)
 

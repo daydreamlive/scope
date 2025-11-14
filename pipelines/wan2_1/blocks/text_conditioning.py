@@ -25,8 +25,7 @@ class TextConditioningBlock(ModularPipelineBlocks):
     def description(self) -> str:
         return (
             "Text Conditioning block that encodes prompts into embeddings for downstream blending. "
-            "Transition configuration is forwarded via pipeline state and handled by the "
-            "embedding blending block."
+            "Uses target_prompts from transition if present, otherwise uses the regular prompts parameter."
         )
 
     @property
@@ -117,10 +116,19 @@ class TextConditioningBlock(ModularPipelineBlocks):
         block_state.embeds_list = None
         block_state.embeds_weights = None
 
+        # Use target_prompts from transition if present, otherwise use regular prompts
+        prompts_to_encode = block_state.prompts
+        transition = block_state.transition
+        if transition is not None:
+            target_prompts = transition.get("target_prompts")
+            if target_prompts is not None:
+                prompts_to_encode = target_prompts
+
         # Normalize prompts to list[dict] format for processing
-        normalized_prompts = self._normalize_prompts(block_state.prompts)
+        normalized_prompts = self._normalize_prompts(prompts_to_encode)
 
         # Check if prompts changed (compare normalized versions)
+        # Use prompts_to_encode (which may be target_prompts) for comparison
         prompts_changed = (
             block_state.current_prompts is None
             or self._normalize_prompts(block_state.current_prompts)
@@ -163,8 +171,9 @@ class TextConditioningBlock(ModularPipelineBlocks):
                     block_state.embeds_weights,
                 ) = encode_prompt_items(normalized_prompts)
 
-                # Store original prompts format (not normalized) for comparison
-                block_state.current_prompts = block_state.prompts
+                # Store prompts_to_encode (which may be target_prompts) for comparison
+                # This ensures we track what was actually encoded
+                block_state.current_prompts = prompts_to_encode
 
         self.set_block_state(state, block_state)
         return components, state

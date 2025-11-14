@@ -197,5 +197,16 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                     block_state.conditioning_embeds = next_embedding
                     block_state.conditioning_embeds_updated = True
 
+        # Signal transition state to frame_processor via PipelineState
+        # This allows frame_processor to manage transition lifecycle in parameters dict
+        # Update transition state based on current status (may have changed during processing)
+        is_transitioning = components.embedding_blender.is_transitioning()
+        state.set("_transition_active", is_transitioning)
+
+        # Clear transition from PipelineState after processing to prevent reuse
+        # Note: frame_processor will clear it from parameters dict when transition completes
+        if transition is not None:
+            state.set("transition", None)
+
         self.set_block_state(state, block_state)
         return components, state

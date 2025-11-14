@@ -210,6 +210,14 @@ class FrameProcessor:
             # Check if there are new parameters
             new_parameters = self.parameters_queue.get_nowait()
             if new_parameters != self.parameters:
+                # Clear stale transition when new prompts arrive without transition
+                if (
+                    "prompts" in new_parameters
+                    and "transition" not in new_parameters
+                    and "transition" in self.parameters
+                ):
+                    self.parameters.pop("transition", None)
+
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
                 logger.info(f"Updated parameters: {self.parameters}")
@@ -227,16 +235,6 @@ class FrameProcessor:
             # Sleep briefly to avoid busy waiting
             self.shutdown_event.wait(SLEEP_TIME)
             return
-
-        # For pipelines that support transitions, treat transition target prompts
-        # as the next prompts. This lets embedding blending handle transitions
-        # based on old vs new conditioning without needing a separate target
-        # prompts path.
-        transition = self.parameters.get("transition")
-        if transition is not None:
-            target_prompts = transition.get("target_prompts") or None
-            if target_prompts:
-                self.parameters["prompts"] = target_prompts
 
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
@@ -267,7 +265,6 @@ class FrameProcessor:
                 video_input = self.prepare_chunk(current_chunk_size)
         try:
             # Pass parameters (excluding prepare-only parameters)
-            # print parameters
             call_params = dict(self.parameters.items())
 
             # Pass reset_cache as init_cache to pipeline
@@ -281,10 +278,21 @@ class FrameProcessor:
 
             output = pipeline(**call_params)
 
-            # Clear transition after processing - it's consumed by modular pipelines
-            # Note: Transitions only work with modular pipelines (StreamDiffusionV2, LongLive, Krea)
-            # Non-modular pipelines (Passthrough, VOD) ignore this parameter
-            self.parameters.pop("transition", None)
+            # Clear transition when complete (blocks signal via PipelineState._transition_active)
+            # Contract: Modular pipelines set this flag; non-modular pipelines ignore transitions
+            if "transition" in call_params and "transition" in self.parameters:
+                transition_active = False
+                if hasattr(pipeline, "state"):
+                    transition_active = pipeline.state.get("_transition_active", False)
+
+                transition = call_params.get("transition")
+                if not transition_active or transition is None:
+                    # Update prompts to target_prompts before clearing transition
+                    if transition is not None and not transition_active:
+                        target_prompts = transition.get("target_prompts")
+                        if target_prompts is not None:
+                            self.parameters["prompts"] = target_prompts
+                    self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
             num_frames = output.shape[0]
