@@ -6,6 +6,7 @@ from diffusers.modular_pipelines import PipelineState
 
 from lib.schema import Quantization
 
+from ..base.lora_mixin import LoRAEnabledPipeline
 from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
@@ -22,7 +23,7 @@ WARMUP_RUNS = 3
 WARMUP_PROMPT = "a majestic sunset"
 
 
-class KreaRealtimeVideoPipeline(Pipeline):
+class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
@@ -55,6 +56,9 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
+
+        # Initialize optional LoRA adapters on the underlying model BEFORE quantization.
+        generator.model = self._init_loras(config, generator.model)
 
         if quantization == Quantization.FP8_E4M3FN:
             # Cast before optional quantization
@@ -151,6 +155,19 @@ class KreaRealtimeVideoPipeline(Pipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        # Handle runtime LoRA scale updates before writing into state.
+        lora_scales = kwargs.get("lora_scales")
+        if lora_scales is not None:
+            try:
+                self._handle_lora_scale_updates(
+                    lora_scales=lora_scales, model=self.components.generator.model
+                )
+            except Exception as exc:
+                logger.error(
+                    "KreaRealtimeVideoPipeline._generate: failed to apply LoRA scale updates: %s",
+                    exc,
+                )
+
         for k, v in kwargs.items():
             self.state.set(k, v)
 
