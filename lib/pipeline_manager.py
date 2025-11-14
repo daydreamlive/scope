@@ -216,13 +216,27 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
-            config = OmegaConf.load("pipelines/streamdiffusionv2/model.yaml")
             models_dir = get_models_dir()
-            config["model_dir"] = str(models_dir)
-            config["text_encoder_path"] = str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "StreamDiffusionV2/wan_causal_dmd_v2v/model.pt"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "model_config": OmegaConf.load(
+                        "pipelines/streamdiffusionv2/model.yaml"
+                    ),
+                }
             )
 
             # Use load parameters for resolution and seed
@@ -286,17 +300,25 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.longlive.pipeline import LongLivePipeline
 
-            config = OmegaConf.load("pipelines/longlive/model.yaml")
-            models_dir = get_models_dir()
-            config["model_dir"] = str(models_dir)
-            config["generator_path"] = get_model_file_path(
-                "LongLive-1.3B/models/longlive_base.pt"
-            )
-            config["lora_path"] = get_model_file_path("LongLive-1.3B/models/lora.pt")
-            config["text_encoder_path"] = str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
+                    ),
+                    "lora_path": str(
+                        get_model_file_path("LongLive-1.3B/models/lora.pt")
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "model_config": OmegaConf.load("pipelines/longlive/model.yaml"),
+                }
             )
 
             height = 320
@@ -321,24 +343,29 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
 
-            config = OmegaConf.load("pipelines/krea_realtime_video/model.yaml")
-            models_dir = get_models_dir()
-            config["model_dir"] = str(models_dir)
-            config["generator_path"] = str(
-                get_model_file_path(
-                    "krea-realtime-video/krea-realtime-video-14b.safetensors"
-                )
-            )
-            config["text_encoder_path"] = str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
-            )
-            config["tokenizer_path"] = str(
-                get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
-            )
-            config["vae_path"] = str(
-                get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "krea-realtime-video/krea-realtime-video-14b.safetensors"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "vae_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+                    ),
+                    "model_config": OmegaConf.load(
+                        "pipelines/krea_realtime_video/model.yaml"
+                    ),
+                }
             )
 
             height = 512

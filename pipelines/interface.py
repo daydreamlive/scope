@@ -16,20 +16,6 @@ class Pipeline(ABC):
     """Abstract base class for all pipelines."""
 
     @abstractmethod
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
-        """
-        Prepare the pipeline and get requirements for the next processing chunk.
-
-        Args:
-            should_prepare: Whether to trigger preparation logic
-            **kwargs: Additional parameters such as:
-                - prompts: list[dict] | None - List of prompts with weights for blending
-                - prompt_interpolation_method: str - Interpolation method (linear/slerp)
-                - reset_cache: bool - Whether to reset internal caches
-        """
-        pass
-
-    @abstractmethod
     def __call__(
         self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs
     ) -> torch.Tensor:
