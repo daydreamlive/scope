@@ -135,16 +135,24 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 prompt_items: list[dict],
             ) -> tuple[list[torch.Tensor], list[float]]:
                 """Encode a list of prompt dicts into embeddings and weights."""
-                embeddings: list[torch.Tensor] = []
-                weights: list[float] = []
+                if not prompt_items:
+                    return [], []
 
-                for prompt_item in prompt_items:
-                    text = prompt_item.get("text", "")
-                    weight = prompt_item.get("weight", 1.0)
+                # Extract texts and weights
+                texts = [item.get("text", "") for item in prompt_items]
+                weights = [item.get("weight", 1.0) for item in prompt_items]
 
-                    conditional_dict = components.text_encoder(text_prompts=[text])
-                    embeddings.append(conditional_dict["prompt_embeds"])
-                    weights.append(weight)
+                # Batch encode all prompts at once
+                conditional_dict = components.text_encoder(text_prompts=texts)
+                batched_embeds = conditional_dict["prompt_embeds"]
+
+                # Split batched tensor into individual tensors, preserving batch dimension
+                # batched_embeds shape: [batch_size, seq_len, hidden_dim]
+                # Each embedding should be [1, seq_len, hidden_dim] to match original behavior
+                embeddings = [
+                    batched_embeds[i].unsqueeze(0)
+                    for i in range(batched_embeds.shape[0])
+                ]
 
                 return embeddings, weights
 
