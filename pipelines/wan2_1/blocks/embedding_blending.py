@@ -55,6 +55,16 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
+                "prompts",
+                type_hint=str | list[str] | list[dict],
+                description="Target prompts (received from TextConditioningBlock)",
+            ),
+            InputParam(
+                "current_prompts",
+                type_hint=str | list[str] | list[dict] | None,
+                description="Current prompts in use (received from TextConditioningBlock)",
+            ),
+            InputParam(
                 "embeds_list",
                 type_hint=list[torch.Tensor] | None,
                 description="List of pre-encoded embeddings to blend",
@@ -85,6 +95,11 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     @property
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
+            OutputParam(
+                "current_prompts",
+                type_hint=str | list[str] | list[dict],
+                description="Current prompts in use (updated when transition completes)",
+            ),
             OutputParam(
                 "conditioning_embeds",
                 type_hint=torch.Tensor,
@@ -125,11 +140,8 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
         # Initialize flag
         block_state.conditioning_embeds_updated = False
 
+        # Cancel active transition if conditioning changes mid-transition
         if conditioning_changed and components.embedding_blender.is_transitioning():
-            logger.info(
-                "EmbeddingBlendingBlock: Conditioning changed during transition, "
-                "cancelling transition"
-            )
             components.embedding_blender.cancel_transition()
 
         with torch.autocast(
@@ -153,15 +165,15 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 has_smooth_transition = transition_config.num_steps > 0
 
                 if has_smooth_transition:
-                    # Start a smooth transition from previous conditioning_embeds to target_blend
                     source_embedding = getattr(block_state, "conditioning_embeds", None)
                     if source_embedding is None:
-                        # No previous embedding to transition from - just snap
+                        # No source: snap directly to target
                         block_state.conditioning_embeds = target_blend.to(
                             dtype=components.config.dtype
                         )
                         block_state.conditioning_embeds_updated = True
                     else:
+                        # Start temporal transition from source to target
                         components.embedding_blender.start_transition(
                             source_embedding=source_embedding,
                             target_embedding=target_blend,
@@ -178,7 +190,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                             block_state.conditioning_embeds = next_embedding
                             block_state.conditioning_embeds_updated = True
                 else:
-                    # Immediate application of new conditioning (no temporal smoothing)
+                    # Immediate application (no temporal smoothing)
                     block_state.conditioning_embeds = target_blend.to(
                         dtype=components.config.dtype
                     )
@@ -197,14 +209,16 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                     block_state.conditioning_embeds = next_embedding
                     block_state.conditioning_embeds_updated = True
 
-        # Signal transition state to frame_processor via PipelineState
-        # This allows frame_processor to manage transition lifecycle in parameters dict
-        # Update transition state based on current status (may have changed during processing)
+        # Signal transition state to frame_processor for lifecycle management
         is_transitioning = components.embedding_blender.is_transitioning()
         state.set("_transition_active", is_transitioning)
 
-        # Clear transition from PipelineState after processing to prevent reuse
-        # Note: frame_processor will clear it from parameters dict when transition completes
+        # Update current_prompts when transition completes (contract with TextConditioningBlock)
+        # Maintains invariant: current_prompts = active prompts, prompts = target prompts
+        if not is_transitioning and block_state.prompts is not None:
+            block_state.current_prompts = block_state.prompts
+
+        # Clear transition from PipelineState to prevent reuse
         if transition is not None:
             state.set("transition", None)
 

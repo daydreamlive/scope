@@ -220,7 +220,6 @@ class FrameProcessor:
 
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
-                logger.info(f"Updated parameters: {self.parameters}")
         except queue.Empty:
             pass
 
@@ -278,8 +277,8 @@ class FrameProcessor:
 
             output = pipeline(**call_params)
 
-            # Clear transition when complete (blocks signal via PipelineState._transition_active)
-            # Contract: Modular pipelines set this flag; non-modular pipelines ignore transitions
+            # Clear transition when complete (blocks signal completion via _transition_active)
+            # Contract: Modular pipelines manage prompts internally; frame_processor manages lifecycle
             if "transition" in call_params and "transition" in self.parameters:
                 transition_active = False
                 if hasattr(pipeline, "state"):
@@ -287,11 +286,6 @@ class FrameProcessor:
 
                 transition = call_params.get("transition")
                 if not transition_active or transition is None:
-                    # Update prompts to target_prompts before clearing transition
-                    if transition is not None and not transition_active:
-                        target_prompts = transition.get("target_prompts")
-                        if target_prompts is not None:
-                            self.parameters["prompts"] = target_prompts
                     self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
