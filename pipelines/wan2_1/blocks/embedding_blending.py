@@ -23,20 +23,20 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     Responsibilities:
     - Spatial blending: Combining multiple weighted embeddings into a single embedding
     - Temporal blending: Smooth transitions between embeddings over multiple frames
-    - Cache management: Setting prompt_embeds_updated flag for downstream cache reinitialization
+    - Cache management: Setting conditioning_embeds_updated flag for downstream cache reinitialization
     - Dtype conversion: Ensuring embeddings match pipeline dtype (e.g., bfloat16)
     - State management: Integrating EmbeddingBlender state with pipeline state flow
 
     Architecture Notes:
     - This block is a thin integration layer around the EmbeddingBlender business logic class
     - EmbeddingBlender remains separate for testability and separation of concerns
-    - During transitions, we set prompt_embeds_updated=True to reset ONLY cross-attention cache,
+    - During transitions, we set conditioning_embeds_updated=True to reset ONLY cross-attention cache,
       preserving KV cache for smooth temporal coherence (unlike init_cache which resets everything)
 
     Cache Reset Strategy:
-    - prompt_embeds_updated=True → Resets cross-attn cache only (SetupCachesBlock)
+    - conditioning_embeds_updated=True → Resets cross-attn cache only (SetupCachesBlock)
     - init_cache=True → Resets ALL caches (KV, cross-attn, VAE, frame counter)
-    - We use prompt_embeds_updated during transitions to maintain temporal context
+    - We use conditioning_embeds_updated during transitions to maintain temporal context
     """
 
     model_name = "Wan2.1"
@@ -76,9 +76,9 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 description="Optional transition config for temporal blending",
             ),
             InputParam(
-                "prompt_embeds",
+                "conditioning_embeds",
                 type_hint=torch.Tensor,
-                description="Existing prompt embeddings (optional)",
+                description="Existing conditioning embeddings (optional)",
             ),
             InputParam(
                 "conditioning_changed",
@@ -95,12 +95,12 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
-                "prompt_embeds",
+                "conditioning_embeds",
                 type_hint=torch.Tensor,
                 description="Blended embeddings to condition denoising (pipeline state variable)",
             ),
             OutputParam(
-                "prompt_embeds_updated",
+                "conditioning_embeds_updated",
                 type_hint=bool,
                 description="Whether embeddings were updated (requires cross-attention cache re-initialization)",
             ),
@@ -120,7 +120,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
         conditioning_changed = getattr(block_state, "conditioning_changed", False)
 
         # Initialize flag
-        block_state.prompt_embeds_updated = False
+        block_state.conditioning_embeds_updated = False
 
         if conditioning_changed and components.embedding_blender.is_transitioning():
             logger.info(
@@ -150,14 +150,14 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 has_smooth_transition = transition_config.num_steps > 0
 
                 if has_smooth_transition:
-                    # Start a smooth transition from previous prompt_embeds to target_blend
-                    source_embedding = getattr(block_state, "prompt_embeds", None)
+                    # Start a smooth transition from previous conditioning_embeds to target_blend
+                    source_embedding = getattr(block_state, "conditioning_embeds", None)
                     if source_embedding is None:
                         # No previous embedding to transition from - just snap
-                        block_state.prompt_embeds = target_blend.to(
+                        block_state.conditioning_embeds = target_blend.to(
                             dtype=components.config.dtype
                         )
-                        block_state.prompt_embeds_updated = True
+                        block_state.conditioning_embeds_updated = True
                     else:
                         components.embedding_blender.start_transition(
                             source_embedding=source_embedding,
@@ -172,14 +172,14 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                             next_embedding = next_embedding.to(
                                 dtype=components.config.dtype
                             )
-                            block_state.prompt_embeds = next_embedding
-                            block_state.prompt_embeds_updated = True
+                            block_state.conditioning_embeds = next_embedding
+                            block_state.conditioning_embeds_updated = True
                 else:
                     # Immediate application of new conditioning (no temporal smoothing)
-                    block_state.prompt_embeds = target_blend.to(
+                    block_state.conditioning_embeds = target_blend.to(
                         dtype=components.config.dtype
                     )
-                    block_state.prompt_embeds_updated = True
+                    block_state.conditioning_embeds_updated = True
 
             # Step 3: Get next embedding from transition queue (if transitioning and no new change)
             if (
@@ -191,8 +191,8 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 if next_embedding is not None:
                     # Cast to pipeline dtype before storing
                     next_embedding = next_embedding.to(dtype=components.config.dtype)
-                    block_state.prompt_embeds = next_embedding
-                    block_state.prompt_embeds_updated = True
+                    block_state.conditioning_embeds = next_embedding
+                    block_state.conditioning_embeds_updated = True
 
         self.set_block_state(state, block_state)
         return components, state

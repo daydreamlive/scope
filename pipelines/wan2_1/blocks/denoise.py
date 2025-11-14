@@ -48,10 +48,10 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="List of denoising steps",
             ),
             InputParam(
-                "prompt_embeds",
+                "conditioning_embeds",
                 required=True,
                 type_hint=torch.Tensor,
-                description="Text embeddings used to conditiong denoising",
+                description="Conditioning embeddings used to condition denoising",
             ),
             InputParam(
                 "current_start_frame",
@@ -126,7 +126,7 @@ class DenoiseBlock(ModularPipelineBlocks):
         num_frames = noise.shape[1]
         denoising_step_list = block_state.denoising_step_list
 
-        conditional_dict = {"prompt_embeds": block_state.prompt_embeds}
+        conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
 
         start_frame = block_state.current_start_frame
         if block_state.start_frame is not None:

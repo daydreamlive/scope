@@ -163,7 +163,7 @@ class EmbeddingBlender:
     - This separation allows EmbeddingBlender to be generic and reusable
     - Intentionally separate from EmbeddingBlendingBlock to maintain
       separation between business logic (this class) and pipeline integration (the block)
-    - Cache management is handled by pipeline state flags (prompt_embeds_updated)
+    - Cache management is handled by pipeline state flags (conditioning_embeds_updated)
     """
 
     def __init__(
