@@ -60,7 +60,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 description="List of pre-encoded embeddings to blend",
             ),
             InputParam(
-                "embedding_weights",
+                "embeds_weights",
                 type_hint=list[float] | None,
                 description="List of weights corresponding to embeds_list",
             ),
@@ -112,7 +112,7 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
 
         # Get inputs from state
         embeds_list = block_state.embeds_list
-        embedding_weights = block_state.embedding_weights
+        embeds_weights = block_state.embeds_weights
         spatial_interpolation_method = (
             block_state.spatial_interpolation_method or "linear"
         )
@@ -137,10 +137,10 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
 
             # Step 1: Spatial blending - compute target embedding when conditioning changes
             target_blend = None
-            if embeds_list and embedding_weights and conditioning_changed:
+            if embeds_list and embeds_weights and conditioning_changed:
                 target_blend = components.embedding_blender.blend(
                     embeddings=embeds_list,
-                    weights=embedding_weights,
+                    weights=embeds_weights,
                     interpolation_method=spatial_interpolation_method,
                     cache_result=False,
                 )

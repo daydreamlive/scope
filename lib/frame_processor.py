@@ -255,7 +255,6 @@ class FrameProcessor:
             requirements = pipeline.prepare(
                 **self.parameters,
             )
-        self.is_prepared = True
 
         video_input = None
         if requirements is not None:
