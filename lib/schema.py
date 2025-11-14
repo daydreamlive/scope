@@ -82,6 +82,10 @@ class Parameters(BaseModel):
         ge=0.01,
         le=1.0,
     )
+    lora_scales: list["LoRAScaleUpdate"] | None = Field(
+        default=None,
+        description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
+    )
 
 
 class WebRTCOfferRequest(BaseModel):
@@ -131,6 +135,49 @@ class Quantization(str, Enum):
     FP8_E4M3FN = "fp8_e4m3fn"
 
 
+class LoRAMergeMode(str, Enum):
+    """LoRA merge mode enumeration."""
+
+    RUNTIME_PEFT = "runtime_peft"
+    GPU_RECONSTRUCT = "gpu_reconstruct"
+    PERMANENT_MERGE = "permanent_merge"
+    CUDA_GRAPH_RECAPTURE = "cuda_graph_recapture"
+
+
+class LoRAConfig(BaseModel):
+    """Configuration for a LoRA (Low-Rank Adaptation) adapter."""
+
+    path: str = Field(
+        ...,
+        description=(
+            "Local path to LoRA weights file (.safetensors, .bin, .pt). "
+            "Typically under models/lora/."
+        ),
+    )
+    scale: float = Field(
+        default=1.0,
+        ge=-10.0,
+        le=10.0,
+        description=(
+            "Adapter strength/weight (-10.0 to 10.0, 0.0 = disabled, 1.0 = full strength)."
+        ),
+    )
+
+
+class LoRAScaleUpdate(BaseModel):
+    """Update scale for a loaded LoRA adapter."""
+
+    path: str = Field(
+        ..., description="Path of the LoRA to update (must match loaded path)"
+    )
+    scale: float = Field(
+        ...,
+        ge=-10.0,
+        le=10.0,
+        description="New adapter strength/weight (-10.0 to 10.0, 0.0 = disabled, 1.0 = full strength).",
+    )
+
+
 class PipelineLoadParams(BaseModel):
     """Base class for pipeline load parameters."""
 
@@ -143,6 +190,17 @@ class StreamDiffusionV2LoadParams(PipelineLoadParams):
     height: int = Field(default=512, description="Target video height", ge=64, le=2048)
     width: int = Field(default=512, description="Target video width", ge=64, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    loras: list[LoRAConfig] | None = Field(
+        default=None, description="Optional list of LoRA adapter configurations."
+    )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description=(
+            "LoRA merge strategy. Permanent merge offers maximum FPS but no runtime updates; "
+            "runtime_peft offers instant updates at reduced FPS; gpu_reconstruct and "
+            "cuda_graph_recapture are advanced strategies for balancing update speed and performance."
+        ),
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -163,6 +221,13 @@ class LongLiveLoadParams(PipelineLoadParams):
     height: int = Field(default=320, description="Target video height", ge=16, le=2048)
     width: int = Field(default=576, description="Target video width", ge=16, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    loras: list[LoRAConfig] | None = Field(
+        default=None, description="Optional list of LoRA adapter configurations."
+    )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge strategy, see StreamDiffusionV2LoadParams.lora_merge_mode for details.",
+    )
 
 
 class KreaRealtimeVideoLoadParams(PipelineLoadParams):
@@ -174,6 +239,13 @@ class KreaRealtimeVideoLoadParams(PipelineLoadParams):
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    loras: list[LoRAConfig] | None = Field(
+        default=None, description="Optional list of LoRA adapter configurations."
+    )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge strategy, see StreamDiffusionV2LoadParams.lora_merge_mode for details.",
     )
 
 
@@ -200,6 +272,13 @@ class PipelineStatusResponse(BaseModel):
     pipeline_id: str | None = Field(default=None, description="ID of loaded pipeline")
     load_params: dict | None = Field(
         default=None, description="Load parameters used when loading the pipeline"
+    )
+    loaded_lora_adapters: list[dict] | None = Field(
+        default=None,
+        description=(
+            "Information about currently loaded LoRA adapters (path and scale). "
+            "Used by the frontend to decide which adapters can be updated at runtime."
+        ),
     )
     error: str | None = Field(
         default=None, description="Error message if status is error"

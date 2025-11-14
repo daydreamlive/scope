@@ -77,6 +77,15 @@ class PipelineManager:
             pipeline_id = self._pipeline_id
             load_params = self._load_params
 
+            # Capture loaded LoRA adapters if pipeline exposes them
+            loaded_lora_adapters = None
+            if self._pipeline is not None and hasattr(
+                self._pipeline, "loaded_lora_adapters"
+            ):
+                loaded_lora_adapters = getattr(
+                    self._pipeline, "loaded_lora_adapters", None
+                )
+
             # If there's an error, clear it after capturing it
             # This ensures errors don't persist across page reloads
             if self._status == PipelineStatus.ERROR and error_message:
@@ -91,6 +100,7 @@ class PipelineManager:
                 "status": current_status.value,
                 "pipeline_id": pipeline_id,
                 "load_params": load_params,
+                "loaded_lora_adapters": loaded_lora_adapters,
                 "error": error_message,
             }
 
@@ -239,18 +249,25 @@ class PipelineManager:
                 }
             )
 
-            # Use load parameters for resolution and seed
+            # Use load parameters for resolution, seed, and optional LoRAs
             height = 512
             width = 512
             seed = 42
+            loras = None
+            lora_merge_mode = "cuda_graph_recapture"
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
                 seed = load_params.get("seed", 42)
+                loras = load_params.get("loras", None)
+                lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
 
             config["height"] = height
             config["width"] = width
             config["seed"] = seed
+            if loras:
+                config["loras"] = loras
+            config["lora_merge_mode"] = lora_merge_mode
 
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -324,14 +341,21 @@ class PipelineManager:
             height = 320
             width = 576
             seed = 42
+            loras = None
+            lora_merge_mode = "cuda_graph_recapture"
             if load_params:
                 height = load_params.get("height", 320)
                 width = load_params.get("width", 576)
                 seed = load_params.get("seed", 42)
+                loras = load_params.get("loras", None)
+                lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
 
             config["height"] = height
             config["width"] = width
             config["seed"] = seed
+            if loras:
+                config["loras"] = loras
+            config["lora_merge_mode"] = lora_merge_mode
 
             pipeline = LongLivePipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -372,15 +396,22 @@ class PipelineManager:
             width = 512
             seed = 42
             quantization = None
+            loras = None
+            lora_merge_mode = "cuda_graph_recapture"
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
                 seed = load_params.get("seed", 42)
                 quantization = load_params.get("quantization", None)
+                loras = load_params.get("loras", None)
+                lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
 
             config["height"] = height
             config["width"] = width
             config["seed"] = seed
+            if loras:
+                config["loras"] = loras
+            config["lora_merge_mode"] = lora_merge_mode
 
             pipeline = KreaRealtimeVideoPipeline(
                 config,
