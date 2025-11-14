@@ -80,15 +80,6 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Existing conditioning embeddings (optional)",
             ),
-            InputParam(
-                "conditioning_changed",
-                type_hint=bool,
-                default=False,
-                description=(
-                    "Whether conditioning inputs changed since last call. Used to "
-                    "manage transitions when new conditioning arrives."
-                ),
-            ),
         ]
 
     @property
@@ -117,7 +108,19 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
             block_state.spatial_interpolation_method or "linear"
         )
         transition = block_state.transition
-        conditioning_changed = getattr(block_state, "conditioning_changed", False)
+
+        # Detect if conditioning changed by comparing signatures
+        current_signature = None
+        if embeds_list is not None and embeds_weights is not None:
+            # Create signature: (length, weights tuple)
+            # This is cheap and avoids storing tensor references
+            current_signature = (len(embeds_list), tuple(embeds_weights))
+
+        previous_signature = getattr(block_state, "_previous_embeds_signature", None)
+        conditioning_changed = current_signature != previous_signature
+
+        # Update stored signature for next comparison
+        block_state._previous_embeds_signature = current_signature
 
         # Initialize flag
         block_state.conditioning_embeds_updated = False

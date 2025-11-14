@@ -74,14 +74,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
                 type_hint=list[float] | None,
                 description="List of weights corresponding to embeds_list",
             ),
-            OutputParam(
-                "conditioning_changed",
-                type_hint=bool,
-                description=(
-                    "Whether conditioning inputs changed since last call. Used by "
-                    "downstream blocks (e.g. embedding blending) to manage transitions."
-                ),
-            ),
         ]
 
     @staticmethod
@@ -134,7 +126,6 @@ class TextConditioningBlock(ModularPipelineBlocks):
             or self._normalize_prompts(block_state.current_prompts)
             != normalized_prompts
         )
-        block_state.conditioning_changed = prompts_changed
 
         with torch.autocast(
             str(components.config.device), dtype=components.config.dtype
