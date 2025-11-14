@@ -21,9 +21,9 @@ logger = diffusers_logging.get_logger(__name__)
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
-        ("set_timesteps", SetTimestepsBlock),
         ("preprocess_video", PreprocessVideoBlock),
         ("noise_scale_controller", NoiseScaleControllerBlock),
+        ("set_timesteps", SetTimestepsBlock),
         ("setup_caches", SetupCachesBlock),
         ("prepare_video_latents", PrepareVideoLatentsBlock),
         ("denoise", DenoiseBlock),
