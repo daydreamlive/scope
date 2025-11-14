@@ -19,6 +19,7 @@ import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { createCloudStream } from "../lib/daydream";
 import { WhipConnection } from "../components/WhipConnection";
+import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
@@ -44,13 +45,11 @@ export function StreamPage() {
     useState<TimelinePrompt | null>(null);
 
   // Cloud mode state (WHIP)
-  const [isCloudLoading, setIsCloudLoading] = useState(false);
   const [isConnectingCloud, setIsConnectingCloud] = useState(false);
   const [isStreamingCloud, setIsStreamingCloud] = useState(false);
-  const [cloudRemoteStream, setCloudRemoteStream] = useState<MediaStream | null>(null);
   const [cloudWhipUrl, setCloudWhipUrl] = useState<string | null>(null);
-  const cloudStreamIdRef = useRef<string | null>(null);
   const isStartingCloudRef = useRef(false);
+  const { setPlaybackUrl } = usePlaybackUrl();
 
   // Stable callbacks for WHIP to avoid effect churn in WhipConnection
   const onWhipConnectionStateChange = useCallback((state: RTCPeerConnectionState) => {
@@ -462,7 +461,6 @@ export function StreamPage() {
     } else {
       if (isStreamingCloud) {
         setCloudWhipUrl(null);
-        setCloudRemoteStream(null);
         setIsStreamingCloud(false);
         setIsConnectingCloud(false);
         return true;
@@ -511,15 +509,12 @@ export function StreamPage() {
           };
         }
 
-        setIsCloudLoading(true);
         setIsConnectingCloud(true);
         isStartingCloudRef.current = true;
         const created = await createCloudStream({
           pipeline_id: 'pip_SD-turbo',
           load_params: loadParams || undefined,
         });
-        cloudStreamIdRef.current = created.id;
-        setIsCloudLoading(false);
 
         const needsVideoInput =
           PIPELINES[pipelineIdToUse]?.category === "video-input";
@@ -746,9 +741,9 @@ export function StreamPage() {
           <div className="flex-1 min-h-0">
             <VideoOutput
               className="h-full"
-              remoteStream={settings.cloudMode ? cloudRemoteStream : remoteStream}
+              remoteStream={remoteStream}
               isPipelineLoading={
-                settings.cloudMode ? isCloudLoading : isPipelineLoading
+                settings.cloudMode ? false : isPipelineLoading
               }
               isConnecting={settings.cloudMode ? isConnectingCloud : isConnecting}
               pipelineError={pipelineError}
@@ -879,8 +874,6 @@ export function StreamPage() {
               onTimelinePlayingChange={handleTimelinePlayingChange}
               isDownloading={isDownloading}
               isStreamingCloud={isStreamingCloud}
-              isConnectingCloud={isConnectingCloud}
-              isStartingCloud={isStartingCloudRef.current}
             />
           </div>
         </div>
@@ -902,9 +895,9 @@ export function StreamPage() {
                 }
               if (isStreamingCloud) {
                 setCloudWhipUrl(null);
-                setCloudRemoteStream(null);
                 setIsStreamingCloud(false);
                 setIsConnectingCloud(false);
+                setPlaybackUrl(null);
               }
               })();
               updateSettings({ cloudMode: enabled });

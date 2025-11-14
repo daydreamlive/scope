@@ -20,8 +20,6 @@ interface PromptInputWithTimelineProps {
   disabled?: boolean;
   isStreaming?: boolean;
   isStreamingCloud?: boolean;
-  isConnectingCloud?: boolean;
-  isStartingCloud?: boolean;
   isVideoPaused?: boolean;
   timelineRef?: React.RefObject<{
     getCurrentTimelinePrompt: () => string;
@@ -58,8 +56,6 @@ export function PromptInputWithTimeline({
   disabled = false,
   isStreaming = false,
   isStreamingCloud = false,
-  isConnectingCloud = false,
-  isStartingCloud = false,
   isVideoPaused = false,
   timelineRef,
   selectedPrompt: _selectedPrompt = null,
@@ -252,8 +248,7 @@ export function PromptInputWithTimeline({
 
   // Initialize stream if needed
   const initializeStream = useCallback(async (): Promise<boolean> => {
-    console.log("[PromptInputWithTimeline] initializeStream", isStreaming, isStreamingCloud, isConnectingCloud);
-    if (!isStreaming && !isStreamingCloud && !isConnectingCloud && !isStartingCloud && onStartStream) {
+    if (!isStreaming && !isStreamingCloud && onStartStream) {
       const result = await onStartStream();
       const started = result === true; // Treat undefined/void as false
       if (started) {
@@ -263,7 +258,7 @@ export function PromptInputWithTimeline({
       return false;
     }
     return true; // Already streaming
-  }, [isStreaming, isStreamingCloud, isConnectingCloud, isStartingCloud, onStartStream]);
+  }, [isStreaming, isStreamingCloud, onStartStream]);
 
   // Check if at end of timeline
   const isAtTimelineEnd = useCallback(() => {
@@ -292,22 +287,22 @@ export function PromptInputWithTimeline({
 
     const isAtEnd = isAtTimelineEnd();
 
-    // if (isAtEnd) {
-    //   setIsLive(true);
-    //   onLiveStateChange?.(true);
+    if (isAtEnd && !(settings?.cloudMode ?? false)) { // Don't think we need to create another stream for cloud mode
+      setIsLive(true);
+      onLiveStateChange?.(true);
 
-    //   // Only create a new live prompt if there are no prompts at all in the timeline
-    //   if (prompts.length === 0) {
-    //     const streamStartedAgain = await initializeStream();
-    //     if (streamStartedAgain) {
-    //       const livePrompt = buildLivePromptFromCurrent(
-    //         currentTime,
-    //         currentTime
-    //       );
-    //       setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
-    //     }
-    //   }
-    // }
+      // Only create a new live prompt if there are no prompts at all in the timeline
+      if (prompts.length === 0) {
+        const streamStartedAgain = await initializeStream();
+        if (streamStartedAgain) {
+          const livePrompt = buildLivePromptFromCurrent(
+            currentTime,
+            currentTime
+          );
+          setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
+        }
+      }
+    }
 
     // Set callback to start playback when video actually starts playing
     if (onVideoPlayingCallbackRef) {

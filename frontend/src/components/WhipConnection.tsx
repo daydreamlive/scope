@@ -48,7 +48,6 @@ export const WhipConnection = memo(
     useEffect(() => {
       console.log("[WhipConnection] Re-rendering WhipConnection");
       if (!whipUrl) return;
-      console.log("[WhipConnection] WhipUrl:", whipUrl, "stream:", streamRef.current?.getVideoTracks().length);
 
       const client = new WhipClient({
         whipUrl,
@@ -72,12 +71,9 @@ export const WhipConnection = memo(
       void client.connect();
       console.log("[WhipConnection] WhipClient connected");
       return () => {
-        console.log("[WhipConnection] WhipClient stoppe, now sleeping");
-        setTimeout(() => {
-          console.log("[WhipConnection] WhipClient stopped, now waking up");
-          void client.stop();
-          clientRef.current = null;
-        }, 2000); // 2s
+        console.log("[WhipConnection] WhipClient stopped");
+        void client.stop();
+        clientRef.current = null;
       };
     }, [
       whipUrl,
