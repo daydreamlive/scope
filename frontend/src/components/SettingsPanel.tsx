@@ -20,12 +20,13 @@ import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import { PIPELINES } from "../data/pipelines";
+import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type { PipelineId } from "../types";
+import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
 
@@ -55,6 +56,10 @@ interface SettingsPanelProps {
   kvCacheAttentionBias?: number;
   onKvCacheAttentionBiasChange?: (bias: number) => void;
   onResetCache?: () => void;
+  loras?: LoRAConfig[];
+  onLorasChange?: (loras: LoRAConfig[]) => void;
+  loraMergeStrategy?: LoraMergeStrategy;
+  onLoraMergeStrategyChange?: (strategy: LoraMergeStrategy) => void;
 }
 
 export function SettingsPanel({
@@ -80,6 +85,10 @@ export function SettingsPanel({
   kvCacheAttentionBias = 0.3,
   onKvCacheAttentionBiasChange,
   onResetCache,
+  loras = [],
+  onLorasChange,
+  loraMergeStrategy = "permanent_merge",
+  onLoraMergeStrategyChange,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
@@ -592,6 +601,50 @@ export function SettingsPanel({
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pipelineSupportsLoRA(pipelineId) && (
+          <div className="space-y-4">
+            <LoRAManager
+              loras={loras}
+              onLorasChange={onLorasChange || (() => {})}
+              disabled={isDownloading}
+              isStreaming={isStreaming}
+            />
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.loraMergeStrategy.label}
+                  tooltip={PARAMETER_METADATA.loraMergeStrategy.tooltip}
+                  className="text-sm text-foreground"
+                />
+                <Select
+                  value={loraMergeStrategy}
+                  onValueChange={value => {
+                    onLoraMergeStrategyChange?.(value as LoraMergeStrategy);
+                  }}
+                  disabled={isStreaming}
+                >
+                  <SelectTrigger className="w-[180px] h-7">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="permanent_merge">
+                      Permanent Merge
+                    </SelectItem>
+                    <SelectItem value="runtime_peft">Runtime PEFT</SelectItem>
+                    <SelectItem value="gpu_reconstruct">
+                      GPU Reconstruct
+                    </SelectItem>
+                    <SelectItem value="cuda_graph_recapture">
+                      CUDA Graph
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>

@@ -254,7 +254,7 @@ class PipelineManager:
             width = 512
             seed = 42
             loras = None
-            lora_merge_mode = "cuda_graph_recapture"
+            lora_merge_mode = config.get("lora_merge_mode", "runtime_peft")
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
@@ -267,6 +267,9 @@ class PipelineManager:
             config["seed"] = seed
             if loras:
                 config["loras"] = loras
+            config["lora_merge_mode"] = lora_merge_mode
+
+            # Add LoRA merge mode to config
             config["lora_merge_mode"] = lora_merge_mode
 
             pipeline = StreamDiffusionV2Pipeline(
@@ -342,7 +345,7 @@ class PipelineManager:
             width = 576
             seed = 42
             loras = None
-            lora_merge_mode = "cuda_graph_recapture"
+            lora_merge_mode = config.get("lora_merge_mode", "runtime_peft")
             if load_params:
                 height = load_params.get("height", 320)
                 width = load_params.get("width", 576)
@@ -355,6 +358,9 @@ class PipelineManager:
             config["seed"] = seed
             if loras:
                 config["loras"] = loras
+            config["lora_merge_mode"] = lora_merge_mode
+
+            # Add LoRA merge mode to config
             config["lora_merge_mode"] = lora_merge_mode
 
             pipeline = LongLivePipeline(
@@ -397,13 +403,15 @@ class PipelineManager:
             seed = 42
             quantization = None
             loras = None
-            lora_merge_mode = "cuda_graph_recapture"
+            # Get from yaml first, default to runtime_peft
+            lora_merge_mode = config.get("lora_merge_mode", "runtime_peft")
             if load_params:
                 height = load_params.get("height", 512)
                 width = load_params.get("width", 512)
                 seed = load_params.get("seed", 42)
                 quantization = load_params.get("quantization", None)
                 loras = load_params.get("loras", None)
+                # load_params can override yaml
                 lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
 
             config["height"] = height
@@ -411,6 +419,9 @@ class PipelineManager:
             config["seed"] = seed
             if loras:
                 config["loras"] = loras
+            config["lora_merge_mode"] = lora_merge_mode
+
+            # Add LoRA merge mode to config
             config["lora_merge_mode"] = lora_merge_mode
 
             pipeline = KreaRealtimeVideoPipeline(

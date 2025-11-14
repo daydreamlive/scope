@@ -4,6 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
+from ..base.lora_mixin import LoRAEnabledPipeline
 from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class LongLivePipeline(Pipeline):
+class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
@@ -52,7 +53,7 @@ class LongLivePipeline(Pipeline):
 
         print(f"Loaded diffusion model in {time.time() - start:.3f}s")
 
-        # Configure LoRA for LongLive model
+        # Configure LoRA for LongLive model (original LongLive LoRA path).
         start = time.time()
         generator.model = configure_lora_for_model(
             generator.model, model_name=generator_model_name, lora_config=lora_config
@@ -60,6 +61,10 @@ class LongLivePipeline(Pipeline):
         # Load LoRA weights
         load_lora_checkpoint(generator.model, lora_path)
         print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
+
+        # Initialize any additional, user-configured LoRA adapters via shared manager.
+        # This is additive and does not replace the original LongLive LoRA above.
+        generator.model = self._init_loras(config, generator.model)
 
         generator = generator.to(device=device, dtype=dtype)
 
@@ -119,6 +124,19 @@ class LongLivePipeline(Pipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        # Handle runtime LoRA scale updates before writing into state.
+        lora_scales = kwargs.get("lora_scales")
+        if lora_scales is not None:
+            try:
+                self._handle_lora_scale_updates(
+                    lora_scales=lora_scales, model=self.components.generator.model
+                )
+            except Exception as exc:
+                logger.error(
+                    "LongLivePipeline._generate: failed to apply LoRA scale updates: %s",
+                    exc,
+                )
+
         for k, v in kwargs.items():
             self.state.set(k, v)
 

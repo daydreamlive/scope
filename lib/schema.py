@@ -201,6 +201,10 @@ class StreamDiffusionV2LoadParams(PipelineLoadParams):
             "cuda_graph_recapture are advanced strategies for balancing update speed and performance."
         ),
     )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge mode: permanent_merge (no updates, zero overhead, 9.15 FPS), runtime_peft (instant updates, ~50% overhead, 4.34 FPS), gpu_reconstruct (60s updates, zero overhead, 10.3 FPS), cuda_graph_recapture (1-5s updates, minimal overhead, ~9-10 FPS).",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -228,6 +232,10 @@ class LongLiveLoadParams(PipelineLoadParams):
         default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
         description="LoRA merge strategy, see StreamDiffusionV2LoadParams.lora_merge_mode for details.",
     )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge mode: permanent_merge (no updates, zero overhead, 9.15 FPS), runtime_peft (instant updates, ~50% overhead, 4.34 FPS), gpu_reconstruct (60s updates, zero overhead, 10.3 FPS), cuda_graph_recapture (1-5s updates, minimal overhead, ~9-10 FPS).",
+    )
 
 
 class KreaRealtimeVideoLoadParams(PipelineLoadParams):
@@ -246,6 +254,10 @@ class KreaRealtimeVideoLoadParams(PipelineLoadParams):
     lora_merge_mode: LoRAMergeMode = Field(
         default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
         description="LoRA merge strategy, see StreamDiffusionV2LoadParams.lora_merge_mode for details.",
+    )
+    lora_merge_mode: LoRAMergeMode = Field(
+        default=LoRAMergeMode.CUDA_GRAPH_RECAPTURE,
+        description="LoRA merge mode: permanent_merge (no updates, zero overhead, 9.15 FPS), runtime_peft (instant updates, ~50% overhead, 4.34 FPS), gpu_reconstruct (60s updates, zero overhead, 10.3 FPS), cuda_graph_recapture (1-5s updates, minimal overhead, ~9-10 FPS).",
     )
 
 
