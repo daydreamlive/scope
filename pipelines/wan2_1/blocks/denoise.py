@@ -36,16 +36,36 @@ class DenoiseBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
+                "height",
+                type_hint=int,
+                description="Height of the video",
+            ),
+            InputParam(
+                "width",
+                type_hint=int,
+                description="Width of the video",
+            ),
+            InputParam(
+                "kv_cache_attention_bias",
+                default=1.0,
+                type_hint=float,
+                description="Controls how much to rely on past frames in the cache during generation",
+            ),
+            # The following should be converted to intermediate inputs to denote that they can come from other blocks
+            # and can be modified since they are also listed under intermediate outputs. They are included as inputs for now
+            # because of what seems to be a bug where intermediate inputs cannot be simplify accessed in block state via
+            # block_state.<intermediate_input>
+            InputParam(
                 "latents",
                 required=True,
                 type_hint=torch.Tensor,
                 description="Noisy latents to denoise",
             ),
             InputParam(
-                "denoising_step_list",
+                "current_denoising_step_list",
                 required=True,
                 type_hint=torch.Tensor,
-                description="List of denoising steps",
+                description="Current list of denoising steps",
             ),
             InputParam(
                 "conditioning_embeds",
@@ -77,25 +97,14 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="Initialized cross-attention cache",
             ),
             InputParam(
-                "height",
-                type_hint=int,
-                description="Height of the video",
-            ),
-            InputParam(
-                "width",
-                type_hint=int,
-                description="Width of the video",
-            ),
-            InputParam(
                 "generator",
                 required=True,
                 description="Random number generator",
             ),
             InputParam(
-                "kv_cache_attention_bias",
-                default=1.0,
-                type_hint=float,
-                description="Controls how much to rely on past frames in the cache during generation",
+                "noise_scale",
+                type_hint=float | None,
+                description="Amount of noise added to video",
             ),
         ]
 
@@ -124,7 +133,7 @@ class DenoiseBlock(ModularPipelineBlocks):
         noise = block_state.latents
         batch_size = noise.shape[0]
         num_frames = noise.shape[1]
-        denoising_step_list = block_state.denoising_step_list
+        denoising_step_list = block_state.current_denoising_step_list.clone()
 
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
 
@@ -133,6 +142,11 @@ class DenoiseBlock(ModularPipelineBlocks):
             start_frame = block_state.start_frame
 
         end_frame = start_frame + num_frames
+
+        if block_state.noise_scale is not None:
+            # Higher noise scale -> more denoising steps, more intense changes to input
+            # Lower noise scale -> less denoising steps, less intense changes to input
+            denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
 
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
