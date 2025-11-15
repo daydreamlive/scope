@@ -345,6 +345,57 @@ class DownloadModelsRequest(BaseModel):
     pipeline_id: str
 
 
+class LoRAFileInfo(BaseModel):
+    """Metadata for an available LoRA file on disk."""
+
+    name: str
+    path: str
+    size_mb: float
+    folder: str | None = None
+
+
+class LoRAFilesResponse(BaseModel):
+    """Response containing all discoverable LoRA files."""
+
+    lora_files: list[LoRAFileInfo]
+
+
+@app.get("/api/v1/lora/list", response_model=LoRAFilesResponse)
+async def list_lora_files():
+    """List available LoRA files in the models/lora directory and its subdirectories."""
+
+    def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
+        """Extract LoRA file metadata."""
+        size_mb = file_path.stat().st_size / (1024 * 1024)
+        relative_path = file_path.relative_to(lora_dir)
+        folder = (
+            str(relative_path.parent) if relative_path.parent != Path(".") else None
+        )
+        return LoRAFileInfo(
+            name=file_path.stem,
+            path=str(file_path),
+            size_mb=round(size_mb, 2),
+            folder=folder,
+        )
+
+    try:
+        lora_dir = Path("models/lora")
+        lora_files: list[LoRAFileInfo] = []
+
+        if lora_dir.exists() and lora_dir.is_dir():
+            for pattern in ("*.safetensors", "*.bin", "*.pt"):
+                for file_path in lora_dir.rglob(pattern):
+                    if file_path.is_file():
+                        lora_files.append(process_lora_file(file_path, lora_dir))
+
+        lora_files.sort(key=lambda x: (x.folder or "", x.name))
+        return LoRAFilesResponse(lora_files=lora_files)
+
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"list_lora_files: Error listing LoRA files: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/models/status")
 async def get_model_status(pipeline_id: str):
     """Check if models for a pipeline are downloaded."""
