@@ -23,6 +23,14 @@ export interface PromptData {
   isProcessing: boolean;
 }
 
+export type LoraMergeStrategy = "permanent_merge" | "runtime_peft";
+
+export interface LoRAConfig {
+  id: string;
+  path: string;
+  scale: number;
+}
+
 export interface SettingsState {
   pipelineId: PipelineId;
   resolution?: {
@@ -37,6 +45,8 @@ export interface SettingsState {
   quantization?: "fp8_e4m3fn" | null;
   kvCacheAttentionBias?: number;
   paused?: boolean;
+  loras?: LoRAConfig[];
+  loraMergeStrategy?: LoraMergeStrategy;
 }
 
 export type PipelineCategory = "video-input" | "no-video-input";
