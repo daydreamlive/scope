@@ -1,3 +1,4 @@
+import type { LoRAConfig } from "../types";
 export interface PromptItem {
   text: string;
   weight: number;
@@ -38,6 +39,8 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   height?: number;
   width?: number;
   seed?: number;
+  loras?: LoRAConfig[];
+  lora_merge_mode?: "permanent_merge" | "runtime_peft";
 }
 
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
@@ -45,6 +48,8 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   width?: number;
   seed?: number;
   quantization?: "fp8_e4m3fn" | null;
+  loras?: LoRAConfig[];
+  lora_merge_mode?: "permanent_merge" | "runtime_peft";
 }
 
 export interface PipelineLoadRequest {
@@ -60,6 +65,8 @@ export interface PipelineStatusResponse {
   status: "not_loaded" | "loading" | "loaded" | "error";
   pipeline_id?: string;
   load_params?: Record<string, unknown>;
+  // Optional list of loaded LoRA adapters, provided by backend when available.
+  loaded_lora_adapters?: { path: string; scale: number }[];
   error?: string;
 }
 
@@ -197,4 +204,31 @@ export const fetchCurrentLogs = async (): Promise<string> => {
 
   const logsText = await response.text();
   return logsText;
+};
+
+export interface LoRAFileInfo {
+  name: string;
+  path: string;
+  size_mb: number;
+  folder?: string | null;
+}
+
+export interface LoRAFilesResponse {
+  lora_files: LoRAFileInfo[];
+}
+
+export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
+  const response = await fetch("/api/v1/lora/list", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `List LoRA files failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
 };
