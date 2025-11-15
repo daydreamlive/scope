@@ -18,3 +18,5 @@ notes/
 .cursorrules
 .cursorignore
 .cursorindexingignore
+
+/pipelines/longlive/*.mp4
