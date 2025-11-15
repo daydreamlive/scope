@@ -48,7 +48,7 @@ _, _, num_frames, _, _ = input_video.shape
 
 num_chunks = (num_frames - 1) // chunk_size
 
-prompt = "a bear is walking on the grass"
+prompts = [{"text": "a bear is walking on the grass", "weight": 100}]
 
 outputs = []
 latency_measures = []
@@ -64,7 +64,7 @@ for i in range(num_chunks):
 
     start = time.time()
     # output is TCHW
-    output = pipeline(video=chunk, prompts=prompt)
+    output = pipeline(video=chunk, prompts=prompts)
 
     num_output_frames, _, _, _ = output.shape
     latency = time.time() - start

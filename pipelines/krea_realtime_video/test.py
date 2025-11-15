@@ -38,7 +38,7 @@ pipeline = KreaRealtimeVideoPipeline(
     dtype=torch.bfloat16,
 )
 
-prompts = [
+prompt_texts = [
     "A realistic video of a Texas Hold'em poker event at a casino. A male player in his late 30s with a medium build, short dark hair, light stubble, and a sharp jawline wears a fitted navy blazer over a charcoal crew-neck tee, dark jeans, and a stainless-steel watch. He sits at a well-lit poker table and tightly grips his hole cards, wearing a tense, serious expression. The table is filled with chips of various colors, the dealer is seen dealing cards, and several rows of slot machines glow in the background. The camera focuses on the player's strained concentration. Wide shot to medium close-up.",
     "A realistic video of a Texas Hold'em poker event at a casino. The same male player—late 30s, medium build, short dark hair, light stubble, sharp jawline—dressed in a fitted navy blazer over a charcoal tee, dark jeans, and a stainless-steel watch—flicks his cards onto the felt, then leans back in the chair with arms spread wide in celebration. The dealer continues dealing to the table as stacks of multicolored chips crowd the surface; slot machines and nearby patrons fill the background. The camera locks onto the player’s exuberant reaction. Wide shot to medium close-up.",
     "A realistic video of a Texas Hold'em poker event at a casino. The same late-30s male player, medium build with short dark hair and light stubble, wearing a navy blazer, charcoal tee, dark jeans, and a stainless-steel watch, reveals the winning hand and leans back in celebration while the dealer keeps the game moving. A nearby patron claps and cheers for the winner, amplifying the festive atmosphere. The table brims with colorful chips, with slot machines and other tables behind. The camera centers on the winner’s reaction as the applause rises. Wide shot to medium close-up.",
@@ -51,13 +51,14 @@ outputs = []
 latency_measures = []
 fps_measures = []
 
-for _, prompt in enumerate(prompts):
+for _, prompt_text in enumerate(prompt_texts):
     num_frames = 0
     max_output_frames = 81
     while num_frames < max_output_frames:
         start = time.time()
 
-        output = pipeline(prompts=prompt, kv_cache_attention_bias=0.3)
+        prompts = [{"text": prompt_text, "weight": 100}]
+        output = pipeline(prompts=prompts, kv_cache_attention_bias=0.3)
 
         num_output_frames, _, _, _ = output.shape
         latency = time.time() - start

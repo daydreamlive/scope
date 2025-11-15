@@ -66,10 +66,10 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
                 "width", required=True, type_hint=int, description="Width of video"
             ),
             InputParam(
-                "prompt_embeds",
+                "conditioning_embeds",
                 required=True,
                 type_hint=torch.Tensor,
-                description="Text embeddings to condition denoising",
+                description="Conditioning embeddings to condition denoising",
             ),
         ]
 
@@ -113,7 +113,7 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
         current_end_frame = block_state.current_start_frame + num_frames
 
         # Run the generator with the clean latent at timestep = 0 to update the KV cache
-        conditional_dict = {"prompt_embeds": block_state.prompt_embeds}
+        conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
         components.generator(
             noisy_image_or_video=block_state.latents,
             conditional_dict=conditional_dict,

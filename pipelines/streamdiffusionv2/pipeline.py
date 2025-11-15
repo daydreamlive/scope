@@ -4,6 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
+from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
@@ -61,7 +62,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
             text_encoder_path=text_encoder_path,
             tokenizer_path=tokenizer_path,
         )
-        print(f"Loaded text encoder in {time.time() - start:3f}s")
+        print(f"Loaded text encoder in {time.time() - start:.3f}s")
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
@@ -83,6 +84,12 @@ class StreamDiffusionV2Pipeline(Pipeline):
         components.add("scheduler", generator.get_scheduler())
         components.add("vae", vae)
         components.add("text_encoder", text_encoder)
+
+        embedding_blender = EmbeddingBlender(
+            device=device,
+            dtype=dtype,
+        )
+        components.add("embedding_blender", embedding_blender)
 
         self.blocks = StreamDiffusionV2Blocks()
         self.components = components
@@ -121,8 +128,12 @@ class StreamDiffusionV2Pipeline(Pipeline):
         for k, v in kwargs.items():
             self.state.set(k, v)
 
+        # Clear transition from state if not provided to prevent stale transitions
+        if "transition" not in kwargs:
+            self.state.set("transition", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
         _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["video"])
+        return postprocess_chunk(self.state.values["output_video"])

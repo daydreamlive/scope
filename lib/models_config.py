@@ -90,7 +90,7 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
         return [
             models_dir / "Wan2.1-T2V-1.3B" / "config.json",
             models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "StreamDiffusionV2" / "model.pt",
+            models_dir / "StreamDiffusionV2" / "wan_causal_dmd_v2v" / "model.pt",
         ]
 
     # longlive pipeline

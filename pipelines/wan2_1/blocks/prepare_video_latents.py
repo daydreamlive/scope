@@ -71,11 +71,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                 description="Noisy latents to denoise",
             ),
             OutputParam("generator", description="Random number generator"),
-            OutputParam(
-                "input_video",
-                type_hint=bool,
-                description="Whether input video is present",
-            ),
         ]
 
     @torch.no_grad()
@@ -135,7 +130,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
             1 - block_state.noise_scale
         )
         block_state.generator = rng
-        block_state.input_video = True
 
         self.set_block_state(state, block_state)
         return components, state

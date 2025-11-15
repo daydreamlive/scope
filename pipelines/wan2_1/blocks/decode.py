@@ -38,7 +38,7 @@ class DecodeBlock(ModularPipelineBlocks):
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
-                "video",
+                "output_video",
                 type_hint=torch.Tensor,
                 description="Decoded video frames",
             ),
@@ -51,7 +51,7 @@ class DecodeBlock(ModularPipelineBlocks):
         # Decode to pixel space
         video = components.vae.decode_to_pixel(block_state.latents, use_cache=True)
 
-        block_state.video = video
+        block_state.output_video = video
 
         self.set_block_state(state, block_state)
         return components, state

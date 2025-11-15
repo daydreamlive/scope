@@ -6,6 +6,7 @@ from diffusers.modular_pipelines import PipelineState
 
 from lib.schema import Quantization
 
+from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 WARMUP_RUNS = 3
-WARMUP_PROMPT = "a majestic sunset"
+WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline):
@@ -119,6 +120,12 @@ class KreaRealtimeVideoPipeline(Pipeline):
         components.add("vae", vae)
         components.add("text_encoder", text_encoder)
 
+        embedding_blender = EmbeddingBlender(
+            device=device,
+            dtype=dtype,
+        )
+        components.add("embedding_blender", embedding_blender)
+
         self.blocks = KreaRealtimeVideoBlocks()
         self.components = components
         self.state = PipelineState()
@@ -154,8 +161,12 @@ class KreaRealtimeVideoPipeline(Pipeline):
         for k, v in kwargs.items():
             self.state.set(k, v)
 
+        # Clear transition from state if not provided to prevent stale transitions
+        if "transition" not in kwargs:
+            self.state.set("transition", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
         _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["video"])
+        return postprocess_chunk(self.state.values["output_video"])

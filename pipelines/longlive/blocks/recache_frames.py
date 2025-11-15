@@ -61,16 +61,16 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 "width", required=True, type_hint=int, description="Width of video"
             ),
             InputParam(
-                "prompt_embeds",
+                "conditioning_embeds",
                 required=True,
                 type_hint=torch.Tensor,
-                description="Text embeddings to condition denoising",
+                description="Conditioning embeddings to condition denoising",
             ),
             InputParam(
-                "prompt_embeds_updated",
+                "conditioning_embeds_updated",
                 required=True,
                 type_hint=bool,
-                description="Whether prompt_embeds were updated (requires frame recaching)",
+                description="Whether conditioning_embeds were updated (requires frame recaching)",
             ),
         ]
 
@@ -123,8 +123,8 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             self.set_block_state(state, block_state)
             return components, state
 
-        # Only recache frames if prompt_embeds were updated
-        if not block_state.prompt_embeds_updated:
+        # Only recache frames if conditioning_embeds were updated
+        if not block_state.conditioning_embeds_updated:
             self.set_block_state(state, block_state)
             return components, state
 
@@ -178,7 +178,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             * 0
         )
 
-        conditional_dict = {"prompt_embeds": block_state.prompt_embeds}
+        conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
         components.generator(
             noisy_image_or_video=recache_frames,
             conditional_dict=conditional_dict,
