@@ -62,4 +62,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
   },
+  loraMergeStrategy: {
+    label: "LoRA Strategy:",
+    tooltip:
+      "LoRA merge strategy affects performance and update capabilities. Permanent Merge: Maximum performance, no runtime updates. Runtime PEFT: Lower performance, instant runtime updates.",
+  },
 };
