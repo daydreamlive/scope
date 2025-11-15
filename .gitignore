@@ -19,4 +19,4 @@ notes/
 .cursorignore
 .cursorindexingignore
 
-/pipelines/longlive/*.mp4
+/controlnet_test/*.mp4

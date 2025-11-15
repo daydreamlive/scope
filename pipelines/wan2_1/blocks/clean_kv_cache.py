@@ -71,6 +71,23 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Text embeddings to condition denoising",
             ),
+            InputParam(
+                "controlnet_states",
+                type_hint=Any,
+                description="Optional tuple of ControlNet states for transformer blocks",
+            ),
+            InputParam(
+                "controlnet_weight",
+                default=1.0,
+                type_hint=float,
+                description="Strength of ControlNet influence when controlnet_states is provided",
+            ),
+            InputParam(
+                "controlnet_stride",
+                default=3,
+                type_hint=int,
+                description="Apply ControlNet states every Nth transformer block",
+            ),
         ]
 
     @property
@@ -122,6 +139,9 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             crossattn_cache=block_state.crossattn_cache,
             current_start=block_state.current_start_frame * frame_seq_length,
             current_end=current_end_frame * frame_seq_length,
+            controlnet_states=getattr(block_state, "controlnet_states", None),
+            controlnet_weight=getattr(block_state, "controlnet_weight", 1.0),
+            controlnet_stride=getattr(block_state, "controlnet_stride", 3),
         )
 
         self.set_block_state(state, block_state)

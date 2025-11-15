@@ -2,6 +2,7 @@ from diffusers.modular_pipelines import SequentialPipelineBlocks
 from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 from diffusers.utils import logging as diffusers_logging
 
+from ..longlive.blocks import ControlNetConditioningBlock
 from ..wan2_1.blocks import (
     CleanKVCacheBlock,
     DecodeBlock,
@@ -26,6 +27,7 @@ ALL_BLOCKS = InsertableDict(
         ("set_timesteps", SetTimestepsBlock),
         ("setup_caches", SetupCachesBlock),
         ("prepare_video_latents", PrepareVideoLatentsBlock),
+        ("controlnet_conditioning", ControlNetConditioningBlock),
         ("denoise", DenoiseBlock),
         ("clean_kv_cache", CleanKVCacheBlock),
         ("decode", DecodeBlock),

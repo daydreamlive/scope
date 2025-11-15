@@ -1,0 +1,26 @@
+pipeline_type: "longlive"
+
+pipeline:
+  generator_path: "LongLive-1.3B/models/longlive_base.pt"
+  lora_path: "LongLive-1.3B/models/lora.pt"
+  text_encoder_path: "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+  tokenizer_path: "Wan2.1-T2V-1.3B/google/umt5-xxl"
+
+controlnet:
+  repo_id: "TheDenk/wan2.1-t2v-1.3b-controlnet-depth-v1"
+  filename: "diffusion_pytorch_model.safetensors"
+  local_subpath: "LongLive-1.3B/controlnets/wan2.1-t2v-1.3b-controlnet-depth-v1.safetensors"
+
+preprocessor:
+  type: "depth"
+  output_video_path: "controlnet_test/control_frames_depth.mp4"
+
+conditioning_scale: 0.75
+compression_ratio: 4
+
+prompt: ""
+
+input_video: "pipelines/streamdiffusionv2/assets/original.mp4"
+
+height: 480
+width: 832

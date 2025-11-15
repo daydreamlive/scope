@@ -1,6 +1,7 @@
 # Adopted from https://github.com/guandeh17/Self-Forcing
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 import math
+import logging
 
 import torch
 import torch.nn as nn
@@ -11,6 +12,8 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
+
+logger = logging.getLogger(__name__)
 
 from ...wan2_1.modules.attention import attention
 from .model import (
@@ -1139,6 +1142,17 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
+        # Log ControlNet parameters at start (consolidated)
+        if controlnet_states is not None:
+            logger.debug(
+                f"ControlNet enabled: {len(controlnet_states)} states, "
+                f"weight={controlnet_weight:.2f}, stride={controlnet_stride}, "
+                f"first_state_shape={controlnet_states[0].shape if len(controlnet_states) > 0 else 'N/A'}, "
+                f"x_shape={x.shape}, seq_len={seq_lens[0].item()}"
+            )
+        else:
+            logger.debug(f"ControlNet disabled, x_shape={x.shape}, seq_len={seq_lens[0].item()}")
+
         # arguments
         kwargs = dict(
             e=e0,
@@ -1224,10 +1238,45 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                             control_state.dim() == 3
                             and control_state.shape[1] == actual_seq_len
                         ):
-                            x[:, :actual_seq_len] = (
-                                x[:, :actual_seq_len]
-                                + control_state * controlnet_weight
+                            # Apply ControlNet injection
+                            control_scaled = control_state * controlnet_weight
+                            # Only log detailed stats for first injection to reduce spam
+                            if control_index == 0:
+                                x_before = x[:, :actual_seq_len].clone()
+                                x[:, :actual_seq_len] = (
+                                    x[:, :actual_seq_len]
+                                    + control_scaled
+                                )
+                                x_after = x[:, :actual_seq_len]
+                                logger.debug(
+                                    f"ControlNet injection at block {block_index}: "
+                                    f"x_mean={x_before.mean().item():.6f}->{x_after.mean().item():.6f}, "
+                                    f"control_mean={control_scaled.mean().item():.6f}, "
+                                    f"control_std={control_scaled.std().item():.6f}"
+                                )
+                            else:
+                                x[:, :actual_seq_len] = (
+                                    x[:, :actual_seq_len]
+                                    + control_scaled
+                                )
+                                # Log summary for subsequent injections
+                                if control_index == 1:
+                                    logger.debug(
+                                        f"ControlNet injections continuing at blocks "
+                                        f"{block_index}, {block_index + controlnet_stride}, ..."
+                                    )
+                        else:
+                            logger.warning(
+                                f"ControlNet injection skipped at block {block_index}: "
+                                f"shape mismatch (control_state.dim()={control_state.dim()}, "
+                                f"control_state.shape[1]={control_state.shape[1]}, "
+                                f"actual_seq_len={actual_seq_len})"
                             )
+                    else:
+                        logger.debug(
+                            f"ControlNet injection skipped at block {block_index}: "
+                            f"control_index {control_index} >= len(controlnet_states) {len(controlnet_states)}"
+                        )
 
         # log_gpu_memory(f"in _forward_inference: {x[0].device}")
         # After all blocks are processed, apply cache updates in a single pass

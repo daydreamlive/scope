@@ -1,0 +1,29 @@
+pipeline_type: "krea_realtime_video"
+
+pipeline:
+  generator_path: "krea-realtime-video/krea-realtime-video-14b.safetensors"
+  text_encoder_path: "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+  tokenizer_path: "Wan2.1-T2V-1.3B/google/umt5-xxl"
+  vae_path: "Wan2.1-T2V-1.3B/Wan2.1_VAE.pth"
+  quantization: "FP8_E4M3FN"
+  compile: false
+
+controlnet:
+  repo_id: "TheDenk/wan2.1-t2v-14b-controlnet-depth-v1"
+  filename: "diffusion_pytorch_model.safetensors"
+  local_subpath: "krea-realtime-video/controlnets/wan2.1-t2v-14b-controlnet-depth-v1.safetensors"
+
+preprocessor:
+  type: "depth"
+  output_video_path: "controlnet_test/control_frames_krea_depth.mp4"
+
+conditioning_scale: 1.75
+compression_ratio: 4
+frames_per_chunk: 3
+
+prompt: "A realistic video of a Texas Hold'em poker event at a casino"
+
+input_video: "pipelines/streamdiffusionv2/assets/original.mp4"
+
+height: 256
+width: 448
