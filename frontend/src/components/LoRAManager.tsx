@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Plus, X, RefreshCw } from "lucide-react";
+import { Plus, X, RefreshCw, Check } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -56,6 +56,14 @@ export function LoRAManager({
     setLocalScales(newLocalScales);
   }, [loras]);
 
+  // Check if there are unsaved scale changes
+  const hasUnsavedScales = loras.some(lora => {
+    const localScale = localScales[lora.id];
+    return (
+      localScale !== undefined && Math.abs(localScale - lora.scale) > 0.001
+    );
+  });
+
   const handleAddLora = () => {
     const newLora: LoRAConfig = {
       id: crypto.randomUUID(),
@@ -79,8 +87,13 @@ export function LoRAManager({
     setLocalScales(prev => ({ ...prev, [id]: scale }));
   };
 
-  const handleScaleCommit = (id: string, scale: number) => {
-    handleLoraChange(id, { scale });
+  const handleApplyScales = () => {
+    onLorasChange(
+      loras.map(lora => ({
+        ...lora,
+        scale: localScales[lora.id] ?? lora.scale,
+      }))
+    );
   };
 
   return (
@@ -128,7 +141,7 @@ export function LoRAManager({
             className="rounded-lg border bg-card p-3 space-y-2"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex-1 min-w-0">
+              <div className="flex-1">
                 <FilePicker
                   value={lora.path}
                   onChange={path => handleLoraChange(lora.id, { path })}
@@ -143,7 +156,7 @@ export function LoRAManager({
                 variant="ghost"
                 onClick={() => handleRemoveLora(lora.id)}
                 disabled={disabled || isStreaming}
-                className="h-6 w-6 p-0 shrink-0"
+                className="h-6 w-6 p-0"
                 title={
                   isStreaming
                     ? "Cannot remove LoRAs while streaming"
@@ -159,26 +172,21 @@ export function LoRAManager({
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1">
                       <SliderWithInput
                         value={localScales[lora.id] ?? lora.scale}
                         onValueChange={value => {
                           handleLocalScaleChange(lora.id, value);
                         }}
-                        onValueCommit={value => {
-                          handleScaleCommit(lora.id, value);
-                        }}
                         min={-10}
                         max={10}
                         step={0.1}
-                        incrementAmount={0.1}
                         disabled={
                           disabled ||
                           (isStreaming &&
                             loraMergeStrategy === "permanent_merge")
                         }
                         className="flex-1"
-                        valueFormatter={v => Math.round(v * 10) / 10}
                       />
                     </div>
                   </TooltipTrigger>
@@ -186,7 +194,7 @@ export function LoRAManager({
                     <p className="text-xs">
                       {isStreaming && loraMergeStrategy === "permanent_merge"
                         ? "Runtime adjustment is disabled with Permanent Merge strategy. LoRA scales are fixed at load time."
-                        : "Adjust LoRA strength. Updates automatically when you release the slider or use +/- buttons. 0.0 = no effect, 1.0 = full strength"}
+                        : "Adjust LoRA strength. Click Apply to update during streaming. 0.0 = no effect, 1.0 = full strength"}
                     </p>
                   </TooltipContent>
                 </Tooltip>
@@ -195,6 +203,20 @@ export function LoRAManager({
           </div>
         ))}
       </div>
+
+      {hasUnsavedScales && (
+        <Button
+          size="sm"
+          onClick={handleApplyScales}
+          disabled={
+            disabled || (isStreaming && loraMergeStrategy === "permanent_merge")
+          }
+          className="w-full"
+        >
+          <Check className="h-3 w-3 mr-1" />
+          Apply Scale Changes
+        </Button>
+      )}
     </div>
   );
 }

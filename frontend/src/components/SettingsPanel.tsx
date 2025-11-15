@@ -675,6 +675,76 @@ export function SettingsPanel({
             </div>
           </div>
         )}
+
+        {pipelineSupportsLoRA(pipelineId) && (
+          <div className="space-y-4">
+            <LoRAManager
+              loras={loras}
+              onLorasChange={onLorasChange}
+              disabled={isDownloading}
+              isStreaming={isStreaming}
+              loraMergeStrategy={loraMergeStrategy}
+            />
+
+            {loras.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.loraMergeStrategy.label}
+                    tooltip={PARAMETER_METADATA.loraMergeStrategy.tooltip}
+                    className="text-sm text-foreground"
+                  />
+                  <Select
+                    value={loraMergeStrategy}
+                    onValueChange={value => {
+                      onLoraMergeStrategyChange?.(value as LoraMergeStrategy);
+                    }}
+                    disabled={isStreaming}
+                  >
+                    <SelectTrigger className="w-[180px] h-7">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <SelectItem value="permanent_merge">
+                              Permanent Merge
+                            </SelectItem>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            <p className="text-xs">
+                              Maximum performance, no runtime updates. LoRA
+                              scales are permanently merged into model weights
+                              at load time. Ideal for production when scales are
+                              predetermined.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <SelectItem value="runtime_peft">
+                              Runtime PEFT
+                            </SelectItem>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            <p className="text-xs">
+                              Lower performance, instant runtime updates. LoRA
+                              scales can be adjusted during streaming without
+                              reloading the model. Faster initialization.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
