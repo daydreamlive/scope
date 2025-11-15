@@ -28,7 +28,7 @@ class PrepareContextFramesBlock(ModularPipelineBlocks):
                 description="Denoised latents",
             ),
             InputParam(
-                "video",
+                "output_video",
                 required=True,
                 type_hint=torch.Tensor,
                 description="Decoded video frames",
@@ -109,7 +109,7 @@ class PrepareContextFramesBlock(ModularPipelineBlocks):
             block_state.decoded_frame_buffer = torch.cat(
                 [
                     block_state.decoded_frame_buffer,
-                    block_state.video.to(
+                    block_state.output_video.to(
                         block_state.decoded_frame_buffer.device,
                         block_state.decoded_frame_buffer.dtype,
                     ),

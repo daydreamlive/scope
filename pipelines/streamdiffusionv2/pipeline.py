@@ -136,4 +136,4 @@ class StreamDiffusionV2Pipeline(Pipeline):
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
         _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["video"])
+        return postprocess_chunk(self.state.values["output_video"])
