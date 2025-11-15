@@ -131,11 +131,10 @@ class SetupCachesBlock(ModularPipelineBlocks):
             init_cache = True
 
         # Clear KV cache when conditioning changes, if manage_cache is enabled and video input is present
-        input_video = getattr(block_state, "input_video", False)
         if (
             block_state.conditioning_embeds_updated
             and block_state.manage_cache
-            and input_video
+            and block_state.video is not None
         ):
             init_cache = True
 
