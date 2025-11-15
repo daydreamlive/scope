@@ -17,7 +17,7 @@ preprocessor:
   type: "depth"
   output_video_path: "controlnet_test/control_frames_krea_depth.mp4"
 
-conditioning_scale: 1.75
+conditioning_scale: 1.0
 compression_ratio: 4
 frames_per_chunk: 3
 

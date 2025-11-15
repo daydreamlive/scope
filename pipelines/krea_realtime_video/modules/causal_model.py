@@ -1,10 +1,13 @@
 import functools
+import logging
 import math
 
 import torch
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
+
+logger = logging.getLogger(__name__)
 from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
@@ -1110,6 +1113,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         current_start: int = 0,
         cache_start: int = 0,
         kv_cache_attention_bias: float = 1.0,
+        controlnet_states=None,
+        controlnet_weight: float = 1.0,
+        controlnet_stride: int = 3,
     ):
         r"""
         Run the diffusion model with kv caching.
@@ -1130,6 +1136,13 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 CLIP image features for image-to-video mode
             y (List[Tensor], *optional*):
                 Conditional video inputs for image-to-video mode, same shape as x
+            controlnet_states (tuple[Tensor], *optional*):
+                Optional ControlNet conditioning states, tuple of per-block tensors
+                with shape [B, L, D] matching the current sequence length
+            controlnet_weight (`float`, defaults to `1.0`):
+                Strength of ControlNet influence when controlnet_states is provided
+            controlnet_stride (`int`, defaults to `3`):
+                Apply ControlNet residual every Nth transformer block
 
         Returns:
             List[Tensor]:
@@ -1189,6 +1202,17 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
+        # Log ControlNet parameters at start (consolidated)
+        if controlnet_states is not None:
+            logger.debug(
+                f"ControlNet enabled: {len(controlnet_states)} states, "
+                f"weight={controlnet_weight:.2f}, stride={controlnet_stride}, "
+                f"first_state_shape={controlnet_states[0].shape if len(controlnet_states) > 0 else 'N/A'}, "
+                f"x_shape={x.shape}, seq_len={seq_lens[0].item()}"
+            )
+        else:
+            logger.debug(f"ControlNet disabled, x_shape={x.shape}, seq_len={seq_lens[0].item()}")
+
         # arguments
         kwargs = dict(
             e=e0,
@@ -1234,6 +1258,62 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                     }
                 )
                 x = block(x, **kwargs)
+
+            # Optional ControlNet injection after each transformer block.
+            # controlnet_states is expected to be an ordered sequence (e.g. tuple)
+            # of tensors with shape [B, L, D] matching the current sequence length.
+            if controlnet_states is not None:
+                if (
+                    controlnet_stride > 0
+                    and (block_index % controlnet_stride) == 0
+                ):
+                    control_index = block_index // controlnet_stride
+                    if control_index < len(controlnet_states):
+                        control_state = controlnet_states[control_index].to(x)
+                        actual_seq_len = seq_lens[0].item()
+                        if (
+                            control_state.dim() == 3
+                            and control_state.shape[1] == actual_seq_len
+                        ):
+                            # Apply ControlNet injection
+                            control_scaled = control_state * controlnet_weight
+                            # Only log detailed stats for first injection to reduce spam
+                            if control_index == 0:
+                                x_before = x[:, :actual_seq_len].clone()
+                                x[:, :actual_seq_len] = (
+                                    x[:, :actual_seq_len]
+                                    + control_scaled
+                                )
+                                x_after = x[:, :actual_seq_len]
+                                logger.debug(
+                                    f"ControlNet injection at block {block_index}: "
+                                    f"x_mean={x_before.mean().item():.6f}->{x_after.mean().item():.6f}, "
+                                    f"control_mean={control_scaled.mean().item():.6f}, "
+                                    f"control_std={control_scaled.std().item():.6f}"
+                                )
+                            else:
+                                x[:, :actual_seq_len] = (
+                                    x[:, :actual_seq_len]
+                                    + control_scaled
+                                )
+                                # Log summary for subsequent injections
+                                if control_index == 1:
+                                    logger.debug(
+                                        f"ControlNet injections continuing at blocks "
+                                        f"{block_index}, {block_index + controlnet_stride}, ..."
+                                    )
+                        else:
+                            logger.warning(
+                                f"ControlNet injection skipped at block {block_index}: "
+                                f"shape mismatch (control_state.dim()={control_state.dim()}, "
+                                f"control_state.shape[1]={control_state.shape[1]}, "
+                                f"actual_seq_len={actual_seq_len})"
+                            )
+                    else:
+                        logger.debug(
+                            f"ControlNet injection skipped at block {block_index}: "
+                            f"control_index {control_index} >= len(controlnet_states) {len(controlnet_states)}"
+                        )
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
