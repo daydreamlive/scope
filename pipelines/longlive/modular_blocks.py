@@ -13,6 +13,7 @@ from ..wan2_1.blocks import (
     TextConditioningBlock,
 )
 from .blocks import (
+    ControlNetConditioningBlock,
     PrepareRecacheFramesBlock,
     RecacheFramesBlock,
     SetTransformerBlocksLocalAttnSizeBlock,
@@ -32,6 +33,7 @@ ALL_BLOCKS = InsertableDict(
         ),
         ("prepare_latents", PrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),
+        ("controlnet_conditioning", ControlNetConditioningBlock),
         ("denoise", DenoiseBlock),
         ("clean_kv_cache", CleanKVCacheBlock),
         ("decode", DecodeBlock),

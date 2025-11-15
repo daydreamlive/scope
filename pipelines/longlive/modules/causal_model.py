@@ -1054,6 +1054,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         crossattn_cache: dict = None,
         current_start: int = 0,
         cache_start: int = 0,
+        controlnet_states=None,
+        controlnet_weight: float = 1.0,
+        controlnet_stride: int = 3,
     ):
         r"""
         Run the diffusion model with kv caching.
@@ -1204,6 +1207,28 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                     ]  # (current_end, local_end_index)
                 else:
                     x = result
+
+            # Optional ControlNet injection after each transformer block.
+            # controlnet_states is expected to be an ordered sequence (e.g. tuple)
+            # of tensors with shape [B, L, D] matching the current sequence length.
+            if controlnet_states is not None:
+                if (
+                    controlnet_stride > 0
+                    and (block_index % controlnet_stride) == 0
+                ):
+                    control_index = block_index // controlnet_stride
+                    if control_index < len(controlnet_states):
+                        control_state = controlnet_states[control_index].to(x)
+                        actual_seq_len = seq_lens[0].item()
+                        if (
+                            control_state.dim() == 3
+                            and control_state.shape[1] == actual_seq_len
+                        ):
+                            x[:, :actual_seq_len] = (
+                                x[:, :actual_seq_len]
+                                + control_state * controlnet_weight
+                            )
+
         # log_gpu_memory(f"in _forward_inference: {x[0].device}")
         # After all blocks are processed, apply cache updates in a single pass
         if kv_cache is not None and cache_update_infos:

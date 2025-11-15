@@ -6,6 +6,9 @@ from safetensors.torch import load_file as load_safetensors
 
 def load_state_dict(weights_path: str) -> dict:
     """Load weights with automatic format detection."""
+    # Convert pathlib.Path to string if needed
+    weights_path = str(weights_path)
+
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"Weights not found at: {weights_path}")
 

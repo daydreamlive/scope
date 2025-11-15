@@ -1,6 +1,10 @@
 # Copied from https://github.com/NVlabs/LongLive/blob/main/utils/lora_utils.py
+import logging
+
 import peft
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 def configure_lora_for_model(transformer, model_name, lora_config):
@@ -56,6 +60,57 @@ def load_lora_checkpoint(model, lora_path: str):
     lora_checkpoint = torch.load(lora_path, map_location="cpu")
     # Support both formats: containing the `generator_lora` key or a raw LoRA state dict
     if isinstance(lora_checkpoint, dict) and "generator_lora" in lora_checkpoint:
-        peft.set_peft_model_state_dict(model, lora_checkpoint["generator_lora"])
+        checkpoint_state_dict = lora_checkpoint["generator_lora"]
     else:
-        peft.set_peft_model_state_dict(model, lora_checkpoint)
+        checkpoint_state_dict = lora_checkpoint
+
+    # Get the model's expected state dict to check for shape mismatches
+    model_state_dict = peft.get_peft_model_state_dict(model)
+
+    # Filter out keys with shape mismatches
+    compatible_state_dict = {}
+    skipped_keys = []
+
+    for key, checkpoint_value in checkpoint_state_dict.items():
+        if key in model_state_dict:
+            model_shape = model_state_dict[key].shape
+            checkpoint_shape = checkpoint_value.shape
+            if model_shape == checkpoint_shape:
+                compatible_state_dict[key] = checkpoint_value
+            else:
+                skipped_keys.append((key, model_shape, checkpoint_shape))
+        else:
+            # Key not in model, skip it
+            skipped_keys.append((key, None, checkpoint_value.shape))
+
+    # Log summary of skipped keys
+    if skipped_keys:
+        logger.warning(
+            f"load_lora_checkpoint: Skipped {len(skipped_keys)} incompatible LoRA keys "
+            f"(out of {len(checkpoint_state_dict)} total)"
+        )
+        # Log first few examples
+        for key, model_shape, checkpoint_shape in skipped_keys[:5]:
+            if model_shape is not None:
+                logger.debug(
+                    f"load_lora_checkpoint: Skipped {key}: "
+                    f"model shape {model_shape} != checkpoint shape {checkpoint_shape}"
+                )
+            else:
+                logger.debug(
+                    f"load_lora_checkpoint: Skipped {key}: "
+                    f"not found in model (checkpoint shape {checkpoint_shape})"
+                )
+        if len(skipped_keys) > 5:
+            logger.debug(
+                f"load_lora_checkpoint: ... and {len(skipped_keys) - 5} more skipped keys"
+            )
+
+    # Load only compatible keys
+    if compatible_state_dict:
+        peft.set_peft_model_state_dict(model, compatible_state_dict)
+        logger.info(
+            f"load_lora_checkpoint: Loaded {len(compatible_state_dict)} compatible LoRA keys"
+        )
+    else:
+        logger.warning("load_lora_checkpoint: No compatible LoRA keys found to load")

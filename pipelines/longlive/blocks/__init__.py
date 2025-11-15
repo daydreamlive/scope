@@ -1,3 +1,4 @@
+from .controlnet_conditioning import ControlNetConditioningBlock
 from .prepare_recache_frames import PrepareRecacheFramesBlock
 from .recache_frames import RecacheFramesBlock
 from .set_transformer_blocks_local_attn_size import (
@@ -5,6 +6,7 @@ from .set_transformer_blocks_local_attn_size import (
 )
 
 __all__ = [
+    "ControlNetConditioningBlock",
     "PrepareRecacheFramesBlock",
     "RecacheFramesBlock",
     "SetTransformerBlocksLocalAttnSizeBlock",

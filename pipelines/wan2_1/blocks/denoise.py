@@ -97,6 +97,23 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float,
                 description="Controls how much to rely on past frames in the cache during generation",
             ),
+            InputParam(
+                "controlnet_states",
+                type_hint=Any,
+                description="Optional tuple of ControlNet states for transformer blocks",
+            ),
+            InputParam(
+                "controlnet_weight",
+                default=1.0,
+                type_hint=float,
+                description="Strength of ControlNet influence when controlnet_states is provided",
+            ),
+            InputParam(
+                "controlnet_stride",
+                default=3,
+                type_hint=int,
+                description="Apply ControlNet states every Nth transformer block",
+            ),
         ]
 
     @property
@@ -155,6 +172,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    controlnet_states=block_state.controlnet_states,
+                    controlnet_weight=block_state.controlnet_weight,
+                    controlnet_stride=block_state.controlnet_stride,
                 )
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -185,6 +205,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    controlnet_states=block_state.controlnet_states,
+                    controlnet_weight=block_state.controlnet_weight,
+                    controlnet_stride=block_state.controlnet_stride,
                 )
 
         block_state.latents = denoised_pred

@@ -201,6 +201,9 @@ class WanDiffusionWrapper(torch.nn.Module):
         aug_t: torch.Tensor | None = None,
         cache_start: int | None = None,
         kv_cache_attention_bias: float = 1.0,
+        controlnet_states=None,
+        controlnet_weight: float = 1.0,
+        controlnet_stride: int = 3,
     ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
 
@@ -213,6 +216,9 @@ class WanDiffusionWrapper(torch.nn.Module):
         logits = None
         # X0 prediction
         if kv_cache is not None:
+            # Inference path with KV cache (streaming).
+            # Optional ControlNet conditioning arguments are forwarded and filtered
+            # by _call_model based on the underlying causal model signature.
             flow_pred = self._call_model(
                 noisy_image_or_video.permute(0, 2, 1, 3, 4),
                 t=input_timestep,
@@ -224,6 +230,9 @@ class WanDiffusionWrapper(torch.nn.Module):
                 current_end=current_end,
                 cache_start=cache_start,
                 kv_cache_attention_bias=kv_cache_attention_bias,
+                controlnet_states=controlnet_states,
+                controlnet_weight=controlnet_weight,
+                controlnet_stride=controlnet_stride,
             ).permute(0, 2, 1, 3, 4)
         else:
             if clean_x is not None:
