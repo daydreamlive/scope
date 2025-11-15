@@ -8,6 +8,7 @@ from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
+from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from .components import WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modules.causal_model import CausalWanModel
@@ -20,7 +21,7 @@ DEFAULT_DENOISING_STEP_LIST = [750, 250]
 CHUNK_SIZE = 4
 
 
-class StreamDiffusionV2Pipeline(Pipeline):
+class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
@@ -51,6 +52,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
         )
 
         print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+
+        # Initialize optional LoRA adapters on the underlying model.
+        generator.model = self._init_loras(config, generator.model)
 
         generator = generator.to(device=device, dtype=dtype)
 
@@ -118,6 +122,13 @@ class StreamDiffusionV2Pipeline(Pipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        # Handle runtime LoRA scale updates before writing into state.
+        lora_scales = kwargs.get("lora_scales")
+        if lora_scales is not None:
+            self._handle_lora_scale_updates(
+                lora_scales=lora_scales, model=self.components.generator.model
+            )
+
         for k, v in kwargs.items():
             self.state.set(k, v)
 
