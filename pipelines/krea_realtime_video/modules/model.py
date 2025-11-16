@@ -1,3 +1,4 @@
+# Modified from https://github.com/krea-ai/realtime-video
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import math
 

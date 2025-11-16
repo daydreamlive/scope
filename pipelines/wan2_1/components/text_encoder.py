@@ -1,3 +1,4 @@
+# Modified from https://github.com/guandeh17/Self-Forcing
 import os
 
 import torch

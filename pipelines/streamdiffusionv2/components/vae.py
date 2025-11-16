@@ -1,3 +1,4 @@
+# Modified from https://github.com/chenfengxu714/StreamDiffusionV2
 import os
 
 import torch

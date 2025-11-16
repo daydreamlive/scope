@@ -1,3 +1,4 @@
+# Modified from https://github.com/krea-ai/realtime-video
 import os
 
 import torch

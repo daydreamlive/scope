@@ -1,4 +1,4 @@
-# Adopted from https://github.com/guandeh17/Self-Forcing
+# Modified from https://github.com/NVlabs/LongLive
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 import math
 
