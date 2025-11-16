@@ -1,3 +1,4 @@
+# Modified from https://github.com/NVlabs/LongLive
 import os
 
 import torch

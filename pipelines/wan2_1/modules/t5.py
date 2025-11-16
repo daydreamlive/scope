@@ -1,3 +1,4 @@
+# Modified from https://github.com/guandeh17/Self-Forcing
 # Modified from transformers.models.t5.modeling_t5
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import logging

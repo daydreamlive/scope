@@ -1,4 +1,4 @@
-# Adopted from https://github.com/NVlabs/LongLive
+# Modified from https://github.com/guandeh17/Self-Forcing
 from abc import ABC, abstractmethod
 
 import torch

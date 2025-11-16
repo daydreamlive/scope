@@ -1,3 +1,4 @@
+# Modified from https://github.com/krea-ai/realtime-video
 import torch
 from einops import rearrange
 from torch import nn
