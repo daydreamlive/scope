@@ -60,6 +60,30 @@ uv run daydream-scope --reload
 uv run pytest
 ```
 
+## Firewalls
+
+See [firewalls section](https://github.com/daydreamlive/scope?tab=readme-ov-file#firewalls) of the README.
+
+If you have SSH access to the remote machine, you can also setup SSH port forwarding
+
+If you are using Cursor, it will automatically do this for you if you connect to the remote machine within the editor and run the Scope server from within the Cursor terminal.
+
+You can also manually update your SSH config file eg `~/.ssh/config` to look like this:
+
+```
+Host <NAME>
+  Hostname <IP>
+  User <USER>
+  Port <PORT>
+  IdentityFile <IDENTITY_FILE>
+  PreferredAuthentications publickey
+  LocalForward 8000 127.0.0.1:8000
+```
+
+- You can set `Host` to a nickname for this machine.
+- You should set `Hostname`, `User` and `Port` based on the SSH information for the machine.
+- You should set `IdentityFile` to the path to the file containing your SSH private key.
+
 ## Testing Pipelines
 
 By default, the server does not load any pipelines on startup, but you can set the `PIPELINE` environment variable to automatically load a specific pipeline on startup which can be useful for testing.
