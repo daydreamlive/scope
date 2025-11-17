@@ -24,10 +24,10 @@ from pipelines.wan2_1.lora.utils import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PermanentMergeLoRAManager"]
+__all__ = ["PermanentMergeLoRAStrategy"]
 
 
-class PermanentMergeLoRAManager:
+class PermanentMergeLoRAStrategy:
     """
     Manages LoRA adapters via permanent weight merging at load time.
 
@@ -66,8 +66,8 @@ class PermanentMergeLoRAManager:
             FileNotFoundError: If the LoRA file does not exist
 
         Example:
-            >>> from pipelines.wan2_1.lora.strategies.permanent_merge_lora import PermanentMergeLoRAManager
-            >>> path = PermanentMergeLoRAManager.load_adapter(
+            >>> from pipelines.wan2_1.lora.strategies.permanent_merge_lora import PermanentMergeLoRAStrategy
+            >>> path = PermanentMergeLoRAStrategy.load_adapter(
             ...     model=pipeline.transformer,
             ...     lora_path="models/lora/my-style.safetensors",
             ...     strength=1.0
@@ -191,7 +191,7 @@ class PermanentMergeLoRAManager:
             List of loaded adapter info dicts with keys: path, scale
 
         Example:
-            >>> loaded = PermanentMergeLoRAManager.load_adapters_from_list(
+            >>> loaded = PermanentMergeLoRAStrategy.load_adapters_from_list(
             ...     model=pipeline.transformer,
             ...     lora_configs=[{"path": "models/lora/style.safetensors", "scale": 1.0}],
             ...     logger_prefix="MyPipeline.__init__: "
@@ -214,7 +214,7 @@ class PermanentMergeLoRAManager:
 
             start = time.time()
             try:
-                returned_path = PermanentMergeLoRAManager.load_adapter(
+                returned_path = PermanentMergeLoRAStrategy.load_adapter(
                     model=model, lora_path=lora_path, strength=scale
                 )
 
