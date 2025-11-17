@@ -45,7 +45,7 @@ class PrepareRecacheFramesBlock(ModularPipelineBlocks):
     @property
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
-            InputParam(
+            OutputParam(
                 "recache_buffer",
                 type_hint=torch.Tensor,
                 description="Sliding window of recache frames",

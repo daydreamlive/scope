@@ -85,7 +85,8 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         if block_state.current_start_frame == 0:
             target_num_frames += 1
 
-        _, _, num_frames, _, _ = block_state.video.shape
+        input_video = block_state.video
+        _, _, num_frames, _, _ = input_video.shape
         # If we do not have enough frames use linear interpolation to resample existing frames
         # to meet the required number of frames
         if num_frames != target_num_frames:
@@ -94,15 +95,15 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                     0,
                     num_frames - 1,
                     target_num_frames,
-                    device=block_state.video.device,
+                    device=input_video.device,
                 )
                 .round()
                 .long()
             )
-            block_state.video = block_state.video[:, :, indices]
+            input_video = input_video[:, :, indices]
 
         # Encode frames to latents using VAE
-        latents = components.vae.encode_to_latent(block_state.video)
+        latents = components.vae.encode_to_latent(input_video)
         # Transpose latents
         latents = latents.transpose(2, 1)
 
