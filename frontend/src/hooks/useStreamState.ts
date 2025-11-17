@@ -33,6 +33,7 @@ export function useStreamState() {
     quantization: null,
     kvCacheAttentionBias: 0.3, // Default cache bias
     paused: false, // Default to not paused (generating)
+    cloudMode: false, // Default to not using cloud mode
   });
 
   const [promptData, setPromptData] = useState<PromptData>({

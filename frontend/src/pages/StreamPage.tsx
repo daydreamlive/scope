@@ -16,7 +16,7 @@ import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import { checkModelStatus, downloadPipelineModels, setApiBaseUrl } from "../lib/api";
 
 export function StreamPage() {
   // Use the stream state hook for settings management
@@ -793,6 +793,21 @@ export function StreamPage() {
             kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
+            cloudMode={settings.cloudMode ?? false}
+            onCloudModeChange={enabled => {
+              // Stop any active stream when switching modes to avoid mixed state
+              (async () => {
+                if (isStreaming) {
+                  stopStream();
+                }
+              })();
+
+
+              const cloudApiUrl = "http://us-staging-1.lvpr.io:8000";
+              setApiBaseUrl(enabled ? cloudApiUrl : "");
+
+              updateSettings({ cloudMode: enabled });
+            }}
           />
         </div>
       </div>

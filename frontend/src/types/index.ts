@@ -37,6 +37,7 @@ export interface SettingsState {
   quantization?: "fp8_e4m3fn" | null;
   kvCacheAttentionBias?: number;
   paused?: boolean;
+  cloudMode?: boolean;
 }
 
 export type PipelineCategory = "video-input" | "no-video-input";

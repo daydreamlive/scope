@@ -63,10 +63,32 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
+// Optional base URL for all API requests. Defaults to relative paths (Vite proxy).
+let API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+/**
+ * Set the API base URL dynamically. Use empty string for relative paths (local/Vite proxy).
+ * @param baseUrl - The base URL to use for all API requests (e.g., "http://example.com:8000")
+ */
+export const setApiBaseUrl = (baseUrl: string) => {
+  API_BASE_URL = baseUrl;
+};
+
+/**
+ * Get the current API base URL.
+ */
+export const getApiBaseUrl = (): string => {
+  return API_BASE_URL;
+};
+
+const apiFetch = (path: string, options?: RequestInit) => {
+  return fetch(`${API_BASE_URL}${path}`, options);
+};
+
 export const sendWebRTCOffer = async (
   data: WebRTCOfferRequest
 ): Promise<RTCSessionDescriptionInit> => {
-  const response = await fetch("/api/v1/webrtc/offer", {
+  const response = await apiFetch("/api/v1/webrtc/offer", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -86,7 +108,7 @@ export const sendWebRTCOffer = async (
 export const loadPipeline = async (
   data: PipelineLoadRequest = {}
 ): Promise<{ message: string }> => {
-  const response = await fetch("/api/v1/pipeline/load", {
+  const response = await apiFetch("/api/v1/pipeline/load", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -104,7 +126,7 @@ export const loadPipeline = async (
 };
 
 export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
-  const response = await fetch("/api/v1/pipeline/status", {
+  const response = await apiFetch("/api/v1/pipeline/status", {
     method: "GET",
     headers: { "Content-Type": "application/json" },
   });
@@ -123,13 +145,10 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
 export const checkModelStatus = async (
   pipelineId: string
 ): Promise<{ downloaded: boolean }> => {
-  const response = await fetch(
-    `/api/v1/models/status?pipeline_id=${pipelineId}`,
-    {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    }
-  );
+  const response = await apiFetch(`/api/v1/models/status?pipeline_id=${pipelineId}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -145,7 +164,7 @@ export const checkModelStatus = async (
 export const downloadPipelineModels = async (
   pipelineId: string
 ): Promise<{ message: string }> => {
-  const response = await fetch("/api/v1/models/download", {
+  const response = await apiFetch("/api/v1/models/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pipeline_id: pipelineId }),
@@ -167,7 +186,7 @@ export interface HardwareInfoResponse {
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
-  const response = await fetch("/api/v1/hardware/info", {
+  const response = await apiFetch("/api/v1/hardware/info", {
     method: "GET",
     headers: { "Content-Type": "application/json" },
   });
@@ -184,7 +203,7 @@ export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
 };
 
 export const fetchCurrentLogs = async (): Promise<string> => {
-  const response = await fetch("/api/v1/logs/current", {
+  const response = await apiFetch("/api/v1/logs/current", {
     method: "GET",
   });
 
