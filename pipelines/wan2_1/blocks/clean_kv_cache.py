@@ -91,6 +91,9 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
 
         generator_param = next(components.generator.parameters())
 
+        _, num_frames, _, _, _ = block_state.latents.shape
+        current_end_frame = block_state.current_start_frame + num_frames
+
         # This is defined to give us timestep = 0 while matching shape expected by the generator.
         # After denoising the KV cache will contain keys/values computed from the noisy input at the final timestep.
         # We want to update the generator with the key/values computed from the final "clean" latent (no noise) which
@@ -99,18 +102,12 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
         # a different value (typically a context_noise param).
         context_timestep = (
             torch.ones(
-                [
-                    1,
-                    components.config.num_frame_per_block,
-                ],
+                [1, num_frames],
                 device=generator_param.device,
                 dtype=generator_param.dtype,
             )
             * 0
         )
-
-        _, num_frames, _, _, _ = block_state.latents.shape
-        current_end_frame = block_state.current_start_frame + num_frames
 
         # Run the generator with the clean latent at timestep = 0 to update the KV cache
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
