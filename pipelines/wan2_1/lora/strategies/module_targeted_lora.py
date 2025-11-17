@@ -13,10 +13,10 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ModuleTargetedLoRAManager"]
+__all__ = ["ModuleTargetedLoRAStrategy"]
 
 
-class ModuleTargetedLoRAManager:
+class ModuleTargetedLoRAStrategy:
     """
     Simple wrapper around LongLive's original LoRA loading functions.
 
@@ -118,12 +118,12 @@ class ModuleTargetedLoRAManager:
             lora_config = {}
 
         # Apply PEFT LoRA configuration (exactly like original LongLive code)
-        model = ModuleTargetedLoRAManager._configure_lora_for_model(
+        model = ModuleTargetedLoRAStrategy._configure_lora_for_model(
             model, model_name="generator", lora_config=lora_config
         )
 
         # Load LoRA weights (exactly like original LongLive code)
-        ModuleTargetedLoRAManager._load_lora_checkpoint(model, lora_path)
+        ModuleTargetedLoRAStrategy._load_lora_checkpoint(model, lora_path)
 
         return lora_path
 
@@ -148,7 +148,7 @@ class ModuleTargetedLoRAManager:
         """
         if len(lora_configs) != 1:
             raise ValueError(
-                "ModuleTargetedLoRAManager only supports single LoRA adapter (LongLive style)"
+                "ModuleTargetedLoRAStrategy only supports single LoRA adapter (LongLive style)"
             )
 
         config = lora_configs[0]
@@ -160,7 +160,7 @@ class ModuleTargetedLoRAManager:
 
         try:
             # Load using original LongLive method
-            adapter_path = ModuleTargetedLoRAManager.load_adapter(
+            adapter_path = ModuleTargetedLoRAStrategy.load_adapter(
                 model=model,
                 lora_path=lora_path,
                 strength=scale,

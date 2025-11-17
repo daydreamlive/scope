@@ -12,11 +12,11 @@ import logging
 from typing import Any
 
 from pipelines.wan2_1.lora.strategies.module_targeted_lora import (
-    ModuleTargetedLoRAManager,
+    ModuleTargetedLoRAStrategy,
 )
-from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAManager
+from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAStrategy
 from pipelines.wan2_1.lora.strategies.permanent_merge_lora import (
-    PermanentMergeLoRAManager,
+    PermanentMergeLoRAStrategy,
 )
 
 __all__ = ["LoRAManager"]
@@ -54,11 +54,11 @@ class LoRAManager:
             merge_mode = LoRAManager.DEFAULT_STRATEGY
 
         if merge_mode == "permanent_merge":
-            return PermanentMergeLoRAManager
+            return PermanentMergeLoRAStrategy
         elif merge_mode == "runtime_peft":
-            return PeftLoRAManager
+            return PeftLoRAStrategy
         elif merge_mode == "module_targeted":
-            return ModuleTargetedLoRAManager
+            return ModuleTargetedLoRAStrategy
         else:
             raise ValueError(
                 f"Unknown merge_mode: {merge_mode}. "
