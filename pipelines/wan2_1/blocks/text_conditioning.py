@@ -118,6 +118,11 @@ class TextConditioningBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
         self.check_inputs(block_state)
 
+        if state.get("init_cache", False):
+            state.set("_text_conditioning_last_incoming_prompts", None)
+            state.set("_text_conditioning_last_encoded_prompts", None)
+            block_state.current_prompts = None
+
         # Initialize outputs
         block_state.embeds_list = None
         block_state.embeds_weights = None

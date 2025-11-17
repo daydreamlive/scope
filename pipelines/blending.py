@@ -328,3 +328,9 @@ class EmbeddingBlender:
         if self._state == BlenderState.TRANSITIONING:
             self._transition_queue.clear()
             self._state = BlenderState.IDLE
+
+    def reset(self) -> None:
+        """Fully reset temporal state for fresh sessions (e.g., after cache reset)."""
+        self._transition_queue.clear()
+        self._current_blend_embedding = None
+        self._state = BlenderState.IDLE
