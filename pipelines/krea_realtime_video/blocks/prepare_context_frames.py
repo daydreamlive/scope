@@ -81,7 +81,7 @@ class PrepareContextFramesBlock(ModularPipelineBlocks):
             ),
             OutputParam(
                 "decoded_frame_buffer",
-                type_hint=int,
+                type_hint=torch.Tensor,
                 description="Sliding window of decoded frames",
             ),
         ]

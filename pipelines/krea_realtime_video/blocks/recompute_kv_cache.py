@@ -121,7 +121,7 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Sliding window of decoded frames",
             ),
-            InputParam(
+            OutputParam(
                 "kv_cache",
                 type_hint=list[dict],
                 description="Initialized KV cache",
