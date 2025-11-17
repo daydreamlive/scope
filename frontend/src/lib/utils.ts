@@ -11,7 +11,10 @@ export function getDefaultDenoisingSteps(pipelineId: PipelineId): number[] {
     return [1000, 750, 500, 250];
   } else if (pipelineId === "krea-realtime-video") {
     return [1000, 750, 500, 250];
-  } else if (pipelineId === "streamdiffusionv2") {
+  } else if (
+    pipelineId === "streamdiffusionv2-1.3b" ||
+    pipelineId === "streamdiffusionv2-14b"
+  ) {
     return [700, 500];
   }
   return [700, 500]; // Default fallback
@@ -25,7 +28,10 @@ export function getDefaultResolution(pipelineId: PipelineId): {
     return { height: 320, width: 576 };
   } else if (pipelineId === "krea-realtime-video") {
     return { height: 320, width: 576 };
-  } else if (pipelineId === "streamdiffusionv2") {
+  } else if (
+    pipelineId === "streamdiffusionv2-1.3b" ||
+    pipelineId === "streamdiffusionv2-14b"
+  ) {
     return { height: 512, width: 512 };
   }
   return { height: 320, width: 576 }; // Default fallback

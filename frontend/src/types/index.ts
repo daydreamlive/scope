@@ -1,5 +1,6 @@
 export type PipelineId =
-  | "streamdiffusionv2"
+  | "streamdiffusionv2-1.3b"
+  | "streamdiffusionv2-14b"
   | "passthrough"
   | "vod"
   | "longlive"

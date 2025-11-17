@@ -15,8 +15,8 @@ export interface PipelineInfo {
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
-  streamdiffusionv2: {
-    name: "StreamDiffusionV2",
+  "streamdiffusionv2-1.3b": {
+    name: "StreamDiffusionV2 1.3B",
     docsUrl:
       "https://github.com/daydreamlive/scope/blob/main/pipelines/streamdiffusionv2/docs/usage.md",
     about:
@@ -29,6 +29,20 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
     supportsLoRA: true,
+  },
+  "streamdiffusionv2-14b": {
+    name: "StreamDiffusionV2 14B",
+    docsUrl:
+      "https://github.com/daydreamlive/scope/blob/main/pipelines/streamdiffusionv2/docs/usage.md",
+    about:
+      "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 14b with modifications to support streaming.",
+    modified: true,
+    category: "video-input",
+    defaultPrompt: "A dog in the grass looking around, photorealistic",
+    estimatedVram: 32,
+    requiresModels: true,
+    defaultTemporalInterpolationMethod: "slerp",
+    defaultTemporalInterpolationSteps: 0,
   },
   longlive: {
     name: "LongLive",

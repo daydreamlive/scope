@@ -117,7 +117,8 @@ export function SettingsPanel({
   ) => {
     const minValue =
       pipelineId === "longlive" ||
-      pipelineId === "streamdiffusionv2" ||
+      pipelineId === "streamdiffusionv2-1.3b" ||
+      pipelineId === "streamdiffusionv2-14b" ||
       pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
@@ -161,7 +162,8 @@ export function SettingsPanel({
   const decrementResolution = (dimension: "height" | "width") => {
     const minValue =
       pipelineId === "longlive" ||
-      pipelineId === "streamdiffusionv2" ||
+      pipelineId === "streamdiffusionv2-1.3b" ||
+      pipelineId === "streamdiffusionv2-14b" ||
       pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
@@ -300,7 +302,8 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
+          pipelineId === "streamdiffusionv2-1.3b" ||
+          pipelineId === "streamdiffusionv2-14b" ||
           pipelineId === "krea-realtime-video") && (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -459,7 +462,8 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
+          pipelineId === "streamdiffusionv2-1.3b" ||
+          pipelineId === "streamdiffusionv2-14b" ||
           pipelineId === "krea-realtime-video") && (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -521,7 +525,8 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
+          pipelineId === "streamdiffusionv2-1.3b" ||
+          pipelineId === "streamdiffusionv2-14b" ||
           pipelineId === "krea-realtime-video") && (
           <DenoisingStepsSlider
             value={denoisingSteps}
@@ -531,7 +536,8 @@ export function SettingsPanel({
           />
         )}
 
-        {pipelineId === "streamdiffusionv2" && (
+        {(pipelineId === "streamdiffusionv2-1.3b" ||
+          pipelineId === "streamdiffusionv2-14b") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -573,7 +579,8 @@ export function SettingsPanel({
           </div>
         )}
 
-        {pipelineId === "krea-realtime-video" && (
+        {(pipelineId === "krea-realtime-video" ||
+          pipelineId === "streamdiffusionv2-14b") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">

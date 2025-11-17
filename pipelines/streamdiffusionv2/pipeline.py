@@ -4,6 +4,8 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
+from lib.schema import Quantization
+
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
@@ -26,6 +28,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
+        quantization: Quantization | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
@@ -57,7 +60,29 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Initialize optional LoRA adapters on the underlying model.
         generator.model = self._init_loras(config, generator.model)
 
-        generator = generator.to(device=device, dtype=dtype)
+        if quantization == Quantization.FP8_E4M3FN:
+            # Cast before optional quantization
+            generator = generator.to(dtype=dtype)
+
+            start = time.time()
+
+            from torchao.quantization.quant_api import (
+                Float8DynamicActivationFloat8WeightConfig,
+                PerTensor,
+                quantize_,
+            )
+
+            # Move to target device during quantization
+            # Defaults to using fp8_e4m3fn for both weights and activations
+            quantize_(
+                generator,
+                Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
+                device=device,
+            )
+
+            print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
+        else:
+            generator = generator.to(device=device, dtype=dtype)
 
         start = time.time()
         text_encoder = WanTextEncoderWrapper(

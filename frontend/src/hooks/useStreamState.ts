@@ -23,8 +23,8 @@ export function useStreamState() {
   });
 
   const [settings, setSettings] = useState<SettingsState>({
-    pipelineId: "streamdiffusionv2",
-    resolution: getDefaultResolution("streamdiffusionv2"), // Default resolution for StreamDiffusionV2
+    pipelineId: "streamdiffusionv2-1.3b",
+    resolution: getDefaultResolution("streamdiffusionv2-1.3b"), // Default resolution for StreamDiffusionV2
     seed: 42,
     denoisingSteps: [700, 500], // Default for StreamDiffusionV2
     noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
@@ -60,10 +60,11 @@ export function useStreamState() {
     fetchHardwareInfo();
   }, []);
 
-  // Set recommended quantization when krea-realtime-video is selected
+  // Set recommended quantization when krea-realtime-video or streamdiffusionv2-14b is selected
   useEffect(() => {
     if (
-      settings.pipelineId === "krea-realtime-video" &&
+      (settings.pipelineId === "krea-realtime-video" ||
+        settings.pipelineId === "streamdiffusionv2-14b") &&
       hardwareInfo?.vram_gb !== null &&
       hardwareInfo?.vram_gb !== undefined
     ) {

@@ -497,15 +497,25 @@ export function StreamPage() {
       // Use settings.resolution if available, otherwise fall back to videoResolution
       const resolution = settings.resolution || videoResolution;
 
-      if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
+      if (
+        (pipelineIdToUse === "streamdiffusionv2-1.3b" ||
+          pipelineIdToUse === "streamdiffusionv2-14b") &&
+        resolution
+      ) {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          ...(pipelineIdToUse === "streamdiffusionv2-14b" && {
+            quantization:
+              settings.quantization !== undefined
+                ? settings.quantization
+                : null,
+          }),
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}${pipelineIdToUse === "streamdiffusionv2-14b" ? `, quantization: ${loadParams.quantization}` : ""}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -599,7 +609,10 @@ export function StreamPage() {
       }
 
       // StreamDiffusionV2-specific parameters
-      if (pipelineIdToUse === "streamdiffusionv2") {
+      if (
+        pipelineIdToUse === "streamdiffusionv2-1.3b" ||
+        pipelineIdToUse === "streamdiffusionv2-14b"
+      ) {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
       }

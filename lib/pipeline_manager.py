@@ -260,7 +260,7 @@ class PipelineManager:
         self, pipeline_id: str, load_params: dict | None = None
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
-        if pipeline_id == "streamdiffusionv2":
+        if pipeline_id == "streamdiffusionv2-1.3b":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
@@ -299,7 +299,59 @@ class PipelineManager:
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
             )
-            logger.info("StreamDiffusionV2 pipeline initialized")
+            logger.info("StreamDiffusionV2 1.3B pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "streamdiffusionv2-14b":
+            from lib.models_config import get_model_file_path, get_models_dir
+            from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+
+            models_dir = get_models_dir()
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "StreamDiffusionV2/wan_causal_dmd_v2v_14b/model.pt"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "model_config": OmegaConf.load(
+                        "pipelines/streamdiffusionv2/model.yaml"
+                    ),
+                }
+            )
+            config["model_config"].base_model_name = "Wan2.1-T2V-14B"
+
+            # Use load parameters for resolution and seed
+            height = 512
+            width = 512
+            seed = 42
+            quantization = None
+            if load_params:
+                height = load_params.get("height", 512)
+                width = load_params.get("width", 512)
+                seed = load_params.get("seed", 42)
+                quantization = load_params.get("quantization", None)
+
+            config["height"] = height
+            config["width"] = width
+            config["seed"] = seed
+
+            pipeline = StreamDiffusionV2Pipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("StreamDiffusionV2 14B pipeline initialized")
             return pipeline
 
         elif pipeline_id == "passthrough":
