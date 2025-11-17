@@ -32,6 +32,7 @@ export interface LoRAConfig {
 
 export interface SettingsState {
   pipelineId: PipelineId;
+  generationMode?: "video" | "text";
   resolution?: {
     height: number;
     width: number;

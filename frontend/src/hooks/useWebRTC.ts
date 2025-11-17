@@ -15,6 +15,7 @@ interface InitialParameters {
   noise_controller?: boolean;
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
+  generation_mode?: "video" | "text";
 }
 
 interface UseWebRTCOptions {
@@ -237,6 +238,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;
+      generation_mode?: "video" | "text";
     }) => {
       if (
         dataChannelRef.current &&

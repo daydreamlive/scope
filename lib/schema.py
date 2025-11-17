@@ -86,6 +86,12 @@ class Parameters(BaseModel):
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
     )
+    generation_mode: Literal["video", "text"] | None = Field(
+        default=None,
+        description="Generation mode for pipelines that support both text-to-video and video-to-video. "
+        "When set to 'video', the pipeline will consume input video frames. When set to 'text', "
+        "the pipeline will operate in pure text-to-video mode without consuming video input.",
+    )
 
 
 class WebRTCOfferRequest(BaseModel):

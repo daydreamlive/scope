@@ -37,7 +37,9 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     about:
       "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt switching and improved quality over longer time periods while maintaining fast generation.",
     modified: true,
-    category: "no-video-input",
+    // LongLive now supports both text and video input; when in Video mode
+    // we treat it as a video-input pipeline.
+    category: "video-input",
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 20,
@@ -53,7 +55,9 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     about:
       "A streaming pipeline and autoregressive video diffusion model from Krea. The model is trained using Self-Forcing on Wan2.1 14b.",
     modified: true,
-    category: "no-video-input",
+    // Krea realtime video now supports both text and video input; when in
+    // Video mode we treat it as a video-input pipeline.
+    category: "video-input",
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 32,

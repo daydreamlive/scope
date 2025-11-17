@@ -695,13 +695,20 @@ class WanVAE_(nn.Module):
                 feat_cache=self._feat_map,
                 feat_idx=self._conv_idx,
             )
-            self._conv_idx = [0]
-            out_ = self.decoder(
-                x[:, :, 1:, :, :],
-                feat_cache=self._feat_map,
-                feat_idx=self._conv_idx,
-            )
-            out = torch.cat([out, out_], 2)
+            # For the very first batch, guard against the case where there is
+            # only a single latent frame (t == 1). In that case x[:, :, 1:]
+            # would be empty and passing it through the decoder would cause
+            # conv3d to see an invalid temporal size (2 < kernel_size=3) after
+            # padding. When additional frames are present we process them in a
+            # second pass as originally intended.
+            if t > 1:
+                self._conv_idx = [0]
+                out_ = self.decoder(
+                    x[:, :, 1:, :, :],
+                    feat_cache=self._feat_map,
+                    feat_idx=self._conv_idx,
+                )
+                out = torch.cat([out, out_], 2)
         else:
             out = []
             for i in range(t):

@@ -6,18 +6,21 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline
+from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
 from .components import WanVAEWrapper
-from .modular_blocks import LongLiveBlocks
+from .modular_blocks import LongLiveTextBlocks, LongLiveVideoBlocks
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
+
+# Chunk size for video input when operating in video-to-video mode
+CHUNK_SIZE = 4
 
 
 class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
@@ -113,7 +116,11 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         )
         components.add("embedding_blender", embedding_blender)
 
-        self.blocks = LongLiveBlocks()
+        # Separate block graphs for text and video modes share the same
+        # underlying modular blocks but avoid requiring video inputs when
+        # running in pure text-to-video mode.
+        self.blocks_text = LongLiveTextBlocks()
+        self.blocks_video = LongLiveVideoBlocks()
         self.components = components
         self.state = PipelineState()
         # These need to be set right now because InputParam.default on the blocks
@@ -121,12 +128,35 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", 1.0)
+        # Defaults for noise control; InputParam.default on the blocks
+        # does not work properly, so we set them explicitly.
+        self.state.set("noise_scale", 0.7)
+        self.state.set("noise_controller", True)
+        self.state.set("current_noise_scale", 0.7)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))
 
         self.first_call = True
+
+    def prepare(
+        self, generation_mode: str | None = None, **kwargs
+    ) -> Requirements | None:
+        """
+        Determine whether this call should consume video input.
+
+        When generation_mode is \"video\", the pipeline requests CHUNK_SIZE
+        frames from the FrameProcessor and operates in video-to-video mode
+        using the shared video preprocessing and latent blocks. When
+        generation_mode is \"text\" (default for backwards compatibility),
+        no video is requested and the pipeline operates in pure text-to-video
+        mode using noise latents only.
+        """
+        mode = generation_mode or kwargs.get("generation_mode") or "text"
+        if mode == "video":
+            return Requirements(input_size=CHUNK_SIZE)
+        return None
 
     def __call__(self, **kwargs) -> torch.Tensor:
         if self.first_call:
@@ -159,5 +189,11 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
-        _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        # Select appropriate block graph based on generation mode.
+        mode = self.state.get("generation_mode")
+        if mode is None:
+            mode = "text"
+        blocks = self.blocks_video if mode == "video" else self.blocks_text
+
+        _, self.state = blocks(self.components, self.state)
+        return postprocess_chunk(self.state.values["video"])

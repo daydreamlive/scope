@@ -22,6 +22,7 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
+    generation_mode?: "video" | "text";
   };
 }
 

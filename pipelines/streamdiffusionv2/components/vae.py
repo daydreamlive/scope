@@ -64,7 +64,12 @@ class WanVAEWrapper(torch.nn.Module):
 
     # Streaming friendly
     def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
-        return self.model.stream_encode(pixel)
+        # The Wan diffusion backbone and downstream blocks expect latents in
+        # [batch, frames, channels, height, width] format. stream_encode
+        # returns [batch, channels, frames, height, width], so we transpose
+        # the temporal and channel dimensions here.
+        latent = self.model.stream_encode(pixel)
+        return latent.permute(0, 2, 1, 3, 4)
 
     # Streaming friendly
     def decode_to_pixel(

@@ -113,7 +113,7 @@ export function StreamPage() {
     localStream,
     isInitializing,
     error: videoSourceError,
-    mode,
+    mode: videoSourceMode,
     videoResolution,
     switchMode,
     handleVideoFileUpload,
@@ -121,7 +121,9 @@ export function StreamPage() {
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
-    enabled: PIPELINES[settings.pipelineId]?.category === "video-input",
+    enabled:
+      PIPELINES[settings.pipelineId]?.category === "video-input" &&
+      (settings.generationMode ?? "video") === "video",
   });
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
@@ -186,6 +188,7 @@ export function StreamPage() {
       denoisingSteps: newDenoisingSteps,
       resolution: newResolution,
       loras: [], // Clear LoRA controls when switching pipelines
+      generationMode: pipelineId === "streamdiffusionv2" ? "video" : "text",
     });
   };
 
@@ -424,6 +427,17 @@ export function StreamPage() {
     }
   }, [settings.pipelineId]);
 
+  const handleGenerationModeChange = (mode: "video" | "text") => {
+    updateSettings({ generationMode: mode });
+    // Inform backend of mode change so pipelines can switch between
+    // text-to-video and video-to-video behaviour.
+    sendParameterUpdate({
+      generation_mode: mode,
+      // Reset cache when switching modes to avoid cross-mode artefacts.
+      reset_cache: true,
+    });
+  };
+
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
     updateSettings({ paused: newPausedState });
@@ -550,9 +564,11 @@ export function StreamPage() {
         return false;
       }
 
-      // Check if this pipeline needs video input
+      // Check if this pipeline needs video input for the current mode
       const pipelineCategory = PIPELINES[pipelineIdToUse]?.category;
-      const needsVideoInput = pipelineCategory === "video-input";
+      const needsVideoInput =
+        pipelineCategory === "video-input" &&
+        (settings.generationMode ?? "video") === "video";
 
       // Only send video stream for pipelines that need video input
       const streamToSend = needsVideoInput
@@ -573,6 +589,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        generation_mode?: "video" | "text";
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -584,24 +601,40 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for krea_realtime_video and longlive
+      // Cache management for all main pipelines
       if (
-        settings.pipelineId === "krea-realtime-video" ||
-        settings.pipelineId === "longlive"
+        pipelineIdToUse === "krea-realtime-video" ||
+        pipelineIdToUse === "longlive" ||
+        pipelineIdToUse === "streamdiffusionv2"
       ) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
       // Krea-realtime-video-specific parameters
-      if (settings.pipelineId === "krea-realtime-video") {
+      if (pipelineIdToUse === "krea-realtime-video") {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
       }
 
-      // StreamDiffusionV2-specific parameters
-      if (pipelineIdToUse === "streamdiffusionv2") {
+      // Noise control is available for all three main pipelines
+      if (
+        pipelineIdToUse === "streamdiffusionv2" ||
+        pipelineIdToUse === "longlive" ||
+        pipelineIdToUse === "krea-realtime-video"
+      ) {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
+      }
+
+      // Generation mode for all main pipelines
+      if (
+        pipelineIdToUse === "streamdiffusionv2" ||
+        pipelineIdToUse === "longlive" ||
+        pipelineIdToUse === "krea-realtime-video"
+      ) {
+        initialParameters.generation_mode =
+          settings.generationMode ??
+          (pipelineIdToUse === "streamdiffusionv2" ? "video" : "text");
       }
 
       // Reset paused state when starting a fresh stream
@@ -631,16 +664,23 @@ export function StreamPage() {
             localStream={localStream}
             isInitializing={isInitializing}
             error={videoSourceError}
-            mode={mode}
-            onModeChange={switchMode}
+            mode={settings.generationMode ?? "video"}
+            onModeChange={handleGenerationModeChange}
+            videoSourceMode={videoSourceMode}
+            onVideoSourceModeChange={switchMode}
             isStreaming={isStreaming}
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
-            canStartStream={
-              PIPELINES[settings.pipelineId]?.category === "no-video-input"
-                ? !isInitializing
-                : !!localStream && !isInitializing
-            }
+            canStartStream={(() => {
+              const pipelineCategory = PIPELINES[settings.pipelineId]?.category;
+              const needsVideoInput =
+                pipelineCategory === "video-input" &&
+                (settings.generationMode ?? "video") === "video";
+              if (!needsVideoInput) {
+                return !isInitializing;
+              }
+              return !!localStream && !isInitializing;
+            })()}
             onStartStream={handleStartStream}
             onStopStream={stopStream}
             onVideoFileUpload={handleVideoFileUpload}

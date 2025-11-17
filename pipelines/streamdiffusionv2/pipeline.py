@@ -11,7 +11,10 @@ from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from .components import WanVAEWrapper
-from .modular_blocks import StreamDiffusionV2Blocks
+from .modular_blocks import (
+    StreamDiffusionV2TextBlocks,
+    StreamDiffusionV2VideoBlocks,
+)
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
@@ -95,7 +98,11 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         )
         components.add("embedding_blender", embedding_blender)
 
-        self.blocks = StreamDiffusionV2Blocks()
+        # Separate block graphs for text and video modes share the same
+        # underlying modular blocks but avoid requiring video inputs when
+        # running in pure text-to-video mode.
+        self.blocks_video = StreamDiffusionV2VideoBlocks()
+        self.blocks_text = StreamDiffusionV2TextBlocks()
         self.components = components
         self.state = PipelineState()
         # These need to be set right now because InputParam.default on the blocks
@@ -112,8 +119,21 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
         self.first_call = True
 
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
-        return Requirements(input_size=CHUNK_SIZE)
+    def prepare(
+        self, generation_mode: str | None = None, **kwargs
+    ) -> Requirements | None:
+        """
+        Determine whether this call should consume video input.
+
+        When generation_mode is \"video\" (default for backwards compatibility),
+        the pipeline requests CHUNK_SIZE frames from the FrameProcessor. When
+        generation_mode is \"text\", no video is requested and the pipeline
+        operates in text-to-video mode using only prompts and noise latents.
+        """
+        mode = generation_mode or kwargs.get("generation_mode") or "video"
+        if mode == "video":
+            return Requirements(input_size=CHUNK_SIZE)
+        return None
 
     def __call__(
         self,
@@ -149,5 +169,11 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
-        _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        # Select appropriate block graph based on generation mode.
+        mode = self.state.get("generation_mode")
+        if mode is None:
+            mode = "video"
+        blocks = self.blocks_video if mode == "video" else self.blocks_text
+
+        _, self.state = blocks(self.components, self.state)
+        return postprocess_chunk(self.state.values["video"])
