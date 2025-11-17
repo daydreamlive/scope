@@ -114,6 +114,15 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
 
         # Run the generator with the clean latent at timestep = 0 to update the KV cache
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
+        context_timestep = (
+            torch.ones(
+                [1, num_frames],
+                device=generator_param.device,
+                dtype=generator_param.dtype,
+            )
+            * 0
+        )
+
         components.generator(
             noisy_image_or_video=block_state.latents,
             conditional_dict=conditional_dict,
