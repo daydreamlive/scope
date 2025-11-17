@@ -10,7 +10,7 @@ from ..interface import Pipeline
 from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAManager
+from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
 from .components import WanVAEWrapper
 from .modular_blocks import LongLiveBlocks
 from .modules.causal_model import CausalWanModel
@@ -63,12 +63,12 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             # module-targeted manager can construct the PEFT config exactly
             # like the original implementation.
             longlive_lora_config = dict(lora_config) if lora_config is not None else {}
-            generator.model = ModuleTargetedLoRAManager._configure_lora_for_model(
+            generator.model = ModuleTargetedLoRAStrategy._configure_lora_for_model(
                 generator.model,
                 model_name=generator_model_name,
                 lora_config=longlive_lora_config,
             )
-            ModuleTargetedLoRAManager._load_lora_checkpoint(generator.model, lora_path)
+            ModuleTargetedLoRAStrategy._load_lora_checkpoint(generator.model, lora_path)
             print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
 
         # Initialize any additional, user-configured LoRA adapters via shared manager.

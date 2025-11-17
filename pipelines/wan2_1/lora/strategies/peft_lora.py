@@ -24,12 +24,12 @@ from pipelines.wan2_1.lora.utils import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PeftLoRAManager"]
+__all__ = ["PeftLoRAStrategy"]
 
 _ENABLE_TORCH_COMPILE = os.getenv("PEFT_LORA_TORCH_COMPILE", "0") == "1"
 
 
-class PeftLoRAManager:
+class PeftLoRAStrategy:
     """
     Manages LoRA adapters using PEFT for instant runtime scale updates.
 
@@ -47,12 +47,12 @@ class PeftLoRAManager:
     @staticmethod
     def _get_peft_model(model: nn.Module) -> Any | None:
         """Get PEFT model wrapper if it exists."""
-        return PeftLoRAManager._peft_models.get(model)
+        return PeftLoRAStrategy._peft_models.get(model)
 
     @staticmethod
     def _set_peft_model(model: nn.Module, peft_model: Any) -> None:
         """Store PEFT model wrapper."""
-        PeftLoRAManager._peft_models[model] = peft_model
+        PeftLoRAStrategy._peft_models[model] = peft_model
 
     @staticmethod
     def _inject_lora_layers(
@@ -153,7 +153,7 @@ class PeftLoRAManager:
         )
 
         # Check if model already has PEFT adapters (in cache or is already PEFT)
-        existing_peft_model = PeftLoRAManager._get_peft_model(model)
+        existing_peft_model = PeftLoRAStrategy._get_peft_model(model)
         logger.debug(
             f"_inject_lora_layers: existing_peft_model from cache: {existing_peft_model is not None}"
         )
@@ -178,7 +178,7 @@ class PeftLoRAManager:
                 f"_inject_lora_layers: Model is already PEFT-wrapped, adding adapter '{adapter_name}'"
             )
             # Register it in cache for future use (key by the PEFT model itself)
-            PeftLoRAManager._set_peft_model(model, model)
+            PeftLoRAStrategy._set_peft_model(model, model)
             # Add new adapter to existing PEFT model
             model.add_adapter(adapter_name, lora_config)
             peft_model = model
@@ -207,7 +207,7 @@ class PeftLoRAManager:
             logger.debug(
                 f"_inject_lora_layers: Model type after PEFT wrapping: {type(peft_model)}"
             )
-            PeftLoRAManager._set_peft_model(model, peft_model)
+            PeftLoRAStrategy._set_peft_model(model, peft_model)
 
         # Get the underlying PEFT model (unwrap compiled wrapper if needed)
         target_model = (
@@ -362,8 +362,8 @@ class PeftLoRAManager:
             The adapter name used
 
         Example:
-            >>> from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAManager
-            >>> adapter_name = PeftLoRAManager.load_adapter(
+            >>> from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAStrategy
+            >>> adapter_name = PeftLoRAStrategy.load_adapter(
             ...     model=pipeline.transformer,
             ...     lora_path="models/lora/my-style.safetensors",
             ...     strength=1.0
@@ -435,7 +435,9 @@ class PeftLoRAManager:
             return adapter_name
 
         # Inject PEFT LoRA layers
-        PeftLoRAManager._inject_lora_layers(model, lora_mapping, adapter_name, strength)
+        PeftLoRAStrategy._inject_lora_layers(
+            model, lora_mapping, adapter_name, strength
+        )
 
         elapsed = time.time() - start_time
         logger.info(f"load_adapter: Loaded adapter '{adapter_name}' in {elapsed:.3f}s")
@@ -461,7 +463,7 @@ class PeftLoRAManager:
             List of loaded adapter info dicts with keys: adapter_name, path, scale
 
         Example:
-            >>> loaded = PeftLoRAManager.load_adapters_from_list(
+            >>> loaded = PeftLoRAStrategy.load_adapters_from_list(
             ...     model=pipeline.transformer,
             ...     lora_configs=[{"path": "models/lora/style.safetensors", "scale": 1.0}]
             ... )
@@ -481,7 +483,7 @@ class PeftLoRAManager:
             adapter_name = lora_config.get("adapter_name")
 
             try:
-                returned_adapter_name = PeftLoRAManager.load_adapter(
+                returned_adapter_name = PeftLoRAStrategy.load_adapter(
                     model=model,
                     lora_path=lora_path,
                     strength=scale,
@@ -534,7 +536,7 @@ class PeftLoRAManager:
             Updated loaded_adapters list
 
         Example:
-            >>> self.loaded_lora_adapters = PeftLoRAManager.update_adapter_scales(
+            >>> self.loaded_lora_adapters = PeftLoRAStrategy.update_adapter_scales(
             ...     model=self.stream.generator.model,
             ...     loaded_adapters=self.loaded_lora_adapters,
             ...     scale_updates=[{"adapter_name": "my_style", "scale": 0.5}]
@@ -543,7 +545,7 @@ class PeftLoRAManager:
         if not scale_updates:
             return loaded_adapters
 
-        peft_model = PeftLoRAManager._get_peft_model(model)
+        peft_model = PeftLoRAStrategy._get_peft_model(model)
         if peft_model is None:
             logger.warning(f"{logger_prefix}No PEFT model found, cannot update scales")
             return loaded_adapters
