@@ -116,6 +116,12 @@ class EmbeddingBlendingBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
+        if state.get("init_cache", False):
+            components.embedding_blender.reset()
+            block_state._previous_embeds_signature = None
+            block_state.conditioning_embeds = None
+            block_state.current_prompts = None
+
         # Get inputs from state
         embeds_list = block_state.embeds_list
         embeds_weights = block_state.embeds_weights
