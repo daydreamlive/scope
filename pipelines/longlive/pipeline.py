@@ -10,10 +10,10 @@ from ..interface import Pipeline
 from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAManager
 from .components import WanVAEWrapper
 from .modular_blocks import LongLiveBlocks
 from .modules.causal_model import CausalWanModel
-from .utils.lora_utils import configure_lora_for_model, load_lora_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -54,17 +54,25 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
 
         print(f"Loaded diffusion model in {time.time() - start:.3f}s")
 
-        # Configure LoRA for LongLive model (original LongLive LoRA path).
-        start = time.time()
-        generator.model = configure_lora_for_model(
-            generator.model, model_name=generator_model_name, lora_config=lora_config
-        )
-        # Load LoRA weights
-        load_lora_checkpoint(generator.model, lora_path)
-        print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
+        # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
+        # This mirrors the original LongLive behavior and is independent of any
+        # additional runtime LoRA strategies managed by LoRAEnabledPipeline.
+        if lora_path is not None:
+            start = time.time()
+            # LongLive's adapter config is passed through unchanged so the
+            # module-targeted manager can construct the PEFT config exactly
+            # like the original implementation.
+            longlive_lora_config = dict(lora_config) if lora_config is not None else {}
+            generator.model = ModuleTargetedLoRAManager._configure_lora_for_model(
+                generator.model,
+                model_name=generator_model_name,
+                lora_config=longlive_lora_config,
+            )
+            ModuleTargetedLoRAManager._load_lora_checkpoint(generator.model, lora_path)
+            print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
 
         # Initialize any additional, user-configured LoRA adapters via shared manager.
-        # This is additive and does not replace the original LongLive LoRA above.
+        # This is additive and does not replace the original LongLive performance LoRA.
         generator.model = self._init_loras(config, generator.model)
 
         generator = generator.to(device=device, dtype=dtype)

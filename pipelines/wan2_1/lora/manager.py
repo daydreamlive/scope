@@ -11,6 +11,9 @@ Supports local .safetensors and .bin files from models/lora/ directory.
 import logging
 from typing import Any
 
+from pipelines.wan2_1.lora.strategies.module_targeted_lora import (
+    ModuleTargetedLoRAManager,
+)
 from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAManager
 from pipelines.wan2_1.lora.strategies.permanent_merge_lora import (
     PermanentMergeLoRAManager,
@@ -35,6 +38,10 @@ class LoRAManager:
     - runtime_peft: Uses PEFT LoraLayer for runtime application
       + Instant scale updates (<1s)
       - ~50% inference overhead per frame
+
+    - module_targeted: Targets specific module types (like LongLive)
+      + Compatible with existing module-driven LoRA files
+      - Uses PEFT wrapping with runtime scale updates
     """
 
     # Default strategy if none specified
@@ -50,10 +57,12 @@ class LoRAManager:
             return PermanentMergeLoRAManager
         elif merge_mode == "runtime_peft":
             return PeftLoRAManager
+        elif merge_mode == "module_targeted":
+            return ModuleTargetedLoRAManager
         else:
             raise ValueError(
                 f"Unknown merge_mode: {merge_mode}. "
-                f"Supported modes: permanent_merge, runtime_peft"
+                f"Supported modes: permanent_merge, runtime_peft, module_targeted"
             )
 
     @staticmethod
@@ -67,7 +76,7 @@ class LoRAManager:
             model: PyTorch model
             lora_path: Local path to LoRA file (.safetensors or .bin)
             strength: Initial strength multiplier for LoRA effect (default 1.0)
-            merge_mode: Strategy to use (permanent_merge, runtime_peft)
+            merge_mode: Strategy to use (permanent_merge, runtime_peft, module_targeted)
 
         Returns:
             The lora_path (used as identifier)
@@ -81,6 +90,7 @@ class LoRAManager:
         lora_configs: list[dict[str, Any]],
         logger_prefix: str = "",
         merge_mode: str = None,
+        target_modules: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Load multiple LoRA adapters using the specified merge strategy.
@@ -89,13 +99,23 @@ class LoRAManager:
             model: PyTorch model
             lora_configs: List of dicts with keys: path (str, required), scale (float, optional, default=1.0)
             logger_prefix: Prefix for log messages
-            merge_mode: Strategy to use (permanent_merge, runtime_peft)
+            merge_mode: Strategy to use (permanent_merge, runtime_peft, module_targeted)
+            target_modules: For module_targeted mode, list of module class names to target
 
         Returns:
             List of loaded adapter info dicts with keys: path, scale
         """
         manager_class = LoRAManager._get_manager_class(merge_mode)
-        return manager_class.load_adapters_from_list(model, lora_configs, logger_prefix)
+
+        # For module_targeted mode, pass target_modules if available
+        if merge_mode == "module_targeted":
+            return manager_class.load_adapters_from_list(
+                model, lora_configs, logger_prefix, target_modules=target_modules
+            )
+        else:
+            return manager_class.load_adapters_from_list(
+                model, lora_configs, logger_prefix
+            )
 
     @staticmethod
     def update_adapter_scales(
