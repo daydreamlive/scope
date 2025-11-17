@@ -6,43 +6,40 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline, Requirements
+from ..interface import Pipeline
 from ..process import postprocess_chunk
-from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAManager
 from .components import WanVAEWrapper
-from .modular_blocks import StreamDiffusionV2Blocks
+from .modular_blocks import LongLiveBlocks
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DENOISING_STEP_LIST = [750, 250]
-
-# Chunk size for streamdiffusionv2
-CHUNK_SIZE = 4
+DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
+class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
-        quantization: Quantization | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
-        **kwargs,  # Allow extra kwargs
     ):
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
+        lora_path = getattr(config, "lora_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
 
-        model_config = load_model_config(config, __file__)
+        model_config = getattr(config, "model_config", {})
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
         generator_model_name = getattr(
             model_config, "generator_model_name", "generator"
         )
+        lora_config = getattr(model_config, "adapter", {})
 
         # Load generator
         start = time.time()
@@ -57,32 +54,28 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
         print(f"Loaded diffusion model in {time.time() - start:.3f}s")
 
-        # Initialize optional LoRA adapters on the underlying model.
+        # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
+        # This mirrors the original LongLive behavior and is independent of any
+        # additional runtime LoRA strategies managed by LoRAEnabledPipeline.
+        if lora_path is not None:
+            start = time.time()
+            # LongLive's adapter config is passed through unchanged so the
+            # module-targeted manager can construct the PEFT config exactly
+            # like the original implementation.
+            longlive_lora_config = dict(lora_config) if lora_config is not None else {}
+            generator.model = ModuleTargetedLoRAManager._configure_lora_for_model(
+                generator.model,
+                model_name=generator_model_name,
+                lora_config=longlive_lora_config,
+            )
+            ModuleTargetedLoRAManager._load_lora_checkpoint(generator.model, lora_path)
+            print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
+
+        # Initialize any additional, user-configured LoRA adapters via shared manager.
+        # This is additive and does not replace the original LongLive performance LoRA.
         generator.model = self._init_loras(config, generator.model)
 
-        if quantization == Quantization.FP8_E4M3FN:
-            # Cast before optional quantization
-            generator = generator.to(dtype=dtype)
-
-            start = time.time()
-
-            from torchao.quantization.quant_api import (
-                Float8DynamicActivationFloat8WeightConfig,
-                PerTensor,
-                quantize_,
-            )
-
-            # Move to target device during quantization
-            # Defaults to using fp8_e4m3fn for both weights and activations
-            quantize_(
-                generator,
-                Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
-                device=device,
-            )
-
-            print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
-        else:
-            generator = generator.to(device=device, dtype=dtype)
+        generator = generator.to(device=device, dtype=dtype)
 
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
@@ -91,7 +84,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             text_encoder_path=text_encoder_path,
             tokenizer_path=tokenizer_path,
         )
-        print(f"Loaded text encoder in {time.time() - start:.3f}s")
+        print(f"Loaded text encoder in {time.time() - start:3f}s")
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
@@ -120,7 +113,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         )
         components.add("embedding_blender", embedding_blender)
 
-        self.blocks = StreamDiffusionV2Blocks()
+        self.blocks = LongLiveBlocks()
         self.components = components
         self.state = PipelineState()
         # These need to be set right now because InputParam.default on the blocks
@@ -128,8 +121,6 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", 1.0)
-        self.state.set("noise_scale", 0.7)
-        self.state.set("noise_controller", True)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
@@ -137,13 +128,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
         self.first_call = True
 
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
-        return Requirements(input_size=CHUNK_SIZE)
-
-    def __call__(
-        self,
-        **kwargs,
-    ) -> torch.Tensor:
+    def __call__(self, **kwargs) -> torch.Tensor:
         if self.first_call:
             self.state.set("init_cache", True)
             self.first_call = False
@@ -160,9 +145,6 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             self._handle_lora_scale_updates(
                 lora_scales=lora_scales, model=self.components.generator.model
             )
-            # Trigger cache reset on LoRA scale updates if manage_cache is enabled
-            if self.state.get("manage_cache", True):
-                kwargs["init_cache"] = True
 
         for k, v in kwargs.items():
             self.state.set(k, v)
@@ -175,5 +157,4 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
         _, self.state = self.blocks(self.components, self.state)
-
         return postprocess_chunk(self.state.values["output_video"])

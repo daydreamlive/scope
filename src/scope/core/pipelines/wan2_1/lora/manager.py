@@ -11,12 +11,12 @@ Supports local .safetensors and .bin files from models/lora/ directory.
 import logging
 from typing import Any
 
-from .strategies.module_targeted_lora import (
-    ModuleTargetedLoRAStrategy,
+from pipelines.wan2_1.lora.strategies.module_targeted_lora import (
+    ModuleTargetedLoRAManager,
 )
-from .strategies.peft_lora import PeftLoRAStrategy
-from .strategies.permanent_merge_lora import (
-    PermanentMergeLoRAStrategy,
+from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAManager
+from pipelines.wan2_1.lora.strategies.permanent_merge_lora import (
+    PermanentMergeLoRAManager,
 )
 
 __all__ = ["LoRAManager"]
@@ -41,7 +41,7 @@ class LoRAManager:
 
     - module_targeted: Targets specific module types (like LongLive)
       + Compatible with existing module-driven LoRA files
-      - Uses PEFT wrapping without runtime scale updates
+      - Uses PEFT wrapping with runtime scale updates
     """
 
     # Default strategy if none specified
@@ -54,11 +54,11 @@ class LoRAManager:
             merge_mode = LoRAManager.DEFAULT_STRATEGY
 
         if merge_mode == "permanent_merge":
-            return PermanentMergeLoRAStrategy
+            return PermanentMergeLoRAManager
         elif merge_mode == "runtime_peft":
-            return PeftLoRAStrategy
+            return PeftLoRAManager
         elif merge_mode == "module_targeted":
-            return ModuleTargetedLoRAStrategy
+            return ModuleTargetedLoRAManager
         else:
             raise ValueError(
                 f"Unknown merge_mode: {merge_mode}. "
