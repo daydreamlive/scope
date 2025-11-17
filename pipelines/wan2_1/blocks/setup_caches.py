@@ -122,6 +122,8 @@ class SetupCachesBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         init_cache = block_state.init_cache
+        is_transitioning = state.get("_transition_active", False)
+        was_transitioning = state.get("_transition_active_prev", False)
 
         max_current_start = (
             components.config.max_rope_freq_table_seq_len
@@ -130,9 +132,11 @@ class SetupCachesBlock(ModularPipelineBlocks):
         if block_state.current_start_frame >= max_current_start:
             init_cache = True
 
-        # Clear KV cache when conditioning changes, if manage_cache is enabled and video input is present
+        # Clear KV cache when conditioning changes outside of a transition if manage_cache is enabled and video input is present.
+        transitioning_context = is_transitioning or was_transitioning
         if (
             block_state.conditioning_embeds_updated
+            and not transitioning_context
             and block_state.manage_cache
             and block_state.video is not None
         ):
@@ -178,6 +182,7 @@ class SetupCachesBlock(ModularPipelineBlocks):
             )
 
         # If the conditioning embeds change we need to reinitialize the crossattn cache
+        # During transitions, this updates cross-attn cache without full KV cache reset
         if (
             init_cache
             or block_state.crossattn_cache is None
@@ -196,6 +201,7 @@ class SetupCachesBlock(ModularPipelineBlocks):
 
             components.vae.clear_cache()
 
+        state.set("_transition_active_prev", is_transitioning)
         self.set_block_state(state, block_state)
         return components, state
 
