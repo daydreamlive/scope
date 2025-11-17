@@ -64,6 +64,11 @@ class LoRAEnabledPipeline:
             config, "_lora_merge_mode"
         ) or _get_config_value(config, "lora_merge_mode")
 
+        # Get target modules for module_targeted mode
+        target_modules = None
+        if lora_merge_mode == "module_targeted":
+            target_modules = _get_config_value(config, "_lora_target_modules")
+
         # Handle legacy use_peft_lora boolean if present on config
         use_peft_flag = _get_config_value(config, "use_peft_lora")
         if lora_merge_mode is None and use_peft_flag is not None:
@@ -90,6 +95,7 @@ class LoRAEnabledPipeline:
             lora_configs=list(lora_configs),
             logger_prefix=f"{self.__class__.__name__}.__init__: ",
             merge_mode=self._lora_merge_mode,
+            target_modules=target_modules,
         )
 
         logger.info(
