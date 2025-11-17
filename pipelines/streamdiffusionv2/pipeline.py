@@ -6,7 +6,7 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline, Requirements
+from ..interface import Pipeline
 from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from .components import WanVAEWrapper
@@ -16,9 +16,6 @@ from .modules.causal_model import CausalWanModel
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
-
-# Chunk size for streamdiffusionv2
-CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(Pipeline):
@@ -107,9 +104,6 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.state.set("base_seed", getattr(config, "seed", 42))
 
         self.first_call = True
-
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
-        return Requirements(input_size=CHUNK_SIZE)
 
     def __call__(
         self,

@@ -37,6 +37,7 @@ class PipelineManager:
         self._pipeline = None
         self._pipeline_id = None
         self._load_params = None
+        self._model_config = None  # Store model config from model.yaml
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
 
@@ -164,11 +165,14 @@ class PipelineManager:
                 logger.info(f"Loading pipeline: {pipeline_id}")
 
                 # Load the pipeline synchronously (we're already in executor thread)
-                pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
+                pipeline, model_config = self._load_pipeline_implementation(
+                    pipeline_id, load_params
+                )
 
                 self._pipeline = pipeline
                 self._pipeline_id = pipeline_id
                 self._load_params = load_params
+                self._model_config = model_config
                 self._status = PipelineStatus.LOADED
 
                 logger.info(f"Pipeline {pipeline_id} loaded successfully")
@@ -183,6 +187,7 @@ class PipelineManager:
                 self._pipeline = None
                 self._pipeline_id = None
                 self._load_params = None
+                self._model_config = None
 
                 return False
 
@@ -196,6 +201,7 @@ class PipelineManager:
         self._pipeline = None
         self._pipeline_id = None
         self._load_params = None
+        self._model_config = None
         self._error_message = None
 
         # Cleanup resources
@@ -211,12 +217,18 @@ class PipelineManager:
     def _load_pipeline_implementation(
         self, pipeline_id: str, load_params: dict | None = None
     ):
-        """Synchronous pipeline loading (runs in thread executor)."""
+        """Synchronous pipeline loading (runs in thread executor).
+
+        Returns:
+            tuple: (pipeline_instance, model_config) where model_config is the loaded
+                   model.yaml config or None if pipeline has no model.yaml
+        """
         if pipeline_id == "streamdiffusionv2":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
             models_dir = get_models_dir()
+            model_config = OmegaConf.load("pipelines/streamdiffusionv2/model.yaml")
             config = OmegaConf.create(
                 {
                     "model_dir": str(models_dir),
@@ -233,9 +245,7 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    "model_config": OmegaConf.load(
-                        "pipelines/streamdiffusionv2/model.yaml"
-                    ),
+                    "model_config": model_config,
                 }
             )
 
@@ -256,7 +266,7 @@ class PipelineManager:
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
-            return pipeline
+            return pipeline, model_config
 
         elif pipeline_id == "passthrough":
             from pipelines.passthrough.pipeline import PassthroughPipeline
@@ -275,7 +285,7 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("Passthrough pipeline initialized")
-            return pipeline
+            return pipeline, None  # No model.yaml for passthrough
 
         elif pipeline_id == "vod":
             from pipelines.vod.pipeline import VodPipeline
@@ -294,12 +304,13 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("VOD pipeline initialized")
-            return pipeline
+            return pipeline, None  # No model.yaml for vod
 
         elif pipeline_id == "longlive":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.longlive.pipeline import LongLivePipeline
 
+            model_config = OmegaConf.load("pipelines/longlive/model.yaml")
             config = OmegaConf.create(
                 {
                     "model_dir": str(get_models_dir()),
@@ -317,7 +328,7 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    "model_config": OmegaConf.load("pipelines/longlive/model.yaml"),
+                    "model_config": model_config,
                 }
             )
 
@@ -337,12 +348,13 @@ class PipelineManager:
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
             )
             logger.info("LongLive pipeline initialized")
-            return pipeline
+            return pipeline, model_config
 
         elif pipeline_id == "krea-realtime-video":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
 
+            model_config = OmegaConf.load("pipelines/krea_realtime_video/model.yaml")
             config = OmegaConf.create(
                 {
                     "model_dir": str(get_models_dir()),
@@ -362,9 +374,7 @@ class PipelineManager:
                     "vae_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
                     ),
-                    "model_config": OmegaConf.load(
-                        "pipelines/krea_realtime_video/model.yaml"
-                    ),
+                    "model_config": model_config,
                 }
             )
 
@@ -394,7 +404,7 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("krea-realtime-video pipeline initialized")
-            return pipeline
+            return pipeline, model_config
 
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
@@ -408,3 +418,40 @@ class PipelineManager:
         """Check if pipeline is loaded and ready (thread-safe)."""
         with self._lock:
             return self._status == PipelineStatus.LOADED
+
+    def get_required_input_frames(self, pipeline_id: str | None = None) -> int:
+        """
+        Calculate the required number of input frames for a pipeline.
+
+        Args:
+            pipeline_id: ID of pipeline. If None, uses current loaded pipeline ID.
+
+        Returns:
+            int: Required number of input frames:
+                - 1 if pipeline has no model.yaml
+                - num_frame_per_block * vae_temporal_downsample_factor if both exist in model.yaml
+                - 0 otherwise (should be treated as "now" - no buffering required)
+        """
+        with self._lock:
+            # If no model config is stored, pipeline has no model.yaml
+            if self._model_config is None:
+                return 1
+
+            try:
+                # Extract fields from stored model config
+                num_frame_per_block = self._model_config.get("num_frame_per_block")
+                vae_temporal_downsample_factor = self._model_config.get(
+                    "vae_temporal_downsample_factor"
+                )
+
+                if (
+                    num_frame_per_block is not None
+                    and vae_temporal_downsample_factor is not None
+                ):
+                    return num_frame_per_block * vae_temporal_downsample_factor
+                else:
+                    # Otherwise, return 0 (should be treated as "now")
+                    return 0
+            except Exception as e:
+                logger.warning(f"Error reading model config: {e}. Returning 0.")
+                return 0
