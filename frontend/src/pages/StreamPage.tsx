@@ -532,7 +532,7 @@ export function StreamPage() {
       } = {};
 
       // Common parameters for pipelines that support prompts
-      if (pipelineIdToUse !== "passthrough" && pipelineIdToUse !== "vod") {
+      if (pipelineIdToUse !== "passthrough") {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
@@ -732,7 +732,6 @@ export function StreamPage() {
               }}
               disabled={
                 settings.pipelineId === "passthrough" ||
-                settings.pipelineId === "vod" ||
                 isPipelineLoading ||
                 isConnecting ||
                 showDownloadDialog

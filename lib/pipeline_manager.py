@@ -263,25 +263,6 @@ class PipelineManager:
             logger.info("Passthrough pipeline initialized")
             return pipeline
 
-        elif pipeline_id == "vod":
-            from pipelines.vod.pipeline import VodPipeline
-
-            # Use load parameters for resolution, default to 512x512
-            height = 512
-            width = 512
-            if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
-
-            pipeline = VodPipeline(
-                height=height,
-                width=width,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-            )
-            logger.info("VOD pipeline initialized")
-            return pipeline
-
         elif pipeline_id == "longlive":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.longlive.pipeline import LongLivePipeline

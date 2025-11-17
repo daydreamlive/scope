@@ -251,7 +251,6 @@ export function InputAndControlsPanel({
                     onTransitionSubmit={onTransitionSubmit}
                     disabled={
                       pipelineId === "passthrough" ||
-                      pipelineId === "vod" ||
                       (_isTimelinePlaying &&
                         !isVideoPaused &&
                         !isAtEndOfTimeline()) ||
