@@ -21,12 +21,15 @@ class PassthroughPipeline(Pipeline):
         self.dtype = dtype
         self.prompts = None
 
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
+    def prepare(self, **kwargs) -> Requirements:
         return Requirements(input_size=4)
 
     def __call__(
-        self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs
+        self,
+        **kwargs,
     ) -> torch.Tensor:
+        input = kwargs.get("video")
+
         if input is None:
             raise ValueError("Input cannot be None for PassthroughPipeline")
 
