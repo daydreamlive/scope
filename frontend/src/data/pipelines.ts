@@ -43,6 +43,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
   },
   longlive: {
     name: "LongLive",

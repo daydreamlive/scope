@@ -330,20 +330,18 @@ class PipelineManager:
             )
             config["model_config"].base_model_name = "Wan2.1-T2V-14B"
 
-            # Use load parameters for resolution and seed
-            height = 512
-            width = 512
-            seed = 42
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
             quantization = None
             if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
-                seed = load_params.get("seed", 42)
                 quantization = load_params.get("quantization", None)
-
-            config["height"] = height
-            config["width"] = width
-            config["seed"] = seed
+                config["quantization"] = quantization
 
             pipeline = StreamDiffusionV2Pipeline(
                 config,
