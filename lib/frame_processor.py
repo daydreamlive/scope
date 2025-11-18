@@ -282,7 +282,13 @@ class FrameProcessor:
             if new_parameters != self.parameters:
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
-                logger.info(f"Updated parameters: {self.parameters}")
+                
+                # Log parameters with truncated base64 image data for readability
+                log_params = dict(self.parameters)
+                if 'input_image' in log_params and log_params['input_image']:
+                    img_str = log_params['input_image']
+                    log_params['input_image'] = f"{img_str[:50]}...{img_str[-20:]}" if len(img_str) > 100 else img_str
+                logger.info(f"Updated parameters: {log_params}")
         except queue.Empty:
             pass
 
