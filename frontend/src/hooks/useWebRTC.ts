@@ -16,6 +16,7 @@ interface InitialParameters {
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
   input_image?: string | null; // Base64 encoded image data for img2img, null to clear
+  i2v_conditioning_mode?: "regular" | "reduced"; // Image-to-video conditioning mode
 }
 
 interface UseWebRTCOptions {
@@ -239,6 +240,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       kv_cache_attention_bias?: number;
       paused?: boolean;
       input_image?: string | null; // Base64 encoded image data for img2img, null to clear
+      i2v_conditioning_mode?: "regular" | "reduced"; // Image-to-video conditioning mode
     }) => {
       if (
         dataChannelRef.current &&

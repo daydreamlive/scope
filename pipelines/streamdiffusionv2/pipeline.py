@@ -216,9 +216,63 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self,
         input: torch.Tensor | list[torch.Tensor] | None = None,
         noise_controller: bool = True,
+        i2v_conditioning_mode: str = "regular",
+        conditioning_image: str | None = None,  # Base64 encoded image for CLIP conditioning
     ) -> torch.Tensor:
         if input is None:
             raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
+
+        # Map i2v_conditioning_mode to clip_conditioning_scale
+        # Regular: full strength (1.0), Reduced: lower strength for more motion (0.4)
+        clip_conditioning_scale = 1.0 if i2v_conditioning_mode == "regular" else 0.4
+
+        # Encode conditioning image to CLIP features if available
+        clip_features = None
+        if conditioning_image:
+            # Check if CLIP encoder is available
+            has_clip_encoder = (
+                hasattr(self.stream, 'generator') and
+                hasattr(self.stream.generator, 'clip_encoder') and
+                self.stream.generator.clip_encoder is not None
+            )
+
+            logger.info(f"Conditioning image provided. CLIP encoder available: {has_clip_encoder}")
+
+            if has_clip_encoder:
+                try:
+                    import base64
+                    from io import BytesIO
+                    from PIL import Image
+
+                    # Decode base64 image
+                    if conditioning_image.startswith('data:image'):
+                        # Remove data:image/...;base64, prefix
+                        conditioning_image = conditioning_image.split(',', 1)[1]
+
+                    image_data = base64.b64decode(conditioning_image)
+                    pil_image = Image.open(BytesIO(image_data)).convert('RGB')
+
+                    # Encode to CLIP features
+                    clip_features = self.stream.generator.clip_encoder.encode_image(pil_image)
+                    # Convert to pipeline dtype (typically bfloat16) for compatibility
+                    clip_features = clip_features.to(self.dtype)
+                    logger.info(
+                        "Encoded conditioning image to CLIP features with scale=%s, shape=%s",
+                        clip_conditioning_scale,
+                        clip_features.shape,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to encode conditioning image: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    clip_features = None
+            else:
+                logger.warning("Conditioning image provided but CLIP encoder not available")
+                if hasattr(self.stream, 'generator'):
+                    logger.warning(f"Generator type: {type(self.stream.generator)}")
+                    logger.warning(f"Has clip_encoder attr: {hasattr(self.stream.generator, 'clip_encoder')}")
+                    if hasattr(self.stream.generator, 'clip_encoder'):
+                        logger.warning(f"clip_encoder value: {self.stream.generator.clip_encoder}")
 
         # Update prompt embedding for this generation call
         # Handles both static blending and temporal transitions
@@ -284,6 +338,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
             current_end=self.current_end,
             current_step=current_step,
             generator=rng,
+            clip_features=clip_features,
+            clip_conditioning_scale=clip_conditioning_scale,
         )
 
         # # Update tracking variables for next input

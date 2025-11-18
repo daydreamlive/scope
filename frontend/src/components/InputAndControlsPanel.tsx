@@ -34,6 +34,8 @@ interface InputAndControlsPanelProps {
   onImageFileUpload?: (file: File) => Promise<boolean>; // New prop for image upload
   onImageClear?: () => void; // New prop for clearing image
   uploadedImage?: string | null; // New prop for displaying uploaded image (base64 or URL)
+  i2vConditioningMode?: "regular" | "reduced"; // New prop for i2v conditioning mode
+  onI2vConditioningModeChange?: (mode: "regular" | "reduced") => void; // New prop for changing i2v mode
   pipelineId: string;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
@@ -72,6 +74,8 @@ export function InputAndControlsPanel({
   onImageFileUpload,
   onImageClear,
   uploadedImage,
+  i2vConditioningMode = "regular",
+  onI2vConditioningModeChange,
   pipelineId,
   prompts,
   onPromptsChange,
@@ -308,6 +312,30 @@ export function InputAndControlsPanel({
               <Upload className="h-4 w-4 text-white" />
             </label>
           </div>
+
+          {/* I2V Conditioning Mode Dropdown - Only show when image is uploaded */}
+          {imagePreview && onI2vConditioningModeChange && (
+            <div className="mt-2">
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                Conditioning Mode
+              </label>
+              <Select
+                value={i2vConditioningMode}
+                onValueChange={value =>
+                  onI2vConditioningModeChange(value as "regular" | "reduced")
+                }
+                disabled={isStreaming || isConnecting}
+              >
+                <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="regular">Regular</SelectItem>
+                  <SelectItem value="reduced">Reduced (More Motion)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
         <div>

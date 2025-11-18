@@ -6,6 +6,11 @@ from .. import (
 from typing import List, Optional
 import torch
 import time
+import os
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class CausalStreamInferencePipeline(torch.nn.Module):
@@ -20,7 +25,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
 
         start = time.time()
         self.generator = get_diffusion_wrapper(model_name=self.generator_model_name)(
-            model_dir=model_dir
+            model_dir=model_dir,
+            enable_clip=True  # Enable CLIP encoder for I2V conditioning
         )
         print(f"Loaded diffusion wrapper in {time.time() - start:3f}s")
 
@@ -150,6 +156,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
         current_end: int,
         current_step: int,
         generator: Optional[torch.Generator] = None,
+        clip_features: Optional[torch.Tensor] = None,
+        clip_conditioning_scale: float = 1.0,
     ) -> torch.Tensor:
         batch_size = noise.shape[0]
 
@@ -173,6 +181,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start,
                     current_end=current_end,
+                    clip_features=clip_features,
+                    clip_conditioning_scale=clip_conditioning_scale,
                 )
                 next_timestep = self.denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -199,6 +209,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start,
                     current_end=current_end,
+                    clip_features=clip_features,
+                    clip_conditioning_scale=clip_conditioning_scale,
                 )
 
         self.generator(
@@ -209,6 +221,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
             crossattn_cache=self.crossattn_cache,
             current_start=current_start,
             current_end=current_end,
+            clip_features=clip_features,
+            clip_conditioning_scale=clip_conditioning_scale,
         )
 
         return denoised_pred

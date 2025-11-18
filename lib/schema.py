@@ -86,6 +86,10 @@ class Parameters(BaseModel):
         default=None,
         description="Base64 encoded image data for image-to-image generation. When provided, the image will be used as the initial input for generation.",
     )
+    i2v_conditioning_mode: Literal["regular", "reduced"] | None = Field(
+        default="regular",
+        description="Image-to-video conditioning mode. 'regular' uses standard CLIP conditioning strength (may cause static frames), 'reduced' uses lower strength to preserve motion.",
+    )
 
 
 class WebRTCOfferRequest(BaseModel):

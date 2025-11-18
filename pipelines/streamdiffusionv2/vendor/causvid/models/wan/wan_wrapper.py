@@ -142,7 +142,7 @@ class WanCLIPImageEncoder:
         if clip_checkpoint_path is None:
             clip_checkpoint_path = os.path.join(
                 model_dir,
-                "Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                "Wan2.1-T2V-1.3B/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
             )
 
         if clip_tokenizer_path is None:
@@ -151,6 +151,8 @@ class WanCLIPImageEncoder:
             )
 
         # Initialize CLIP model
+        print(f"Loading CLIP model from: {clip_checkpoint_path}")
+        print(f"Loading CLIP tokenizer from: {clip_tokenizer_path}")
         self.clip_model = CLIPModel(
             dtype=dtype,
             device=device,
@@ -175,16 +177,16 @@ class WanCLIPImageEncoder:
         # CLIP expects images in range [0, 1] with specific normalization
         image_np = np.array(image.convert("RGB")).astype(np.float32) / 255.0
 
-        # Convert to tensor: [H, W, 3] -> [1, 3, H, W]
-        image_tensor = (
-            torch.from_numpy(image_np)
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-            .to(device=self.device, dtype=self.dtype)
-        )
+        # Convert to tensor: [H, W, 3] -> [3, H, W]
+        image_tensor = torch.from_numpy(image_np).permute(2, 0, 1)
 
-        # Normalize: convert from [0, 1] to [-1, 1]
-        image_tensor = image_tensor * 2.0 - 1.0
+        # Add frame dimension to match CLIP expectation [C, F, H, W]
+        image_tensor = image_tensor.unsqueeze(1)
+
+        # Move to device/dtype and normalize to [-1, 1]
+        image_tensor = (
+            image_tensor.to(device=self.device, dtype=self.dtype) * 2.0 - 1.0
+        )
 
         # Extract CLIP features
         with torch.no_grad():
@@ -204,6 +206,13 @@ class WanCLIPImageEncoder:
         """
         with torch.no_grad():
             # Ensure tensor is in the right format and device
+            # Ensure tensor has frame dimension [C, F, H, W]
+            if image_tensor.ndim == 3:
+                image_tensor = image_tensor.unsqueeze(1)
+            elif image_tensor.shape[1] != 1:
+                # If tensor is [B, 3, H, W], treat batch as frame dimension
+                image_tensor = image_tensor.permute(1, 0, 2, 3)
+
             image_tensor = image_tensor.to(device=self.device, dtype=self.dtype)
 
             # Extract CLIP features
@@ -453,6 +462,7 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
         self.clip_encoder = None
         if enable_clip:
             try:
+                print(f"Initializing CLIP encoder with model_dir={model_dir}")
                 self.clip_encoder = WanCLIPImageEncoder(
                     model_dir=model_dir,
                     dtype=torch.float16,
@@ -460,8 +470,11 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
                 )
                 print("✓ CLIP Image Encoder initialized for image conditioning")
             except Exception as e:
+                import traceback
                 print(f"⚠ Warning: Failed to initialize CLIP encoder: {e}")
+                print(f"Traceback: {traceback.format_exc()}")
                 print("  Image conditioning will be disabled.")
+                self.clip_encoder = None
 
     def forward(
         self,
@@ -473,6 +486,7 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
         current_start: Optional[int] = None,
         current_end: Optional[int] = None,
         clip_features: Optional[torch.Tensor] = None,
+        clip_conditioning_scale: float = 1.0,
     ) -> torch.Tensor:
         """
         Forward pass with optional CLIP features for image conditioning.
@@ -486,6 +500,7 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
             current_start: Start frame index for causal attention
             current_end: End frame index for causal attention
             clip_features: Optional CLIP image features [B, 257, 1280]
+            clip_conditioning_scale: Scale factor for CLIP conditioning strength
 
         Returns:
             Predicted clean latent tensor
@@ -499,11 +514,16 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
             input_timestep = timestep
 
         # Prepare model inputs
+        # Apply conditioning scale to CLIP features if present
+        scaled_clip_features = None
+        if clip_features is not None:
+            scaled_clip_features = clip_features * clip_conditioning_scale
+
         model_kwargs = {
             "t": input_timestep,
             "context": prompt_embeds,
             "seq_len": self.seq_len,
-            "clip_fea": clip_features,  # Add CLIP features
+            "clip_fea": scaled_clip_features,  # Add scaled CLIP features
         }
 
         # Add cache arguments if provided

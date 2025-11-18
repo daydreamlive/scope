@@ -36,6 +36,7 @@ export function StreamPage() {
   // Image input state
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [imageData, setImageData] = useState<string | null>(null); // Base64 data to send to backend
+  const [i2vConditioningMode, setI2vConditioningMode] = useState<"regular" | "reduced">("regular");
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
@@ -157,6 +158,7 @@ export function StreamPage() {
       if (isStreaming) {
         sendParameterUpdate({
           input_image: base64Data,
+          i2v_conditioning_mode: i2vConditioningMode,
         });
       }
 
@@ -175,6 +177,17 @@ export function StreamPage() {
     if (isStreaming) {
       sendParameterUpdate({
         input_image: null,
+      });
+    }
+  };
+
+  const handleI2vConditioningModeChange = (mode: "regular" | "reduced") => {
+    setI2vConditioningMode(mode);
+
+    // If streaming and image is uploaded, send the mode update to backend
+    if (isStreaming && imageData) {
+      sendParameterUpdate({
+        i2v_conditioning_mode: mode,
       });
     }
   };
@@ -580,6 +593,7 @@ export function StreamPage() {
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
         input_image?: string;
+        i2v_conditioning_mode?: "regular" | "reduced";
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -594,6 +608,7 @@ export function StreamPage() {
       // Add image data if image is uploaded
       if (imageData) {
         initialParameters.input_image = imageData;
+        initialParameters.i2v_conditioning_mode = i2vConditioningMode;
       }
 
       // Cache management for krea_realtime_video and longlive
@@ -659,6 +674,8 @@ export function StreamPage() {
             onImageFileUpload={handleImageFileUpload}
             onImageClear={handleImageClear}
             uploadedImage={uploadedImage}
+            i2vConditioningMode={i2vConditioningMode}
+            onI2vConditioningModeChange={handleI2vConditioningModeChange}
             pipelineId={settings.pipelineId}
             prompts={promptItems}
             onPromptsChange={setPromptItems}

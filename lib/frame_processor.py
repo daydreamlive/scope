@@ -300,10 +300,13 @@ class FrameProcessor:
         # Check for image input mode
         input_image = self.parameters.get("input_image", None)
         if input_image and input_image != self.current_image_data:
-            # New image data received, clear cache
+            # New image data received for CLIP conditioning
             self.current_image_data = input_image
-            self.image_frames_cache = None
-            logger.info("New image data received for img2img mode")
+            logger.info("New image data received for I2V CLIP conditioning")
+        elif not input_image and self.current_image_data:
+            # Image was cleared
+            self.current_image_data = None
+            logger.info("Image data cleared")
 
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
@@ -328,35 +331,26 @@ class FrameProcessor:
         if requirements is not None:
             current_chunk_size = requirements.input_size
 
-            # Clear image cache if chunk size changed (e.g., after prompt update that resets pipeline)
-            if self.cached_chunk_size is not None and self.cached_chunk_size != current_chunk_size:
-                logger.info(f"Chunk size changed from {self.cached_chunk_size} to {current_chunk_size}, clearing image cache")
-                self.image_frames_cache = None
-                self.cached_chunk_size = None
-
-            # Use image input if available, otherwise use video frames
-            if self.current_image_data:
-                # Generate frames from image
-                if self.image_frames_cache is None:
-                    # Convert and cache image frames
-                    self.image_frames_cache = self._convert_base64_image_to_frames(
-                        self.current_image_data, current_chunk_size
-                    )
-                    self.cached_chunk_size = current_chunk_size
-                input = self.image_frames_cache
-            else:
-                # Use video frames from buffer
-                with self.frame_buffer_lock:
-                    if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
-                        # Sleep briefly to avoid busy waiting
-                        self.shutdown_event.wait(SLEEP_TIME)
-                        return
-                    input = self.prepare_chunk(current_chunk_size)
+            # ALWAYS use video frames from buffer as the main input
+            # The image (if present) will be used for CLIP conditioning, not as input replacement
+            with self.frame_buffer_lock:
+                if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
+                    # Sleep briefly to avoid busy waiting
+                    self.shutdown_event.wait(SLEEP_TIME)
+                    return
+                input = self.prepare_chunk(current_chunk_size)
         try:
             # Pass parameters (excluding prepare-only parameters)
+            # Note: input_image is kept in PREPARE_ONLY_PARAMS, it's passed separately to pipeline
             call_params = {
                 k: v for k, v in self.parameters.items() if k not in PREPARE_ONLY_PARAMS
             }
+
+            # Add the conditioning image data if available
+            # This will be used for CLIP encoding, not as input replacement
+            if self.current_image_data:
+                call_params["conditioning_image"] = self.current_image_data
+
             output = pipeline(input, **call_params)
 
             processing_time = time.time() - start_time

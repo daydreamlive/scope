@@ -62,4 +62,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
   },
+  i2vConditioningMode: {
+    label: "I2V Conditioning Mode:",
+    tooltip:
+      "Controls the strength of image-to-video conditioning. 'Regular' uses standard CLIP conditioning which may cause static frames. 'Reduced' uses lower conditioning strength to preserve more motion from the input video.",
+  },
 };
