@@ -1,5 +1,8 @@
 import logging
 import time
+import base64
+from io import BytesIO
+from PIL import Image
 
 import torch
 from diffusers.modular_pipelines import PipelineState
@@ -8,7 +11,8 @@ from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
-from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
+from ..wan2_1.components import WanTextEncoderWrapper
+from .wrapper import CausalWanDiffusionWrapper
 from .components import WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modules.causal_model import CausalWanModel
@@ -42,12 +46,13 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         # Load generator
         start = time.time()
-        generator = WanDiffusionWrapper(
+        generator = CausalWanDiffusionWrapper(
             CausalWanModel,
             model_name=base_model_name,
             model_dir=model_dir,
             generator_path=generator_path,
             generator_model_name=generator_model_name,
+            enable_clip=True,
             **base_model_kwargs,
         )
 
@@ -127,6 +132,25 @@ class StreamDiffusionV2Pipeline(Pipeline):
     def _generate(self, **kwargs) -> torch.Tensor:
         for k, v in kwargs.items():
             self.state.set(k, v)
+
+        # Handle input_image for CLIP conditioning
+        input_image = kwargs.get("input_image")
+        clip_features = None
+
+        if input_image and isinstance(input_image, str) and hasattr(self.components.generator, "clip_encoder") and self.components.generator.clip_encoder is not None:
+             try:
+                # Decode base64 image
+                img_str = input_image
+                if "," in img_str:
+                    img_str = img_str.split(",", 1)[1]
+                image_bytes = base64.b64decode(img_str)
+                image = Image.open(BytesIO(image_bytes))
+                # Encode
+                clip_features = self.components.generator.clip_encoder.encode_image(image)
+             except Exception as e:
+                logger.error(f"Failed to encode input image: {e}")
+
+        self.state.set("clip_features", clip_features)
 
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
