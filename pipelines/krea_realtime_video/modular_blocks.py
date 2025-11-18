@@ -40,6 +40,7 @@ TEXT_BLOCKS = InsertableDict(
 VIDEO_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
+        ("embedding_blending", EmbeddingBlendingBlock),
         ("preprocess_video", PreprocessVideoBlock),
         ("noise_scale_controller", NoiseScaleControllerBlock),
         ("set_timesteps", SetTimestepsBlock),
