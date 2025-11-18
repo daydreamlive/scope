@@ -75,7 +75,7 @@ export function SettingsPanel({
   onResolutionChange,
   seed = 42,
   onSeedChange,
-  denoisingSteps = [700, 500],
+  denoisingSteps,
   onDenoisingStepsChange,
   noiseScale = 0.7,
   onNoiseScaleChange,
@@ -95,6 +95,8 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
+  const effectiveDenoisingSteps =
+    denoisingSteps ?? getDefaultDenoisingSteps(pipelineId);
 
   const modeCapabilities = getPipelineModeCapabilities(pipelineId);
   const effectiveGenerationMode = generationMode ?? modeCapabilities.nativeMode;
@@ -598,7 +600,7 @@ export function SettingsPanel({
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video") && (
           <DenoisingStepsSlider
-            value={denoisingSteps}
+            value={effectiveDenoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
             defaultValues={getDefaultDenoisingSteps(pipelineId)}
             tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}

@@ -6,7 +6,7 @@ import type {
   PromptData,
 } from "../types";
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultResolution } from "../lib/utils";
+import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { getHardwareInfo, type HardwareInfoResponse } from "../lib/api";
 
 export function useStreamState() {
@@ -31,7 +31,7 @@ export function useStreamState() {
     resolution: getDefaultResolution("streamdiffusionv2"), // Default resolution for StreamDiffusionV2
     generationMode: defaultNativeMode,
     seed: 42,
-    denoisingSteps: [700, 500], // Default for StreamDiffusionV2
+    denoisingSteps: getDefaultDenoisingSteps("streamdiffusionv2"),
     noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
     noiseController: true, // Default noise controller for StreamDiffusionV2
     manageCache: true, // Default manage cache for StreamDiffusionV2

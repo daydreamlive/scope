@@ -379,7 +379,9 @@ export function StreamPage() {
     sendParameterUpdate({
       prompts,
       prompt_interpolation_method: interpolationMethod,
-      denoising_step_list: settings.denoisingSteps || [700, 500],
+      denoising_step_list:
+        settings.denoisingSteps ||
+        getDefaultDenoisingSteps(settings.pipelineId),
     });
   };
 
@@ -509,6 +511,23 @@ export function StreamPage() {
     }
   }, [videoResolution, isStreaming, settings.pipelineId, updateSettings]);
 
+  const computeCanStartStream = (
+    caps: ReturnType<typeof getPipelineModeCapabilities>,
+    generationMode: "video" | "text" | undefined,
+    hasLocalStream: boolean,
+    isInitializingLocalStream: boolean
+  ) => {
+    const effectiveMode = generationMode ?? caps.nativeMode;
+    const needsVideoInput =
+      caps.requiresVideoInVideoMode && effectiveMode === "video";
+
+    if (!needsVideoInput) {
+      return !isInitializingLocalStream;
+    }
+
+    return hasLocalStream && !isInitializingLocalStream;
+  };
+
   const handleStartStream = async (
     overridePipelineId?: PipelineId
   ): Promise<boolean> => {
@@ -637,12 +656,9 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for all main pipelines
-      if (
-        pipelineIdToUse === "krea-realtime-video" ||
-        pipelineIdToUse === "longlive" ||
-        pipelineIdToUse === "streamdiffusionv2"
-      ) {
+      // Cache management for pipelines that support it
+      const runtimeCaps = getPipelineModeCapabilities(pipelineIdToUse);
+      if (runtimeCaps.hasCacheManagement) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
@@ -652,24 +668,14 @@ export function StreamPage() {
           settings.kvCacheAttentionBias ?? 1.0;
       }
 
-      // Noise control is available for all three main pipelines
-      if (
-        pipelineIdToUse === "streamdiffusionv2" ||
-        pipelineIdToUse === "longlive" ||
-        pipelineIdToUse === "krea-realtime-video"
-      ) {
+      // Noise control and generation mode for pipelines that expose them
+      if (runtimeCaps.hasNoiseControls) {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
-      // Generation mode for all main pipelines
-      if (
-        pipelineIdToUse === "streamdiffusionv2" ||
-        pipelineIdToUse === "longlive" ||
-        pipelineIdToUse === "krea-realtime-video"
-      ) {
-        const caps = getPipelineModeCapabilities(pipelineIdToUse);
-        const nativeGenerationMode = caps.nativeMode;
+      if (runtimeCaps.hasGenerationModeControl) {
+        const nativeGenerationMode = runtimeCaps.nativeMode;
         initialParameters.generation_mode =
           settings.generationMode ?? nativeGenerationMode;
       }
@@ -709,14 +715,13 @@ export function StreamPage() {
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={(() => {
-              const pipelineCategory = PIPELINES[settings.pipelineId]?.category;
-              const needsVideoInput =
-                pipelineCategory === "video-input" &&
-                (settings.generationMode ?? "video") === "video";
-              if (!needsVideoInput) {
-                return !isInitializing;
-              }
-              return !!localStream && !isInitializing;
+              const caps = getPipelineModeCapabilities(settings.pipelineId);
+              return computeCanStartStream(
+                caps,
+                settings.generationMode,
+                !!localStream,
+                isInitializing
+              );
             })()}
             onStartStream={handleStartStream}
             onStopStream={stopStream}
@@ -803,7 +808,9 @@ export function StreamPage() {
                   sendParameterUpdate({
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
+                    denoising_step_list:
+                      settings.denoisingSteps ||
+                      getDefaultDenoisingSteps(settings.pipelineId),
                   });
                 }
               }}
@@ -847,7 +854,9 @@ export function StreamPage() {
                   sendParameterUpdate({
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
+                    denoising_step_list:
+                      settings.denoisingSteps ||
+                      getDefaultDenoisingSteps(settings.pipelineId),
                   });
                 }
               }}
@@ -897,7 +906,10 @@ export function StreamPage() {
             onResolutionChange={handleResolutionChange}
             seed={settings.seed ?? 42}
             onSeedChange={handleSeedChange}
-            denoisingSteps={settings.denoisingSteps || [700, 500]}
+            denoisingSteps={
+              settings.denoisingSteps ||
+              getDefaultDenoisingSteps(settings.pipelineId)
+            }
             onDenoisingStepsChange={handleDenoisingStepsChange}
             noiseScale={settings.noiseScale ?? 0.7}
             onNoiseScaleChange={handleNoiseScaleChange}

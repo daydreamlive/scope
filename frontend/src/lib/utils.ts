@@ -12,9 +12,11 @@ export function getDefaultDenoisingSteps(pipelineId: PipelineId): number[] {
   } else if (pipelineId === "krea-realtime-video") {
     return [1000, 750, 500, 250];
   } else if (pipelineId === "streamdiffusionv2") {
-    return [700, 500];
+    // Match backend DEFAULT_DENOISING_STEP_LIST for StreamDiffusionV2
+    return [750, 250];
   }
-  return [700, 500]; // Default fallback
+  // Default fallback for pipelines without explicit schedules
+  return [750, 250];
 }
 
 export function getDefaultResolution(pipelineId: PipelineId): {

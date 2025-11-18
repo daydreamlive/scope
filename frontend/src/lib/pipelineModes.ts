@@ -26,6 +26,21 @@ export interface PipelineModeCapabilities {
   };
   showNoiseControlsInText: boolean;
   showNoiseControlsInVideo: boolean;
+  /**
+   * Whether this pipeline exposes an explicit generation_mode control that
+   * allows switching between text-to-video and video-to-video behaviour.
+   */
+  hasGenerationModeControl: boolean;
+  /**
+   * Whether this pipeline supports user-adjustable noise controls. When false,
+   * UI and initial parameter wiring should avoid sending noise_scale or
+   * noise_controller.
+   */
+  hasNoiseControls: boolean;
+  /**
+   * Whether this pipeline exposes a cache management toggle (manage_cache).
+   */
+  hasCacheManagement: boolean;
 }
 
 export function getPipelineModeCapabilities(
@@ -50,6 +65,9 @@ export function getPipelineModeCapabilities(
 
   let showNoiseControlsInText = false;
   let showNoiseControlsInVideo = false;
+  let hasGenerationModeControl = false;
+  let hasNoiseControls = false;
+  let hasCacheManagement = false;
 
   if (id === "streamdiffusionv2") {
     // StreamDiffusionV2 uses noise controls only in video-to-video mode. In
@@ -61,6 +79,18 @@ export function getPipelineModeCapabilities(
     // LongLive and Krea only need noise controls in video-to-video workflows.
     showNoiseControlsInText = false;
     showNoiseControlsInVideo = true;
+  }
+
+  // All three main pipelines expose generation mode, noise controls and cache
+  // management toggles.
+  if (
+    id === "streamdiffusionv2" ||
+    id === "longlive" ||
+    id === "krea-realtime-video"
+  ) {
+    hasGenerationModeControl = true;
+    hasNoiseControls = true;
+    hasCacheManagement = true;
   }
 
   return {
@@ -76,5 +106,8 @@ export function getPipelineModeCapabilities(
     },
     showNoiseControlsInText,
     showNoiseControlsInVideo,
+    hasGenerationModeControl,
+    hasNoiseControls,
+    hasCacheManagement,
   };
 }
