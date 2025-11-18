@@ -150,6 +150,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
         current_end: int,
         current_step: int,
         generator: Optional[torch.Generator] = None,
+        clip_features: Optional[torch.Tensor] = None,
+        clip_conditioning_scale: float = 0.5,
     ) -> torch.Tensor:
         batch_size = noise.shape[0]
 
@@ -173,6 +175,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start,
                     current_end=current_end,
+                    clip_features=clip_features,
+                    clip_conditioning_scale=clip_conditioning_scale,
                 )
                 next_timestep = self.denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -199,6 +203,8 @@ class CausalStreamInferencePipeline(torch.nn.Module):
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start,
                     current_end=current_end,
+                    clip_features=clip_features,
+                    clip_conditioning_scale=clip_conditioning_scale,
                 )
 
         self.generator(

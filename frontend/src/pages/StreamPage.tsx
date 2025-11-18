@@ -356,6 +356,16 @@ export function StreamPage() {
     });
   };
 
+  const handleClipConditioningScaleChange = (scale: number) => {
+    updateSettings({ clipConditioningScale: scale });
+    // Send CLIP conditioning scale update to backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        clip_conditioning_scale: scale,
+      });
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -659,6 +669,8 @@ export function StreamPage() {
             onImageFileUpload={handleImageFileUpload}
             onImageClear={handleImageClear}
             uploadedImage={uploadedImage}
+            clipConditioningScale={settings.clipConditioningScale ?? 0.5}
+            onClipConditioningScaleChange={handleClipConditioningScaleChange}
             pipelineId={settings.pipelineId}
             prompts={promptItems}
             onPromptsChange={setPromptItems}

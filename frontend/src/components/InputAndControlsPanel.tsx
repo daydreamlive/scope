@@ -16,6 +16,8 @@ import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 import { Button } from "./ui/button";
+import { SliderWithInput } from "./ui/slider-with-input";
+import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -34,6 +36,8 @@ interface InputAndControlsPanelProps {
   onImageFileUpload?: (file: File) => Promise<boolean>; // New prop for image upload
   onImageClear?: () => void; // New prop for clearing image
   uploadedImage?: string | null; // New prop for displaying uploaded image (base64 or URL)
+  clipConditioningScale?: number; // Image conditioning strength
+  onClipConditioningScaleChange?: (scale: number) => void; // Handler for scale changes
   pipelineId: string;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
@@ -72,6 +76,8 @@ export function InputAndControlsPanel({
   onImageFileUpload,
   onImageClear,
   uploadedImage,
+  clipConditioningScale = 0.5,
+  onClipConditioningScaleChange,
   pipelineId,
   prompts,
   onPromptsChange,
@@ -104,6 +110,12 @@ export function InputAndControlsPanel({
   };
   const videoRef = useRef<HTMLVideoElement>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  // Local slider state management for image conditioning scale
+  const clipConditioningScaleSlider = useLocalSliderValue(
+    clipConditioningScale,
+    onClipConditioningScaleChange
+  );
 
   // Get pipeline category, default to video-input
   const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
@@ -275,7 +287,6 @@ export function InputAndControlsPanel({
                 {/* Clear button */}
                 <Button
                   onClick={handleClearImage}
-                  disabled={isStreaming || isConnecting}
                   size="sm"
                   variant="ghost"
                   className="absolute top-2 right-2 p-1 rounded-full bg-black/50 hover:bg-black/70"
@@ -295,19 +306,34 @@ export function InputAndControlsPanel({
               onChange={handleImageUpload}
               className="hidden"
               id="image-upload"
-              disabled={isStreaming || isConnecting}
             />
             <label
               htmlFor="image-upload"
-              className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                isStreaming || isConnecting
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:bg-black/70 cursor-pointer"
-              }`}
+              className="absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors hover:bg-black/70 cursor-pointer"
             >
               <Upload className="h-4 w-4 text-white" />
             </label>
           </div>
+
+          {/* Image Strength Slider - only show when image is uploaded */}
+          {imagePreview && (
+            <div className="mt-3">
+              <SliderWithInput
+                label="Image Strength"
+                tooltip="Controls how much the image influences generation. 0.0 = text-only, 0.5 = balanced, 1.0 = maximum image influence. Lower values allow more creative text-driven variations."
+                value={clipConditioningScaleSlider.localValue}
+                onValueChange={clipConditioningScaleSlider.handleValueChange}
+                onValueCommit={clipConditioningScaleSlider.handleValueCommit}
+                min={0.0}
+                max={1.0}
+                step={0.01}
+                incrementAmount={0.01}
+                labelClassName="text-sm text-foreground w-24"
+                valueFormatter={clipConditioningScaleSlider.formatValue}
+                inputParser={v => parseFloat(v) || 0.5}
+              />
+            </div>
+          )}
         </div>
 
         <div>

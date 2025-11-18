@@ -22,6 +22,7 @@ export interface WebRTCOfferRequest {
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
     input_image?: string | null; // Base64 encoded image data for img2img, null to clear
+    clip_conditioning_scale?: number; // Image conditioning strength (0.0 to 1.0)
   };
 }
 

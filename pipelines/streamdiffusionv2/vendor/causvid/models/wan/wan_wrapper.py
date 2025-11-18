@@ -473,6 +473,7 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
         current_start: Optional[int] = None,
         current_end: Optional[int] = None,
         clip_features: Optional[torch.Tensor] = None,
+        clip_conditioning_scale: float = 1.0,
     ) -> torch.Tensor:
         """
         Forward pass with optional CLIP features for image conditioning.
@@ -486,6 +487,7 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
             current_start: Start frame index for causal attention
             current_end: End frame index for causal attention
             clip_features: Optional CLIP image features [B, 257, 1280]
+            clip_conditioning_scale: Strength of image conditioning (0.0=text-only, 1.0=full strength)
 
         Returns:
             Predicted clean latent tensor
@@ -498,12 +500,20 @@ class CausalWanDiffusionWrapper(WanDiffusionWrapper):
         else:
             input_timestep = timestep
 
+        # Prepare CLIP features with conditioning scale
+        clip_fea_dict = None
+        if clip_features is not None:
+            clip_fea_dict = {
+                'features': clip_features,
+                'scale': clip_conditioning_scale
+            }
+
         # Prepare model inputs
         model_kwargs = {
             "t": input_timestep,
             "context": prompt_embeds,
             "seq_len": self.seq_len,
-            "clip_fea": clip_features,  # Add CLIP features
+            "clip_fea": clip_fea_dict,  # Pass CLIP features with scale
         }
 
         # Add cache arguments if provided

@@ -32,6 +32,7 @@ export function useStreamState() {
     manageCache: true, // Default manage cache for StreamDiffusionV2
     quantization: null,
     kvCacheAttentionBias: 0.3, // Default cache bias
+    clipConditioningScale: 0.5, // Default image conditioning scale
     paused: false, // Default to not paused (generating)
   });
 

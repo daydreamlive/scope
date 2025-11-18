@@ -1,8 +1,11 @@
 import logging
 import os
 import time
+import base64
+from io import BytesIO
 
 import torch
+from PIL import Image
 
 from ..blending import PromptBlender, handle_transition_prepare
 from ..interface import Pipeline, Requirements
@@ -10,6 +13,7 @@ from ..process import postprocess_chunk, preprocess_chunk
 from .vendor.causvid.models.wan.causal_stream_inference import (
     CausalStreamInferencePipeline,
 )
+from .vendor.causvid.models.wan.wan_wrapper import WanCLIPImageEncoder
 
 # https://github.com/daydreamlive/scope/blob/0cf1766186be3802bf97ce550c2c978439f22068/pipelines/streamdiffusionv2/vendor/causvid/models/wan/causal_model.py#L306
 MAX_ROPE_FREQ_TABLE_SEQ_LEN = 1024
@@ -61,10 +65,35 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.stream.generator.load_state_dict(state_dict, strict=False)
         print(f"Loaded diffusion state dict in {time.time() - start:.3f}s")
 
+        # Initialize CLIP embedding layer after loading state dict
+        # This creates the clip_img_emb MLP on the correct device
+        if hasattr(self.stream.generator, 'model'):
+            self.stream.generator.model._post_init_clip_embedding()
+            print("✓ CLIP embedding layer initialized")
+
         self.chunk_size = chunk_size
         self.start_chunk_size = start_chunk_size
         self.noise_scale = noise_scale
         self.base_seed = config.get("seed", 42)
+        self.clip_conditioning_scale = 0.5  # Default image conditioning scale
+
+        # Initialize CLIP encoder for image conditioning
+        try:
+            model_dir = config.get("model_dir")
+            self.clip_encoder = WanCLIPImageEncoder(
+                model_dir=model_dir,
+                dtype=torch.float16,
+                device=device,
+            )
+            print("✓ CLIP Image Encoder initialized for image conditioning")
+        except Exception as e:
+            print(f"⚠ Warning: Failed to initialize CLIP encoder: {e}")
+            print("  Image conditioning will be disabled.")
+            self.clip_encoder = None
+
+        # Storage for current image and its CLIP features
+        self.current_image_data = None  # Base64 image data
+        self.current_clip_features = None  # Encoded CLIP features
 
         self.prompts = None
         self.denoising_step_list = None
@@ -91,6 +120,37 @@ class StreamDiffusionV2Pipeline(Pipeline):
         denoising_step_list = kwargs.get("denoising_step_list", None)
         noise_controller = kwargs.get("noise_controller", None)
         noise_scale = kwargs.get("noise_scale", None)
+        input_image = kwargs.get("input_image", None)  # Base64 image data
+
+        # Handle image input for CLIP conditioning
+        if input_image != self.current_image_data:
+            if input_image is None:
+                # Clear image
+                logger.info("Clearing CLIP image conditioning")
+                self.current_image_data = None
+                self.current_clip_features = None
+            elif self.clip_encoder is not None:
+                # New image - encode it
+                try:
+                    logger.info("Encoding new image for CLIP conditioning")
+                    # Decode base64 to PIL Image
+                    if input_image.startswith('data:image'):
+                        # Remove data URL prefix if present
+                        input_image = input_image.split(',', 1)[1]
+
+                    image_bytes = base64.b64decode(input_image)
+                    pil_image = Image.open(BytesIO(image_bytes)).convert('RGB')
+
+                    # Encode with CLIP
+                    self.current_clip_features = self.clip_encoder.encode_image(pil_image)
+                    self.current_image_data = input_image
+                    logger.info(f"✓ Image encoded, CLIP features shape: {self.current_clip_features.shape}")
+                    logger.info(f"  CLIP features range: [{self.current_clip_features.min():.3f}, {self.current_clip_features.max():.3f}]")
+                    logger.info(f"  CLIP features mean: {self.current_clip_features.mean():.3f}, std: {self.current_clip_features.std():.3f}")
+                except Exception as e:
+                    logger.error(f"Failed to encode image: {e}")
+                    self.current_clip_features = None
+                    self.current_image_data = None
 
         # Check if prompts changed using prompt blender
         if self.prompt_blender.should_update(prompts, prompt_interpolation_method):
@@ -216,9 +276,19 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self,
         input: torch.Tensor | list[torch.Tensor] | None = None,
         noise_controller: bool = True,
+        clip_conditioning_scale: float = 0.5,
     ) -> torch.Tensor:
         if input is None:
             raise ValueError("Input cannot be None for StreamDiffusionV2Pipeline")
+
+        # Update clip conditioning scale if provided
+        self.clip_conditioning_scale = clip_conditioning_scale
+
+        # Log CLIP conditioning status
+        if self.current_clip_features is not None:
+            logger.debug(f"CLIP conditioning ACTIVE - scale: {self.clip_conditioning_scale:.2f}, features shape: {self.current_clip_features.shape}")
+        else:
+            logger.debug("CLIP conditioning INACTIVE - no image features")
 
         # Update prompt embedding for this generation call
         # Handles both static blending and temporal transitions
@@ -278,12 +348,16 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # Higher noise scale -> noiser latents, less of inputs preserved
         # Lower noise scale -> less noisy latents, more of inputs preserved
         noisy_latents = noise * self.noise_scale + latents * (1 - self.noise_scale)
+
+        # Run inference with optional CLIP conditioning
         denoised_pred = self.stream.inference(
             noise=noisy_latents,
             current_start=self.current_start,
             current_end=self.current_end,
             current_step=current_step,
             generator=rng,
+            clip_features=self.current_clip_features,
+            clip_conditioning_scale=self.clip_conditioning_scale,
         )
 
         # # Update tracking variables for next input

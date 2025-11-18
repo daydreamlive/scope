@@ -667,9 +667,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 List of text embeddings each with shape [L, C]
             seq_len (`int`):
                 Maximum sequence length for positional encoding
-            clip_fea (Tensor, *optional*):
+            clip_fea (Tensor or dict, *optional*):
                 CLIP image features for image conditioning (optional for T2V, required for I2V)
-                Shape: [B, 257, 1280] from CLIP ViT-H/14 encoder
+                Can be either:
+                - Tensor: Shape [B, 257, 1280] from CLIP ViT-H/14 encoder
+                - dict: {'features': Tensor, 'scale': float} where scale controls conditioning strength (0.0-1.0)
             y (List[Tensor], *optional*):
                 Conditional video inputs for image-to-video mode, same shape as x
 
@@ -727,11 +729,24 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
+            # Extract features tensor and conditioning scale
+            if isinstance(clip_fea, dict):
+                conditioning_scale = clip_fea.get('scale', 1.0)
+                clip_features = clip_fea['features']
+            else:
+                conditioning_scale = 1.0
+                clip_features = clip_fea
+
             # Use appropriate embedding layer based on model type
             if self.model_type == "i2v":
-                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context_clip = self.img_emb(clip_features)  # bs x 257 x dim
             elif self.model_type == "t2v":
-                context_clip = self.clip_img_emb(clip_fea)  # bs x 257 x dim
+                context_clip = self.clip_img_emb(clip_features)  # bs x 257 x dim
+
+            # Apply conditioning scale to control image influence
+            # scale=1.0: full strength, scale=0.5: half strength, scale=0.0: text-only
+            context_clip = context_clip * conditioning_scale
+
             context = torch.concat([context_clip, context], dim=1)
 
         # arguments
@@ -793,9 +808,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 List of text embeddings each with shape [L, C]
             seq_len (`int`):
                 Maximum sequence length for positional encoding
-            clip_fea (Tensor, *optional*):
+            clip_fea (Tensor or dict, *optional*):
                 CLIP image features for image conditioning (optional for T2V, required for I2V)
-                Shape: [B, 257, 1280] from CLIP ViT-H/14 encoder
+                Can be either:
+                - Tensor: Shape [B, 257, 1280] from CLIP ViT-H/14 encoder
+                - dict: {'features': Tensor, 'scale': float} where scale controls conditioning strength (0.0-1.0)
             y (List[Tensor], *optional*):
                 Conditional video inputs for image-to-video mode, same shape as x
 
@@ -863,11 +880,24 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
+            # Extract features tensor and conditioning scale
+            if isinstance(clip_fea, dict):
+                conditioning_scale = clip_fea.get('scale', 1.0)
+                clip_features = clip_fea['features']
+            else:
+                conditioning_scale = 1.0
+                clip_features = clip_fea
+
             # Use appropriate embedding layer based on model type
             if self.model_type == "i2v":
-                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context_clip = self.img_emb(clip_features)  # bs x 257 x dim
             elif self.model_type == "t2v":
-                context_clip = self.clip_img_emb(clip_fea)  # bs x 257 x dim
+                context_clip = self.clip_img_emb(clip_features)  # bs x 257 x dim
+
+            # Apply conditioning scale to control image influence
+            # scale=1.0: full strength, scale=0.5: half strength, scale=0.0: text-only
+            context_clip = context_clip * conditioning_scale
+
             context = torch.concat([context_clip, context], dim=1)
 
         # arguments
