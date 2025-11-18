@@ -31,6 +31,11 @@ WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
+    # Native/default generation mode for this pipeline. In native mode the
+    # pipeline runs purely text-to-video and never requires input video unless
+    # explicitly requested.
+    NATIVE_GENERATION_MODE = "text"
+
     def __init__(
         self,
         config,
@@ -180,11 +185,15 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         When generation_mode is \"video\", the pipeline requests CHUNK_SIZE
         frames from the FrameProcessor and operates in video-to-video mode
         using the shared video preprocessing and latent blocks. When
-        generation_mode is \"text\" (default for backwards compatibility),
-        no video is requested and the pipeline operates in pure text-to-video
-        mode using noise latents only.
+        generation_mode is \"text\" (the native mode), no video is requested
+        and the pipeline operates in pure text-to-video mode using noise
+        latents only.
         """
-        mode = generation_mode or kwargs.get("generation_mode") or "text"
+        mode = (
+            generation_mode
+            or kwargs.get("generation_mode")
+            or self.NATIVE_GENERATION_MODE
+        )
         if mode == "video":
             return Requirements(input_size=CHUNK_SIZE)
         return None
@@ -220,10 +229,17 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
-        # Select appropriate block graph based on generation mode.
-        mode = self.state.get("generation_mode")
-        if mode is None:
-            mode = "text"
+        # Select appropriate block graph based on generation mode. If no mode
+        # has been set yet, fall back to the native mode.
+        mode = self.state.get("generation_mode") or self.NATIVE_GENERATION_MODE
+
+        # In native text-to-video mode, ignore any noise_scale value present in
+        # state or passed from the frontend. This restores the original Krea
+        # behaviour where the denoising schedule is fixed and independent of
+        # noise controls, which are only meaningful for video-to-video workflows.
+        if mode == "text":
+            self.state.set("noise_scale", None)
+
         blocks = self.blocks_video if mode == "video" else self.blocks_text
 
         _, self.state = blocks(self.components, self.state)

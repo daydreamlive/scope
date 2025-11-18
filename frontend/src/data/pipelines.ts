@@ -6,6 +6,10 @@ export interface PipelineInfo {
   docsUrl?: string;
   modified?: boolean;
   category: PipelineCategory;
+  // Native/default generation mode for this pipeline when first selected.
+  // - "video": pipeline is primarily video-to-video by default.
+  // - "text": pipeline is primarily text-to-video by default.
+  nativeGenerationMode?: "video" | "text";
   defaultPrompt?: string;
   estimatedVram?: number; // GB
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
@@ -23,6 +27,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support streaming.",
     modified: true,
     category: "video-input",
+    nativeGenerationMode: "video",
     defaultPrompt: "A dog in the grass looking around, photorealistic",
     estimatedVram: 20,
     requiresModels: true,
@@ -40,6 +45,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     // LongLive now supports both text and video input; when in Video mode
     // we treat it as a video-input pipeline.
     category: "video-input",
+    nativeGenerationMode: "text",
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 20,
@@ -58,6 +64,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     // Krea realtime video now supports both text and video input; when in
     // Video mode we treat it as a video-input pipeline.
     category: "video-input",
+    nativeGenerationMode: "text",
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 32,
@@ -71,6 +78,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     about:
       "A pipeline that returns the input video without any processing that is useful for testing and debugging.",
     category: "video-input",
+    nativeGenerationMode: "video",
     requiresModels: false,
   },
 };

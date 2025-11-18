@@ -24,6 +24,11 @@ CHUNK_SIZE = 4
 
 
 class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
+    # Native/default generation mode for this pipeline. In native mode the
+    # pipeline runs purely text-to-video and never requires input video unless
+    # explicitly requested.
+    NATIVE_GENERATION_MODE = "text"
+
     def __init__(
         self,
         config,
@@ -105,6 +110,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             or "streamdiffusionv2",  # Use streamdiffusionv2 for video mode
             pipeline_name="longlive",
             model_dir=model_dir,
+            # When reusing the StreamDiffusionV2 VAE inside LongLive, apply
+            # LongLive-style latent scaling so that video latents match the
+            # distribution expected by the LongLive pipeline.
+            apply_longlive_scale=True,
         )
         print(f"Loaded VAEs in {time.time() - start:.3f}s")
         # Move VAEs to target device and use target dtype
@@ -163,11 +172,15 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         When generation_mode is \"video\", the pipeline requests CHUNK_SIZE
         frames from the FrameProcessor and operates in video-to-video mode
         using the shared video preprocessing and latent blocks. When
-        generation_mode is \"text\" (default for backwards compatibility),
-        no video is requested and the pipeline operates in pure text-to-video
-        mode using noise latents only.
+        generation_mode is \"text\" (the native mode), no video is requested
+        and the pipeline operates in pure text-to-video mode using noise
+        latents only.
         """
-        mode = generation_mode or kwargs.get("generation_mode") or "text"
+        mode = (
+            generation_mode
+            or kwargs.get("generation_mode")
+            or self.NATIVE_GENERATION_MODE
+        )
         if mode == "video":
             return Requirements(input_size=CHUNK_SIZE)
         return None
@@ -203,10 +216,17 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
-        # Select appropriate block graph and VAE based on generation mode.
-        mode = self.state.get("generation_mode")
-        if mode is None:
-            mode = "text"
+        # Select appropriate block graph and VAE based on generation mode. If
+        # no mode has been set yet, fall back to the native mode.
+        mode = self.state.get("generation_mode") or self.NATIVE_GENERATION_MODE
+
+        # In native text-to-video mode, ignore any noise_scale value present in
+        # state or passed from the frontend. This restores the original LongLive
+        # behaviour where the denoising schedule is fixed and independent of
+        # noise controls, which are only meaningful for video-to-video workflows.
+        if mode == "text":
+            self.state.set("noise_scale", None)
+
         blocks = self.blocks_video if mode == "video" else self.blocks_text
 
         # Select VAE based on mode: streamdiffusionv2 for video mode, longlive for text mode

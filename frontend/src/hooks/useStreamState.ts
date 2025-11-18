@@ -5,10 +5,14 @@ import type {
   SettingsState,
   PromptData,
 } from "../types";
+import { PIPELINES } from "../data/pipelines";
 import { getDefaultResolution } from "../lib/utils";
 import { getHardwareInfo, type HardwareInfoResponse } from "../lib/api";
 
 export function useStreamState() {
+  const defaultNativeMode =
+    PIPELINES["streamdiffusionv2"].nativeGenerationMode ?? "video";
+
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
     gpu: 0,
@@ -25,7 +29,7 @@ export function useStreamState() {
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
     resolution: getDefaultResolution("streamdiffusionv2"), // Default resolution for StreamDiffusionV2
-    generationMode: "video",
+    generationMode: defaultNativeMode,
     seed: 42,
     denoisingSteps: [700, 500], // Default for StreamDiffusionV2
     noiseScale: 0.7, // Default noise scale for StreamDiffusionV2

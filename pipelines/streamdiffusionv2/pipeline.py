@@ -26,6 +26,11 @@ CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
+    # Native/default generation mode for this pipeline. In native mode the
+    # pipeline operates purely on video input unless the caller explicitly
+    # requests text-only behaviour.
+    NATIVE_GENERATION_MODE = "video"
+
     def __init__(
         self,
         config,
@@ -130,12 +135,16 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         """
         Determine whether this call should consume video input.
 
-        When generation_mode is \"video\" (default for backwards compatibility),
-        the pipeline requests CHUNK_SIZE frames from the FrameProcessor. When
+        When generation_mode is \"video\" (the native mode), the pipeline
+        requests CHUNK_SIZE frames from the FrameProcessor. When
         generation_mode is \"text\", no video is requested and the pipeline
         operates in text-to-video mode using only prompts and noise latents.
         """
-        mode = generation_mode or kwargs.get("generation_mode") or "video"
+        mode = (
+            generation_mode
+            or kwargs.get("generation_mode")
+            or self.NATIVE_GENERATION_MODE
+        )
         if mode == "video":
             return Requirements(input_size=CHUNK_SIZE)
         return None
@@ -174,10 +183,18 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
-        # Select appropriate block graph based on generation mode.
-        mode = self.state.get("generation_mode")
-        if mode is None:
-            mode = "video"
+        # Select appropriate block graph based on generation mode. If no mode
+        # has been set in state yet, fall back to the native mode.
+        mode = self.state.get("generation_mode") or self.NATIVE_GENERATION_MODE
+
+        # In text-to-video mode, ignore any noise_scale value present in state
+        # or passed from the frontend. This aligns StreamDiffusionV2's text
+        # mode with the other native text-to-video pipelines (LongLive, Krea),
+        # where the denoising schedule is fixed and independent of noise
+        # controls, which are reserved for video-to-video workflows.
+        if mode == "text":
+            self.state.set("noise_scale", None)
+
         blocks = self.blocks_video if mode == "video" else self.blocks_text
 
         _, self.state = blocks(self.components, self.state)

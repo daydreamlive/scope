@@ -24,6 +24,7 @@ import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
+import { getPipelineModeCapabilities } from "../lib/pipelineModes";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import { LoRAManager } from "./LoRAManager";
@@ -36,6 +37,7 @@ interface SettingsPanelProps {
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
+  generationMode?: "video" | "text";
   resolution?: {
     height: number;
     width: number;
@@ -68,6 +70,7 @@ export function SettingsPanel({
   onPipelineIdChange,
   isStreaming = false,
   isDownloading = false,
+  generationMode,
   resolution,
   onResolutionChange,
   seed = 42,
@@ -92,6 +95,9 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
+
+  const modeCapabilities = getPipelineModeCapabilities(pipelineId);
+  const effectiveGenerationMode = generationMode ?? modeCapabilities.nativeMode;
 
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -599,49 +605,51 @@ export function SettingsPanel({
           />
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="space-y-2 pt-2">
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.noiseController.label}
-                    tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                    className="text-sm text-foreground"
-                  />
-                  <Toggle
-                    pressed={noiseController}
-                    onPressedChange={onNoiseControllerChange || (() => {})}
-                    disabled={isStreaming}
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                  >
-                    {noiseController ? "ON" : "OFF"}
-                  </Toggle>
+        {modeCapabilities &&
+          ((effectiveGenerationMode === "text" &&
+            modeCapabilities.showNoiseControlsInText) ||
+            (effectiveGenerationMode === "video" &&
+              modeCapabilities.showNoiseControlsInVideo)) && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <LabelWithTooltip
+                      label={PARAMETER_METADATA.noiseController.label}
+                      tooltip={PARAMETER_METADATA.noiseController.tooltip}
+                      className="text-sm text-foreground"
+                    />
+                    <Toggle
+                      pressed={noiseController}
+                      onPressedChange={onNoiseControllerChange || (() => {})}
+                      disabled={isStreaming}
+                      variant="outline"
+                      size="sm"
+                      className="h-7"
+                    >
+                      {noiseController ? "ON" : "OFF"}
+                    </Toggle>
+                  </div>
                 </div>
-              </div>
 
-              <SliderWithInput
-                label={PARAMETER_METADATA.noiseScale.label}
-                tooltip={PARAMETER_METADATA.noiseScale.tooltip}
-                value={noiseScaleSlider.localValue}
-                onValueChange={noiseScaleSlider.handleValueChange}
-                onValueCommit={noiseScaleSlider.handleValueCommit}
-                min={0.0}
-                max={1.0}
-                step={0.01}
-                incrementAmount={0.01}
-                disabled={noiseController}
-                labelClassName="text-sm text-foreground w-20"
-                valueFormatter={noiseScaleSlider.formatValue}
-                inputParser={v => parseFloat(v) || 0.0}
-              />
+                <SliderWithInput
+                  label={PARAMETER_METADATA.noiseScale.label}
+                  tooltip={PARAMETER_METADATA.noiseScale.tooltip}
+                  value={noiseScaleSlider.localValue}
+                  onValueChange={noiseScaleSlider.handleValueChange}
+                  onValueCommit={noiseScaleSlider.handleValueCommit}
+                  min={0.0}
+                  max={1.0}
+                  step={0.01}
+                  incrementAmount={0.01}
+                  disabled={noiseController}
+                  labelClassName="text-sm text-foreground w-20"
+                  valueFormatter={noiseScaleSlider.formatValue}
+                  inputParser={v => parseFloat(v) || 0.0}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {pipelineId === "krea-realtime-video" && (
           <div className="space-y-4">

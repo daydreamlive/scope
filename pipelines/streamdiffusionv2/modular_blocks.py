@@ -41,10 +41,13 @@ VIDEO_BLOCKS = InsertableDict(
     ]
 )
 
-# Text mode: pure text-to-video, no video-dependent blocks.
+# Text mode: pure text-to-video, no video-dependent blocks. We still run
+# EmbeddingBlendingBlock so that conditioning_embeds is produced for the
+# DenoiseBlock, matching the behaviour of the video path and other pipelines.
 TEXT_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
+        ("embedding_blending", EmbeddingBlendingBlock),
         ("set_timesteps", SetTimestepsBlock),
         ("setup_caches", SetupCachesBlock),
         ("prepare_latents", PrepareLatentsBlock),

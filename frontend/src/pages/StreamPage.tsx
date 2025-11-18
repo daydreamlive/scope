@@ -14,7 +14,8 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
-import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import { getPipelineModeCapabilities } from "../lib/pipelineModes";
+import type { PipelineId, LoRAConfig, LoraMergeStrategy, SettingsState } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
@@ -121,9 +122,11 @@ export function StreamPage() {
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
-    enabled:
-      PIPELINES[settings.pipelineId]?.category === "video-input" &&
-      (settings.generationMode ?? "video") === "video",
+    enabled: (() => {
+      const caps = getPipelineModeCapabilities(settings.pipelineId);
+      const currentMode = settings.generationMode ?? caps.nativeMode;
+      return caps.requiresVideoInVideoMode && currentMode === "video";
+    })(),
   });
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
@@ -150,13 +153,15 @@ export function StreamPage() {
       stopStream();
     }
 
-    // Check if we're switching from no-video-input to video-input pipeline
-    const currentPipelineCategory = PIPELINES[settings.pipelineId]?.category;
-    const newPipelineCategory = PIPELINES[pipelineId]?.category;
+    // Check if we're switching from a pipeline that does not require video
+    // input in video mode to one that does. This ensures the local video
+    // source is correctly reinitialized when enabling video workflows.
+    const currentCaps = getPipelineModeCapabilities(settings.pipelineId);
+    const newCaps = getPipelineModeCapabilities(pipelineId);
 
     if (
-      currentPipelineCategory === "no-video-input" &&
-      newPipelineCategory === "video-input"
+      !currentCaps.requiresVideoInVideoMode &&
+      newCaps.requiresVideoInVideoMode
     ) {
       // Trigger video source reinitialization
       // Otherwise the camera or video file is not visible while switching the pipeline types
@@ -178,9 +183,11 @@ export function StreamPage() {
     setSelectedTimelinePrompt(null);
     setExternalSelectedPromptId(null);
 
-    // Update denoising steps and resolution based on pipeline
+    // Update denoising steps, resolution and native generation mode based on pipeline
     const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
     const newResolution = getDefaultResolution(pipelineId);
+    const caps = getPipelineModeCapabilities(pipelineId);
+    const nativeGenerationMode = caps.nativeMode;
 
     // Update the pipeline in settings
     updateSettings({
@@ -188,7 +195,7 @@ export function StreamPage() {
       denoisingSteps: newDenoisingSteps,
       resolution: newResolution,
       loras: [], // Clear LoRA controls when switching pipelines
-      generationMode: pipelineId === "streamdiffusionv2" ? "video" : "text",
+      generationMode: nativeGenerationMode,
     });
   };
 
@@ -223,11 +230,14 @@ export function StreamPage() {
 
             const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
             const newResolution = getDefaultResolution(pipelineId);
+            const caps = getPipelineModeCapabilities(pipelineId);
+            const nativeGenerationMode = caps.nativeMode;
 
             updateSettings({
               pipelineId,
               denoisingSteps: newDenoisingSteps,
               resolution: newResolution,
+              generationMode: nativeGenerationMode,
             });
 
             // Automatically start the stream after download completes
@@ -428,7 +438,27 @@ export function StreamPage() {
   }, [settings.pipelineId]);
 
   const handleGenerationModeChange = (mode: "video" | "text") => {
-    updateSettings({ generationMode: mode });
+    // Update generation mode and, for pipelines whose native mode is text,
+    // restore their native resolution when switching back to text. This keeps
+    // the text-only experience aligned with the original pipeline defaults
+    // even after experimenting with video-to-video mode.
+    const pipelineId = settings.pipelineId;
+    const caps = getPipelineModeCapabilities(pipelineId);
+    const updates: Partial<SettingsState> = { generationMode: mode };
+
+    // For pipelines whose native mode is text but that also support video, we
+    // restore the native text resolution when switching back to text and adopt
+    // the detected video resolution when switching into video mode.
+    if (caps.supportsVideo && caps.nativeMode === "text") {
+      if (mode === "text") {
+        updates.resolution =
+          caps.defaultResolutionByMode.text ?? getDefaultResolution(pipelineId);
+      } else if (mode === "video" && videoResolution) {
+        updates.resolution = videoResolution;
+      }
+    }
+
+    updateSettings(updates);
     // Inform backend of mode change so pipelines can switch between
     // text-to-video and video-to-video behaviour.
     sendParameterUpdate({
@@ -458,12 +488,18 @@ export function StreamPage() {
   // Ref to store callback that should execute when video starts playing
   const onVideoPlayingCallbackRef = useRef<(() => void) | null>(null);
   // Sync resolution with videoResolution when video source changes
-  // Only sync for video-input pipelines
+  // Only sync for pipelines that require video input in video mode while
+  // they are in video mode.
   useEffect(() => {
-    const pipelineCategory = PIPELINES[settings.pipelineId]?.category;
-    const isVideoInputPipeline = pipelineCategory === "video-input";
+    const caps = getPipelineModeCapabilities(settings.pipelineId);
+    const currentMode = settings.generationMode ?? caps.nativeMode;
 
-    if (videoResolution && !isStreaming && isVideoInputPipeline) {
+    if (
+      videoResolution &&
+      !isStreaming &&
+      caps.requiresVideoInVideoMode &&
+      currentMode === "video"
+    ) {
       updateSettings({
         resolution: {
           height: videoResolution.height,
@@ -565,10 +601,10 @@ export function StreamPage() {
       }
 
       // Check if this pipeline needs video input for the current mode
-      const pipelineCategory = PIPELINES[pipelineIdToUse]?.category;
+      const caps = getPipelineModeCapabilities(pipelineIdToUse);
+      const currentMode = settings.generationMode ?? caps.nativeMode;
       const needsVideoInput =
-        pipelineCategory === "video-input" &&
-        (settings.generationMode ?? "video") === "video";
+        caps.requiresVideoInVideoMode && currentMode === "video";
 
       // Only send video stream for pipelines that need video input
       const streamToSend = needsVideoInput
@@ -632,9 +668,10 @@ export function StreamPage() {
         pipelineIdToUse === "longlive" ||
         pipelineIdToUse === "krea-realtime-video"
       ) {
+        const caps = getPipelineModeCapabilities(pipelineIdToUse);
+        const nativeGenerationMode = caps.nativeMode;
         initialParameters.generation_mode =
-          settings.generationMode ??
-          (pipelineIdToUse === "streamdiffusionv2" ? "video" : "text");
+          settings.generationMode ?? nativeGenerationMode;
       }
 
       // Reset paused state when starting a fresh stream
@@ -851,6 +888,7 @@ export function StreamPage() {
             className="h-full"
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
+            generationMode={settings.generationMode}
             isStreaming={isStreaming}
             isDownloading={isDownloading}
             resolution={

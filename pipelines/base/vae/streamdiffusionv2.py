@@ -7,7 +7,11 @@ from ...streamdiffusionv2.modules.vae import _video_vae
 
 
 class StreamDiffusionV2VAE(torch.nn.Module):
-    def __init__(self, model_dir: str | None = None):
+    def __init__(
+        self,
+        model_dir: str | None = None,
+        apply_longlive_scale: bool = False,
+    ):
         super().__init__()
 
         model_dir = model_dir if model_dir is not None else "wan_models"
@@ -49,6 +53,11 @@ class StreamDiffusionV2VAE(torch.nn.Module):
         ]
         self.mean = torch.tensor(mean, dtype=torch.float32)
         self.std = torch.tensor(std, dtype=torch.float32)
+        # When True, apply the same latent scaling as LongLiveVAE. This is
+        # useful when reusing this VAE inside the LongLive pipeline for
+        # video-to-video mode while keeping the original StreamDiffusionV2
+        # behaviour unchanged when this flag is False.
+        self.apply_longlive_scale = apply_longlive_scale
 
         # init model
         self.model = (
@@ -64,26 +73,27 @@ class StreamDiffusionV2VAE(torch.nn.Module):
 
     # Streaming friendly
     def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
-        # Apply scaling like LongLiveVAE does
-        device, dtype = pixel.device, pixel.dtype
-        scale = [
-            self.mean.to(device=device, dtype=dtype),
-            1.0 / self.std.to(device=device, dtype=dtype),
-        ]
-
         # The Wan diffusion backbone and downstream blocks expect latents in
         # [batch, frames, channels, height, width] format. stream_encode
         # returns [batch, channels, frames, height, width], so we transpose
         # the temporal and channel dimensions here.
         latent = self.model.stream_encode(pixel)
 
-        # Apply scaling to match LongLiveVAE behavior
-        if isinstance(scale[0], torch.Tensor):
-            latent = (latent - scale[0].view(1, latent.shape[1], 1, 1, 1)) * scale[
-                1
-            ].view(1, latent.shape[1], 1, 1, 1)
-        else:
-            latent = (latent - scale[0]) * scale[1]
+        # Optionally apply LongLive-style scaling when this VAE is reused
+        # inside the LongLive pipeline for video-to-video mode.
+        if self.apply_longlive_scale:
+            device, dtype = pixel.device, pixel.dtype
+            scale = [
+                self.mean.to(device=device, dtype=dtype),
+                1.0 / self.std.to(device=device, dtype=dtype),
+            ]
+
+            if isinstance(scale[0], torch.Tensor):
+                latent = (latent - scale[0].view(1, latent.shape[1], 1, 1, 1)) * scale[
+                    1
+                ].view(1, latent.shape[1], 1, 1, 1)
+            else:
+                latent = (latent - scale[0]) * scale[1]
 
         return latent.permute(0, 2, 1, 3, 4)
 
