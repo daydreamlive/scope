@@ -77,8 +77,8 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.base_seed = config.get("seed", 42)
         self.clip_conditioning_scale = 0.5  # Default image conditioning scale
 
-        # I2V (Image-to-Video) state management
-        self.i2v_mode = "clip_only"  # Options: "clip_only", "channel_concat", "full"
+        # I2V (Image-to-Video) mode (cross-attention only in this branch)
+        self.i2v_mode = "clip_only"
 
         # Initialize CLIP encoder for image conditioning
         try:
@@ -136,7 +136,7 @@ class StreamDiffusionV2Pipeline(Pipeline):
         # Handle image input for CLIP conditioning
         if input_image != self.current_image_data:
             if input_image is None:
-                # Clear image
+                # Clear image conditioning
                 logger.info("Clearing CLIP image conditioning")
                 self.current_image_data = None
                 self.current_clip_features = None
@@ -155,9 +155,10 @@ class StreamDiffusionV2Pipeline(Pipeline):
                     # Encode with CLIP
                     self.current_clip_features = self.clip_encoder.encode_image(pil_image)
                     self.current_image_data = input_image
-                    logger.info(f"✓ Image encoded, CLIP features shape: {self.current_clip_features.shape}")
+                    logger.info(f"Image encoded, CLIP features shape: {self.current_clip_features.shape}")
                     logger.info(f"  CLIP features range: [{self.current_clip_features.min():.3f}, {self.current_clip_features.max():.3f}]")
                     logger.info(f"  CLIP features mean: {self.current_clip_features.mean():.3f}, std: {self.current_clip_features.std():.3f}")
+
                 except Exception as e:
                     logger.error(f"Failed to encode image: {e}")
                     self.current_clip_features = None
@@ -243,12 +244,6 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.last_frame = None
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
-
-        # Reset I2V first chunk flag on prepare
-        # This ensures channel concat is re-applied when starting a new generation
-        if self.i2v_cond_latent is not None:
-            self.i2v_first_chunk = True
-            logger.info("Reset I2V first_chunk flag for new generation")
 
     def _apply_motion_aware_noise_controller(self, input: torch.Tensor):
         # The prev seq is the last chunk_size frames of the current input

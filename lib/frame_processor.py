@@ -282,7 +282,7 @@ class FrameProcessor:
             if new_parameters != self.parameters:
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
-                
+
                 # Log parameters with truncated base64 image data for readability
                 log_params = dict(self.parameters)
                 if 'input_image' in log_params and log_params['input_image']:
