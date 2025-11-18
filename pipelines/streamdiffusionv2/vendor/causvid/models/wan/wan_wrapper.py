@@ -142,7 +142,7 @@ class WanCLIPImageEncoder:
         if clip_checkpoint_path is None:
             clip_checkpoint_path = os.path.join(
                 model_dir,
-                "Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                "Wan2.1-T2V-1.3B/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
             )
 
         if clip_tokenizer_path is None:

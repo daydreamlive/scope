@@ -86,6 +86,17 @@ class Parameters(BaseModel):
         default=None,
         description="Base64 encoded image data for image-to-image generation. When provided, the image will be used as the initial input for generation.",
     )
+    i2v_mode: Literal["clip_only", "channel_concat", "full"] | None = Field(
+        default=None,
+        description="Image-to-video conditioning mode: 'clip_only' uses only CLIP cross-attention (lightweight, semantic), "
+        "'channel_concat' adds latent concatenation (structural), 'full' uses both (maximum fidelity). Default: 'clip_only'",
+    )
+    clip_conditioning_scale: float | None = Field(
+        default=None,
+        description="Strength of CLIP image conditioning (0.0=text-only, 1.0=max image influence). Default: 0.5",
+        ge=0.0,
+        le=1.0,
+    )
 
 
 class WebRTCOfferRequest(BaseModel):

@@ -28,6 +28,7 @@ PREPARE_ONLY_PARAMS = frozenset(
         "noise_scale",
         "kv_cache_attention_bias",
         "input_image",  # Image data is processed and converted to frames
+        "i2v_mode",  # I2V mode is handled in prepare()
     }
 )
 

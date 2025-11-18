@@ -33,6 +33,7 @@ export function useStreamState() {
     quantization: null,
     kvCacheAttentionBias: 0.3, // Default cache bias
     clipConditioningScale: 0.5, // Default image conditioning scale
+    i2vMode: "clip_only", // Default I2V mode (CLIP-only cross-attention)
     paused: false, // Default to not paused (generating)
   });
 

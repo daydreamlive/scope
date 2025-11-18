@@ -77,6 +77,9 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.base_seed = config.get("seed", 42)
         self.clip_conditioning_scale = 0.5  # Default image conditioning scale
 
+        # I2V (Image-to-Video) state management
+        self.i2v_mode = "clip_only"  # Options: "clip_only", "channel_concat", "full"
+
         # Initialize CLIP encoder for image conditioning
         try:
             model_dir = config.get("model_dir")
@@ -121,6 +124,14 @@ class StreamDiffusionV2Pipeline(Pipeline):
         noise_controller = kwargs.get("noise_controller", None)
         noise_scale = kwargs.get("noise_scale", None)
         input_image = kwargs.get("input_image", None)  # Base64 image data
+        i2v_mode = kwargs.get("i2v_mode", None)  # I2V mode: clip_only, channel_concat, full
+
+        # Update I2V mode if provided
+        if i2v_mode is not None and i2v_mode != self.i2v_mode:
+            logger.info(f"Updating I2V mode: {self.i2v_mode} -> {i2v_mode}")
+            self.i2v_mode = i2v_mode
+            # Reset I2V state when mode changes
+            should_prepare = True
 
         # Handle image input for CLIP conditioning
         if input_image != self.current_image_data:
@@ -232,6 +243,12 @@ class StreamDiffusionV2Pipeline(Pipeline):
         self.last_frame = None
         self.current_start = 0
         self.current_end = self.stream.frame_seq_length * 2
+
+        # Reset I2V first chunk flag on prepare
+        # This ensures channel concat is re-applied when starting a new generation
+        if self.i2v_cond_latent is not None:
+            self.i2v_first_chunk = True
+            logger.info("Reset I2V first_chunk flag for new generation")
 
     def _apply_motion_aware_noise_controller(self, input: torch.Tensor):
         # The prev seq is the last chunk_size frames of the current input

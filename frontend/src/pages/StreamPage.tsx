@@ -366,6 +366,16 @@ export function StreamPage() {
     }
   };
 
+  const handleI2vModeChange = (mode: "clip_only" | "channel_concat" | "full") => {
+    updateSettings({ i2vMode: mode });
+    // Send I2V mode update to backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        i2v_mode: mode,
+      });
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -590,6 +600,8 @@ export function StreamPage() {
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
         input_image?: string;
+        clip_conditioning_scale?: number;
+        i2v_mode?: "clip_only" | "channel_concat" | "full";
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -604,6 +616,8 @@ export function StreamPage() {
       // Add image data if image is uploaded
       if (imageData) {
         initialParameters.input_image = imageData;
+        initialParameters.clip_conditioning_scale = settings.clipConditioningScale ?? 0.5;
+        initialParameters.i2v_mode = settings.i2vMode ?? "clip_only";
       }
 
       // Cache management for krea_realtime_video and longlive
@@ -671,6 +685,8 @@ export function StreamPage() {
             uploadedImage={uploadedImage}
             clipConditioningScale={settings.clipConditioningScale ?? 0.5}
             onClipConditioningScaleChange={handleClipConditioningScaleChange}
+            i2vMode={settings.i2vMode ?? "clip_only"}
+            onI2vModeChange={handleI2vModeChange}
             pipelineId={settings.pipelineId}
             prompts={promptItems}
             onPromptsChange={setPromptItems}

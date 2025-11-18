@@ -38,6 +38,8 @@ interface InputAndControlsPanelProps {
   uploadedImage?: string | null; // New prop for displaying uploaded image (base64 or URL)
   clipConditioningScale?: number; // Image conditioning strength
   onClipConditioningScaleChange?: (scale: number) => void; // Handler for scale changes
+  i2vMode?: "clip_only" | "channel_concat" | "full"; // I2V conditioning mode
+  onI2vModeChange?: (mode: "clip_only" | "channel_concat" | "full") => void; // Handler for mode changes
   pipelineId: string;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
@@ -78,6 +80,8 @@ export function InputAndControlsPanel({
   uploadedImage,
   clipConditioningScale = 0.5,
   onClipConditioningScaleChange,
+  i2vMode = "clip_only",
+  onI2vModeChange,
   pipelineId,
   prompts,
   onPromptsChange,
@@ -317,7 +321,7 @@ export function InputAndControlsPanel({
 
           {/* Image Strength Slider - only show when image is uploaded */}
           {imagePreview && (
-            <div className="mt-3">
+            <div className="mt-3 space-y-3">
               <SliderWithInput
                 label="Image Strength"
                 tooltip="Controls how much the image influences generation. 0.0 = text-only, 0.5 = balanced, 1.0 = maximum image influence. Lower values allow more creative text-driven variations."
@@ -332,6 +336,39 @@ export function InputAndControlsPanel({
                 valueFormatter={clipConditioningScaleSlider.formatValue}
                 inputParser={v => parseFloat(v) || 0.5}
               />
+
+              {/* I2V Mode Selector */}
+              <div className="flex items-center justify-between">
+                <label className="text-sm text-foreground">I2V Mode</label>
+                <Select
+                  value={i2vMode}
+                  onValueChange={onI2vModeChange}
+                >
+                  <SelectTrigger className="w-[180px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="clip_only">
+                      <div className="flex flex-col">
+                        <span>CLIP Only</span>
+                        <span className="text-xs text-muted-foreground">Semantic guidance</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="channel_concat">
+                      <div className="flex flex-col">
+                        <span>Channel Concat</span>
+                        <span className="text-xs text-muted-foreground">Structural guidance</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="full">
+                      <div className="flex flex-col">
+                        <span>Full (Both)</span>
+                        <span className="text-xs text-muted-foreground">Maximum fidelity</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
         </div>

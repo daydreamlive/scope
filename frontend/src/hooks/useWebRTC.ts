@@ -16,6 +16,7 @@ interface InitialParameters {
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
   input_image?: string | null; // Base64 encoded image data for img2img, null to clear
+  i2v_mode?: "clip_only" | "channel_concat" | "full"; // I2V conditioning mode
 }
 
 interface UseWebRTCOptions {
@@ -240,6 +241,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       paused?: boolean;
       input_image?: string | null; // Base64 encoded image data for img2img, null to clear
       clip_conditioning_scale?: number; // Image conditioning strength (0.0 to 1.0)
+      i2v_mode?: "clip_only" | "channel_concat" | "full"; // I2V conditioning mode
     }) => {
       if (
         dataChannelRef.current &&
