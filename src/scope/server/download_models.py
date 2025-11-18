@@ -83,6 +83,8 @@ def download_required_models():
 def download_streamdiffusionv2_pipeline() -> None:
     """Download models for the StreamDiffusionV2 pipeline."""
     wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
+    wan_i2v_repo = "Wan-AI/Wan2.1-I2V-14B-480P"
+    wan_i2v_clip_file = "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
     wan_video_comfy_repo = "Kijai/WanVideo_comfy"
     wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
     stream_diffusion_repo = "jerryfeng/StreamDiffusionV2"
@@ -90,6 +92,7 @@ def download_streamdiffusionv2_pipeline() -> None:
     # Ensure models directory exists and get paths
     models_root = ensure_models_dir()
     wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
+    wan_i2v_dst = models_root / "Wan2.1-I2V-14B-480P"
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
     stream_diffusion_dst = models_root / "StreamDiffusionV2"
 
@@ -99,12 +102,15 @@ def download_streamdiffusionv2_pipeline() -> None:
         wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
     )
 
-    # 2) HF single file download into a folder
+    # 2) Download CLIP model for image-to-video (I2V) feature extraction
+    download_hf_single_file(wan_i2v_repo, wan_i2v_clip_file, wan_i2v_dst)
+
+    # 3) HF single file download into a folder
     download_hf_single_file(
         wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
     )
 
-    # 3) HF repo download for StreamDiffusionV2 (1.3b only)
+    # 4) HF repo download for StreamDiffusionV2 (1.3b only)
     snapshot_download(
         repo_id=stream_diffusion_repo,
         local_dir=stream_diffusion_dst,

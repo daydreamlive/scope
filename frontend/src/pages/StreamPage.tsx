@@ -44,6 +44,10 @@ export function StreamPage() {
     useState<"linear" | "slerp">("slerp");
   const [transitionSteps, setTransitionSteps] = useState(4);
 
+  // Image input state
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [imageData, setImageData] = useState<string | null>(null); // Base64 data to send to backend
+
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
 
@@ -124,6 +128,49 @@ export function StreamPage() {
     enabled: PIPELINES[settings.pipelineId]?.category === "video-input",
   });
 
+  const handleImageFileUpload = async (file: File): Promise<boolean> => {
+    try {
+      // Convert image to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const base64 = reader.result as string;
+          resolve(base64);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(file);
+      const base64Data = await base64Promise;
+
+      // Store the image data
+      setUploadedImage(base64Data);
+      setImageData(base64Data);
+
+      // If streaming, send the image data to the backend immediately
+      if (isStreaming) {
+        sendParameterUpdate({
+          input_image: base64Data,
+        });
+      }
+      return true;
+    } catch (error) {
+      console.error("Failed to process image:", error);
+      return false;
+    }
+  };
+
+  const handleImageClear = () => {
+    setUploadedImage(null);
+    setImageData(null);
+
+    // If streaming, send null to clear the image on backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        input_image: null,
+      });
+    }
+  };
+
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
   };
@@ -139,6 +186,7 @@ export function StreamPage() {
     // Send transition to backend
     sendParameterUpdate({
       transition,
+      input_image: imageData || undefined, // Include image data with prompt updates if present
     });
   };
 
@@ -280,6 +328,7 @@ export function StreamPage() {
     // Send denoising steps update to backend
     sendParameterUpdate({
       denoising_step_list: denoisingSteps,
+      input_image: imageData || undefined,
     });
   };
 
@@ -288,6 +337,7 @@ export function StreamPage() {
     // Send noise scale update to backend
     sendParameterUpdate({
       noise_scale: noiseScale,
+      input_image: imageData || undefined,
     });
   };
 
@@ -296,6 +346,7 @@ export function StreamPage() {
     // Send noise controller update to backend
     sendParameterUpdate({
       noise_controller: enabled,
+      input_image: imageData || undefined,
     });
   };
 
@@ -304,6 +355,7 @@ export function StreamPage() {
     // Send manage cache update to backend
     sendParameterUpdate({
       manage_cache: enabled,
+      input_image: imageData || undefined,
     });
   };
 
@@ -317,6 +369,7 @@ export function StreamPage() {
     // Send KV cache attention bias update to backend
     sendParameterUpdate({
       kv_cache_attention_bias: bias,
+      input_image: imageData || undefined,
     });
   };
 
@@ -352,6 +405,7 @@ export function StreamPage() {
     // Send reset cache command to backend
     sendParameterUpdate({
       reset_cache: true,
+      input_image: imageData || undefined,
     });
   };
 
@@ -367,6 +421,7 @@ export function StreamPage() {
       prompts,
       prompt_interpolation_method: interpolationMethod,
       denoising_step_list: settings.denoisingSteps || [700, 500],
+      input_image: imageData || undefined,
     });
   };
 
@@ -429,6 +484,7 @@ export function StreamPage() {
     updateSettings({ paused: newPausedState });
     sendParameterUpdate({
       paused: newPausedState,
+      input_image: imageData || undefined,
     });
 
     // Deselect any selected prompt when video starts playing
@@ -575,6 +631,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        input_image?: string;
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -584,6 +641,11 @@ export function StreamPage() {
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
         ];
+      }
+
+      // Add image data if image is uploaded
+      if (imageData) {
+        initialParameters.input_image = imageData;
       }
 
       // Cache management for krea_realtime_video and longlive
@@ -646,6 +708,9 @@ export function StreamPage() {
             onStartStream={handleStartStream}
             onStopStream={stopStream}
             onVideoFileUpload={handleVideoFileUpload}
+            onImageFileUpload={handleImageFileUpload}
+            onImageClear={handleImageClear}
+            uploadedImage={uploadedImage}
             pipelineId={settings.pipelineId}
             prompts={promptItems}
             onPromptsChange={setPromptItems}
@@ -722,6 +787,7 @@ export function StreamPage() {
                       temporal_interpolation_method:
                         temporalInterpolationMethod,
                     },
+                    input_image: imageData || undefined,
                   });
                 } else {
                   // Send direct prompts without transition
@@ -729,6 +795,7 @@ export function StreamPage() {
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
+                    input_image: imageData || undefined,
                   });
                 }
               }}
@@ -766,6 +833,7 @@ export function StreamPage() {
                       temporal_interpolation_method:
                         effectiveTemporalInterpolationMethod,
                     },
+                    input_image: imageData || undefined,
                   });
                 } else {
                   // Send direct prompts without transition
@@ -773,6 +841,7 @@ export function StreamPage() {
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
+                    input_image: imageData || undefined,
                   });
                 }
               }}

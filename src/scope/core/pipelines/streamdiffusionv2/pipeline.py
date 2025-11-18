@@ -1,5 +1,8 @@
 import logging
 import time
+import base64
+from io import BytesIO
+from PIL import Image
 
 import torch
 from diffusers.modular_pipelines import PipelineState
@@ -165,6 +168,25 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
         for k, v in kwargs.items():
             self.state.set(k, v)
+
+        # Handle input_image for CLIP conditioning
+        input_image = kwargs.get("input_image")
+        clip_features = None
+
+        if input_image and isinstance(input_image, str) and hasattr(self.components.generator, "clip_encoder") and self.components.generator.clip_encoder is not None:
+             try:
+                # Decode base64 image
+                img_str = input_image
+                if "," in img_str:
+                    img_str = img_str.split(",", 1)[1]
+                image_bytes = base64.b64decode(img_str)
+                image = Image.open(BytesIO(image_bytes))
+                # Encode
+                clip_features = self.components.generator.clip_encoder.encode_image(image)
+             except Exception as e:
+                logger.error(f"Failed to encode input image: {e}")
+
+        self.state.set("clip_features", clip_features)
 
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:

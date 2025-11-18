@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -8,13 +8,14 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Badge } from "./ui/badge";
-import { Upload } from "lucide-react";
+import { Upload, X } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { Button } from "./ui/button";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -30,6 +31,9 @@ interface InputAndControlsPanelProps {
   onStartStream: () => void;
   onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
+  onImageFileUpload?: (file: File) => Promise<boolean>; // New prop for image upload
+  onImageClear?: () => void; // New prop for clearing image
+  uploadedImage?: string | null; // New prop for displaying uploaded image (base64 or URL)
   pipelineId: string;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
@@ -65,6 +69,9 @@ export function InputAndControlsPanel({
   onStartStream: _onStartStream,
   onStopStream: _onStopStream,
   onVideoFileUpload,
+  onImageFileUpload,
+  onImageClear,
+  uploadedImage,
   pipelineId,
   prompts,
   onPromptsChange,
@@ -96,8 +103,9 @@ export function InputAndControlsPanel({
     return _currentTime >= lastPrompt.endTime;
   };
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
-  // Get pipeline category, deafault to video-input
+  // Get pipeline category, default to video-input
   const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
 
   useEffect(() => {
@@ -105,6 +113,13 @@ export function InputAndControlsPanel({
       videoRef.current.srcObject = localStream;
     }
   }, [localStream]);
+
+  // Update image preview when uploadedImage prop changes
+  useEffect(() => {
+    if (uploadedImage) {
+      setImagePreview(uploadedImage);
+    }
+  }, [uploadedImage]);
 
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -119,6 +134,36 @@ export function InputAndControlsPanel({
     }
     // Reset the input value so the same file can be selected again
     event.target.value = "";
+  };
+
+  const handleImageUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (file && onImageFileUpload) {
+      try {
+        // Create preview
+        const reader = new FileReader();
+        reader.onload = e => {
+          setImagePreview(e.target?.result as string);
+        };
+        reader.readAsDataURL(file);
+
+        // Upload the file
+        await onImageFileUpload(file);
+      } catch (error) {
+        console.error("Image upload failed:", error);
+      }
+    }
+    // Reset the input value so the same file can be selected again
+    event.target.value = "";
+  };
+
+  const handleClearImage = () => {
+    setImagePreview(null);
+    if (onImageClear) {
+      onImageClear();
+    }
   };
 
   return (
@@ -158,7 +203,7 @@ export function InputAndControlsPanel({
 
         {pipelineCategory === "video-input" && (
           <div>
-            <h3 className="text-sm font-medium mb-2">Input</h3>
+            <h3 className="text-sm font-medium mb-2">Video Input</h3>
             <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
               {isInitializing ? (
                 <div className="text-center text-muted-foreground text-sm">
@@ -215,6 +260,55 @@ export function InputAndControlsPanel({
             </div>
           </div>
         )}
+
+        {/* Optional Image Input - Available for all modes */}
+        <div>
+          <h3 className="text-sm font-medium mb-2">Image Input (Optional)</h3>
+          <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative min-h-[120px]">
+            {imagePreview ? (
+              <div className="relative w-full">
+                <img
+                  src={imagePreview}
+                  alt="Input image preview"
+                  className="w-full h-full object-cover"
+                />
+                {/* Clear button */}
+                <Button
+                  onClick={handleClearImage}
+                  disabled={isStreaming || isConnecting}
+                  size="sm"
+                  variant="ghost"
+                  className="absolute top-2 right-2 p-1 rounded-full bg-black/50 hover:bg-black/70"
+                >
+                  <X className="h-4 w-4 text-white" />
+                </Button>
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground text-sm p-4">
+                No image uploaded
+              </div>
+            )}
+            {/* Upload button */}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="hidden"
+              id="image-upload"
+              disabled={isStreaming || isConnecting}
+            />
+            <label
+              htmlFor="image-upload"
+              className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                isStreaming || isConnecting
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-black/70 cursor-pointer"
+              }`}
+            >
+              <Upload className="h-4 w-4 text-white" />
+            </label>
+          </div>
+        </div>
 
         <div>
           {(() => {
