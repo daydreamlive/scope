@@ -91,17 +91,25 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE
+        # Load VAEs - use streamdiffusionv2 strategy for video-to-video mode (streaming-friendly)
+        # and longlive strategy for text-to-video mode
         start = time.time()
         vae_strategy = getattr(config, "vae_strategy", None)
-        vae = create_vae(
-            strategy=vae_strategy,
+        vae_text = create_vae(
+            strategy=vae_strategy or "longlive",  # Default to longlive for text mode
             pipeline_name="longlive",
             model_dir=model_dir,
         )
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
-        # Move VAE to target device and use target dtype
-        vae = vae.to(device=device, dtype=dtype)
+        vae_video = create_vae(
+            strategy=vae_strategy
+            or "streamdiffusionv2",  # Use streamdiffusionv2 for video mode
+            pipeline_name="longlive",
+            model_dir=model_dir,
+        )
+        print(f"Loaded VAEs in {time.time() - start:.3f}s")
+        # Move VAEs to target device and use target dtype
+        vae_text = vae_text.to(device=device, dtype=dtype)
+        vae_video = vae_video.to(device=device, dtype=dtype)
 
         # Create components config
         components_config = {}
@@ -112,7 +120,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         components = ComponentsManager(components_config)
         components.add("generator", generator)
         components.add("scheduler", generator.get_scheduler())
-        components.add("vae", vae)
+        components.add("vae_text", vae_text)
+        components.add("vae_video", vae_video)
         components.add("text_encoder", text_encoder)
 
         embedding_blender = EmbeddingBlender(
@@ -194,11 +203,17 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
-        # Select appropriate block graph based on generation mode.
+        # Select appropriate block graph and VAE based on generation mode.
         mode = self.state.get("generation_mode")
         if mode is None:
             mode = "text"
         blocks = self.blocks_video if mode == "video" else self.blocks_text
+
+        # Select VAE based on mode: streamdiffusionv2 for video mode, longlive for text mode
+        if mode == "video":
+            self.components.add("vae", self.components.vae_video)
+        else:
+            self.components.add("vae", self.components.vae_text)
 
         _, self.state = blocks(self.components, self.state)
         return postprocess_chunk(self.state.values["video"])

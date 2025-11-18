@@ -64,11 +64,27 @@ class StreamDiffusionV2VAE(torch.nn.Module):
 
     # Streaming friendly
     def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
+        # Apply scaling like LongLiveVAE does
+        device, dtype = pixel.device, pixel.dtype
+        scale = [
+            self.mean.to(device=device, dtype=dtype),
+            1.0 / self.std.to(device=device, dtype=dtype),
+        ]
+
         # The Wan diffusion backbone and downstream blocks expect latents in
         # [batch, frames, channels, height, width] format. stream_encode
         # returns [batch, channels, frames, height, width], so we transpose
         # the temporal and channel dimensions here.
         latent = self.model.stream_encode(pixel)
+
+        # Apply scaling to match LongLiveVAE behavior
+        if isinstance(scale[0], torch.Tensor):
+            latent = (latent - scale[0].view(1, latent.shape[1], 1, 1, 1)) * scale[
+                1
+            ].view(1, latent.shape[1], 1, 1, 1)
+        else:
+            latent = (latent - scale[0]) * scale[1]
+
         return latent.permute(0, 2, 1, 3, 4)
 
     # Streaming friendly
