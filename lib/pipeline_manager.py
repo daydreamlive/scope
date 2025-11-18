@@ -77,6 +77,15 @@ class PipelineManager:
             pipeline_id = self._pipeline_id
             load_params = self._load_params
 
+            # Capture loaded LoRA adapters if pipeline exposes them
+            loaded_lora_adapters = None
+            if self._pipeline is not None and hasattr(
+                self._pipeline, "loaded_lora_adapters"
+            ):
+                loaded_lora_adapters = getattr(
+                    self._pipeline, "loaded_lora_adapters", None
+                )
+
             # If there's an error, clear it after capturing it
             # This ensures errors don't persist across page reloads
             if self._status == PipelineStatus.ERROR and error_message:
@@ -91,6 +100,7 @@ class PipelineManager:
                 "status": current_status.value,
                 "pipeline_id": pipeline_id,
                 "load_params": load_params,
+                "loaded_lora_adapters": loaded_lora_adapters,
                 "error": error_message,
             }
 
@@ -186,6 +196,44 @@ class PipelineManager:
 
                 return False
 
+    def _apply_load_params(
+        self,
+        config: dict,
+        load_params: dict | None,
+        default_height: int,
+        default_width: int,
+        default_seed: int = 42,
+    ) -> None:
+        """Extract and apply common load parameters (resolution, seed, LoRAs) to config.
+
+        Args:
+            config: Pipeline config dict to update
+            load_params: Load parameters dict (may contain height, width, seed, loras, lora_merge_mode)
+            default_height: Default height if not in load_params
+            default_width: Default width if not in load_params
+            default_seed: Default seed if not in load_params
+        """
+        height = default_height
+        width = default_width
+        seed = default_seed
+        loras = None
+        lora_merge_mode = "permanent_merge"
+
+        if load_params:
+            height = load_params.get("height", default_height)
+            width = load_params.get("width", default_width)
+            seed = load_params.get("seed", default_seed)
+            loras = load_params.get("loras", None)
+            lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
+
+        config["height"] = height
+        config["width"] = width
+        config["seed"] = seed
+        if loras:
+            config["loras"] = loras
+        # Pass merge_mode directly to mixin, not via config
+        config["_lora_merge_mode"] = lora_merge_mode
+
     def _unload_pipeline_unsafe(self):
         """Unload the current pipeline. Must be called with lock held."""
         if self._pipeline:
@@ -212,7 +260,7 @@ class PipelineManager:
         self, pipeline_id: str, load_params: dict | None = None
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
-        if pipeline_id == "streamdiffusionv2":
+        if pipeline_id == "streamdiffusionv2-1.3b":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
@@ -239,23 +287,69 @@ class PipelineManager:
                 }
             )
 
-            # Use load parameters for resolution and seed
-            height = 512
-            width = 512
-            seed = 42
-            if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
-                seed = load_params.get("seed", 42)
-
-            config["height"] = height
-            config["width"] = width
-            config["seed"] = seed
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
 
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
             )
-            logger.info("StreamDiffusionV2 pipeline initialized")
+            logger.info("StreamDiffusionV2 1.3B pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "streamdiffusionv2-14b":
+            from lib.models_config import get_model_file_path, get_models_dir
+            from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+
+            models_dir = get_models_dir()
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "StreamDiffusionV2/wan_causal_dmd_v2v_14b/model.pt"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "model_config": OmegaConf.load(
+                        "pipelines/streamdiffusionv2/model.yaml"
+                    ),
+                }
+            )
+            config["model_config"].base_model_name = "Wan2.1-T2V-14B"
+
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+                config["quantization"] = quantization
+
+            pipeline = StreamDiffusionV2Pipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("StreamDiffusionV2 14B pipeline initialized")
             return pipeline
 
         elif pipeline_id == "passthrough":
@@ -321,17 +415,14 @@ class PipelineManager:
                 }
             )
 
-            height = 320
-            width = 576
-            seed = 42
-            if load_params:
-                height = load_params.get("height", 320)
-                width = load_params.get("width", 576)
-                seed = load_params.get("seed", 42)
-
-            config["height"] = height
-            config["width"] = width
-            config["seed"] = seed
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=320,
+                default_width=576,
+                default_seed=42,
+            )
 
             pipeline = LongLivePipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -368,19 +459,18 @@ class PipelineManager:
                 }
             )
 
-            height = 512
-            width = 512
-            seed = 42
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
             quantization = None
             if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
-                seed = load_params.get("seed", 42)
                 quantization = load_params.get("quantization", None)
-
-            config["height"] = height
-            config["width"] = width
-            config["seed"] = seed
 
             pipeline = KreaRealtimeVideoPipeline(
                 config,

@@ -80,8 +80,8 @@ def download_required_models():
         raise
 
 
-def download_streamdiffusionv2_pipeline() -> None:
-    """Download models for the StreamDiffusionV2 pipeline."""
+def download_streamdiffusionv2_1_3b_pipeline() -> None:
+    """Download models for the StreamDiffusionV2 1.3B pipeline."""
     wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
     wan_video_comfy_repo = "Kijai/WanVideo_comfy"
     wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
@@ -109,6 +109,47 @@ def download_streamdiffusionv2_pipeline() -> None:
         repo_id=stream_diffusion_repo,
         local_dir=stream_diffusion_dst,
         allow_patterns=["wan_causal_dmd_v2v/model.pt"],
+    )
+
+
+def download_streamdiffusionv2_14b_pipeline() -> None:
+    """Download models for the StreamDiffusionV2 14B pipeline."""
+    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
+    wan_video_14b_repo = "Wan-AI/Wan2.1-T2V-14B"
+    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
+    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
+    stream_diffusion_repo = "jerryfeng/StreamDiffusionV2"
+
+    # Ensure models directory exists and get paths
+    models_root = ensure_models_dir()
+    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
+    wan_video_14b_dst = models_root / "Wan2.1-T2V-14B"
+    wan_video_comfy_dst = models_root / "WanVideo_comfy"
+    stream_diffusion_dst = models_root / "StreamDiffusionV2"
+
+    # 1) HF repo download excluding a large file
+    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    download_hf_repo_excluding(
+        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
+    )
+
+    # 2) HF single file download into a folder
+    download_hf_single_file(
+        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
+    )
+
+    # 3) Download only config.json from Wan2.1-T2V-14B (no model weights needed)
+    snapshot_download(
+        repo_id=wan_video_14b_repo,
+        local_dir=wan_video_14b_dst,
+        allow_patterns=["config.json"],
+    )
+
+    # 3) HF repo download for StreamDiffusionV2 (14B only)
+    snapshot_download(
+        repo_id=stream_diffusion_repo,
+        local_dir=stream_diffusion_dst,
+        allow_patterns=["wan_causal_dmd_v2v_14b/model.pt"],
     )
 
 
@@ -195,10 +236,12 @@ def download_models(pipeline_id: str | None = None) -> None:
     """
     if pipeline_id is None:
         # Download all pipelines
-        download_streamdiffusionv2_pipeline()
+        download_streamdiffusionv2_1_3b_pipeline()
         download_longlive_pipeline()
-    elif pipeline_id == "streamdiffusionv2":
-        download_streamdiffusionv2_pipeline()
+    elif pipeline_id == "streamdiffusionv2-1.3b":
+        download_streamdiffusionv2_1_3b_pipeline()
+    elif pipeline_id == "streamdiffusionv2-14b":
+        download_streamdiffusionv2_14b_pipeline()
     elif pipeline_id == "longlive":
         download_longlive_pipeline()
     elif pipeline_id == "krea-realtime-video":

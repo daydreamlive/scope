@@ -11,6 +11,7 @@ from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
+from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from .components import WanVAEWrapper
 from .modular_blocks import KreaRealtimeVideoBlocks
 from .modules.causal_model import CausalWanModel
@@ -23,7 +24,7 @@ WARMUP_RUNS = 3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
-class KreaRealtimeVideoPipeline(Pipeline):
+class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
     def __init__(
         self,
         config,
@@ -56,6 +57,9 @@ class KreaRealtimeVideoPipeline(Pipeline):
 
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
+
+        # Initialize optional LoRA adapters on the underlying model BEFORE quantization.
+        generator.model = self._init_loras(config, generator.model)
 
         if quantization == Quantization.FP8_E4M3FN:
             # Cast before optional quantization
@@ -158,6 +162,13 @@ class KreaRealtimeVideoPipeline(Pipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        # Handle runtime LoRA scale updates before writing into state.
+        lora_scales = kwargs.get("lora_scales")
+        if lora_scales is not None:
+            self._handle_lora_scale_updates(
+                lora_scales=lora_scales, model=self.components.generator.model
+            )
+
         for k, v in kwargs.items():
             self.state.set(k, v)
 
