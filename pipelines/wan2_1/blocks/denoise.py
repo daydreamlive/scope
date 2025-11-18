@@ -106,6 +106,11 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float | None,
                 description="Amount of noise added to video",
             ),
+            InputParam(
+                "clip_features",
+                type_hint=torch.Tensor | None,
+                description="CLIP features for image conditioning",
+            ),
         ]
 
     @property
@@ -169,6 +174,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    clip_features=block_state.clip_features,
                 )
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -199,6 +205,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    clip_features=block_state.clip_features,
                 )
 
         block_state.latents = denoised_pred
