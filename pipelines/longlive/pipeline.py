@@ -4,6 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
+from ..base.vae import create_vae
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
@@ -11,7 +12,6 @@ from ..process import postprocess_chunk
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from .components import WanVAEWrapper
 from .modular_blocks import LongLiveTextBlocks, LongLiveVideoBlocks
 from .modules.causal_model import CausalWanModel
 
@@ -93,7 +93,12 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
 
         # Load VAE
         start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
+        vae_strategy = getattr(config, "vae_strategy", None)
+        vae = create_vae(
+            strategy=vae_strategy,
+            pipeline_name="longlive",
+            model_dir=model_dir,
+        )
         print(f"Loaded VAE in {time.time() - start:.3f}s")
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)

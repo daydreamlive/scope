@@ -3,10 +3,10 @@ import os
 
 import torch
 
-from ..modules.vae import _video_vae
+from ...streamdiffusionv2.modules.vae import _video_vae
 
 
-class WanVAEWrapper(torch.nn.Module):
+class StreamDiffusionV2VAE(torch.nn.Module):
     def __init__(self, model_dir: str | None = None):
         super().__init__()
 

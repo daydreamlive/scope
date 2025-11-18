@@ -4,14 +4,14 @@ import os
 import torch
 import torch.nn as nn
 
-from ..modules.vae import (
+from ...krea_realtime_video.modules.vae import (
     CausalConv3d,
     WanVAE,
 )
-from ..modules.vae_block3 import VAEDecoder3d
+from ...krea_realtime_video.modules.vae_block3 import VAEDecoder3d
 
 
-class WanVAEWrapper(torch.nn.Module):
+class KreaRealtimeVideoVAE(torch.nn.Module):
     def __init__(
         self,
         model_name: str = "Wan2.1-T2V-1.3B",

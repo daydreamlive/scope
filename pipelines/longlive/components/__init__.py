@@ -1,3 +1,3 @@
-from .vae import WanVAEWrapper
-
-__all__ = ["WanVAEWrapper"]
+# VAE wrapper moved to pipelines.base.vae
+# Import directly: from pipelines.base.vae import LongLiveVAE
+__all__ = []

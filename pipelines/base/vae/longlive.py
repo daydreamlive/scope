@@ -3,10 +3,10 @@ import os
 
 import torch
 
-from ..modules.vae import _video_vae
+from ...longlive.modules.vae import _video_vae
 
 
-class WanVAEWrapper(torch.nn.Module):
+class LongLiveVAE(torch.nn.Module):
     def __init__(self, model_dir: str | None = None):
         super().__init__()
 
