@@ -12,7 +12,7 @@ from pathlib import Path
 # This prevents errors when HF_HUB_ENABLE_HF_TRANSFER=1 is set but hf_transfer is not installed
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 
-from lib.models_config import (
+from scope.server.models_config import (
     ensure_models_dir,
     models_are_downloaded,
 )

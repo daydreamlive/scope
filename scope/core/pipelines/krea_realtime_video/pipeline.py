@@ -4,7 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
-from lib.schema import Quantization
+from scope.core.pipelines.common import Quantization
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager

@@ -1,42 +1,33 @@
 import time
+from pathlib import Path
 
 import torch
 from diffusers.utils import export_to_video
 from omegaconf import OmegaConf
 
-from lib.models_config import get_model_file_path, get_models_dir
-from lib.schema import Quantization
+from scope.server.models_config import get_model_file_path, get_models_dir
 
-from .pipeline import KreaRealtimeVideoPipeline
+from .pipeline import LongLivePipeline
 
 config = OmegaConf.create(
     {
         "model_dir": str(get_models_dir()),
         "generator_path": str(
-            get_model_file_path(
-                "krea-realtime-video/krea-realtime-video-14b.safetensors"
-            )
+            get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
         ),
+        "lora_path": str(get_model_file_path("LongLive-1.3B/models/lora.pt")),
         "text_encoder_path": str(
             get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
         ),
         "tokenizer_path": str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")),
-        "vae_path": str(get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")),
-        "model_config": OmegaConf.load("pipelines/krea_realtime_video/model.yaml"),
-        "height": 320,
-        "width": 576,
+        "model_config": OmegaConf.load(Path(__file__).parent / "model.yaml"),
+        "height": 480,
+        "width": 832,
     }
 )
 
 device = torch.device("cuda")
-pipeline = KreaRealtimeVideoPipeline(
-    config,
-    # Set quantization to Quantization.FP8_E4M3FN to work with 32GB VRAM
-    quantization=Quantization.FP8_E4M3FN,
-    compile=False,
-    device=device,
-    dtype=torch.bfloat16,
-)
+pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
 
 prompt_texts = [
     "A realistic video of a Texas Hold'em poker event at a casino. A male player in his late 30s with a medium build, short dark hair, light stubble, and a sharp jawline wears a fitted navy blazer over a charcoal crew-neck tee, dark jeans, and a stainless-steel watch. He sits at a well-lit poker table and tightly grips his hole cards, wearing a tense, serious expression. The table is filled with chips of various colors, the dealer is seen dealing cards, and several rows of slot machines glow in the background. The camera focuses on the player's strained concentration. Wide shot to medium close-up.",
@@ -58,7 +49,7 @@ for _, prompt_text in enumerate(prompt_texts):
         start = time.time()
 
         prompts = [{"text": prompt_text, "weight": 100}]
-        output = pipeline(prompts=prompts, kv_cache_attention_bias=0.3)
+        output = pipeline(prompts=prompts)
 
         num_output_frames, _, _, _ = output.shape
         latency = time.time() - start
@@ -77,7 +68,7 @@ for _, prompt_text in enumerate(prompt_texts):
 output_video = torch.concat(outputs)
 print(output_video.shape)
 output_video_np = output_video.contiguous().numpy()
-export_to_video(output_video_np, "pipelines/krea_realtime_video/output.mp4", fps=16)
+export_to_video(output_video_np, str(Path(__file__).parent / "output.mp4"), fps=16)
 
 # Print statistics
 print("\n=== Performance Statistics ===")

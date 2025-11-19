@@ -37,16 +37,18 @@ def main() -> None:
     """Main build function."""
     print("🚀 Building daydream-scope...")
 
-    # Check if we're in the right directory
-    if not Path("pyproject.toml").exists():
-        print(
-            "❌ Error: pyproject.toml not found. Please run this script from the project root."
-        )
+    # Find the project root (where pyproject.toml is)
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent.parent  # Go up from scope/server to root/
+
+    # Check if we're in the right directory structure
+    if not (project_root / "pyproject.toml").exists():
+        print("❌ Error: pyproject.toml not found. Project structure may be incorrect.")
         sys.exit(1)
 
     # Build frontend
     print("📦 Building frontend...")
-    frontend_dir = Path("frontend")
+    frontend_dir = project_root / "frontend"
 
     if not frontend_dir.exists():
         print("❌ Error: frontend directory not found")

@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -213,8 +214,10 @@ class PipelineManager:
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
         if pipeline_id == "streamdiffusionv2":
-            from lib.models_config import get_model_file_path, get_models_dir
-            from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+            from scope.core.pipelines.streamdiffusionv2.pipeline import (
+                StreamDiffusionV2Pipeline,
+            )
+            from scope.server.models_config import get_model_file_path, get_models_dir
 
             models_dir = get_models_dir()
             config = OmegaConf.create(
@@ -234,7 +237,8 @@ class PipelineManager:
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
                     "model_config": OmegaConf.load(
-                        "pipelines/streamdiffusionv2/model.yaml"
+                        Path(__file__).parent.parent.parent
+                        / "scope/core/pipelines/streamdiffusionv2/model.yaml"
                     ),
                 }
             )
@@ -259,7 +263,7 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "passthrough":
-            from pipelines.passthrough.pipeline import PassthroughPipeline
+            from scope.core.pipelines.passthrough.pipeline import PassthroughPipeline
 
             # Use load parameters for resolution, default to 512x512
             height = 512
@@ -278,7 +282,7 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "vod":
-            from pipelines.vod.pipeline import VodPipeline
+            from scope.core.pipelines.vod.pipeline import VodPipeline
 
             # Use load parameters for resolution, default to 512x512
             height = 512
@@ -297,8 +301,8 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "longlive":
-            from lib.models_config import get_model_file_path, get_models_dir
-            from pipelines.longlive.pipeline import LongLivePipeline
+            from scope.core.pipelines.longlive.pipeline import LongLivePipeline
+            from scope.server.models_config import get_model_file_path, get_models_dir
 
             config = OmegaConf.create(
                 {
@@ -317,7 +321,10 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    "model_config": OmegaConf.load("pipelines/longlive/model.yaml"),
+                    "model_config": OmegaConf.load(
+                        Path(__file__).parent.parent.parent
+                        / "scope/core/pipelines/longlive/model.yaml"
+                    ),
                 }
             )
 
@@ -340,8 +347,10 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "krea-realtime-video":
-            from lib.models_config import get_model_file_path, get_models_dir
-            from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
+            from scope.core.pipelines.krea_realtime_video.pipeline import (
+                KreaRealtimeVideoPipeline,
+            )
+            from scope.server.models_config import get_model_file_path, get_models_dir
 
             config = OmegaConf.create(
                 {
@@ -363,7 +372,8 @@ class PipelineManager:
                         get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
                     ),
                     "model_config": OmegaConf.load(
-                        "pipelines/krea_realtime_video/model.yaml"
+                        Path(__file__).parent.parent.parent
+                        / "scope/core/pipelines/krea_realtime_video/model.yaml"
                     ),
                 }
             )
