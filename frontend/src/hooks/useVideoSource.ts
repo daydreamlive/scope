@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-export type VideoSourceMode = "video" | "camera";
+export type VideoSourceMode = "video" | "camera" | "image";
 
 interface UseVideoSourceProps {
   onStreamUpdate?: (stream: MediaStream) => Promise<boolean>;
@@ -183,6 +183,9 @@ export function useVideoSource(props?: UseVideoSourceProps) {
           console.error("Failed to switch to camera mode:", error);
           // Error is already set by requestCameraAccess
         }
+      } else if (newMode === "image") {
+        // Image mode - no video stream needed, but we stop existing streams
+        // newStream remains null
       }
 
       if (newStream) {

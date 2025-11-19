@@ -193,6 +193,7 @@ export function InputAndControlsPanel({
                 <>
                   <SelectItem value="video">Video</SelectItem>
                   <SelectItem value="camera">Camera</SelectItem>
+                  <SelectItem value="image">Image</SelectItem>
                 </>
               ) : (
                 <SelectItem value="text">Text</SelectItem>
@@ -201,7 +202,7 @@ export function InputAndControlsPanel({
           </Select>
         </div>
 
-        {pipelineCategory === "video-input" && (
+        {pipelineCategory === "video-input" && mode !== "image" && (
           <div>
             <h3 className="text-sm font-medium mb-2">Video Input</h3>
             <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
@@ -261,10 +262,11 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* Optional Image Input - Available for all modes */}
-        <div>
-          <h3 className="text-sm font-medium mb-2">Image Input (Optional)</h3>
-          <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative min-h-[120px]">
+        {/* Image Input - Only available in image mode */}
+        {mode === "image" && (
+          <div>
+            <h3 className="text-sm font-medium mb-2">Image Input</h3>
+            <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative min-h-[120px]">
             {imagePreview ? (
               <div className="relative w-full">
                 <img
@@ -309,6 +311,7 @@ export function InputAndControlsPanel({
             </label>
           </div>
         </div>
+        )}
 
         <div>
           {(() => {
