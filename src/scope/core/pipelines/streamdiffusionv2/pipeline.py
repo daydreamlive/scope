@@ -53,11 +53,6 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             model_dir=model_dir,
             generator_path=generator_path,
             generator_model_name=generator_model_name,
-<<<<<<< HEAD:src/scope/core/pipelines/streamdiffusionv2/pipeline.py
-=======
-            enable_clip=True,
-            dtype=dtype,  # Pass dtype here
->>>>>>> 8ec552c (Fixes to tensor shapes, added i2v detection.):pipelines/streamdiffusionv2/pipeline.py
             **base_model_kwargs,
         )
 
@@ -136,16 +131,12 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("kv_cache_attention_bias", 1.0)
         self.state.set("noise_scale", 0.7)
         self.state.set("noise_controller", True)
-        self.state.set("clip_conditioning_scale", 1.0)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))
 
         self.first_call = True
-
-        # expose self as stream for tests if needed, or just aliasing
-        self.stream = self
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         return Requirements(input_size=CHUNK_SIZE)
@@ -176,51 +167,6 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
         for k, v in kwargs.items():
             self.state.set(k, v)
-
-        # Handle input_image for CLIP conditioning (Ephemeral / One-off)
-        input_image = kwargs.get("input_image")
-        clip_features = None
-
-        if input_image:
-            try:
-                image = None
-                if isinstance(input_image, str):
-                    # Decode base64 image
-                    import base64
-                    from io import BytesIO
-
-                    img_str = input_image
-                    if "," in img_str:
-                        img_str = img_str.split(",", 1)[1]
-                    image_bytes = base64.b64decode(img_str)
-                    image = Image.open(BytesIO(image_bytes))
-                elif isinstance(input_image, Image.Image):
-                    image = input_image
-
-                if image:
-                    # Encode CLIP
-                    if (
-                        hasattr(self.components.generator, "clip_encoder")
-                        and self.components.generator.clip_encoder is not None
-                    ):
-                        clip_features = (
-                            self.components.generator.clip_encoder.encode_image(image)
-                        )
-
-            except Exception as e:
-                logger.error(f"Failed to encode input image: {e}")
-
-        self.state.set("clip_features", clip_features)
-
-        # Pass clip_conditioning_scale if provided in kwargs
-        if "clip_conditioning_scale" in kwargs:
-            scale = float(kwargs["clip_conditioning_scale"])
-            self.state.set("clip_conditioning_scale", scale)
-
-            # Apply scaling to clip_features directly here if present
-            if clip_features is not None and scale != 1.0:
-                clip_features = clip_features * scale
-                self.state.set("clip_features", clip_features)
 
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
