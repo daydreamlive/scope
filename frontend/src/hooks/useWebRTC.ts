@@ -245,10 +245,10 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         dataChannelRef.current.readyState === "open"
       ) {
         try {
-          // Filter out undefined/null parameters
+          // Filter out undefined parameters, but keep null (used for clearing values like input_image)
           const filteredParams: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(params)) {
-            if (value !== undefined && value !== null) {
+            if (value !== undefined) {
               filteredParams[key] = value;
             }
           }

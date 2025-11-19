@@ -238,6 +238,7 @@ class FrameProcessor:
         try:
             # Add new update
             self.parameters_queue.put_nowait(parameters)
+            logger.debug(f"Parameters queued for update: {parameters.keys()}")
         except queue.Full:
             logger.info("Parameter queue full, dropping parameter update")
             return False
@@ -304,11 +305,14 @@ class FrameProcessor:
 
         # Check for image input mode
         input_image = self.parameters.get("input_image", None)
-        if input_image and input_image != self.current_image_data:
-            # New image data received, clear cache
+        if input_image != self.current_image_data:
+            # Image data changed (or cleared), clear cache
             self.current_image_data = input_image
             self.image_frames_cache = None
-            logger.info("New image data received for img2img mode")
+            if input_image:
+                logger.info("New image data received for img2img mode")
+            else:
+                logger.info("Image data cleared")
 
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)

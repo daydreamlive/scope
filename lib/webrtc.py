@@ -230,9 +230,20 @@ class WebRTCManager:
                     logger.info(f"Data channel opened for session {session.id}")
                     notification_sender.flush_pending_notifications()
 
+                @data_channel.on("close")
+                def on_data_channel_close():
+                    logger.info(f"Data channel closed for session {session.id}")
+
                 @data_channel.on("message")
                 def on_data_channel_message(message):
                     try:
+                        # Log raw message for debugging
+                        # logger.debug(f"Raw data channel message: {message}")
+
+                        # Handle bytes if necessary
+                        if isinstance(message, bytes):
+                            message = message.decode("utf-8")
+
                         # Parse the JSON message
                         data = json.loads(message)
                         logger.info(f"Received parameter update: {data}")
