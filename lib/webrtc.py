@@ -156,7 +156,9 @@ class WebRTCManager:
                 initial_parameters = request.initialParameters.model_dump(
                     exclude_none=True
                 )
-            logger.info(f"Received initial parameters: {initial_parameters}")
+
+            safe_params = sanitize_params_for_logging(initial_parameters)
+            logger.info(f"Received initial parameters: {safe_params}")
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
@@ -220,12 +222,25 @@ class WebRTCManager:
                     logger.info(f"Data channel opened for session {session.id}")
                     notification_sender.flush_pending_notifications()
 
+                @data_channel.on("close")
+                def on_data_channel_close():
+                    logger.info(f"Data channel closed for session {session.id}")
+
                 @data_channel.on("message")
                 def on_data_channel_message(message):
                     try:
+                        # Log raw message for debugging
+                        # logger.debug(f"Raw data channel message: {message}")
+
+                        # Handle bytes if necessary
+                        if isinstance(message, bytes):
+                            message = message.decode("utf-8")
+
                         # Parse the JSON message
                         data = json.loads(message)
-                        logger.info(f"Received parameter update: {data}")
+
+                        safe_data = sanitize_params_for_logging(data)
+                        logger.info(f"Received parameter update: {safe_data}")
 
                         # Check for paused parameter and call pause() method on video track
                         if "paused" in data and session.video_track:
@@ -346,3 +361,21 @@ def credentials_to_rtc_ice_servers(credentials: dict[str, Any]) -> list[RTCIceSe
             )
             ice_servers.append(ice_server)
     return ice_servers
+
+
+def sanitize_params_for_logging(params: dict) -> dict:
+    """Create a safe version of parameters for logging that truncates large strings."""
+    safe_params = {}
+    for key, value in params.items():
+        if (
+            key in ("input_image", "adapter_image")
+            and isinstance(value, str)
+            and len(value) > 100
+        ):
+            # Truncate base64 images to first 50 chars + ellipsis + last 10 chars
+            safe_params[key] = (
+                value[:50] + "..." + value[-10:] if len(value) > 60 else value
+            )
+        else:
+            safe_params[key] = value
+    return safe_params

@@ -687,8 +687,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-            context = torch.concat([context_clip, context], dim=1)
+            # Use appropriate embedding layer based on model type
+            if self.model_type == "i2v":
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context = torch.concat([context_clip, context], dim=1)
 
         # arguments
         kwargs = dict(
@@ -818,8 +820,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
         if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-            context = torch.concat([context_clip, context], dim=1)
+            # Use appropriate embedding layer based on model type
+            if self.model_type == "i2v":
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context = torch.concat([context_clip, context], dim=1)
 
         # arguments
         kwargs = dict(

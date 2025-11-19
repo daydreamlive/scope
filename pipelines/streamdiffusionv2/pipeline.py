@@ -28,6 +28,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         config,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
+        **kwargs,  # Allow extra kwargs
     ):
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
@@ -150,4 +151,5 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
         _, self.state = self.blocks(self.components, self.state)
+
         return postprocess_chunk(self.state.values["output_video"])

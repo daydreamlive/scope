@@ -82,6 +82,10 @@ class Parameters(BaseModel):
         ge=0.01,
         le=1.0,
     )
+    input_image: str | None = Field(
+        default=None,
+        description="Base64 encoded image data for image-to-image generation. When provided, the image will be used as the input for generation.",
+    )
     lora_scales: list["LoRAScaleUpdate"] | None = Field(
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",

@@ -44,6 +44,10 @@ export function StreamPage() {
     useState<"linear" | "slerp">("slerp");
   const [transitionSteps, setTransitionSteps] = useState(4);
 
+  // Image input state
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [imageData, setImageData] = useState<string | null>(null); // Base64 data to send to backend
+
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
 
@@ -123,6 +127,49 @@ export function StreamPage() {
     shouldReinitialize: shouldReinitializeVideo,
     enabled: PIPELINES[settings.pipelineId]?.category === "video-input",
   });
+
+  const handleImageFileUpload = async (file: File): Promise<boolean> => {
+    try {
+      // Convert image to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const base64 = reader.result as string;
+          resolve(base64);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(file);
+      const base64Data = await base64Promise;
+
+      // Store the image data
+      setUploadedImage(base64Data);
+      setImageData(base64Data);
+
+      // If streaming, send the image data to the backend immediately
+      if (isStreaming) {
+        sendParameterUpdate({
+          input_image: base64Data,
+        });
+      }
+      return true;
+    } catch (error) {
+      console.error("Failed to process image:", error);
+      return false;
+    }
+  };
+
+  const handleImageClear = () => {
+    setUploadedImage(null);
+    setImageData(null);
+
+    // If streaming, send null to clear the image on backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        input_image: null,
+      });
+    }
+  };
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
@@ -573,6 +620,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        input_image?: string;
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -582,6 +630,11 @@ export function StreamPage() {
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
         ];
+      }
+
+      // Add image data if image is uploaded
+      if (imageData) {
+        initialParameters.input_image = imageData;
       }
 
       // Cache management for krea_realtime_video and longlive
@@ -644,6 +697,9 @@ export function StreamPage() {
             onStartStream={handleStartStream}
             onStopStream={stopStream}
             onVideoFileUpload={handleVideoFileUpload}
+            onImageFileUpload={handleImageFileUpload}
+            onImageClear={handleImageClear}
+            uploadedImage={uploadedImage}
             pipelineId={settings.pipelineId}
             prompts={promptItems}
             onPromptsChange={setPromptItems}

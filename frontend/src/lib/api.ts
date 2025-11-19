@@ -22,6 +22,7 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
+    input_image?: string | null; // Base64 encoded image data for img2img, null to clear
   };
 }
 
