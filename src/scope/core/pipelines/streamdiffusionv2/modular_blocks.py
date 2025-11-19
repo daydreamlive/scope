@@ -18,7 +18,6 @@ from ..wan2_1.blocks import (
 
 logger = diffusers_logging.get_logger(__name__)
 
-
 # Main pipeline blocks for V2V workflow
 ALL_BLOCKS = InsertableDict(
     [
