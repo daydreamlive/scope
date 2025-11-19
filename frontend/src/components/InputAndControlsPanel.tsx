@@ -267,50 +267,50 @@ export function InputAndControlsPanel({
           <div>
             <h3 className="text-sm font-medium mb-2">Image Input</h3>
             <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative min-h-[120px]">
-            {imagePreview ? (
-              <div className="relative w-full">
-                <img
-                  src={imagePreview}
-                  alt="Input image preview"
-                  className="w-full h-full object-cover"
-                />
-                {/* Clear button */}
-                <Button
-                  onClick={handleClearImage}
-                  disabled={isStreaming || isConnecting}
-                  size="sm"
-                  variant="ghost"
-                  className="absolute top-2 right-2 p-1 rounded-full bg-black/50 hover:bg-black/70"
-                >
-                  <X className="h-4 w-4 text-white" />
-                </Button>
-              </div>
-            ) : (
-              <div className="text-center text-muted-foreground text-sm p-4">
-                No image uploaded
-              </div>
-            )}
-            {/* Upload button */}
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleImageUpload}
-              className="hidden"
-              id="image-upload"
-              disabled={isStreaming || isConnecting}
-            />
-            <label
-              htmlFor="image-upload"
-              className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                isStreaming || isConnecting
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:bg-black/70 cursor-pointer"
-              }`}
-            >
-              <Upload className="h-4 w-4 text-white" />
-            </label>
+              {imagePreview ? (
+                <div className="relative w-full">
+                  <img
+                    src={imagePreview}
+                    alt="Input image preview"
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Clear button */}
+                  <Button
+                    onClick={handleClearImage}
+                    disabled={isStreaming || isConnecting}
+                    size="sm"
+                    variant="ghost"
+                    className="absolute top-2 right-2 p-1 rounded-full bg-black/50 hover:bg-black/70"
+                  >
+                    <X className="h-4 w-4 text-white" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center text-muted-foreground text-sm p-4">
+                  No image uploaded
+                </div>
+              )}
+              {/* Upload button */}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+                id="image-upload"
+                disabled={isStreaming || isConnecting}
+              />
+              <label
+                htmlFor="image-upload"
+                className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                  isStreaming || isConnecting
+                    ? "opacity-50 cursor-not-allowed"
+                    : "hover:bg-black/70 cursor-pointer"
+                }`}
+              >
+                <Upload className="h-4 w-4 text-white" />
+              </label>
+            </div>
           </div>
-        </div>
         )}
 
         <div>
