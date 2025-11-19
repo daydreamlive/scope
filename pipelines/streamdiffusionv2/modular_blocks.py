@@ -64,7 +64,7 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
 
         noise = block_state.latents
         batch_size = noise.shape[0]
-        num_frames = noise.shape[2]
+        num_frames = noise.shape[1]
         denoising_step_list = block_state.current_denoising_step_list.clone()
 
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
@@ -177,10 +177,9 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
                 )
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
-                # denoised_pred: [B, C, T, H, W]
+                # denoised_pred: [B, T, C, H, W]
                 # We need to flatten B and T to match timestep: [B*T]
-                # So we permute to [B, T, C, H, W] then flatten to [B*T, C, H, W]
-                flattened_pred = denoised_pred.permute(0, 2, 1, 3, 4).flatten(0, 1)
+                flattened_pred = denoised_pred.flatten(0, 1)
 
                 random_noise = torch.randn(
                     flattened_pred.shape,
@@ -202,10 +201,8 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
                     ),
                 )
 
-                # Restore shape: [B*T, C, H, W] -> [B, T, C, H, W] -> [B, C, T, H, W]
-                noise = noise.unflatten(0, (batch_size, num_frames)).permute(
-                    0, 2, 1, 3, 4
-                )
+                # Restore shape: [B*T, C, H, W] -> [B, T, C, H, W]
+                noise = noise.unflatten(0, (batch_size, num_frames))
             else:
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
