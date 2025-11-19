@@ -334,12 +334,6 @@ class FrameProcessor:
         video_input = None
         if requirements is not None:
             current_chunk_size = requirements.input_size
-            with self.frame_buffer_lock:
-                if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
-                    # Sleep briefly to avoid busy waiting
-                    self.shutdown_event.wait(SLEEP_TIME)
-                    return
-                input = self.prepare_chunk(current_chunk_size)
 
             # Clear image cache if chunk size changed (e.g., after prompt update that resets pipeline)
             if (
