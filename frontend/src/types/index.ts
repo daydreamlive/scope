@@ -1,3 +1,5 @@
+import type { GenerationMode } from "../constants/modes";
+
 export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"
@@ -32,7 +34,7 @@ export interface LoRAConfig {
 
 export interface SettingsState {
   pipelineId: PipelineId;
-  generationMode?: "video" | "text";
+  generationMode?: GenerationMode;
   resolution?: {
     height: number;
     width: number;

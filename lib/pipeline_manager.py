@@ -260,17 +260,15 @@ class PipelineManager:
         self, pipeline_id: str, load_params: dict | None = None
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
-        from lib.defaults import get_mode_defaults
+        from lib.defaults import extract_load_params
 
         if pipeline_id == "streamdiffusionv2":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
-            native_defaults = get_mode_defaults(StreamDiffusionV2Pipeline)
-            default_resolution = native_defaults.get("resolution", {})
-            default_height = default_resolution.get("height", 512)
-            default_width = default_resolution.get("width", 512)
-            default_seed = native_defaults.get("base_seed", 42)
+            height, width, seed = extract_load_params(
+                StreamDiffusionV2Pipeline, load_params
+            )
 
             models_dir = get_models_dir()
             config = OmegaConf.create(
@@ -292,17 +290,19 @@ class PipelineManager:
                     "model_config": OmegaConf.load(
                         "pipelines/streamdiffusionv2/model.yaml"
                     ),
+                    "height": height,
+                    "width": width,
+                    "seed": seed,
                 }
             )
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=default_height,
-                default_width=default_width,
-                default_seed=default_seed,
-            )
+            # Apply LoRAs if present
+            if load_params:
+                loras = load_params.get("loras", None)
+                if loras:
+                    config["loras"] = loras
+                lora_merge_mode = load_params.get("lora_merge_mode", "permanent_merge")
+                config["_lora_merge_mode"] = lora_merge_mode
 
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -313,17 +313,7 @@ class PipelineManager:
         elif pipeline_id == "passthrough":
             from pipelines.passthrough.pipeline import PassthroughPipeline
 
-            native_defaults = get_mode_defaults(PassthroughPipeline)
-            default_resolution = native_defaults.get("resolution", {})
-            default_height = default_resolution.get("height", 512)
-            default_width = default_resolution.get("width", 512)
-
-            # Use load parameters for resolution, default to 512x512
-            height = default_height
-            width = default_width
-            if load_params:
-                height = load_params.get("height", default_height)
-                width = load_params.get("width", default_width)
+            height, width, _ = extract_load_params(PassthroughPipeline, load_params)
 
             pipeline = PassthroughPipeline(
                 height=height,
@@ -338,11 +328,7 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.longlive.pipeline import LongLivePipeline
 
-            native_defaults = get_mode_defaults(LongLivePipeline)
-            default_resolution = native_defaults.get("resolution", {})
-            default_height = default_resolution.get("height", 320)
-            default_width = default_resolution.get("width", 576)
-            default_seed = native_defaults.get("base_seed", 42)
+            height, width, seed = extract_load_params(LongLivePipeline, load_params)
 
             config = OmegaConf.create(
                 {
@@ -362,17 +348,19 @@ class PipelineManager:
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
                     "model_config": OmegaConf.load("pipelines/longlive/model.yaml"),
+                    "height": height,
+                    "width": width,
+                    "seed": seed,
                 }
             )
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=default_height,
-                default_width=default_width,
-                default_seed=default_seed,
-            )
+            # Apply LoRAs if present
+            if load_params:
+                loras = load_params.get("loras", None)
+                if loras:
+                    config["loras"] = loras
+                lora_merge_mode = load_params.get("lora_merge_mode", "permanent_merge")
+                config["_lora_merge_mode"] = lora_merge_mode
 
             pipeline = LongLivePipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -384,11 +372,12 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
 
-            native_defaults = get_mode_defaults(KreaRealtimeVideoPipeline)
-            default_resolution = native_defaults.get("resolution", {})
-            default_height = default_resolution.get("height", 320)
-            default_width = default_resolution.get("width", 576)
-            default_seed = native_defaults.get("base_seed", 42)
+            height, width, seed = extract_load_params(
+                KreaRealtimeVideoPipeline, load_params
+            )
+            quantization = (
+                load_params.get("quantization", None) if load_params else None
+            )
 
             config = OmegaConf.create(
                 {
@@ -412,21 +401,22 @@ class PipelineManager:
                     "model_config": OmegaConf.load(
                         "pipelines/krea_realtime_video/model.yaml"
                     ),
+                    "height": height,
+                    "width": width,
+                    "seed": seed,
                 }
             )
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=default_height,
-                default_width=default_width,
-                default_seed=default_seed,
-            )
-
-            quantization = None
+            # Apply LoRAs and quantization if present
             if load_params:
+                loras = load_params.get("loras", None)
+                if loras:
+                    config["loras"] = loras
+                lora_merge_mode = load_params.get("lora_merge_mode", "permanent_merge")
+                config["_lora_merge_mode"] = lora_merge_mode
                 quantization = load_params.get("quantization", None)
+            else:
+                quantization = None
 
             pipeline = KreaRealtimeVideoPipeline(
                 config,

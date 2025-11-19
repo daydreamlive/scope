@@ -19,6 +19,8 @@ import {
   getModeDefaults,
 } from "../lib/utils";
 import { getPipelineModeCapabilities } from "../lib/pipelineModes";
+import { getPipelineSettingsUpdate } from "../utils/pipelineSettings";
+import { GENERATION_MODE, VIDEO_SOURCE_MODE } from "../constants/modes";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy, SettingsState } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -194,26 +196,10 @@ export function StreamPage() {
     setSelectedTimelinePrompt(null);
     setExternalSelectedPromptId(null);
 
-    const caps = getPipelineModeCapabilities(pipelineId);
-    const nativeGenerationMode = caps.nativeMode;
-    const nativeModeDefaults = getModeDefaults(
-      pipelineId,
-      nativeGenerationMode
-    );
-
-    // Update the pipeline in settings
+    // Update the pipeline in settings with consolidated defaults
     updateSettings({
-      pipelineId,
-      denoisingSteps: nativeModeDefaults.denoising_steps,
-      resolution: nativeModeDefaults.resolution,
+      ...getPipelineSettingsUpdate(pipelineId),
       loras: [], // Clear LoRA controls when switching pipelines
-      generationMode: nativeGenerationMode,
-      manageCache: nativeModeDefaults.manage_cache,
-      noiseScale: nativeModeDefaults.noise_scale ?? undefined,
-      noiseController: nativeModeDefaults.noise_controller ?? undefined,
-      seed: nativeModeDefaults.base_seed,
-      kvCacheAttentionBias:
-        nativeModeDefaults.kv_cache_attention_bias ?? undefined,
     });
   };
 
@@ -246,25 +232,8 @@ export function StreamPage() {
             setSelectedTimelinePrompt(null);
             setExternalSelectedPromptId(null);
 
-            const caps = getPipelineModeCapabilities(pipelineId);
-            const nativeGenerationMode = caps.nativeMode;
-            const nativeModeDefaults = getModeDefaults(
-              pipelineId,
-              nativeGenerationMode
-            );
-
-            updateSettings({
-              pipelineId,
-              denoisingSteps: nativeModeDefaults.denoising_steps,
-              resolution: nativeModeDefaults.resolution,
-              generationMode: nativeGenerationMode,
-              manageCache: nativeModeDefaults.manage_cache,
-              noiseScale: nativeModeDefaults.noise_scale ?? undefined,
-              noiseController: nativeModeDefaults.noise_controller ?? undefined,
-              seed: nativeModeDefaults.base_seed,
-              kvCacheAttentionBias:
-                nativeModeDefaults.kv_cache_attention_bias ?? undefined,
-            });
+            // Update the pipeline in settings with consolidated defaults
+            updateSettings(getPipelineSettingsUpdate(pipelineId));
 
             // Automatically start the stream after download completes
             // Use setTimeout to ensure state updates are processed first
@@ -473,18 +442,23 @@ export function StreamPage() {
     const caps = getPipelineModeCapabilities(pipelineId);
 
     // Convert "camera" mode to generationMode="video" + videoSourceMode="camera"
-    let generationMode: "video" | "text";
-    let newVideoSourceMode: "video" | "camera" | undefined;
+    let generationMode:
+      | typeof GENERATION_MODE.VIDEO
+      | typeof GENERATION_MODE.TEXT;
+    let newVideoSourceMode:
+      | typeof VIDEO_SOURCE_MODE.VIDEO
+      | typeof VIDEO_SOURCE_MODE.CAMERA
+      | undefined;
 
-    if (mode === "camera") {
-      generationMode = "video";
-      newVideoSourceMode = "camera";
-    } else if (mode === "video") {
-      generationMode = "video";
+    if (mode === VIDEO_SOURCE_MODE.CAMERA) {
+      generationMode = GENERATION_MODE.VIDEO;
+      newVideoSourceMode = VIDEO_SOURCE_MODE.CAMERA;
+    } else if (mode === GENERATION_MODE.VIDEO) {
+      generationMode = GENERATION_MODE.VIDEO;
       // When switching to "video" mode, ensure videoSourceMode is set to "video"
       // (unless it's already "video", in which case we don't need to change it)
-      if (videoSourceMode !== "video") {
-        newVideoSourceMode = "video";
+      if (videoSourceMode !== VIDEO_SOURCE_MODE.VIDEO) {
+        newVideoSourceMode = VIDEO_SOURCE_MODE.VIDEO;
       }
     } else {
       generationMode = mode;
@@ -494,15 +468,15 @@ export function StreamPage() {
     const updates: Partial<SettingsState> = { generationMode };
 
     // Set resolution based on the mode using pipeline defaults
-    if (generationMode === "text") {
+    if (generationMode === GENERATION_MODE.TEXT) {
       updates.resolution =
         caps.defaultResolutionByMode.text ??
-        getDefaultResolution(pipelineId, "text");
-    } else if (generationMode === "video") {
+        getDefaultResolution(pipelineId, GENERATION_MODE.TEXT);
+    } else if (generationMode === GENERATION_MODE.VIDEO) {
       // Use pipeline's default video resolution first, only fall back to video source if no default
       const defaultVideoResolution =
         caps.defaultResolutionByMode.video ??
-        getDefaultResolution(pipelineId, "video");
+        getDefaultResolution(pipelineId, GENERATION_MODE.VIDEO);
       // Prioritize pipeline default over video source resolution
       updates.resolution = defaultVideoResolution || videoResolution;
     }
@@ -556,7 +530,7 @@ export function StreamPage() {
       videoResolution &&
       !isStreaming &&
       caps.requiresVideoInVideoMode &&
-      currentMode === "video" &&
+      currentMode === GENERATION_MODE.VIDEO &&
       !settings.resolution // Only sync if resolution is not already set
     ) {
       updateSettings({
@@ -576,13 +550,16 @@ export function StreamPage() {
 
   const computeCanStartStream = (
     caps: ReturnType<typeof getPipelineModeCapabilities>,
-    generationMode: "video" | "text" | undefined,
+    generationMode:
+      | typeof GENERATION_MODE.VIDEO
+      | typeof GENERATION_MODE.TEXT
+      | undefined,
     hasLocalStream: boolean,
     isInitializingLocalStream: boolean
   ) => {
     const effectiveMode = generationMode ?? caps.nativeMode;
     const needsVideoInput =
-      caps.requiresVideoInVideoMode && effectiveMode === "video";
+      caps.requiresVideoInVideoMode && effectiveMode === GENERATION_MODE.VIDEO;
 
     if (!needsVideoInput) {
       return !isInitializingLocalStream;
@@ -693,7 +670,7 @@ export function StreamPage() {
       const currentMode = settings.generationMode ?? caps.nativeMode;
       const modeDefaults = getModeDefaults(pipelineIdToUse, currentMode);
       const needsVideoInput =
-        caps.requiresVideoInVideoMode && currentMode === "video";
+        caps.requiresVideoInVideoMode && currentMode === GENERATION_MODE.VIDEO;
 
       // Only send video stream for pipelines that need video input
       const streamToSend = needsVideoInput
@@ -747,8 +724,10 @@ export function StreamPage() {
       // Noise control and generation mode for pipelines that expose them
       const shouldSendNoiseControls =
         runtimeCaps.hasNoiseControls &&
-        ((currentMode === "video" && runtimeCaps.showNoiseControlsInVideo) ||
-          (currentMode === "text" && runtimeCaps.showNoiseControlsInText));
+        ((currentMode === GENERATION_MODE.VIDEO &&
+          runtimeCaps.showNoiseControlsInVideo) ||
+          (currentMode === GENERATION_MODE.TEXT &&
+            runtimeCaps.showNoiseControlsInText));
       if (shouldSendNoiseControls) {
         const resolvedNoiseScale =
           settings.noiseScale !== undefined
@@ -803,10 +782,10 @@ export function StreamPage() {
             mode={
               // Convert generationMode + videoSourceMode back to the combined mode for the UI
               // TODO: This conversion should be removed when 'camera' is refactored into a separate input control
-              settings.generationMode === "video" &&
-              videoSourceMode === "camera"
-                ? "camera"
-                : (settings.generationMode ?? "video")
+              settings.generationMode === GENERATION_MODE.VIDEO &&
+              videoSourceMode === VIDEO_SOURCE_MODE.CAMERA
+                ? VIDEO_SOURCE_MODE.CAMERA
+                : (settings.generationMode ?? GENERATION_MODE.VIDEO)
             }
             onModeChange={handleGenerationModeChange}
             videoSourceMode={videoSourceMode}

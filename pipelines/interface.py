@@ -71,6 +71,52 @@ class Pipeline(ABC):
         """
         pass
 
+    @classmethod
+    def _initialize_state_with_defaults(cls, state, config) -> None:
+        """Initialize pipeline state with default values from config and pipeline defaults.
+
+        This helper consolidates the common pattern of initializing state parameters
+        with values from config (if present) or falling back to pipeline defaults.
+
+        Args:
+            state: PipelineState object to initialize
+            config: Configuration object with optional overrides
+        """
+        from lib.defaults import get_mode_defaults
+
+        native_defaults = get_mode_defaults(cls)
+
+        state.set("current_start_frame", 0)
+        state.set("current_noise_scale", 0.7)
+
+        # Resolution
+        default_resolution = native_defaults.get("resolution", {})
+        state.set(
+            "height",
+            getattr(config, "height", default_resolution.get("height", 512)),
+        )
+        state.set(
+            "width",
+            getattr(config, "width", default_resolution.get("width", 576)),
+        )
+
+        # Seed
+        state.set(
+            "base_seed", getattr(config, "seed", native_defaults.get("base_seed", 42))
+        )
+
+        # Cache management
+        state.set("manage_cache", native_defaults.get("manage_cache", True))
+
+        # Noise controls
+        state.set("noise_scale", native_defaults.get("noise_scale"))
+        state.set("noise_controller", native_defaults.get("noise_controller"))
+
+        # Pipeline-specific parameters (optional, may not exist in all defaults)
+        kv_cache_bias = native_defaults.get("kv_cache_attention_bias")
+        if kv_cache_bias is not None:
+            state.set("kv_cache_attention_bias", kv_cache_bias)
+
     @abstractmethod
     def __call__(
         self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs
