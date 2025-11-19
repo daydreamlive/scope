@@ -141,7 +141,7 @@ export function LoRAManager({
             className="rounded-lg border bg-card p-3 space-y-2"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <FilePicker
                   value={lora.path}
                   onChange={path => handleLoraChange(lora.id, { path })}
@@ -156,7 +156,7 @@ export function LoRAManager({
                 variant="ghost"
                 onClick={() => handleRemoveLora(lora.id)}
                 disabled={disabled || isStreaming}
-                className="h-6 w-6 p-0"
+                className="h-6 w-6 p-0 shrink-0"
                 title={
                   isStreaming
                     ? "Cannot remove LoRAs while streaming"
@@ -172,7 +172,7 @@ export function LoRAManager({
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <SliderWithInput
                         value={localScales[lora.id] ?? lora.scale}
                         onValueChange={value => {
@@ -181,12 +181,14 @@ export function LoRAManager({
                         min={-10}
                         max={10}
                         step={0.1}
+                        incrementAmount={0.1}
                         disabled={
                           disabled ||
                           (isStreaming &&
                             loraMergeStrategy === "permanent_merge")
                         }
                         className="flex-1"
+                        valueFormatter={v => Math.round(v * 10) / 10}
                       />
                     </div>
                   </TooltipTrigger>
