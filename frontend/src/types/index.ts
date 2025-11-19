@@ -3,7 +3,9 @@ export type PipelineId =
   | "passthrough"
   | "vod"
   | "longlive"
-  | "krea-realtime-video";
+  | "krea-realtime-video"
+  | "sd-turbo"
+  | "sdxl-turbo";
 
 export interface SystemMetrics {
   cpu: number;

@@ -13,6 +13,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
   pipelineCompatibility?: PipelineCompatibility;
+  cloudModelId?: string;
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
@@ -61,7 +62,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationSteps: 4,
   },
   "sd-turbo": {
-    name: "SD-turbo",
+    name: "SDTurbo",
     docsUrl:
       "",
     about:
@@ -70,11 +71,27 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     category: "video-input",
     defaultPrompt:
       "",
-    estimatedVram: 32,
-    requiresModels: true,
+    requiresModels: false,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
     pipelineCompatibility: "cloud",
+    cloudModelId: "stabilityai/sd-turbo",
+  },
+  "sdxl-turbo": {
+    name: "SDXL Turbo",
+    docsUrl:
+      "",
+    about:
+      "",
+    modified: true,
+    category: "video-input",
+    defaultPrompt:
+      "",
+    requiresModels: false,
+    defaultTemporalInterpolationMethod: "linear",
+    defaultTemporalInterpolationSteps: 4,
+    pipelineCompatibility: "cloud",
+    cloudModelId: "stabilityai/sdxl-turbo",
   },
   passthrough: {
     name: "Passthrough",

@@ -17,7 +17,7 @@ import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
-import { createCloudStream } from "../lib/daydream";
+import { createCloudStream, updateCloudStream, type CreateStreamResponse, type StreamParams } from "../lib/daydream";
 import { WhipConnection } from "../components/WhipConnection";
 import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
 
@@ -47,7 +47,7 @@ export function StreamPage() {
   // Cloud mode state (WHIP)
   const [isConnectingCloud, setIsConnectingCloud] = useState(false);
   const [isStreamingCloud, setIsStreamingCloud] = useState(false);
-  const [cloudWhipUrl, setCloudWhipUrl] = useState<string | null>(null);
+  const [activeStream, setActiveStream] = useState<CreateStreamResponse | null>(null);
   const isStartingCloudRef = useRef(false);
   const { setPlaybackUrl } = usePlaybackUrl();
 
@@ -70,8 +70,9 @@ export function StreamPage() {
   const onWhipRetryLimitExceeded = useCallback(() => {
     setIsStreamingCloud(false);
     setIsConnectingCloud(false);
-    setCloudWhipUrl(null);
-  }, [setIsStreamingCloud, setIsConnectingCloud, setCloudWhipUrl]);
+    setActiveStream(null);
+    setPlaybackUrl(null);
+  }, [setIsStreamingCloud, setIsConnectingCloud, setPlaybackUrl]);
 
   // Timeline state for left panel
   const [timelinePrompts, setTimelinePrompts] = useState<TimelinePrompt[]>([]);
@@ -122,6 +123,86 @@ export function StreamPage() {
     sendParameterUpdate,
   } = useWebRTC();
 
+  // Convert local params to Daydream API StreamParams format
+  const convertToStreamParams = useCallback((
+    prompts?: PromptItem[] | string | string[] | Array<[string, number]>,
+    denoisingSteps?: number[],
+    height?: number,
+    width?: number,
+    seed?: number
+  ): Partial<StreamParams> => {
+    const streamParams: Partial<StreamParams> = {};
+
+    // Convert denoising_step_list to t_index_list
+    // Scale from 0-1000 range to 0-50 range
+    if (denoisingSteps && Array.isArray(denoisingSteps)) {
+      streamParams.t_index_list = [...denoisingSteps]
+        .reverse()
+        .map(step => Math.round(step * (50 / 1000)));
+    }
+
+    // Map prompts - convert PromptItem[] to [string, number][]
+    if (prompts) {
+      if (Array.isArray(prompts) && prompts.length > 0) {
+        // Handle PromptItem[] format (most common case)
+        if (typeof prompts[0] === 'object' && prompts[0] !== null && 'text' in prompts[0]) {
+          const converted = (prompts as PromptItem[])
+            .map(item => [item.text, item.weight] as [string, number])
+            .filter(([text]) => text.trim() !== '');
+          if (converted.length > 0) {
+            streamParams.prompt = converted;
+          }
+        } else if (Array.isArray(prompts[0])) {
+          // Already in tuple format [string, number][]
+          const filtered = (prompts as Array<[string, number]>).filter(([text]) => text.trim() !== '');
+          if (filtered.length > 0) {
+            streamParams.prompt = filtered;
+          }
+        } else if (typeof prompts[0] === 'string' && prompts[0].trim() !== '') {
+          // string[] - use first non-empty string
+          streamParams.prompt = prompts[0];
+        }
+      } else if (typeof prompts === 'string' && prompts.trim() !== '') {
+        streamParams.prompt = prompts;
+      }
+    }
+
+    // Include height, width, and seed if provided
+    if (height !== undefined) {
+      streamParams.height = height;
+    }
+    if (width !== undefined) {
+      streamParams.width = width;
+    }
+    if (seed !== undefined) {
+      streamParams.seed = seed;
+    }
+
+    return streamParams;
+  }, []);
+
+  // Handle parameter updates - cloud mode vs local mode
+  const handleParameterUpdate = useCallback((params: Parameters<typeof sendParameterUpdate>[0]) => {
+    if (settings.cloudMode) {
+      if (!activeStream?.id) {
+        return;
+      }
+
+      // Convert local params format to Daydream API format
+      const streamParams = convertToStreamParams(
+        'prompts' in params ? params.prompts : undefined,
+        'denoising_step_list' in params && Array.isArray(params.denoising_step_list) ? params.denoising_step_list : undefined,
+      );
+
+      updateCloudStream(activeStream.id, {
+        params: streamParams as StreamParams,
+      });
+
+    } else {
+      sendParameterUpdate(params);
+    }
+  }, [settings.cloudMode, sendParameterUpdate, activeStream, convertToStreamParams]);
+
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
     peerConnectionRef,
@@ -157,7 +238,7 @@ export function StreamPage() {
     }
 
     // Send transition to backend
-    sendParameterUpdate({
+    handleParameterUpdate({
       transition,
     });
   };
@@ -166,6 +247,12 @@ export function StreamPage() {
     // Stop the stream if it's currently running
     if (isStreaming) {
       stopStream();
+    }
+    if (isStreamingCloud) {
+      setActiveStream(null);
+      setIsStreamingCloud(false);
+      setIsConnectingCloud(false);
+      setPlaybackUrl(null);
     }
 
     // Check if we're switching from no-video-input to video-input pipeline
@@ -297,7 +384,7 @@ export function StreamPage() {
   const handleDenoisingStepsChange = (denoisingSteps: number[]) => {
     updateSettings({ denoisingSteps });
     // Send denoising steps update to backend
-    sendParameterUpdate({
+    handleParameterUpdate({
       denoising_step_list: denoisingSteps,
     });
   };
@@ -305,7 +392,7 @@ export function StreamPage() {
   const handleNoiseScaleChange = (noiseScale: number) => {
     updateSettings({ noiseScale });
     // Send noise scale update to backend
-    sendParameterUpdate({
+    handleParameterUpdate({
       noise_scale: noiseScale,
     });
   };
@@ -313,7 +400,7 @@ export function StreamPage() {
   const handleNoiseControllerChange = (enabled: boolean) => {
     updateSettings({ noiseController: enabled });
     // Send noise controller update to backend
-    sendParameterUpdate({
+    handleParameterUpdate({
       noise_controller: enabled,
     });
   };
@@ -321,7 +408,7 @@ export function StreamPage() {
   const handleManageCacheChange = (enabled: boolean) => {
     updateSettings({ manageCache: enabled });
     // Send manage cache update to backend
-    sendParameterUpdate({
+    handleParameterUpdate({
       manage_cache: enabled,
     });
   };
@@ -334,14 +421,14 @@ export function StreamPage() {
   const handleKvCacheAttentionBiasChange = (bias: number) => {
     updateSettings({ kvCacheAttentionBias: bias });
     // Send KV cache attention bias update to backend
-    sendParameterUpdate({
+    handleParameterUpdate({
       kv_cache_attention_bias: bias,
     });
   };
 
   const handleResetCache = () => {
     // Send reset cache command to backend
-    sendParameterUpdate({
+    handleParameterUpdate({
       reset_cache: true,
     });
   };
@@ -354,7 +441,7 @@ export function StreamPage() {
 
     // Also send the updated parameters to the backend immediately
     // Preserve the full blend while live
-    sendParameterUpdate({
+    handleParameterUpdate({
       prompts,
       prompt_interpolation_method: interpolationMethod,
       denoising_step_list: settings.denoisingSteps || [700, 500],
@@ -418,7 +505,7 @@ export function StreamPage() {
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
     updateSettings({ paused: newPausedState });
-    sendParameterUpdate({
+    handleParameterUpdate({
       paused: newPausedState,
     });
 
@@ -460,9 +547,10 @@ export function StreamPage() {
       }
     } else {
       if (isStreamingCloud) {
-        setCloudWhipUrl(null);
+        setActiveStream(null);
         setIsStreamingCloud(false);
         setIsConnectingCloud(false);
+        setPlaybackUrl(null);
         return true;
       }
       // Ignore new start requests while a cloud connection is being established
@@ -477,43 +565,27 @@ export function StreamPage() {
     try {
       // Cloud mode via WHIP
       if (settings.cloudMode) {
-        // Prepare load parameters based on pipeline
-        let loadParams: Record<string, unknown> | null = null;
         const resolution = settings.resolution || videoResolution;
-        if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
-          loadParams = {
-            height: resolution.height,
-            width: resolution.width,
-            seed: settings.seed ?? 42,
-          };
-        } else if (pipelineIdToUse === "passthrough" && resolution) {
-          loadParams = {
-            height: resolution.height,
-            width: resolution.width,
-          };
-        } else if (pipelineIdToUse === "longlive" && resolution) {
-          loadParams = {
-            height: resolution.height,
-            width: resolution.width,
-            seed: settings.seed ?? 42,
-          };
-        } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
-          loadParams = {
-            height: resolution.height,
-            width: resolution.width,
-            seed: settings.seed ?? 42,
-            quantization:
-              settings.quantization !== undefined
-                ? settings.quantization
-                : "fp8_e4m3fn",
-          };
-        }
+
+        // Convert prompts and denoising steps to StreamParams format
+        const streamParams = convertToStreamParams(
+          promptItems,
+          settings.denoisingSteps,
+          resolution?.height,
+          resolution?.width,
+          settings.seed ?? 42
+        );
+
+        let params: StreamParams = {
+          model_id: PIPELINES[pipelineIdToUse]?.cloudModelId as StreamParams["model_id"],
+          ...streamParams,
+        };
 
         setIsConnectingCloud(true);
         isStartingCloudRef.current = true;
         const created = await createCloudStream({
-          pipeline_id: 'pip_SD-turbo',
-          load_params: loadParams || undefined,
+          pipeline: 'streamdiffusion',
+          params: params,
         });
 
         const needsVideoInput =
@@ -533,8 +605,8 @@ export function StreamPage() {
           return false;
         }
 
-        // Mount WHIP connection component via state; it will manage the connection lifecycle
-        setCloudWhipUrl(endpoint);
+        // Store the full stream response for access to all fields
+        setActiveStream(created);
 
         updateSettings({ paused: false });
         // Keep connecting state true until RTCPeerConnection reports connected
@@ -771,7 +843,7 @@ export function StreamPage() {
             />
           </div>
           {/* Timeline area - compact, always visible */}
-          <div className="flex-shrink-0 mt-2">
+          <div className={`flex-shrink-0 mt-2 ${(settings?.cloudMode ?? false) ? 'hidden' : ''}`}>
             <PromptInputWithTimeline
               currentPrompt={promptItems[0]?.text || ""}
               currentPromptItems={promptItems}
@@ -784,7 +856,7 @@ export function StreamPage() {
 
                 // Send to backend - use transition if streaming and transition steps > 0
                 if (isStreaming && transitionSteps > 0) {
-                  sendParameterUpdate({
+                  handleParameterUpdate({
                     transition: {
                       target_prompts: prompts,
                       num_steps: transitionSteps,
@@ -794,7 +866,7 @@ export function StreamPage() {
                   });
                 } else {
                   // Send direct prompts without transition
-                  sendParameterUpdate({
+                  handleParameterUpdate({
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
@@ -828,7 +900,7 @@ export function StreamPage() {
 
                 // Send to backend - use transition if streaming and transition steps > 0
                 if (isStreaming && effectiveTransitionSteps > 0) {
-                  sendParameterUpdate({
+                  handleParameterUpdate({
                     transition: {
                       target_prompts: prompts,
                       num_steps: effectiveTransitionSteps,
@@ -838,7 +910,7 @@ export function StreamPage() {
                   });
                 } else {
                   // Send direct prompts without transition
-                  sendParameterUpdate({
+                  handleParameterUpdate({
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
@@ -894,7 +966,7 @@ export function StreamPage() {
                   stopStream();
                 }
               if (isStreamingCloud) {
-                setCloudWhipUrl(null);
+                setActiveStream(null);
                 setIsStreamingCloud(false);
                 setIsConnectingCloud(false);
                 setPlaybackUrl(null);
@@ -942,13 +1014,12 @@ export function StreamPage() {
         />
       )}
       {/* WHIP Connection Mount Point (cloud mode) */}
-      {settings.cloudMode && cloudWhipUrl ? (
+      {settings.cloudMode && activeStream?.whip_url ? (
         <WhipConnection
-          whipUrl={cloudWhipUrl}
+          whipUrl={activeStream.whip_url}
           stream={localStream ?? null}
           onConnectionStateChange={onWhipConnectionStateChange}
           onRetryLimitExceeded={onWhipRetryLimitExceeded}
-          debugStats  // TODO remove later
         />
       ) : null}
     </div>

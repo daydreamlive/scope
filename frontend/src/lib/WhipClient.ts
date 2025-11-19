@@ -264,7 +264,7 @@ export class WhipClient {
   private videoSender: RTCRtpSender | null = null;
   private audioSender: RTCRtpSender | null = null;
   private videoTransceiver: RTCRtpTransceiver | null = null;
-  private audioTransceiver: RTCRtpTransceiver | null = null;
+  // private audioTransceiver: RTCRtpTransceiver | null = null;
   private abortController: AbortController | null = null;
   private isConnecting = false;
   private connectionEstablished = false;
@@ -325,7 +325,7 @@ export class WhipClient {
         this.videoSender = null;
         this.audioSender = null;
         this.videoTransceiver = null;
-        this.audioTransceiver = null;
+        // this.audioTransceiver = null;
       }
       const pc = this.createPeerConnection();
       this.pc = pc;
@@ -417,7 +417,7 @@ export class WhipClient {
     this.videoSender = null;
     this.audioSender = null;
     this.videoTransceiver = null;
-    this.audioTransceiver = null;
+    // this.audioTransceiver = null;
   }
 
   setMaxFramerate(fps?: number) {
@@ -455,7 +455,7 @@ export class WhipClient {
       const v = pc.addTransceiver("video", { direction: "sendonly" });
       const a = pc.addTransceiver("audio", { direction: "sendonly" });
       this.videoTransceiver = v;
-      this.audioTransceiver = a;
+      // this.audioTransceiver = a;
       this.videoSender = v.sender || null;
       this.audioSender = a.sender || null;
     } catch {}
@@ -521,7 +521,7 @@ export class WhipClient {
     return pc;
   }
 
-  private async attachStream(mediaStream: MediaStream, pc: RTCPeerConnection) {
+  private async attachStream(mediaStream: MediaStream, _: RTCPeerConnection) {
     const videoTrack = mediaStream.getVideoTracks()[0] || null;
     const audioTrack = mediaStream.getAudioTracks()[0] || null;
     if (this.videoSender) {
