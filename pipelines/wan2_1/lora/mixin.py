@@ -2,6 +2,9 @@
 
 This mixin is intentionally thin: it delegates all heavy lifting to the
 LoRA managers so that modular block graphs remain completely unaware of LoRA.
+
+Note: This LoRA integration is specifically designed for the Wan2.1 architecture
+and may not be compatible with other model architectures without modification.
 """
 
 from __future__ import annotations
@@ -42,6 +45,11 @@ class LoRAEnabledPipeline:
     The mixin keeps track of:
     - self._lora_merge_mode: currently active merge strategy
     - self.loaded_lora_adapters: list of {path, scale, adapter_name?}
+
+    Architecture Compatibility:
+    This implementation is specifically designed for Wan2.1 architecture models
+    and targets their specific Linear layer structure. Using this with other
+    architectures may require modifications to the LoRA strategies.
     """
 
     _lora_merge_mode: str | None = None
