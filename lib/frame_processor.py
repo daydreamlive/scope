@@ -32,9 +32,6 @@ PREPARE_ONLY_PARAMETERS = {
     "frame_rate",
     "target_frame_rate",
     "bitrate",
-    "denoising_step_list",
-    "noise_scale",
-    "kv_cache_attention_bias",
     "input_image",  # Image data is processed and converted to frames
 }
 
