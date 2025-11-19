@@ -354,6 +354,14 @@ export function StreamPage() {
     });
   };
 
+  const handleClipConditioningScaleChange = (scale: number) => {
+    updateSettings({ clipConditioningScale: scale });
+    // Send clip conditioning scale update to backend
+    sendParameterUpdate({
+      clip_conditioning_scale: scale,
+    });
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -576,6 +584,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        clip_conditioning_scale?: number;
         input_image?: string;
       } = {};
 
@@ -611,6 +620,8 @@ export function StreamPage() {
       if (pipelineIdToUse === "streamdiffusionv2") {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
+        initialParameters.clip_conditioning_scale =
+          settings.clipConditioningScale ?? 1.0;
       }
 
       // Reset paused state when starting a fresh stream
@@ -848,6 +859,8 @@ export function StreamPage() {
             onQuantizationChange={handleQuantizationChange}
             kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
+            clipConditioningScale={settings.clipConditioningScale ?? 1.0}
+            onClipConditioningScaleChange={handleClipConditioningScaleChange}
             onResetCache={handleResetCache}
           />
         </div>

@@ -54,6 +54,8 @@ interface SettingsPanelProps {
   onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
   kvCacheAttentionBias?: number;
   onKvCacheAttentionBiasChange?: (bias: number) => void;
+  clipConditioningScale?: number;
+  onClipConditioningScaleChange?: (scale: number) => void;
   onResetCache?: () => void;
 }
 
@@ -79,6 +81,8 @@ export function SettingsPanel({
   onQuantizationChange,
   kvCacheAttentionBias = 0.3,
   onKvCacheAttentionBiasChange,
+  clipConditioningScale = 1.0,
+  onClipConditioningScaleChange,
   onResetCache,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
@@ -89,6 +93,10 @@ export function SettingsPanel({
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
     onKvCacheAttentionBiasChange
+  );
+  const clipConditioningScaleSlider = useLocalSliderValue(
+    clipConditioningScale,
+    onClipConditioningScaleChange
   );
 
   // Validation error states
@@ -559,6 +567,21 @@ export function SettingsPanel({
                 labelClassName="text-sm text-foreground w-20"
                 valueFormatter={noiseScaleSlider.formatValue}
                 inputParser={v => parseFloat(v) || 0.0}
+              />
+
+              <SliderWithInput
+                label={PARAMETER_METADATA.clipConditioningScale.label}
+                tooltip={PARAMETER_METADATA.clipConditioningScale.tooltip}
+                value={clipConditioningScaleSlider.localValue}
+                onValueChange={clipConditioningScaleSlider.handleValueChange}
+                onValueCommit={clipConditioningScaleSlider.handleValueCommit}
+                min={0.0}
+                max={1.0}
+                step={0.01}
+                incrementAmount={0.01}
+                labelClassName="text-sm text-foreground w-20"
+                valueFormatter={clipConditioningScaleSlider.formatValue}
+                inputParser={v => parseFloat(v) || 1.0}
               />
             </div>
           </div>

@@ -237,6 +237,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       manage_cache?: boolean;
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
+      clip_conditioning_scale?: number;
       paused?: boolean;
       input_image?: string | null; // Base64 encoded image data for img2img, null to clear
     }) => {

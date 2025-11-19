@@ -36,6 +36,7 @@ export interface SettingsState {
   manageCache?: boolean;
   quantization?: "fp8_e4m3fn" | null;
   kvCacheAttentionBias?: number;
+  clipConditioningScale?: number;
   paused?: boolean;
 }
 
