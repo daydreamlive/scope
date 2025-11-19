@@ -28,11 +28,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "aiortc>=1.13.0",
-    "fastapi>=0.116.1",
-    "httpx>=0.28.1",
-    "twilio>=9.8.0",
-    "uvicorn>=0.35.0",
+    # Core dependencies (required for scope.core)
     "torch==2.8.0",
     "torchvision==0.23.0",
     "easydict>=1.13",
@@ -53,12 +49,19 @@ dependencies = [
     "kernels>=0.10.4",
     "triton==3.4.0; sys_platform != 'win32'",
     "triton-windows==3.4.0.post21; sys_platform == 'win32'",
+    "pydantic>=2.0.0",  # Required by scope.core.pipelines.interface
+    # Server dependencies (required for daydream-scope command)
+    "aiortc>=1.13.0",
+    "fastapi>=0.116.1",
+    "httpx>=0.28.1",
+    "twilio>=9.8.0",
+    "uvicorn>=0.35.0",
 ]
 
 [project.scripts]
-daydream-scope = "app:main"
-build = "build:main"
-download_models = "download_models:main"
+daydream-scope = "scope.server.app:main"
+build = "scope.server.build:main"
+download_models = "scope.server.download_models:main"
 
 [project.urls]
 Homepage = "https://github.com/daydreamlive/scope"
@@ -141,7 +144,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.ruff.lint.isort]
-known-first-party = ["lib"]
+known-first-party = ["scope"]
 
 [build-system]
 requires = ["hatchling", "editables"]
@@ -152,12 +155,12 @@ include = [
     "frontend/dist/assets/**/*",
     "frontend/dist/index.html",
 
-    "pipelines/**/*",
-    "lib/**/*",
+    "scope/core/**/*",
+    "scope/server/**/*",
     "*.py",
 
     "./README.md",
-    "./LICENSE",
+    "./LICENSE.md",
     "*.toml",
     ".python-version",
 
