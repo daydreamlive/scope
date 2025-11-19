@@ -1,10 +1,7 @@
-import base64
 import logging
 import time
-from io import BytesIO
 
 import torch
-import torchvision.transforms.functional as TF
 from diffusers.modular_pipelines import PipelineState
 from PIL import Image
 
@@ -183,15 +180,15 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Handle input_image for CLIP conditioning (Ephemeral / One-off)
         input_image = kwargs.get("input_image")
         clip_features = None
-        i2v_latents = None
-
-        model_type = getattr(self.components.generator.model, "model_type", "t2v")
 
         if input_image:
             try:
                 image = None
                 if isinstance(input_image, str):
                     # Decode base64 image
+                    import base64
+                    from io import BytesIO
+
                     img_str = input_image
                     if "," in img_str:
                         img_str = img_str.split(",", 1)[1]
@@ -210,52 +207,20 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
                             self.components.generator.clip_encoder.encode_image(image)
                         )
 
-                    # Encode VAE (Channel Concat) - Only if model is I2V
-                    if model_type == "i2v":
-                        # Convert to tensor
-                        image_tensor = (
-                            TF.to_tensor(image).sub_(0.5).div_(0.5)
-                        )  # [-1, 1]
-                        # [C, H, W] -> [1, C, H, W]
-                        image_tensor = image_tensor.unsqueeze(0).to(
-                            device=self.components.config.device,
-                            dtype=self.components.config.dtype,
-                        )
-                        # [1, C, H, W] -> [1, C, T=1, H, W]
-                        video_tensor = image_tensor.unsqueeze(2)
-
-                        cond_latents = self.components.vae.encode_to_latent(
-                            video_tensor
-                        )
-
-                        # Create mask
-                        mask = torch.ones(
-                            cond_latents.shape[0],
-                            4,
-                            cond_latents.shape[2],
-                            cond_latents.shape[3],
-                            cond_latents.shape[4],
-                            device=cond_latents.device,
-                            dtype=cond_latents.dtype,
-                        )
-                        i2v_latents = torch.cat(
-                            [cond_latents, mask], dim=1
-                        )  # [1, 20, 1, h, w]
-
             except Exception as e:
                 logger.error(f"Failed to encode input image: {e}")
 
         self.state.set("clip_features", clip_features)
 
-        # Only set i2v_conditioning_latent if model supports it (I2V)
-        if model_type == "i2v":
-            self.state.set("i2v_conditioning_latent", i2v_latents)
-
         # Pass clip_conditioning_scale if provided in kwargs
         if "clip_conditioning_scale" in kwargs:
-            self.state.set(
-                "clip_conditioning_scale", float(kwargs["clip_conditioning_scale"])
-            )
+            scale = float(kwargs["clip_conditioning_scale"])
+            self.state.set("clip_conditioning_scale", scale)
+
+            # Apply scaling to clip_features directly here if present
+            if clip_features is not None and scale != 1.0:
+                clip_features = clip_features * scale
+                self.state.set("clip_features", clip_features)
 
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:

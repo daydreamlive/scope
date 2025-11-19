@@ -80,33 +80,37 @@ class FrameProcessor:
         self.paused = False
 
         # Store image data for img2img mode
-        self.current_image_data = None
+        self.current_image_data = None  # Base64 string or raw input
+        self.current_pil_image = None  # Decoded PIL image
         self.image_frames_cache = None  # Cache converted image frames
         self.cached_chunk_size = None  # Track chunk size of cached frames
 
-    def _convert_base64_image_to_frames(
-        self, base64_data: str, chunk_size: int
+    def _convert_image_to_frames(
+        self, image_input: str | Image.Image, chunk_size: int
     ) -> list[torch.Tensor]:
         """
-        Convert base64 encoded image data to a list of tensor frames.
+        Convert image input (base64 string or PIL Image) to a list of tensor frames.
 
         Args:
-            base64_data: Base64 encoded image string (with or without data URI prefix)
+            image_input: Base64 encoded image string or PIL Image
             chunk_size: Number of frames to generate (will repeat the same image)
 
         Returns:
             List of tensor frames in THWC format [0-255] range
         """
         try:
-            # Remove data URI prefix if present (e.g., "data:image/png;base64,")
-            if "," in base64_data:
-                base64_data = base64_data.split(",", 1)[1]
+            image = image_input
 
-            # Decode base64 to bytes
-            image_bytes = base64.b64decode(base64_data)
-
-            # Load image using PIL
-            image = Image.open(BytesIO(image_bytes))
+            # If input is string, decode it
+            if isinstance(image, str):
+                base64_data = image
+                # Remove data URI prefix if present
+                if "," in base64_data:
+                    base64_data = base64_data.split(",", 1)[1]
+                # Decode base64 to bytes
+                image_bytes = base64.b64decode(base64_data)
+                # Load image using PIL
+                image = Image.open(BytesIO(image_bytes))
 
             # Convert to RGB if necessary
             if image.mode != "RGB":
@@ -121,12 +125,12 @@ class FrameProcessor:
 
             # Repeat the image chunk_size times to match expected input
             frames = [image_tensor for _ in range(chunk_size)]
-            logger.info(
-                f"Converted base64 image to {chunk_size} frames, shape: {image_tensor.shape}"
+            logger.debug(
+                f"Converted image to {chunk_size} frames, shape: {image_tensor.shape}"
             )
             return frames
         except Exception as e:
-            logger.error(f"Failed to convert base64 image to frames: {e}")
+            logger.error(f"Failed to convert image to frames: {e}")
             raise
 
     def start(self):
@@ -306,8 +310,22 @@ class FrameProcessor:
             # Image data changed (or cleared), clear cache
             self.current_image_data = input_image
             self.image_frames_cache = None
+            self.current_pil_image = None
+
             if input_image:
                 logger.info("New image data received for img2img mode")
+                try:
+                    # Decode base64 to PIL Image once
+                    img_str = input_image
+                    if "," in img_str:
+                        img_str = img_str.split(",", 1)[1]
+                    image_bytes = base64.b64decode(img_str)
+                    pil_img = Image.open(BytesIO(image_bytes))
+                    if pil_img.mode != "RGB":
+                        pil_img = pil_img.convert("RGB")
+                    self.current_pil_image = pil_img
+                except Exception as e:
+                    logger.error(f"Failed to decode input image: {e}")
             else:
                 logger.info("Image data cleared")
 
@@ -328,8 +346,13 @@ class FrameProcessor:
 
         requirements = None
         if hasattr(pipeline, "prepare"):
+            # Use PIL image for prepare if available to avoid re-decoding
+            prepare_params = self.parameters.copy()
+            if self.current_pil_image:
+                prepare_params["input_image"] = self.current_pil_image
+
             requirements = pipeline.prepare(
-                **self.parameters,
+                **prepare_params,
             )
 
         video_input = None
@@ -352,8 +375,11 @@ class FrameProcessor:
                 # Generate frames from image
                 if self.image_frames_cache is None:
                     # Convert and cache image frames
-                    self.image_frames_cache = self._convert_base64_image_to_frames(
-                        self.current_image_data, current_chunk_size
+                    # Use PIL image if available, otherwise base64 string
+                    src = self.current_pil_image if self.current_pil_image else self.current_image_data
+
+                    self.image_frames_cache = self._convert_image_to_frames(
+                        src, current_chunk_size
                     )
                     self.cached_chunk_size = current_chunk_size
                 video_input = self.image_frames_cache
