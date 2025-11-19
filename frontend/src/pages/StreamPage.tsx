@@ -439,32 +439,62 @@ export function StreamPage() {
     }
   }, [settings.pipelineId]);
 
-  const handleGenerationModeChange = (mode: "video" | "text") => {
+  const handleGenerationModeChange = (mode: "video" | "text" | "camera") => {
+    // TODO: 'camera' should not be a mode, but should be refactored into a separate input control.
+    // Currently we handle 'camera' by converting it to generationMode="video" + videoSourceMode="camera".
     // Update generation mode and, for pipelines whose native mode is text,
     // restore their native resolution when switching back to text. This keeps
     // the text-only experience aligned with the original pipeline defaults
     // even after experimenting with video-to-video mode.
     const pipelineId = settings.pipelineId;
     const caps = getPipelineModeCapabilities(pipelineId);
-    const updates: Partial<SettingsState> = { generationMode: mode };
 
-    // For pipelines whose native mode is text but that also support video, we
-    // restore the native text resolution when switching back to text and adopt
-    // the detected video resolution when switching into video mode.
-    if (caps.supportsVideo && caps.nativeMode === "text") {
-      if (mode === "text") {
-        updates.resolution =
-          caps.defaultResolutionByMode.text ?? getDefaultResolution(pipelineId);
-      } else if (mode === "video" && videoResolution) {
-        updates.resolution = videoResolution;
+    // Convert "camera" mode to generationMode="video" + videoSourceMode="camera"
+    let generationMode: "video" | "text";
+    let newVideoSourceMode: "video" | "camera" | undefined;
+
+    if (mode === "camera") {
+      generationMode = "video";
+      newVideoSourceMode = "camera";
+    } else if (mode === "video") {
+      generationMode = "video";
+      // When switching to "video" mode, ensure videoSourceMode is set to "video"
+      // (unless it's already "video", in which case we don't need to change it)
+      if (videoSourceMode !== "video") {
+        newVideoSourceMode = "video";
       }
+    } else {
+      generationMode = mode;
+      // For "text" mode, don't change videoSourceMode
+    }
+
+    const updates: Partial<SettingsState> = { generationMode };
+
+    // Set resolution based on the mode using pipeline defaults
+    if (generationMode === "text") {
+      updates.resolution =
+        caps.defaultResolutionByMode.text ??
+        getDefaultResolution(pipelineId);
+    } else if (generationMode === "video") {
+      // Use pipeline's default video resolution first, only fall back to video source if no default
+      const defaultVideoResolution =
+        caps.defaultResolutionByMode.video ??
+        getDefaultResolution(pipelineId);
+      // Prioritize pipeline default over video source resolution
+      updates.resolution = defaultVideoResolution || videoResolution;
     }
 
     updateSettings(updates);
+
+    // Update video source mode if needed
+    if (newVideoSourceMode && newVideoSourceMode !== videoSourceMode) {
+      switchMode(newVideoSourceMode);
+    }
+
     // Inform backend of mode change so pipelines can switch between
     // text-to-video and video-to-video behaviour.
     sendParameterUpdate({
-      generation_mode: mode,
+      generation_mode: generationMode,
       // Reset cache when switching modes to avoid cross-mode artefacts.
       reset_cache: true,
     });
@@ -713,7 +743,14 @@ export function StreamPage() {
             localStream={localStream}
             isInitializing={isInitializing}
             error={videoSourceError}
-            mode={settings.generationMode ?? "video"}
+            mode={
+              // Convert generationMode + videoSourceMode back to the combined mode for the UI
+              // TODO: This conversion should be removed when 'camera' is refactored into a separate input control
+              settings.generationMode === "video" &&
+              videoSourceMode === "camera"
+                ? "camera"
+                : (settings.generationMode ?? "video")
+            }
             onModeChange={handleGenerationModeChange}
             videoSourceMode={videoSourceMode}
             onVideoSourceModeChange={switchMode}
