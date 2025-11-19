@@ -34,15 +34,16 @@ export function useInputMode({
   ): InputMode[] => {
     if (category === "video-input") {
       // For video-input pipelines, include image if supported
-      return imageSupport
-        ? ["video", "camera", "image"]
-        : ["video", "camera"];
+      return imageSupport ? ["video", "camera", "image"] : ["video", "camera"];
     } else {
       return ["image", "text"];
     }
   };
 
-  const availableModes = getAvailableModes(pipelineCategory, supportsImageInput);
+  const availableModes = getAvailableModes(
+    pipelineCategory,
+    supportsImageInput
+  );
 
   // Check if a mode is disabled
   const isModeDisabled = (modeToCheck: InputMode): boolean => {
