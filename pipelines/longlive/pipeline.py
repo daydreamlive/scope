@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 # Chunk size for video input when operating in video-to-video mode
+# TODO: Remove this constant when rebasing on PR 152, along with the prepare() method.
 CHUNK_SIZE = 4
 
 
@@ -100,6 +101,9 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         # and longlive strategy for text-to-video mode
         start = time.time()
         vae_strategy = getattr(config, "vae_strategy", None)
+        # TODO: Replace this dual-load stopgap with a smarter per-mode VAE
+        # selection (e.g. independent strategy overrides or lazy loading) once
+        # the video-to-video integration stabilizes. This would help support other implementations (LightVAE) as well.
         vae_text = create_vae(
             strategy=vae_strategy or "longlive",  # Default to longlive for text mode
             pipeline_name="longlive",
@@ -176,6 +180,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         and the pipeline operates in pure text-to-video mode using noise
         latents only.
         """
+        # TODO: Remove this method when rebasing on PR 152, along with the CHUNK_SIZE
+        # constant. The prepare() functionality will be moved to the base Pipeline class.
         mode = (
             generation_mode
             or kwargs.get("generation_mode")

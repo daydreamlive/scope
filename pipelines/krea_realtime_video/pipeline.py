@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 # Chunk size for video input when operating in video-to-video mode
+# TODO: Remove this constant when rebasing on PR 152, along with the prepare() method.
 CHUNK_SIZE = 4
 
 WARMUP_RUNS = 3
@@ -189,6 +190,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         and the pipeline operates in pure text-to-video mode using noise
         latents only.
         """
+        # TODO: Remove this method when rebasing on PR 152, along with the CHUNK_SIZE
+        # constant. The prepare() functionality will be moved to the base Pipeline class.
         mode = (
             generation_mode
             or kwargs.get("generation_mode")
