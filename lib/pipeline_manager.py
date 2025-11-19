@@ -260,9 +260,17 @@ class PipelineManager:
         self, pipeline_id: str, load_params: dict | None = None
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
+        from lib.defaults import get_mode_defaults
+
         if pipeline_id == "streamdiffusionv2":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+
+            native_defaults = get_mode_defaults(StreamDiffusionV2Pipeline)
+            default_resolution = native_defaults.get("resolution", {})
+            default_height = default_resolution.get("height", 512)
+            default_width = default_resolution.get("width", 512)
+            default_seed = native_defaults.get("base_seed", 42)
 
             models_dir = get_models_dir()
             config = OmegaConf.create(
@@ -291,9 +299,9 @@ class PipelineManager:
             self._apply_load_params(
                 config,
                 load_params,
-                default_height=512,
-                default_width=512,
-                default_seed=42,
+                default_height=default_height,
+                default_width=default_width,
+                default_seed=default_seed,
             )
 
             pipeline = StreamDiffusionV2Pipeline(
@@ -305,12 +313,17 @@ class PipelineManager:
         elif pipeline_id == "passthrough":
             from pipelines.passthrough.pipeline import PassthroughPipeline
 
+            native_defaults = get_mode_defaults(PassthroughPipeline)
+            default_resolution = native_defaults.get("resolution", {})
+            default_height = default_resolution.get("height", 512)
+            default_width = default_resolution.get("width", 512)
+
             # Use load parameters for resolution, default to 512x512
-            height = 512
-            width = 512
+            height = default_height
+            width = default_width
             if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
+                height = load_params.get("height", default_height)
+                width = load_params.get("width", default_width)
 
             pipeline = PassthroughPipeline(
                 height=height,
@@ -324,6 +337,12 @@ class PipelineManager:
         elif pipeline_id == "longlive":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.longlive.pipeline import LongLivePipeline
+
+            native_defaults = get_mode_defaults(LongLivePipeline)
+            default_resolution = native_defaults.get("resolution", {})
+            default_height = default_resolution.get("height", 320)
+            default_width = default_resolution.get("width", 576)
+            default_seed = native_defaults.get("base_seed", 42)
 
             config = OmegaConf.create(
                 {
@@ -350,9 +369,9 @@ class PipelineManager:
             self._apply_load_params(
                 config,
                 load_params,
-                default_height=320,
-                default_width=576,
-                default_seed=42,
+                default_height=default_height,
+                default_width=default_width,
+                default_seed=default_seed,
             )
 
             pipeline = LongLivePipeline(
@@ -364,6 +383,12 @@ class PipelineManager:
         elif pipeline_id == "krea-realtime-video":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
+
+            native_defaults = get_mode_defaults(KreaRealtimeVideoPipeline)
+            default_resolution = native_defaults.get("resolution", {})
+            default_height = default_resolution.get("height", 320)
+            default_width = default_resolution.get("width", 576)
+            default_seed = native_defaults.get("base_seed", 42)
 
             config = OmegaConf.create(
                 {
@@ -394,9 +419,9 @@ class PipelineManager:
             self._apply_load_params(
                 config,
                 load_params,
-                default_height=512,
-                default_width=512,
-                default_seed=42,
+                default_height=default_height,
+                default_width=default_width,
+                default_seed=default_seed,
             )
 
             quantization = None

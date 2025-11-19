@@ -6,7 +6,7 @@ import type {
   PromptData,
 } from "../types";
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
+import { getModeDefaults } from "../lib/utils";
 import { getHardwareInfo, type HardwareInfoResponse } from "../lib/api";
 
 export function useStreamState() {
@@ -26,17 +26,23 @@ export function useStreamState() {
     status: "Ready",
   });
 
+  const streamModeDefaults = getModeDefaults(
+    "streamdiffusionv2",
+    defaultNativeMode
+  );
+
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
-    resolution: getDefaultResolution("streamdiffusionv2"), // Default resolution for StreamDiffusionV2
+    resolution: streamModeDefaults.resolution,
     generationMode: defaultNativeMode,
-    seed: 42,
-    denoisingSteps: getDefaultDenoisingSteps("streamdiffusionv2"),
-    noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
-    noiseController: true, // Default noise controller for StreamDiffusionV2
-    manageCache: true, // Default manage cache for StreamDiffusionV2
+    seed: streamModeDefaults.base_seed,
+    denoisingSteps: streamModeDefaults.denoising_steps,
+    noiseScale: streamModeDefaults.noise_scale ?? undefined,
+    noiseController: streamModeDefaults.noise_controller ?? undefined,
+    manageCache: streamModeDefaults.manage_cache,
     quantization: null,
-    kvCacheAttentionBias: 0.3, // Default cache bias
+    kvCacheAttentionBias:
+      streamModeDefaults.kv_cache_attention_bias ?? undefined,
     paused: false, // Default to not paused (generating)
     loraMergeStrategy: "permanent_merge", // Default LoRA merge strategy
   });

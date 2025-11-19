@@ -37,6 +37,33 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
     # explicitly requested.
     NATIVE_GENERATION_MODE = "text"
 
+    @classmethod
+    def get_defaults(cls) -> dict:
+        """Return default parameters for KreaRealtimeVideo pipeline."""
+        shared = {
+            "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
+            "manage_cache": True,
+            "base_seed": 42,
+            "kv_cache_attention_bias": 0.30,
+        }
+        return {
+            "native_generation_mode": cls.NATIVE_GENERATION_MODE,
+            "modes": {
+                "text": {
+                    **shared,
+                    "resolution": {"height": 320, "width": 576},
+                    "noise_scale": None,
+                    "noise_controller": None,
+                },
+                "video": {
+                    **shared,
+                    "resolution": {"height": 320, "width": 320},
+                    "noise_scale": 0.35,
+                    "noise_controller": True,
+                },
+            },
+        }
+
     def __init__(
         self,
         config,
@@ -157,17 +184,36 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # These need to be set right now because InputParam.default on the blocks
         # does not work properly
         self.state.set("current_start_frame", 0)
-        self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", 1.0)
-        # Defaults for noise control; InputParam.default on the blocks
-        # does not work properly, so we set them explicitly.
-        self.state.set("noise_scale", 0.7)
-        self.state.set("noise_controller", True)
         self.state.set("current_noise_scale", 0.7)
 
-        self.state.set("height", config.height)
-        self.state.set("width", config.width)
-        self.state.set("base_seed", getattr(config, "seed", 42))
+        # Initialize with native mode defaults
+        from lib.defaults import get_mode_defaults
+
+        native_defaults = get_mode_defaults(self.__class__)
+        self.state.set(
+            "height",
+            getattr(
+                config,
+                "height",
+                native_defaults.get("resolution", {}).get("height", 320),
+            ),
+        )
+        self.state.set(
+            "width",
+            getattr(
+                config, "width", native_defaults.get("resolution", {}).get("width", 576)
+            ),
+        )
+        self.state.set(
+            "base_seed", getattr(config, "seed", native_defaults.get("base_seed", 42))
+        )
+        self.state.set("manage_cache", native_defaults.get("manage_cache", True))
+        self.state.set(
+            "kv_cache_attention_bias",
+            native_defaults.get("kv_cache_attention_bias", 0.3),
+        )
+        self.state.set("noise_scale", native_defaults.get("noise_scale"))
+        self.state.set("noise_controller", native_defaults.get("noise_controller"))
 
         start = time.time()
         for _ in range(WARMUP_RUNS):
@@ -229,19 +275,22 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
-        if self.state.get("denoising_step_list") is None:
-            self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
-
         # Select appropriate block graph based on generation mode. If no mode
         # has been set yet, fall back to the native mode.
         mode = self.state.get("generation_mode") or self.NATIVE_GENERATION_MODE
 
-        # In native text-to-video mode, ignore any noise_scale value present in
-        # state or passed from the frontend. This restores the original Krea
-        # behaviour where the denoising schedule is fixed and independent of
-        # noise controls, which are only meaningful for video-to-video workflows.
+        # Apply mode-specific defaults for parameters not provided in kwargs
+        from lib.defaults import get_mode_defaults
+
+        mode_defaults = get_mode_defaults(self.__class__, mode)
+        if "denoising_step_list" not in kwargs and mode_defaults.get("denoising_steps"):
+            self.state.set("denoising_step_list", mode_defaults["denoising_steps"])
         if mode == "text":
             self.state.set("noise_scale", None)
+        elif "noise_scale" not in kwargs:
+            self.state.set("noise_scale", mode_defaults.get("noise_scale"))
+        if "noise_controller" not in kwargs:
+            self.state.set("noise_controller", mode_defaults.get("noise_controller"))
 
         blocks = self.blocks_video if mode == "video" else self.blocks_text
 

@@ -18,7 +18,7 @@ export interface WebRTCOfferRequest {
     prompt_interpolation_method?: "linear" | "slerp";
     transition?: PromptTransition;
     denoising_step_list?: number[];
-    noise_scale?: number;
+    noise_scale?: number | null;
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
@@ -121,6 +121,43 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
     const errorText = await response.text();
     throw new Error(
       `Pipeline status failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export interface PipelineModeDefaults {
+  denoising_steps: number[];
+  resolution: { height: number; width: number };
+  manage_cache: boolean;
+  base_seed: number;
+  noise_scale?: number | null;
+  noise_controller?: boolean | null;
+  kv_cache_attention_bias?: number | null;
+}
+
+export interface PipelineDefaults {
+  native_generation_mode: "video" | "text";
+  modes: {
+    text: PipelineModeDefaults;
+    video: PipelineModeDefaults;
+  };
+}
+
+export const getPipelineDefaults = async (
+  pipelineId: string
+): Promise<PipelineDefaults> => {
+  const response = await fetch(`/api/v1/pipelines/${pipelineId}/defaults`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Pipeline defaults failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 

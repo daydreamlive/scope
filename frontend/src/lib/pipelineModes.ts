@@ -1,5 +1,5 @@
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultResolution } from "./utils";
+import { getDefaultResolution, getCachedPipelineDefaults } from "./utils";
 import type { PipelineCategory, PipelineId } from "../types";
 
 export interface PipelineModeCapabilities {
@@ -49,7 +49,10 @@ export function getPipelineModeCapabilities(
   const info = PIPELINES[id];
   const category: PipelineCategory = info?.category ?? "no-video-input";
 
+  // Get native mode from API defaults
+  const cachedDefaults = getCachedPipelineDefaults(id);
   const nativeMode: "video" | "text" =
+    cachedDefaults?.native_generation_mode ??
     info?.nativeGenerationMode ??
     (category === "video-input" ? "video" : "text");
 
@@ -61,7 +64,9 @@ export function getPipelineModeCapabilities(
 
   const requiresVideoInVideoMode = category === "video-input" && supportsVideo;
 
-  const baseResolution = getDefaultResolution(id);
+  // Get resolution from defaults
+  const textResolution = getDefaultResolution(id, "text");
+  const videoResolution = getDefaultResolution(id, "video");
 
   let showNoiseControlsInText = false;
   let showNoiseControlsInVideo = false;
@@ -101,8 +106,8 @@ export function getPipelineModeCapabilities(
     supportsText,
     requiresVideoInVideoMode,
     defaultResolutionByMode: {
-      text: baseResolution,
-      video: baseResolution,
+      text: textResolution,
+      video: videoResolution,
     },
     showNoiseControlsInText,
     showNoiseControlsInVideo,

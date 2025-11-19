@@ -13,7 +13,11 @@ import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
+import {
+  getDefaultDenoisingSteps,
+  getDefaultResolution,
+  getModeDefaults,
+} from "../lib/utils";
 import { getPipelineModeCapabilities } from "../lib/pipelineModes";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy, SettingsState } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
@@ -33,6 +37,13 @@ function buildLoRAParams(
 export function StreamPage() {
   // Use the stream state hook for settings management
   const { settings, updateSettings } = useStreamState();
+  const currentModeForDefaults =
+    settings.generationMode ??
+    getPipelineModeCapabilities(settings.pipelineId).nativeMode;
+  const modeDefaultsForUI = getModeDefaults(
+    settings.pipelineId,
+    currentModeForDefaults
+  );
 
   // Prompt state
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
@@ -183,19 +194,26 @@ export function StreamPage() {
     setSelectedTimelinePrompt(null);
     setExternalSelectedPromptId(null);
 
-    // Update denoising steps, resolution and native generation mode based on pipeline
-    const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
-    const newResolution = getDefaultResolution(pipelineId);
     const caps = getPipelineModeCapabilities(pipelineId);
     const nativeGenerationMode = caps.nativeMode;
+    const nativeModeDefaults = getModeDefaults(
+      pipelineId,
+      nativeGenerationMode
+    );
 
     // Update the pipeline in settings
     updateSettings({
       pipelineId,
-      denoisingSteps: newDenoisingSteps,
-      resolution: newResolution,
+      denoisingSteps: nativeModeDefaults.denoising_steps,
+      resolution: nativeModeDefaults.resolution,
       loras: [], // Clear LoRA controls when switching pipelines
       generationMode: nativeGenerationMode,
+      manageCache: nativeModeDefaults.manage_cache,
+      noiseScale: nativeModeDefaults.noise_scale ?? undefined,
+      noiseController: nativeModeDefaults.noise_controller ?? undefined,
+      seed: nativeModeDefaults.base_seed,
+      kvCacheAttentionBias:
+        nativeModeDefaults.kv_cache_attention_bias ?? undefined,
     });
   };
 
@@ -228,16 +246,24 @@ export function StreamPage() {
             setSelectedTimelinePrompt(null);
             setExternalSelectedPromptId(null);
 
-            const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
-            const newResolution = getDefaultResolution(pipelineId);
             const caps = getPipelineModeCapabilities(pipelineId);
             const nativeGenerationMode = caps.nativeMode;
+            const nativeModeDefaults = getModeDefaults(
+              pipelineId,
+              nativeGenerationMode
+            );
 
             updateSettings({
               pipelineId,
-              denoisingSteps: newDenoisingSteps,
-              resolution: newResolution,
+              denoisingSteps: nativeModeDefaults.denoising_steps,
+              resolution: nativeModeDefaults.resolution,
               generationMode: nativeGenerationMode,
+              manageCache: nativeModeDefaults.manage_cache,
+              noiseScale: nativeModeDefaults.noise_scale ?? undefined,
+              noiseController: nativeModeDefaults.noise_controller ?? undefined,
+              seed: nativeModeDefaults.base_seed,
+              kvCacheAttentionBias:
+                nativeModeDefaults.kv_cache_attention_bias ?? undefined,
             });
 
             // Automatically start the stream after download completes
@@ -381,7 +407,7 @@ export function StreamPage() {
       prompt_interpolation_method: interpolationMethod,
       denoising_step_list:
         settings.denoisingSteps ||
-        getDefaultDenoisingSteps(settings.pipelineId),
+        getDefaultDenoisingSteps(settings.pipelineId, currentModeForDefaults),
     });
   };
 
@@ -442,10 +468,7 @@ export function StreamPage() {
   const handleGenerationModeChange = (mode: "video" | "text" | "camera") => {
     // TODO: 'camera' should not be a mode, but should be refactored into a separate input control.
     // Currently we handle 'camera' by converting it to generationMode="video" + videoSourceMode="camera".
-    // Update generation mode and, for pipelines whose native mode is text,
-    // restore their native resolution when switching back to text. This keeps
-    // the text-only experience aligned with the original pipeline defaults
-    // even after experimenting with video-to-video mode.
+    // Update generation mode and restore the appropriate resolution for the mode.
     const pipelineId = settings.pipelineId;
     const caps = getPipelineModeCapabilities(pipelineId);
 
@@ -474,12 +497,12 @@ export function StreamPage() {
     if (generationMode === "text") {
       updates.resolution =
         caps.defaultResolutionByMode.text ??
-        getDefaultResolution(pipelineId);
+        getDefaultResolution(pipelineId, "text");
     } else if (generationMode === "video") {
       // Use pipeline's default video resolution first, only fall back to video source if no default
       const defaultVideoResolution =
         caps.defaultResolutionByMode.video ??
-        getDefaultResolution(pipelineId);
+        getDefaultResolution(pipelineId, "video");
       // Prioritize pipeline default over video source resolution
       updates.resolution = defaultVideoResolution || videoResolution;
     }
@@ -523,6 +546,8 @@ export function StreamPage() {
   // Only sync for pipelines that require video input in video mode while
   // they are in video mode. Only runs when videoResolution changes to avoid
   // resetting resolution during timeline rewinds or other operations.
+  // Note: This only syncs if no resolution is currently set, to avoid overriding
+  // pipeline defaults or user-selected resolutions.
   useEffect(() => {
     const caps = getPipelineModeCapabilities(settings.pipelineId);
     const currentMode = settings.generationMode ?? caps.nativeMode;
@@ -531,7 +556,8 @@ export function StreamPage() {
       videoResolution &&
       !isStreaming &&
       caps.requiresVideoInVideoMode &&
-      currentMode === "video"
+      currentMode === "video" &&
+      !settings.resolution // Only sync if resolution is not already set
     ) {
       updateSettings({
         resolution: {
@@ -544,6 +570,7 @@ export function StreamPage() {
     videoResolution,
     settings.pipelineId,
     settings.generationMode,
+    settings.resolution,
     updateSettings,
   ]); // Removed isStreaming from deps to prevent reset during rewind
 
@@ -596,21 +623,26 @@ export function StreamPage() {
       // Always load pipeline with current parameters - backend will handle the rest
       console.log(`Loading ${pipelineIdToUse} pipeline...`);
 
+      const caps = getPipelineModeCapabilities(pipelineIdToUse);
+      const nativeMode = caps.nativeMode;
+      const nativeModeDefaults = getModeDefaults(pipelineIdToUse, nativeMode);
+      const resolution = (settings.resolution ||
+        videoResolution ||
+        nativeModeDefaults.resolution)!;
+
       // Prepare load parameters based on pipeline type
       let loadParams = null;
 
-      // Use settings.resolution if available, otherwise fall back to videoResolution
-      const resolution = settings.resolution || videoResolution;
-
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
+        const seed = settings.seed ?? nativeModeDefaults.base_seed;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
-          seed: settings.seed ?? 42,
+          seed,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -621,20 +653,22 @@ export function StreamPage() {
           `Loading with resolution: ${resolution.width}x${resolution.height}`
         );
       } else if (pipelineIdToUse === "longlive" && resolution) {
+        const seed = settings.seed ?? nativeModeDefaults.base_seed;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
-          seed: settings.seed ?? 42,
+          seed,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
-      } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
+      } else if (pipelineIdToUse === "krea-realtime-video" && resolution) {
+        const seed = settings.seed ?? nativeModeDefaults.base_seed;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
-          seed: settings.seed ?? 42,
+          seed,
           quantization:
             settings.quantization !== undefined
               ? settings.quantization
@@ -642,7 +676,7 @@ export function StreamPage() {
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       }
 
@@ -656,8 +690,8 @@ export function StreamPage() {
       }
 
       // Check if this pipeline needs video input for the current mode
-      const caps = getPipelineModeCapabilities(pipelineIdToUse);
       const currentMode = settings.generationMode ?? caps.nativeMode;
+      const modeDefaults = getModeDefaults(pipelineIdToUse, currentMode);
       const needsVideoInput =
         caps.requiresVideoInVideoMode && currentMode === "video";
 
@@ -676,7 +710,7 @@ export function StreamPage() {
         prompts?: PromptItem[];
         prompt_interpolation_method?: "linear" | "slerp";
         denoising_step_list?: number[];
-        noise_scale?: number;
+        noise_scale?: number | null;
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
@@ -687,27 +721,50 @@ export function StreamPage() {
       if (pipelineIdToUse !== "passthrough") {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
-        initialParameters.denoising_step_list = settings.denoisingSteps || [
-          700, 500,
-        ];
+        initialParameters.denoising_step_list =
+          settings.denoisingSteps || modeDefaults.denoising_steps;
       }
 
       // Cache management for pipelines that support it
-      const runtimeCaps = getPipelineModeCapabilities(pipelineIdToUse);
+      const runtimeCaps = caps;
       if (runtimeCaps.hasCacheManagement) {
-        initialParameters.manage_cache = settings.manageCache ?? true;
+        const manageCacheValue =
+          settings.manageCache ?? modeDefaults.manage_cache;
+        if (manageCacheValue !== undefined) {
+          initialParameters.manage_cache = manageCacheValue;
+        }
       }
 
       // Krea-realtime-video-specific parameters
       if (pipelineIdToUse === "krea-realtime-video") {
-        initialParameters.kv_cache_attention_bias =
-          settings.kvCacheAttentionBias ?? 1.0;
+        const bias =
+          settings.kvCacheAttentionBias ??
+          modeDefaults.kv_cache_attention_bias ??
+          1.0;
+        initialParameters.kv_cache_attention_bias = bias;
       }
 
       // Noise control and generation mode for pipelines that expose them
-      if (runtimeCaps.hasNoiseControls) {
-        initialParameters.noise_scale = settings.noiseScale ?? 0.7;
-        initialParameters.noise_controller = settings.noiseController ?? true;
+      const shouldSendNoiseControls =
+        runtimeCaps.hasNoiseControls &&
+        ((currentMode === "video" && runtimeCaps.showNoiseControlsInVideo) ||
+          (currentMode === "text" && runtimeCaps.showNoiseControlsInText));
+      if (shouldSendNoiseControls) {
+        const resolvedNoiseScale =
+          settings.noiseScale !== undefined
+            ? settings.noiseScale
+            : modeDefaults.noise_scale;
+        if (resolvedNoiseScale !== undefined) {
+          initialParameters.noise_scale = resolvedNoiseScale;
+        }
+
+        const resolvedNoiseController =
+          settings.noiseController !== undefined
+            ? settings.noiseController
+            : (modeDefaults.noise_controller ?? undefined);
+        if (resolvedNoiseController !== undefined) {
+          initialParameters.noise_controller = resolvedNoiseController;
+        }
       }
 
       if (runtimeCaps.hasGenerationModeControl) {
@@ -853,7 +910,10 @@ export function StreamPage() {
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list:
                       settings.denoisingSteps ||
-                      getDefaultDenoisingSteps(settings.pipelineId),
+                      getDefaultDenoisingSteps(
+                        settings.pipelineId,
+                        currentModeForDefaults
+                      ),
                   });
                 }
               }}
@@ -899,7 +959,10 @@ export function StreamPage() {
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list:
                       settings.denoisingSteps ||
-                      getDefaultDenoisingSteps(settings.pipelineId),
+                      getDefaultDenoisingSteps(
+                        settings.pipelineId,
+                        currentModeForDefaults
+                      ),
                   });
                 }
               }}
@@ -943,22 +1006,27 @@ export function StreamPage() {
             generationMode={settings.generationMode}
             isStreaming={isStreaming}
             isDownloading={isDownloading}
-            resolution={
-              settings.resolution || getDefaultResolution(settings.pipelineId)
-            }
+            resolution={settings.resolution || modeDefaultsForUI.resolution}
             onResolutionChange={handleResolutionChange}
-            seed={settings.seed ?? 42}
+            seed={settings.seed ?? modeDefaultsForUI.base_seed}
             onSeedChange={handleSeedChange}
             denoisingSteps={
-              settings.denoisingSteps ||
-              getDefaultDenoisingSteps(settings.pipelineId)
+              settings.denoisingSteps || modeDefaultsForUI.denoising_steps
             }
             onDenoisingStepsChange={handleDenoisingStepsChange}
-            noiseScale={settings.noiseScale ?? 0.7}
+            noiseScale={
+              settings.noiseScale !== undefined
+                ? settings.noiseScale
+                : (modeDefaultsForUI.noise_scale ?? undefined)
+            }
             onNoiseScaleChange={handleNoiseScaleChange}
-            noiseController={settings.noiseController ?? true}
+            noiseController={
+              settings.noiseController !== undefined
+                ? settings.noiseController
+                : (modeDefaultsForUI.noise_controller ?? undefined)
+            }
             onNoiseControllerChange={handleNoiseControllerChange}
-            manageCache={settings.manageCache ?? true}
+            manageCache={settings.manageCache ?? modeDefaultsForUI.manage_cache}
             onManageCacheChange={handleManageCacheChange}
             quantization={
               settings.quantization !== undefined
@@ -966,7 +1034,11 @@ export function StreamPage() {
                 : "fp8_e4m3fn"
             }
             onQuantizationChange={handleQuantizationChange}
-            kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
+            kvCacheAttentionBias={
+              settings.kvCacheAttentionBias ??
+              modeDefaultsForUI.kv_cache_attention_bias ??
+              undefined
+            }
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
             loras={settings.loras || []}

@@ -11,7 +11,7 @@ interface InitialParameters {
   prompt_interpolation_method?: "linear" | "slerp";
   transition?: PromptTransition;
   denoising_step_list?: number[];
-  noise_scale?: number;
+  noise_scale?: number | null;
   noise_controller?: boolean;
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
@@ -232,7 +232,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       prompt_interpolation_method?: "linear" | "slerp";
       transition?: PromptTransition;
       denoising_step_list?: number[];
-      noise_scale?: number;
+      noise_scale?: number | null;
       noise_controller?: boolean;
       manage_cache?: boolean;
       reset_cache?: boolean;

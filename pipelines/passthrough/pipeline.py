@@ -8,6 +8,27 @@ from ..process import postprocess_chunk, preprocess_chunk
 class PassthroughPipeline(Pipeline):
     """Passthrough pipeline for testing"""
 
+    NATIVE_GENERATION_MODE = "video"
+
+    @classmethod
+    def get_defaults(cls) -> dict:
+        """Return default parameters for Passthrough pipeline."""
+        shared = {
+            "denoising_steps": [],
+            "resolution": {"height": 512, "width": 512},
+            "manage_cache": True,
+            "base_seed": 42,
+            "noise_scale": None,
+            "noise_controller": None,
+        }
+        return {
+            "native_generation_mode": cls.NATIVE_GENERATION_MODE,
+            "modes": {
+                "text": {**shared},
+                "video": {**shared},
+            },
+        }
+
     def __init__(
         self,
         height: int = 512,

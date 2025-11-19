@@ -1,34 +1,81 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { PipelineId } from "../types";
+import type { PipelineDefaults, PipelineModeDefaults } from "./api";
+
+type GenerationMode = "text" | "video";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function getDefaultDenoisingSteps(pipelineId: PipelineId): number[] {
-  if (pipelineId === "longlive") {
-    return [1000, 750, 500, 250];
-  } else if (pipelineId === "krea-realtime-video") {
-    return [1000, 750, 500, 250];
-  } else if (pipelineId === "streamdiffusionv2") {
-    // Match backend DEFAULT_DENOISING_STEP_LIST for StreamDiffusionV2
-    return [750, 250];
-  }
-  // Default fallback for pipelines without explicit schedules
-  return [750, 250];
+// Cache for pipeline defaults fetched from API
+const pipelineDefaultsCache = new Map<PipelineId, PipelineDefaults>();
+
+/**
+ * Set cached defaults for a pipeline. Called after fetching from API.
+ */
+export function setPipelineDefaults(
+  pipelineId: PipelineId,
+  defaults: PipelineDefaults
+): void {
+  pipelineDefaultsCache.set(pipelineId, defaults);
 }
 
-export function getDefaultResolution(pipelineId: PipelineId): {
+/**
+ * Get cached defaults for a pipeline, or null if not cached.
+ */
+export function getCachedPipelineDefaults(
+  pipelineId: PipelineId
+): PipelineDefaults | null {
+  return pipelineDefaultsCache.get(pipelineId) || null;
+}
+
+/**
+ * Get mode-specific defaults for a pipeline.
+ * Throws if defaults not yet loaded - caller should ensure defaults are fetched first.
+ */
+export function getModeDefaults(
+  pipelineId: PipelineId,
+  mode?: GenerationMode
+): PipelineModeDefaults {
+  const cached = getCachedPipelineDefaults(pipelineId);
+  if (!cached?.modes) {
+    throw new Error(
+      `getModeDefaults: Defaults not loaded for ${pipelineId}. App should fetch defaults before rendering.`
+    );
+  }
+
+  const native_mode = cached.native_generation_mode;
+  const resolvedMode = mode ?? native_mode;
+  const modeDefaults = cached.modes[resolvedMode] ?? cached.modes[native_mode];
+
+  if (!modeDefaults) {
+    throw new Error(
+      `getModeDefaults: No defaults for mode ${resolvedMode} in ${pipelineId}`
+    );
+  }
+
+  return {
+    ...modeDefaults,
+    denoising_steps: [...modeDefaults.denoising_steps],
+    resolution: { ...modeDefaults.resolution },
+  };
+}
+
+export function getDefaultDenoisingSteps(
+  pipelineId: PipelineId,
+  mode?: GenerationMode
+): number[] {
+  return getModeDefaults(pipelineId, mode).denoising_steps;
+}
+
+export function getDefaultResolution(
+  pipelineId: PipelineId,
+  mode?: GenerationMode
+): {
   height: number;
   width: number;
 } {
-  if (pipelineId === "longlive") {
-    return { height: 320, width: 576 };
-  } else if (pipelineId === "krea-realtime-video") {
-    return { height: 320, width: 576 };
-  } else if (pipelineId === "streamdiffusionv2") {
-    return { height: 512, width: 512 };
-  }
-  return { height: 320, width: 576 }; // Default fallback
+  return getModeDefaults(pipelineId, mode).resolution;
 }

@@ -36,6 +36,41 @@ class Pipeline(ABC):
       the processed video chunk.
     """
 
+    @classmethod
+    @abstractmethod
+    def get_defaults(cls) -> dict:
+        """Return default parameters for this pipeline.
+
+        Implementations must return a dictionary with the following structure:
+
+            {
+                "native_generation_mode": "text" | "video",
+                "modes": {
+                    "text": {
+                        "denoising_steps": [...],
+                        "resolution": {"height": ..., "width": ...},
+                        "manage_cache": ...,
+                        "base_seed": ...,
+                        "...": ...
+                    },
+                    "video": {
+                        "denoising_steps": [...],
+                        "resolution": {"height": ..., "width": ...},
+                        "noise_scale": ...,
+                        "noise_controller": ...,
+                        "manage_cache": ...,
+                        "base_seed": ...,
+                        "...": ...
+                    }
+                }
+            }
+
+        Additional mode-specific keys (e.g. kv_cache_attention_bias) may be
+        included as needed. All pipelines should provide entries for both text
+        and video modes, even if a mode is not typically used.
+        """
+        pass
+
     @abstractmethod
     def __call__(
         self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs

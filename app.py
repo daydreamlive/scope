@@ -396,6 +396,46 @@ async def list_lora_files():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def get_pipeline_class(pipeline_id: str):
+    """Get the pipeline class for a given pipeline ID without instantiating it."""
+    if pipeline_id == "streamdiffusionv2":
+        from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+
+        return StreamDiffusionV2Pipeline
+    elif pipeline_id == "longlive":
+        from pipelines.longlive.pipeline import LongLivePipeline
+
+        return LongLivePipeline
+    elif pipeline_id == "krea-realtime-video":
+        from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
+
+        return KreaRealtimeVideoPipeline
+    elif pipeline_id == "passthrough":
+        from pipelines.passthrough.pipeline import PassthroughPipeline
+
+        return PassthroughPipeline
+    else:
+        return None
+
+
+@app.get("/api/v1/pipelines/{pipeline_id}/defaults")
+async def get_pipeline_defaults(pipeline_id: str):
+    """Get default parameters for a pipeline."""
+    try:
+        pipeline_class = get_pipeline_class(pipeline_id)
+        if pipeline_class is None:
+            raise HTTPException(
+                status_code=404, detail=f"Pipeline '{pipeline_id}' not found"
+            )
+        defaults = pipeline_class.get_defaults()
+        return defaults
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pipeline defaults: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/models/status")
 async def get_model_status(pipeline_id: str):
     """Check if models for a pipeline are downloaded."""
