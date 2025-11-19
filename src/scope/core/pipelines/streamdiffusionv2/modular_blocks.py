@@ -98,6 +98,7 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
 
         y = None
         if model_type == "i2v":
+            # TODO: This was a test of i2v - it's been clarified that training is required - not implemented at the moment
             # I2V model expects 'y' (20 channels: 16 latent + 4 mask)
 
             if i2v_latents is None:

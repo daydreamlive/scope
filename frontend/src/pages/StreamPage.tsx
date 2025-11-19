@@ -186,7 +186,6 @@ export function StreamPage() {
     // Send transition to backend
     sendParameterUpdate({
       transition,
-      input_image: imageData || undefined, // Include image data with prompt updates if present
     });
   };
 
@@ -328,7 +327,6 @@ export function StreamPage() {
     // Send denoising steps update to backend
     sendParameterUpdate({
       denoising_step_list: denoisingSteps,
-      input_image: imageData || undefined,
     });
   };
 
@@ -337,7 +335,6 @@ export function StreamPage() {
     // Send noise scale update to backend
     sendParameterUpdate({
       noise_scale: noiseScale,
-      input_image: imageData || undefined,
     });
   };
 
@@ -346,7 +343,6 @@ export function StreamPage() {
     // Send noise controller update to backend
     sendParameterUpdate({
       noise_controller: enabled,
-      input_image: imageData || undefined,
     });
   };
 
@@ -355,7 +351,6 @@ export function StreamPage() {
     // Send manage cache update to backend
     sendParameterUpdate({
       manage_cache: enabled,
-      input_image: imageData || undefined,
     });
   };
 
@@ -369,7 +364,6 @@ export function StreamPage() {
     // Send KV cache attention bias update to backend
     sendParameterUpdate({
       kv_cache_attention_bias: bias,
-      input_image: imageData || undefined,
     });
   };
 
@@ -405,7 +399,6 @@ export function StreamPage() {
     // Send reset cache command to backend
     sendParameterUpdate({
       reset_cache: true,
-      input_image: imageData || undefined,
     });
   };
 
@@ -421,7 +414,6 @@ export function StreamPage() {
       prompts,
       prompt_interpolation_method: interpolationMethod,
       denoising_step_list: settings.denoisingSteps || [700, 500],
-      input_image: imageData || undefined,
     });
   };
 
@@ -484,7 +476,6 @@ export function StreamPage() {
     updateSettings({ paused: newPausedState });
     sendParameterUpdate({
       paused: newPausedState,
-      input_image: imageData || undefined,
     });
 
     // Deselect any selected prompt when video starts playing
@@ -787,7 +778,6 @@ export function StreamPage() {
                       temporal_interpolation_method:
                         temporalInterpolationMethod,
                     },
-                    input_image: imageData || undefined,
                   });
                 } else {
                   // Send direct prompts without transition
@@ -795,7 +785,6 @@ export function StreamPage() {
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
-                    input_image: imageData || undefined,
                   });
                 }
               }}
@@ -833,7 +822,6 @@ export function StreamPage() {
                       temporal_interpolation_method:
                         effectiveTemporalInterpolationMethod,
                     },
-                    input_image: imageData || undefined,
                   });
                 } else {
                   // Send direct prompts without transition
@@ -841,7 +829,6 @@ export function StreamPage() {
                     prompts,
                     prompt_interpolation_method: interpolationMethod,
                     denoising_step_list: settings.denoisingSteps || [700, 500],
-                    input_image: imageData || undefined,
                   });
                 }
               }}
