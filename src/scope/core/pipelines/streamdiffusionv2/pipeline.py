@@ -1,11 +1,12 @@
+import base64
 import logging
 import time
-import base64
 from io import BytesIO
-from PIL import Image
 
 import torch
+import torchvision.transforms.functional as TF
 from diffusers.modular_pipelines import PipelineState
+from PIL import Image
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
@@ -33,6 +34,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         quantization: Quantization | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
+        **kwargs,  # Allow extra kwargs
     ):
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
@@ -54,6 +56,11 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             model_dir=model_dir,
             generator_path=generator_path,
             generator_model_name=generator_model_name,
+<<<<<<< HEAD:src/scope/core/pipelines/streamdiffusionv2/pipeline.py
+=======
+            enable_clip=True,
+            dtype=dtype,  # Pass dtype here
+>>>>>>> 8ec552c (Fixes to tensor shapes, added i2v detection.):pipelines/streamdiffusionv2/pipeline.py
             **base_model_kwargs,
         )
 
@@ -132,15 +139,95 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("kv_cache_attention_bias", 1.0)
         self.state.set("noise_scale", 0.7)
         self.state.set("noise_controller", True)
+        self.state.set("clip_conditioning_scale", 1.0)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))
 
+        # Persistent I2V state
+        self.i2v_visual_context = None
+        self.i2v_cond_concat = None
+        self.i2v_first_chunk = False
+
         self.first_call = True
+
+        # expose self as stream for tests if needed, or just aliasing
+        self.stream = self
 
     def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
         return Requirements(input_size=CHUNK_SIZE)
+
+    def encode_image_for_i2v(
+        self, image_tensor: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Encode an image tensor for I2V conditioning.
+        Args:
+            image_tensor: Image tensor [3, H, W] in range [-1, 1] or [0, 1] depending on previous steps?
+                          WanCLIPImageEncoder expects [-1, 1] if we use encode_image_from_tensor
+        Returns:
+            visual_context: CLIP features
+            cond_concat: VAE latents
+        """
+        # Ensure tensor is on device
+        image_tensor = image_tensor.to(
+            device=self.components.config.device, dtype=self.components.config.dtype
+        )
+
+        if len(image_tensor.shape) == 3:
+            image_tensor = image_tensor.unsqueeze(0)  # [1, 3, H, W]
+
+        # 1. Encode CLIP features
+        clip_encoder = self.components.generator.clip_encoder
+        if clip_encoder is None:
+            logger.warning("CLIP encoder not available.")
+            visual_context = None
+        else:
+            visual_context = clip_encoder.encode_image_from_tensor(
+                image_tensor
+            )  # [1, 257, 1280]
+
+        # 2. Encode VAE latents for channel concatenation
+        # VAE expects [B, C, T, H, W]
+        video_tensor = image_tensor.unsqueeze(2)  # [1, 3, 1, H, W]
+
+        # Assuming input is [-1, 1]. WanVAEWrapper doesn't seem to normalize inside, it expects input.
+        # DenoiseBlock usually receives normalized latents? No, VAE encode_to_latent takes pixel.
+        cond_latents = self.components.vae.encode_to_latent(
+            video_tensor
+        )  # [1, 16, 1, h, w]
+
+        # Create mask for I2V (4 channels of ones for the first frame)
+        # Wan2.1 I2V expects 20 channels: 16 latent + 4 mask
+        # The mask should be 1s for the conditioned frame
+        mask = torch.ones(
+            cond_latents.shape[0],
+            4,
+            cond_latents.shape[2],
+            cond_latents.shape[3],
+            cond_latents.shape[4],
+            device=cond_latents.device,
+            dtype=cond_latents.dtype,
+        )
+
+        cond_concat = torch.cat([cond_latents, mask], dim=1)  # [1, 20, 1, h, w]
+
+        return visual_context, cond_concat
+
+    def set_i2v_conditioning(
+        self, visual_context: torch.Tensor, cond_concat: torch.Tensor
+    ):
+        """Set the persistent I2V conditioning."""
+        self.i2v_visual_context = visual_context
+        self.i2v_cond_concat = cond_concat
+        self.i2v_first_chunk = True  # Maybe used for something?
+
+    def clear_i2v_conditioning(self):
+        """Clear the persistent I2V conditioning."""
+        self.i2v_visual_context = None
+        self.i2v_cond_concat = None
+        self.i2v_first_chunk = False
 
     def __call__(
         self,
@@ -169,24 +256,82 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         for k, v in kwargs.items():
             self.state.set(k, v)
 
-        # Handle input_image for CLIP conditioning
+        # Handle input_image for CLIP conditioning (Ephemeral / One-off)
         input_image = kwargs.get("input_image")
-        clip_features = None
+        clip_features = self.i2v_visual_context  # Start with persistent if available
+        i2v_latents = self.i2v_cond_concat  # Start with persistent
 
-        if input_image and isinstance(input_image, str) and hasattr(self.components.generator, "clip_encoder") and self.components.generator.clip_encoder is not None:
-             try:
-                # Decode base64 image
-                img_str = input_image
-                if "," in img_str:
-                    img_str = img_str.split(",", 1)[1]
-                image_bytes = base64.b64decode(img_str)
-                image = Image.open(BytesIO(image_bytes))
-                # Encode
-                clip_features = self.components.generator.clip_encoder.encode_image(image)
-             except Exception as e:
+        model_type = getattr(self.components.generator.model, "model_type", "t2v")
+
+        if input_image:
+            try:
+                image = None
+                if isinstance(input_image, str):
+                    # Decode base64 image
+                    img_str = input_image
+                    if "," in img_str:
+                        img_str = img_str.split(",", 1)[1]
+                    image_bytes = base64.b64decode(img_str)
+                    image = Image.open(BytesIO(image_bytes))
+                elif isinstance(input_image, Image.Image):
+                    image = input_image
+
+                if image:
+                    # Encode CLIP
+                    if (
+                        hasattr(self.components.generator, "clip_encoder")
+                        and self.components.generator.clip_encoder is not None
+                    ):
+                        clip_features = (
+                            self.components.generator.clip_encoder.encode_image(image)
+                        )
+
+                    # Encode VAE (Channel Concat) - Only if model is I2V
+                    if model_type == "i2v":
+                        # Convert to tensor
+                        image_tensor = (
+                            TF.to_tensor(image).sub_(0.5).div_(0.5)
+                        )  # [-1, 1]
+                        # [C, H, W] -> [1, C, H, W]
+                        image_tensor = image_tensor.unsqueeze(0).to(
+                            device=self.components.config.device,
+                            dtype=self.components.config.dtype,
+                        )
+                        # [1, C, H, W] -> [1, C, T=1, H, W]
+                        video_tensor = image_tensor.unsqueeze(2)
+
+                        cond_latents = self.components.vae.encode_to_latent(
+                            video_tensor
+                        )
+
+                        # Create mask
+                        mask = torch.ones(
+                            cond_latents.shape[0],
+                            4,
+                            cond_latents.shape[2],
+                            cond_latents.shape[3],
+                            cond_latents.shape[4],
+                            device=cond_latents.device,
+                            dtype=cond_latents.dtype,
+                        )
+                        i2v_latents = torch.cat(
+                            [cond_latents, mask], dim=1
+                        )  # [1, 20, 1, h, w]
+
+            except Exception as e:
                 logger.error(f"Failed to encode input image: {e}")
 
         self.state.set("clip_features", clip_features)
+
+        # Only set i2v_conditioning_latent if model supports it (I2V)
+        if model_type == "i2v":
+            self.state.set("i2v_conditioning_latent", i2v_latents)
+
+        # Pass clip_conditioning_scale if provided in kwargs
+        if "clip_conditioning_scale" in kwargs:
+            self.state.set(
+                "clip_conditioning_scale", float(kwargs["clip_conditioning_scale"])
+            )
 
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
@@ -196,4 +341,9 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
         _, self.state = self.blocks(self.components, self.state)
+
+        # Update state flags
+        if self.i2v_first_chunk:
+            self.i2v_first_chunk = False
+
         return postprocess_chunk(self.state.values["output_video"])

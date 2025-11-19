@@ -1,16 +1,16 @@
+import base64
 import logging
 import queue
 import threading
 import time
 from collections import deque
-from typing import Any
-import base64
 from io import BytesIO
+from typing import Any
 
+import numpy as np
 import torch
 from aiortc.mediastreams import VideoFrame
 from PIL import Image
-import numpy as np
 
 from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
@@ -124,7 +124,9 @@ class FrameProcessor:
 
             # Repeat the image chunk_size times to match expected input
             frames = [image_tensor for _ in range(chunk_size)]
-            logger.info(f"Converted base64 image to {chunk_size} frames, shape: {image_tensor.shape}")
+            logger.info(
+                f"Converted base64 image to {chunk_size} frames, shape: {image_tensor.shape}"
+            )
             return frames
         except Exception as e:
             logger.error(f"Failed to convert base64 image to frames: {e}")
@@ -340,8 +342,13 @@ class FrameProcessor:
                 input = self.prepare_chunk(current_chunk_size)
 
             # Clear image cache if chunk size changed (e.g., after prompt update that resets pipeline)
-            if self.cached_chunk_size is not None and self.cached_chunk_size != current_chunk_size:
-                logger.info(f"Chunk size changed from {self.cached_chunk_size} to {current_chunk_size}, clearing image cache")
+            if (
+                self.cached_chunk_size is not None
+                and self.cached_chunk_size != current_chunk_size
+            ):
+                logger.info(
+                    f"Chunk size changed from {self.cached_chunk_size} to {current_chunk_size}, clearing image cache"
+                )
                 self.image_frames_cache = None
                 self.cached_chunk_size = None
 
@@ -358,7 +365,10 @@ class FrameProcessor:
             else:
                 # Use video frames from buffer
                 with self.frame_buffer_lock:
-                    if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
+                    if (
+                        not self.frame_buffer
+                        or len(self.frame_buffer) < current_chunk_size
+                    ):
                         # Sleep briefly to avoid busy waiting
                         self.shutdown_event.wait(SLEEP_TIME)
                         return
@@ -366,7 +376,9 @@ class FrameProcessor:
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = {
-                k: v for k, v in self.parameters.items() if k not in PREPARE_ONLY_PARAMETERS
+                k: v
+                for k, v in self.parameters.items()
+                if k not in PREPARE_ONLY_PARAMETERS
             }
 
             # Pass reset_cache as init_cache to pipeline
