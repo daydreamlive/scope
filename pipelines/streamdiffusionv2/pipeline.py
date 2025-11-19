@@ -3,7 +3,6 @@ import time
 
 import torch
 from diffusers.modular_pipelines import PipelineState
-from PIL import Image
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
