@@ -4,7 +4,7 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
-from scope.core.pipelines.common import Quantization
+from scope.core.pipelines.common import Quantization, load_model_config
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
@@ -38,7 +38,8 @@ class KreaRealtimeVideoPipeline(Pipeline):
         tokenizer_path = getattr(config, "tokenizer_path", None)
         vae_path = getattr(config, "vae_path", None)
 
-        model_config = getattr(config, "model_config", {})
+        # Auto-load model.yaml if model_config not provided
+        model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-14B")
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
 

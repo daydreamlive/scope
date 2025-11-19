@@ -6,7 +6,6 @@ import logging
 import os
 import threading
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -236,10 +235,7 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    "model_config": OmegaConf.load(
-                        Path(__file__).parent.parent.parent
-                        / "scope/core/pipelines/streamdiffusionv2/model.yaml"
-                    ),
+                    # model_config will be auto-loaded from the pipeline's model.yaml
                 }
             )
 
@@ -321,10 +317,7 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    "model_config": OmegaConf.load(
-                        Path(__file__).parent.parent.parent
-                        / "scope/core/pipelines/longlive/model.yaml"
-                    ),
+                    # model_config will be auto-loaded from the pipeline's model.yaml
                 }
             )
 
@@ -371,10 +364,7 @@ class PipelineManager:
                     "vae_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
                     ),
-                    "model_config": OmegaConf.load(
-                        Path(__file__).parent.parent.parent
-                        / "scope/core/pipelines/krea_realtime_video/model.yaml"
-                    ),
+                    # model_config will be auto-loaded from the pipeline's model.yaml
                 }
             )
 
