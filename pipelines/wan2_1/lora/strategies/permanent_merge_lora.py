@@ -1,10 +1,9 @@
 """
-Permanent merge LoRA manager for WAN models - maximum inference performance.
+Permanent merge LoRA strategy for WAN models.
 
-This implementation merges LoRA weights directly into model weights at load time,
-providing zero inference overhead. No runtime scale updates are supported - the
-scale is fixed at load time. Ideal for production deployment where LoRA scale
-is predetermined and maximum FPS is critical.
+Merges LoRA weights into model weights at load time using PEFT's merge_and_unload(),
+providing zero inference overhead. LoRA scales are fixed at load time and cannot be
+updated at runtime. Ideal for production deployment where maximum FPS is critical.
 """
 
 import logging
@@ -14,13 +13,7 @@ from typing import Any
 
 import torch
 
-from pipelines.wan2_1.lora.utils import (
-    build_key_map,
-    calculate_lora_scale,
-    find_lora_pair,
-    load_lora_weights,
-    normalize_lora_key,
-)
+from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +24,12 @@ class PermanentMergeLoRAStrategy:
     """
     Manages LoRA adapters via permanent weight merging at load time.
 
-    This merges LoRA weights directly: W_final = W_base + scale * (lora_B @ lora_A)
-    The LoRA matrices and original weights are discarded after merging, minimizing
-    memory usage and providing zero inference overhead.
+    Uses PEFT's merge_and_unload() to merge LoRA weights directly into model
+    parameters, eliminating inference overhead. LoRA scales are fixed at load time
+    and cannot be updated at runtime.
 
-    Trade-off: Runtime scale updates are not supported. The scale is permanently
-    baked into the weights at load time.
-
-    Compatible with FP8 quantization - merge happens before or after quantization
-    depending on when LoRAs are loaded.
+    Ideal for production deployment where maximum FPS is critical.
+    Compatible with FP8 quantization.
     """
 
     @staticmethod
@@ -49,127 +39,62 @@ class PermanentMergeLoRAStrategy:
         strength: float = 1.0,
     ) -> str:
         """
-        Load LoRA by permanently merging into model weights.
+        Load and permanently merge LoRA adapter into model weights.
 
-        This performs one-time weight merging: W_final = W_base + strength * (lora_B @ lora_A)
-        After merging, the LoRA matrices are discarded. No runtime scale updates are supported.
+        The adapter is loaded with PEFT, merged into the base model weights,
+        then the PEFT wrapper is removed. The resulting model has the LoRA
+        effect permanently baked in with zero inference overhead.
 
         Args:
             model: PyTorch model
             lora_path: Local path to LoRA file (.safetensors or .bin)
-            strength: Strength multiplier for LoRA effect (permanently baked in)
+            strength: Strength multiplier for LoRA effect
 
         Returns:
             The lora_path (used as identifier)
 
         Raises:
             FileNotFoundError: If the LoRA file does not exist
-
-        Example:
-            >>> from pipelines.wan2_1.lora.strategies.permanent_merge_lora import PermanentMergeLoRAStrategy
-            >>> path = PermanentMergeLoRAStrategy.load_adapter(
-            ...     model=pipeline.transformer,
-            ...     lora_path="models/lora/my-style.safetensors",
-            ...     strength=1.0
-            ... )
         """
-        # Load LoRA weights
-        lora_state = load_lora_weights(lora_path)
-        logger.debug(f"load_adapter: Loaded {len(lora_state)} keys from {lora_path}")
+        start_time = time.time()
+        logger.info(
+            f"load_adapter: Loading and permanently merging LoRA from {lora_path} (strength={strength})"
+        )
 
-        model_state = model.state_dict()
-        key_map = build_key_map(model_state)
-        logger.debug(f"load_adapter: Built key map with {len(key_map)} entries")
+        # Use PeftLoRAStrategy to load the adapter (wraps model with PEFT)
+        adapter_name = PeftLoRAStrategy.load_adapter(
+            model=model, lora_path=lora_path, strength=strength
+        )
 
-        # Compute merged weights
-        merged_weights = {}
-        applied_count = 0
-        skipped_no_match = 0
-        skipped_no_model_key = 0
-        processed_keys = set()
-
-        for lora_key in lora_state.keys():
-            if lora_key in processed_keys:
-                continue
-
-            # Find LoRA pair using shared utility
-            pair_result = find_lora_pair(lora_key, lora_state)
-            if pair_result is None:
-                skipped_no_match += 1
-                continue
-
-            base_key, alpha_key, lora_A, lora_B = pair_result
-
-            # Mark both keys as processed
-            if ".lora_up.weight" in lora_key:
-                processed_keys.add(lora_key)
-                processed_keys.add(f"{base_key}.lora_down.weight")
-            elif ".lora_B.weight" in lora_key:
-                processed_keys.add(lora_key)
-                processed_keys.add(f"{base_key}.lora_A.weight")
-
-            # Normalize the base key to match model format
-            normalized_key = normalize_lora_key(base_key)
-
-            # Find the model weight key
-            model_key = key_map.get(normalized_key)
-            if model_key is None:
-                model_key = key_map.get(f"diffusion_model.{normalized_key}")
-
-            if model_key is None or model_key not in model_state:
-                skipped_no_model_key += 1
-                if skipped_no_model_key <= 3:
-                    logger.debug(
-                        f"load_adapter: No model key found for base_key={base_key}, normalized={normalized_key}"
-                    )
-                continue
-
-            # Extract alpha
-            alpha = None
-            if alpha_key and alpha_key in lora_state:
-                alpha = lora_state[alpha_key].item()
-
-            # Compute the LoRA contribution
-            original_weight = model_state[model_key]
-
-            # Move LoRA weights to same device as model weight
-            lora_A = lora_A.to(device=original_weight.device)
-            lora_B = lora_B.to(device=original_weight.device)
-
-            # Compute scale: alpha / rank
-            rank = lora_A.shape[0]
-            scale = calculate_lora_scale(alpha, rank)
-
-            # Compute LoRA diff: B @ A (note: lora_B is up, lora_A is down)
-            lora_diff = torch.mm(
-                lora_B.float().flatten(start_dim=1), lora_A.float().flatten(start_dim=1)
-            ).reshape(original_weight.shape)
-
-            # Merge: W_final = W_base + strength * scale * diff
-            # Convert to original weight's dtype before merging
-            scaled_diff = (strength * scale * lora_diff).to(
-                dtype=original_weight.dtype, device=original_weight.device
+        # Get the PEFT-wrapped model from the cache
+        peft_model = PeftLoRAStrategy._get_peft_model(model)
+        if peft_model is None:
+            raise RuntimeError(
+                f"load_adapter: Failed to get PEFT model after loading adapter '{adapter_name}'"
             )
-            merged_weight = original_weight + scaled_diff
 
-            merged_weights[model_key] = merged_weight
-            applied_count += 1
+        # Get the actual PEFT model (unwrap torch.compile if needed)
+        target_model = (
+            peft_model._orig_mod if hasattr(peft_model, "_orig_mod") else peft_model
+        )
 
-        # Apply merged weights to model using load_state_dict
-        # This handles quantized tensors properly
-        if merged_weights:
-            model.load_state_dict(merged_weights, strict=False)
-            logger.info(
-                f"load_adapter: Permanently merged {applied_count} LoRA weight patches (strength={strength})"
-            )
-            logger.debug(
-                f"load_adapter: Skipped {skipped_no_match} no match, "
-                f"{skipped_no_model_key} no model key"
-            )
-        else:
-            logger.warning(
-                "load_adapter: No LoRA patches applied (check model compatibility)"
-            )
+        # Merge the adapter weights into base model and unwrap
+        merged_model = target_model.merge_and_unload(
+            safe_merge=True, adapter_names=[adapter_name]
+        )
+
+        # Copy merged weights back to original model
+        # This is necessary because merge_and_unload returns a new model instance
+        model.load_state_dict(merged_model.state_dict(), strict=True)
+
+        # Clean up PEFT model from cache
+        if model in PeftLoRAStrategy._peft_models:
+            del PeftLoRAStrategy._peft_models[model]
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"load_adapter: Permanently merged LoRA '{Path(lora_path).name}' in {elapsed:.3f}s"
+        )
 
         return str(lora_path)
 
@@ -189,13 +114,6 @@ class PermanentMergeLoRAStrategy:
 
         Returns:
             List of loaded adapter info dicts with keys: path, scale
-
-        Example:
-            >>> loaded = PermanentMergeLoRAStrategy.load_adapters_from_list(
-            ...     model=pipeline.transformer,
-            ...     lora_configs=[{"path": "models/lora/style.safetensors", "scale": 1.0}],
-            ...     logger_prefix="MyPipeline.__init__: "
-            ... )
         """
         loaded_adapters = []
 
