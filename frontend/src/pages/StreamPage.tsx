@@ -491,7 +491,8 @@ export function StreamPage() {
   const onVideoPlayingCallbackRef = useRef<(() => void) | null>(null);
   // Sync resolution with videoResolution when video source changes
   // Only sync for pipelines that require video input in video mode while
-  // they are in video mode.
+  // they are in video mode. Only runs when videoResolution changes to avoid
+  // resetting resolution during timeline rewinds or other operations.
   useEffect(() => {
     const caps = getPipelineModeCapabilities(settings.pipelineId);
     const currentMode = settings.generationMode ?? caps.nativeMode;
@@ -509,7 +510,12 @@ export function StreamPage() {
         },
       });
     }
-  }, [videoResolution, isStreaming, settings.pipelineId, updateSettings]);
+  }, [
+    videoResolution,
+    settings.pipelineId,
+    settings.generationMode,
+    updateSettings,
+  ]); // Removed isStreaming from deps to prevent reset during rewind
 
   const computeCanStartStream = (
     caps: ReturnType<typeof getPipelineModeCapabilities>,
