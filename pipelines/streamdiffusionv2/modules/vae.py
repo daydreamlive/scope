@@ -624,13 +624,14 @@ class WanVAE_(nn.Module):
                 feat_cache=self._enc_feat_map,
                 feat_idx=self._enc_conv_idx,
             )
-            self._enc_conv_idx = [0]
-            out_ = self.encoder(
-                x[:, :, 1:, :, :],
-                feat_cache=self._enc_feat_map,
-                feat_idx=self._enc_conv_idx,
-            )
-            out = torch.cat([out, out_], 2)
+            if t > 1:
+                self._enc_conv_idx = [0]
+                out_ = self.encoder(
+                    x[:, :, 1:, :, :],
+                    feat_cache=self._enc_feat_map,
+                    feat_idx=self._enc_conv_idx,
+                )
+                out = torch.cat([out, out_], 2)
         else:
             out = []
             for i in range(t // 4):

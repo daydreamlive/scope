@@ -86,6 +86,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
             target_num_frames += 1
 
         _, _, num_frames, _, _ = block_state.video.shape
+
         # If we do not have enough frames use linear interpolation to resample existing frames
         # to meet the required number of frames
         if num_frames != target_num_frames:
