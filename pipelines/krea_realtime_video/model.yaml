@@ -7,6 +7,3 @@ local_attn_size: 6
 vae_spatial_downsample_factor: 8
 patch_embedding_spatial_downsample_factor: 2
 max_rope_freq_table_seq_len: 1024
-# LoRA merge mode: runtime_peft (instant updates, overhead), gpu_reconstruct (slow updates, no overhead),
-# permanent_merge (no updates, zero overhead), cuda_graph_recapture (CUDA graph + PEFT)
-lora_merge_mode: runtime_peft
