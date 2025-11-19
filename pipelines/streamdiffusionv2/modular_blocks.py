@@ -75,26 +75,32 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
 
         end_frame = start_frame + num_frames
 
-        if block_state.noise_scale is not None:
-            # Higher noise scale -> more denoising steps, more intense changes to input
-            # Lower noise scale -> less denoising steps, less intense changes to input
-            denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
+        # NOTE: Commented out to allow manual denoising_step_list control
+        # The noise_scale parameter is still used in PrepareVideoLatentsBlock for initial noise mixing
+        # if block_state.noise_scale is not None:
+        #     # Higher noise scale -> more denoising steps, more intense changes to input
+        #     # Lower noise scale -> less denoising steps, less intense changes to input
+        #     denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
 
-        # Handle CLIP features scaling
+        # Check model type to determine if 'y' is required
+        model_type = getattr(components.generator.model, "model_type", "t2v")
+
+        # CFG for CLIP conditioning: only apply when scale != 1.0 and CLIP features exist
         clip_features = block_state.clip_features
-        if clip_features is not None and block_state.clip_conditioning_scale != 1.0:
-            # Scale the CLIP features
-            # We interpolate between the features and zero (or a learnt null embedding if we had one, but here just zero)
-            # Note: CLIP features are usually normalized, so scaling might affect magnitude.
-            # Wan2.1 projects them via MLP.
-            clip_features = clip_features * block_state.clip_conditioning_scale
+
+        # Disable CLIP features for T2V model as it uses random projection weights
+        if model_type == "t2v" and clip_features is not None:
+            logger.warning("Disabling CLIP features for T2V model (unsupported)")
+            clip_features = None
+
+        use_cfg = clip_features is not None and block_state.clip_conditioning_scale != 1.0
+
+        if clip_features is not None:
+            logger.info(f"CLIP features present, scale={block_state.clip_conditioning_scale}, use_cfg={use_cfg}")
 
         # I2V Conditioning Latent (Channel Concatenation)
         # "y" in the model forward pass
         i2v_latents = getattr(block_state, "i2v_conditioning_latent", None)
-
-        # Check model type to determine if 'y' is required
-        model_type = getattr(components.generator.model, "model_type", "t2v")
 
         y = None
         if model_type == "i2v":
@@ -139,7 +145,7 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
                         b * t, c, h, w
                     )
                     i2v_latents = torch.nn.functional.interpolate(
-                        i2v_latents, size=(target_h, target_w), mode="nearest"
+                        i2v_latents, size=(target_h, target_w), mode="bilinear", align_corners=False
                     )
                     i2v_latents = i2v_latents.reshape(
                         b, t, c, target_h, target_w
@@ -164,6 +170,50 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
             )
 
             if index < len(denoising_step_list) - 1:
+                '''
+                if use_cfg:
+                    # CFG: Run model twice - with and without CLIP features
+                    _, cond_pred = components.generator(
+                        noisy_image_or_video=noise,
+                        conditional_dict=conditional_dict,
+                        timestep=timestep,
+                        kv_cache=block_state.kv_cache,
+                        crossattn_cache=block_state.crossattn_cache,
+                        current_start=start_frame * frame_seq_length,
+                        current_end=end_frame * frame_seq_length,
+                        kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                        clip_features=clip_features,
+                        y=y,
+                    )
+                    _, uncond_pred = components.generator(
+                        noisy_image_or_video=noise,
+                        conditional_dict=conditional_dict,
+                        timestep=timestep,
+                        kv_cache=block_state.kv_cache,
+                        crossattn_cache=block_state.crossattn_cache,
+                        current_start=start_frame * frame_seq_length,
+                        current_end=end_frame * frame_seq_length,
+                        kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                        clip_features=None,
+                        y=y,
+                    )
+                    # CFG formula: uncond + scale * (cond - uncond)
+                    scale = block_state.clip_conditioning_scale
+                    denoised_pred = uncond_pred + scale * (cond_pred - uncond_pred)
+                else:
+                    _, denoised_pred = components.generator(
+                        noisy_image_or_video=noise,
+                        conditional_dict=conditional_dict,
+                        timestep=timestep,
+                        kv_cache=block_state.kv_cache,
+                        crossattn_cache=block_state.crossattn_cache,
+                        current_start=start_frame * frame_seq_length,
+                        current_end=end_frame * frame_seq_length,
+                        kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                        clip_features=clip_features,
+                        y=y,
+                    )
+                '''
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
@@ -174,7 +224,7 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     clip_features=clip_features,
-                    y=y,  # Pass the constructed I2V conditioning tensor
+                    y=y,
                 )
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -205,6 +255,49 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
                 # Restore shape: [B*T, C, H, W] -> [B, T, C, H, W]
                 noise = noise.unflatten(0, (batch_size, num_frames))
             else:
+                '''
+                if use_cfg:
+                    # CFG: Run model twice - with and without CLIP features
+                    _, cond_pred = components.generator(
+                        noisy_image_or_video=noise,
+                        conditional_dict=conditional_dict,
+                        timestep=timestep,
+                        kv_cache=block_state.kv_cache,
+                        crossattn_cache=block_state.crossattn_cache,
+                        current_start=start_frame * frame_seq_length,
+                        current_end=end_frame * frame_seq_length,
+                        kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                        clip_features=clip_features,
+                        y=y,
+                    )
+                    _, uncond_pred = components.generator(
+                        noisy_image_or_video=noise,
+                        conditional_dict=conditional_dict,
+                        timestep=timestep,
+                        kv_cache=block_state.kv_cache,
+                        crossattn_cache=block_state.crossattn_cache,
+                        current_start=start_frame * frame_seq_length,
+                        current_end=end_frame * frame_seq_length,
+                        kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                        clip_features=None,
+                        y=y,
+                    )
+                    scale = block_state.clip_conditioning_scale
+                    denoised_pred = uncond_pred + scale * (cond_pred - uncond_pred)
+                else:
+                    _, denoised_pred = components.generator(
+                        noisy_image_or_video=noise,
+                        conditional_dict=conditional_dict,
+                        timestep=timestep,
+                        kv_cache=block_state.kv_cache,
+                        crossattn_cache=block_state.crossattn_cache,
+                        current_start=start_frame * frame_seq_length,
+                        current_end=end_frame * frame_seq_length,
+                        kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                        clip_features=clip_features,
+                        y=y,
+                    )
+                '''
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
@@ -215,7 +308,7 @@ class StreamDiffusionV2DenoiseBlock(BaseDenoiseBlock):
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     clip_features=clip_features,
-                    y=y,  # Pass the constructed I2V conditioning tensor
+                    y=y,
                 )
 
         block_state.latents = denoised_pred

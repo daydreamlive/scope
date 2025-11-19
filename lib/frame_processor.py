@@ -345,8 +345,12 @@ class FrameProcessor:
                 self.cached_chunk_size = None
 
             # Use image input if available, otherwise use video frames
-            if self.current_image_data:
-                # Generate frames from image
+            # NOTE: For StreamDiffusionV2, input_image is used for CLIP conditioning only,
+            # not as video input replacement. Video input always comes from webcam/video file.
+            is_streamdiffusionv2 = pipeline.__class__.__name__ == "StreamDiffusionV2Pipeline" if pipeline else False
+
+            if self.current_image_data and not is_streamdiffusionv2:
+                # Generate frames from image (for non-StreamDiffusionV2 pipelines)
                 if self.image_frames_cache is None:
                     # Convert and cache image frames
                     self.image_frames_cache = self._convert_base64_image_to_frames(
@@ -381,6 +385,10 @@ class FrameProcessor:
             # Pass video input to pipeline
             if video_input is not None:
                 call_params["video"] = video_input
+
+            # Pass input_image to pipeline for CLIP encoding (in addition to using it for frame generation)
+            if self.current_image_data:
+                call_params["input_image"] = self.current_image_data
 
             output = pipeline(**call_params)
 

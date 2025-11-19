@@ -221,7 +221,17 @@ class StreamDiffusionV2Pipeline(Pipeline):
         clip_features = self.i2v_visual_context  # Start with persistent if available
         i2v_latents = self.i2v_cond_concat  # Start with persistent
 
+        logger.info(f"_generate called: input_image={'present' if input_image else 'None'}, persistent_clip={'present' if self.i2v_visual_context is not None else 'None'}")
+
         model_type = getattr(self.components.generator.model, "model_type", "t2v")
+
+        # Handle explicit None to clear the image
+        if input_image is None and "input_image" in kwargs:
+            logger.info("Clearing CLIP features (input_image=None)")
+            self.i2v_visual_context = None
+            self.i2v_cond_concat = None
+            clip_features = None
+            i2v_latents = None
 
         if input_image:
             try:
@@ -237,14 +247,23 @@ class StreamDiffusionV2Pipeline(Pipeline):
                     image = input_image
 
                 if image:
-                    # Encode CLIP
+                    # Encode CLIP (Only for I2V model, as T2V doesn't support it properly yet)
                     if (
-                        hasattr(self.components.generator, "clip_encoder")
+                        model_type == "i2v"
+                        and hasattr(self.components.generator, "clip_encoder")
                         and self.components.generator.clip_encoder is not None
                     ):
                         clip_features = (
                             self.components.generator.clip_encoder.encode_image(image)
                         )
+                        # Store persistently for future frames
+                        self.i2v_visual_context = clip_features
+                        logger.info(f"Encoded CLIP features from input image, shape: {clip_features.shape}")
+                    elif model_type == "t2v":
+                        logger.warning("CLIP features are not supported for T2V model. Ignoring input image for CLIP conditioning.")
+                        clip_features = None
+                    else:
+                        logger.warning("CLIP encoder not available, cannot encode input image")
 
                     # Encode VAE (Channel Concat) - Only if model is I2V
                     if model_type == "i2v":
@@ -283,15 +302,15 @@ class StreamDiffusionV2Pipeline(Pipeline):
 
         self.state.set("clip_features", clip_features)
 
+        if clip_features is not None:
+            logger.info(f"Setting CLIP features in state, clip_conditioning_scale={kwargs.get('clip_conditioning_scale', 1.0)}")
+        else:
+            logger.debug("No CLIP features to set in state")
+
         # Only set i2v_conditioning_latent if model supports it (I2V)
+        # TODO: This is not implemented at the moment
         if model_type == "i2v":
             self.state.set("i2v_conditioning_latent", i2v_latents)
-
-        # Pass clip_conditioning_scale if provided in kwargs
-        if "clip_conditioning_scale" in kwargs:
-            self.state.set(
-                "clip_conditioning_scale", float(kwargs["clip_conditioning_scale"])
-            )
 
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
