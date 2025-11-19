@@ -1,4 +1,5 @@
 export type PipelineCategory = "video-input" | "no-video-input";
+export type PipelineCompatibility = "local" | "cloud" | "both";
 
 export interface PipelineInfo {
   name: string;
@@ -11,6 +12,7 @@ export interface PipelineInfo {
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
+  pipelineCompatibility?: PipelineCompatibility;
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
@@ -57,6 +59,22 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
+  },
+  "sd-turbo": {
+    name: "SD-turbo",
+    docsUrl:
+      "",
+    about:
+      "",
+    modified: true,
+    category: "video-input",
+    defaultPrompt:
+      "",
+    estimatedVram: 32,
+    requiresModels: true,
+    defaultTemporalInterpolationMethod: "linear",
+    defaultTemporalInterpolationSteps: 4,
+    pipelineCompatibility: "cloud",
   },
   passthrough: {
     name: "Passthrough",

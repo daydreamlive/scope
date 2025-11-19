@@ -1,7 +1,6 @@
 "use client";
 
 import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
-import { useMuxer } from "@/muxer";
 import { memo, useEffect, useRef } from "react";
 import { WhipClient } from "@/lib/WhipClient";
 
@@ -32,7 +31,6 @@ export const WhipConnection = memo(
     debugStats,
   }: WhipConnectionProps) => {
     const { setPlaybackUrl, setLoading } = usePlaybackUrl();
-    const muxer = useMuxer();
     const clientRef = useRef<WhipClient | null>(null);
     const streamRef = useRef<MediaStream | null>(stream);
 
@@ -88,12 +86,6 @@ export const WhipConnection = memo(
       setPlaybackUrl,
       setLoading,
     ]);
-
-    useEffect(() => {
-      const client = clientRef.current;
-      if (!client) return;
-      client.setMaxFramerate(muxer.sendFps);
-    }, [muxer.sendFps]);
 
     return null;
   },

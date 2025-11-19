@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -99,6 +99,27 @@ export function SettingsPanel({
   const [heightError, setHeightError] = useState<string | null>(null);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+
+  // Get filtered pipeline IDs based on cloudMode
+  const filteredPipelineIds = useMemo(() => {
+    return Object.keys(PIPELINES).filter(id => {
+      const pipeline = PIPELINES[id];
+      const compatibility = pipeline.pipelineCompatibility || "local";
+
+      if (cloudMode) {
+        return compatibility === "cloud" || compatibility === "both";
+      } else {
+        return compatibility === "local" || compatibility === "both";
+      }
+    });
+  }, [cloudMode]);
+
+  // Auto-select first available pipeline if current selection is no longer available
+  useEffect(() => {
+    if (filteredPipelineIds.length > 0 && !filteredPipelineIds.includes(pipelineId)) {
+      onPipelineIdChange?.(filteredPipelineIds[0] as PipelineId);
+    }
+  }, [cloudMode, filteredPipelineIds, pipelineId, onPipelineIdChange]);
 
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -229,7 +250,7 @@ export function SettingsPanel({
               <SelectValue placeholder="Select a pipeline" />
             </SelectTrigger>
             <SelectContent>
-              {Object.keys(PIPELINES).map(id => (
+              {filteredPipelineIds.map(id => (
                 <SelectItem key={id} value={id}>
                   {id}
                 </SelectItem>
