@@ -135,6 +135,9 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             self._handle_lora_scale_updates(
                 lora_scales=lora_scales, model=self.components.generator.model
             )
+            # Trigger cache reset on LoRA scale updates if manage_cache is enabled
+            if self.state.get("manage_cache", True):
+                kwargs["init_cache"] = True
 
         for k, v in kwargs.items():
             self.state.set(k, v)

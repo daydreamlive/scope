@@ -238,6 +238,9 @@ class FrameProcessor:
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
 
+        # Pop lora_scales to prevent re-processing on every frame
+        lora_scales = self.parameters.pop("lora_scales", None)
+
         # Clear output buffer queue when reset_cache is requested to prevent old frames
         if reset_cache:
             logger.info("Clearing output buffer queue due to reset_cache request")
@@ -270,6 +273,10 @@ class FrameProcessor:
             call_params["init_cache"] = not self.is_prepared
             if reset_cache is not None:
                 call_params["init_cache"] = reset_cache
+
+            # Pass lora_scales only when present (one-time update)
+            if lora_scales is not None:
+                call_params["lora_scales"] = lora_scales
 
             # Pass video input to pipeline
             if video_input is not None:
