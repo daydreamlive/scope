@@ -41,7 +41,7 @@ class LoRAManager:
 
     - module_targeted: Targets specific module types (like LongLive)
       + Compatible with existing module-driven LoRA files
-      - Uses PEFT wrapping with runtime scale updates
+      - Uses PEFT wrapping without runtime scale updates
     """
 
     # Default strategy if none specified

@@ -3,7 +3,7 @@ PEFT-based LoRA manager for WAN models with real-time scale updates.
 
 This implementation uses PEFT's LoraLayer for runtime LoRA application
 without weight merging, enabling instant scale updates (<1s) suitable for
-real-time video generation with FP8 quantization.
+real-time video generation.
 """
 
 import logging
