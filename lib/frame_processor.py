@@ -12,20 +12,6 @@ from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
-# Parameters that are only used in prepare() and should not be passed to __call__()
-PREPARE_ONLY_PARAMS = frozenset(
-    {
-        "prompt_interpolation_method",
-        "reset_cache",
-        "manage_cache",
-        "prompts",
-        "transition",
-        "denoising_step_list",
-        "noise_scale",
-        "kv_cache_attention_bias",
-    }
-)
-
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 
@@ -224,9 +210,16 @@ class FrameProcessor:
             # Check if there are new parameters
             new_parameters = self.parameters_queue.get_nowait()
             if new_parameters != self.parameters:
+                # Clear stale transition when new prompts arrive without transition
+                if (
+                    "prompts" in new_parameters
+                    and "transition" not in new_parameters
+                    and "transition" in self.parameters
+                ):
+                    self.parameters.pop("transition", None)
+
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
-                logger.info(f"Updated parameters: {self.parameters}")
         except queue.Empty:
             pass
 
@@ -245,6 +238,9 @@ class FrameProcessor:
         # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
 
+        # Pop lora_scales to prevent re-processing on every frame
+        lora_scales = self.parameters.pop("lora_scales", None)
+
         # Clear output buffer queue when reset_cache is requested to prevent old frames
         if reset_cache:
             logger.info("Clearing output buffer queue due to reset_cache request")
@@ -254,14 +250,13 @@ class FrameProcessor:
                 except queue.Empty:
                     break
 
-        requirements = pipeline.prepare(
-            should_prepare=not self.is_prepared or reset_cache, **self.parameters
-        )
-        # Transition is consumed by prepare()
-        self.parameters.pop("transition", None)
-        self.is_prepared = True
-        input = None
+        requirements = None
+        if hasattr(pipeline, "prepare"):
+            requirements = pipeline.prepare(
+                **self.parameters,
+            )
 
+        video_input = None
         if requirements is not None:
             current_chunk_size = requirements.input_size
             with self.frame_buffer_lock:
@@ -269,13 +264,36 @@ class FrameProcessor:
                     # Sleep briefly to avoid busy waiting
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
-                input = self.prepare_chunk(current_chunk_size)
+                video_input = self.prepare_chunk(current_chunk_size)
         try:
             # Pass parameters (excluding prepare-only parameters)
-            call_params = {
-                k: v for k, v in self.parameters.items() if k not in PREPARE_ONLY_PARAMS
-            }
-            output = pipeline(input, **call_params)
+            call_params = dict(self.parameters.items())
+
+            # Pass reset_cache as init_cache to pipeline
+            call_params["init_cache"] = not self.is_prepared
+            if reset_cache is not None:
+                call_params["init_cache"] = reset_cache
+
+            # Pass lora_scales only when present (one-time update)
+            if lora_scales is not None:
+                call_params["lora_scales"] = lora_scales
+
+            # Pass video input to pipeline
+            if video_input is not None:
+                call_params["video"] = video_input
+
+            output = pipeline(**call_params)
+
+            # Clear transition when complete (blocks signal completion via _transition_active)
+            # Contract: Modular pipelines manage prompts internally; frame_processor manages lifecycle
+            if "transition" in call_params and "transition" in self.parameters:
+                transition_active = False
+                if hasattr(pipeline, "state"):
+                    transition_active = pipeline.state.get("_transition_active", False)
+
+                transition = call_params.get("transition")
+                if not transition_active or transition is None:
+                    self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
             num_frames = output.shape[0]
@@ -327,6 +345,8 @@ class FrameProcessor:
                 logger.error(f"Error processing chunk: {e}", exc_info=True)
             else:
                 raise e
+
+        self.is_prepared = True
 
     def prepare_chunk(self, chunk_size: int) -> list[torch.Tensor]:
         """

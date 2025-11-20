@@ -11,6 +11,7 @@ export interface PipelineInfo {
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
+  supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
@@ -27,6 +28,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
   },
   longlive: {
     name: "LongLive",
@@ -42,6 +44,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
   },
   "krea-realtime-video": {
     name: "Krea Realtime Video",
@@ -57,6 +60,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
+    supportsLoRA: true,
   },
   passthrough: {
     name: "Passthrough",
@@ -66,3 +70,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: false,
   },
 };
+
+export function pipelineSupportsLoRA(pipelineId: string): boolean {
+  return PIPELINES[pipelineId]?.supportsLoRA === true;
+}

@@ -104,9 +104,11 @@ def download_streamdiffusionv2_pipeline() -> None:
         wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
     )
 
-    # 3) HF repo download for StreamDiffusionV2
-    download_hf_repo_excluding(
-        stream_diffusion_repo, stream_diffusion_dst, ignore_patterns=[]
+    # 3) HF repo download for StreamDiffusionV2 (1.3b only)
+    snapshot_download(
+        repo_id=stream_diffusion_repo,
+        local_dir=stream_diffusion_dst,
+        allow_patterns=["wan_causal_dmd_v2v/model.pt"],
     )
 
 

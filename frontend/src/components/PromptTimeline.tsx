@@ -416,6 +416,8 @@ export function PromptTimeline({
             manageCache: settings.manageCache,
             quantization: settings.quantization,
             kvCacheAttentionBias: settings.kvCacheAttentionBias,
+            loras: settings.loras,
+            loraMergeStrategy: settings.loraMergeStrategy,
             // Exclude paused state as it's runtime-specific
           }
         : undefined,
