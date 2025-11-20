@@ -5,11 +5,10 @@ import { toast } from "sonner";
 
 interface UsePipelineOptions {
   pollInterval?: number; // milliseconds
-  maxTimeout?: number; // milliseconds
 }
 
 export function usePipeline(options: UsePipelineOptions = {}) {
-  const { pollInterval = 2000, maxTimeout = 45000 } = options;
+  const { pollInterval = 2000 } = options;
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
@@ -19,7 +18,6 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   const [error, setError] = useState<string | null>(null);
 
   const pollTimeoutRef = useRef<number | null>(null);
-  const loadTimeoutRef = useRef<number | null>(null);
   const isPollingRef = useRef(false);
   const shownErrorRef = useRef<string | null>(null); // Track which error we've shown
 
@@ -107,6 +105,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           statusResponse.status === "loaded" ||
           statusResponse.status === "error"
         ) {
+          setIsLoading(false);
           stopPolling();
           return;
         }
@@ -149,66 +148,18 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         setError(null);
         shownErrorRef.current = null; // Reset error tracking when starting new load
 
-        // Start the load request
+        // Start the load request (backend handles this asynchronously)
         await loadPipeline({
           pipeline_id: pipelineId,
           load_params: loadParams,
         });
 
-        // Start polling for updates
+        // Start polling for updates - this will handle status updates asynchronously
         startPolling();
 
-        // Set up timeout for the load operation
-        const timeoutPromise = new Promise<boolean>((_, reject) => {
-          loadTimeoutRef.current = setTimeout(() => {
-            reject(
-              new Error(
-                `Pipeline load timeout after ${maxTimeout / 1000} seconds`
-              )
-            );
-          }, maxTimeout);
-        });
-
-        // Wait for pipeline to be loaded or error
-        const loadPromise = new Promise<boolean>((resolve, reject) => {
-          const checkComplete = async () => {
-            try {
-              const currentStatus = await getPipelineStatus();
-              if (currentStatus.status === "loaded") {
-                resolve(true);
-              } else if (currentStatus.status === "error") {
-                const errorMsg = currentStatus.error || "Pipeline load failed";
-                // Show toast for load completion errors
-                if (shownErrorRef.current !== errorMsg) {
-                  toast.error("Pipeline Error", {
-                    description: errorMsg,
-                    duration: 5000,
-                  });
-                  shownErrorRef.current = errorMsg;
-                }
-                reject(new Error(errorMsg));
-              } else {
-                // Continue polling
-                setTimeout(checkComplete, pollInterval);
-              }
-            } catch (err) {
-              reject(err);
-            }
-          };
-          checkComplete();
-        });
-
-        // Race between load completion and timeout
-        const result = await Promise.race([loadPromise, timeoutPromise]);
-
-        // Clear timeout if load completed
-        if (loadTimeoutRef.current) {
-          clearTimeout(loadTimeoutRef.current);
-          loadTimeoutRef.current = null;
-        }
-
-        stopPolling();
-        return result;
+        // Return immediately - don't wait for pipeline to load
+        // The polling mechanism will handle status updates and show errors via toasts
+        return true;
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to load pipeline";
@@ -223,20 +174,11 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         }
         setError(null); // Don't persist in state
 
-        stopPolling();
-
-        // Clear timeout on error
-        if (loadTimeoutRef.current) {
-          clearTimeout(loadTimeoutRef.current);
-          loadTimeoutRef.current = null;
-        }
-
-        return false;
-      } finally {
         setIsLoading(false);
+        return false;
       }
     },
-    [isLoading, maxTimeout, pollInterval, startPolling, stopPolling]
+    [isLoading, startPolling]
   );
 
   // Load pipeline with proper state management
@@ -260,9 +202,6 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   useEffect(() => {
     return () => {
       stopPolling();
-      if (loadTimeoutRef.current) {
-        clearTimeout(loadTimeoutRef.current);
-      }
     };
   }, [stopPolling]);
 

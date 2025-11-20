@@ -287,18 +287,15 @@ async def load_pipeline(
         if request.load_params:
             load_params_dict = request.load_params.model_dump()
 
-        success = await pipeline_manager.load_pipeline(
-            request.pipeline_id, load_params_dict
+        # Initiate pipeline loading in background - don't wait for completion
+        # The frontend will poll for status updates
+        asyncio.create_task(
+            pipeline_manager.load_pipeline(request.pipeline_id, load_params_dict)
         )
-        if success:
-            return {"message": "Pipeline loading initiated successfully"}
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to load pipeline: {pipeline_manager.error_message}",
-            )
+
+        return {"message": "Pipeline loading initiated successfully"}
     except Exception as e:
-        logger.error(f"Error loading pipeline: {e}")
+        logger.error(f"Error initiating pipeline load: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
