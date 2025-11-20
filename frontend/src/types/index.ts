@@ -1,7 +1,6 @@
 export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"
-  | "vod"
   | "longlive"
   | "krea-realtime-video";
 

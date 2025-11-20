@@ -211,12 +211,6 @@ class PassthroughLoadParams(PipelineLoadParams):
     pass
 
 
-class VodLoadParams(PipelineLoadParams):
-    """Load parameters for VOD pipeline."""
-
-    pass
-
-
 class LongLiveLoadParams(LoRAEnabledLoadParams):
     """Load parameters for LongLive pipeline."""
 
@@ -246,7 +240,6 @@ class PipelineLoadRequest(BaseModel):
     load_params: (
         StreamDiffusionV2LoadParams
         | PassthroughLoadParams
-        | VodLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
         | None
