@@ -56,10 +56,28 @@ def normalize_lora_key(lora_base_key: str) -> str:
     if lora_base_key.startswith("lora_unet_"):
         # Remove lora_unet_ prefix
         key = lora_base_key[len("lora_unet_") :]
+
+        # Protect layer name patterns by temporarily replacing them
+        # These should keep their underscores: cross_attn, self_attn
+        # Use placeholders without underscores to avoid them being converted to dots
+        protected_patterns = {
+            "cross_attn": "<<CROSSATTN>>",
+            "self_attn": "<<SELFATTN>>",
+        }
+
+        for pattern, placeholder in protected_patterns.items():
+            key = key.replace(pattern, placeholder)
+
         # Convert underscores to dots for block/layer numbering
         key = re.sub(r"_(\d+)_", r".\1.", key)
-        # Convert remaining underscores to dots for layer names
+
+        # Convert remaining underscores to dots
         key = key.replace("_", ".")
+
+        # Restore protected patterns
+        for pattern, placeholder in protected_patterns.items():
+            key = key.replace(placeholder, pattern)
+
         return key
 
     # Handle diffusion_model prefix

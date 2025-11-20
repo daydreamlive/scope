@@ -6,11 +6,8 @@ providing zero inference overhead. LoRA scales are fixed at load time and cannot
 updated at runtime. Ideal for production deployment where maximum FPS is critical.
 """
 
-import logging
 import os
 import tempfile
-import time
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -18,8 +15,6 @@ from safetensors.torch import load_file, save_file
 
 from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAStrategy
 from pipelines.wan2_1.lora.utils import find_lora_pair, normalize_lora_key
-
-logger = logging.getLogger(__name__)
 
 __all__ = ["PermanentMergeLoRAStrategy"]
 
@@ -62,22 +57,12 @@ def convert_community_lora_to_peft_format(
 
     if has_lora_up_down or has_lora_unet_prefix:
         needs_conversion = True
-        logger.info(
-            f"convert_community_lora_to_peft_format: Detected community LoRA format "
-            f"(lora_up/down={has_lora_up_down}, lora_unet_prefix={has_lora_unet_prefix}), converting to PEFT format"
-        )
 
     if not needs_conversion:
         if not has_diffusion_model_prefix and has_peft_format:
-            logger.info(
-                "convert_community_lora_to_peft_format: LoRA has PEFT format but missing diffusion_model prefix, adding it"
-            )
             needs_conversion = True
 
     if not needs_conversion:
-        logger.info(
-            "convert_community_lora_to_peft_format: LoRA is already in PEFT format, no conversion needed"
-        )
         return lora_path
 
     converted_state = {}
@@ -100,29 +85,28 @@ def convert_community_lora_to_peft_format(
             processed_keys.add(lora_key)
             processed_keys.add(f"{base_key}.lora_A.weight")
 
+        # Extract alpha and compute pre-scaling
+        # PEFT doesn't use alpha from state_dict, so we must pre-scale the weights
+        alpha = None
+        if alpha_key and alpha_key in lora_state:
+            alpha_tensor = lora_state[alpha_key]
+            alpha = alpha_tensor.item() if alpha_tensor.numel() == 1 else None
+
+        rank = lora_A.shape[0]
+        scale_factor = (alpha / rank) if alpha is not None else 1.0
+
+        # Apply alpha/rank scaling to lora_B (up weight) to match standard LoRA behavior
+        # This ensures PEFT merges the weights with correct magnitude
+        lora_B_scaled = lora_B * scale_factor
+
         normalized_key = normalize_lora_key(base_key)
 
         if not normalized_key.startswith("diffusion_model."):
             normalized_key = f"diffusion_model.{normalized_key}"
 
+        # Store pre-scaled weights (no alpha tensor needed)
         converted_state[f"{normalized_key}.lora_A.weight"] = lora_A
-        converted_state[f"{normalized_key}.lora_B.weight"] = lora_B
-
-        if alpha_key and alpha_key in lora_state:
-            alpha_normalized = normalize_lora_key(alpha_key)
-            if not alpha_normalized.startswith("diffusion_model."):
-                alpha_normalized = f"diffusion_model.{alpha_normalized}"
-            converted_state[alpha_normalized] = lora_state[alpha_key]
-
-    num_pairs = len([k for k in converted_state.keys() if ".lora_A.weight" in k])
-    logger.info(
-        f"convert_community_lora_to_peft_format: Converted {len(lora_state)} keys to {len(converted_state)} PEFT-compatible keys ({num_pairs} LoRA pairs)"
-    )
-
-    sample_converted_keys = list(converted_state.keys())[:10]
-    logger.info(
-        f"convert_community_lora_to_peft_format: Sample converted keys: {sample_converted_keys}"
-    )
+        converted_state[f"{normalized_key}.lora_B.weight"] = lora_B_scaled
 
     temp_fd, temp_path = tempfile.mkstemp(
         suffix=".safetensors", prefix="lora_converted_"
@@ -131,9 +115,6 @@ def convert_community_lora_to_peft_format(
 
     try:
         save_file(converted_state, temp_path)
-        logger.info(
-            f"convert_community_lora_to_peft_format: Saved converted LoRA to temp file: {temp_path}"
-        )
         return temp_path
     except Exception as e:
         if os.path.exists(temp_path):
@@ -182,11 +163,6 @@ class PermanentMergeLoRAStrategy:
         Raises:
             FileNotFoundError: If the LoRA file does not exist
         """
-        start_time = time.time()
-        logger.info(
-            f"load_adapter: Loading and permanently merging LoRA from {lora_path} (strength={strength})"
-        )
-
         converted_lora_path = None
         try:
             converted_lora_path = convert_community_lora_to_peft_format(
@@ -200,24 +176,15 @@ class PermanentMergeLoRAStrategy:
             if converted_lora_path and converted_lora_path != lora_path:
                 if os.path.exists(converted_lora_path):
                     os.unlink(converted_lora_path)
-                    logger.debug(
-                        f"load_adapter: Cleaned up temp converted LoRA file: {converted_lora_path}"
-                    )
 
         peft_model = PeftLoRAStrategy._get_peft_model(model)
         if peft_model is None:
-            logger.warning(
-                f"load_adapter: No PEFT model in cache after loading '{adapter_name}'. "
-                f"This usually means the LoRA had no layers matching the model structure. "
-                f"Skipping merge for this LoRA."
-            )
             return str(lora_path)
 
         target_model = (
             peft_model._orig_mod if hasattr(peft_model, "_orig_mod") else peft_model
         )
 
-        # Include pre-existing adapters to avoid losing them during merge
         all_adapter_names = [adapter_name]
         if hasattr(target_model, "peft_config"):
             existing_adapters = list(target_model.peft_config.keys())
@@ -229,12 +196,9 @@ class PermanentMergeLoRAStrategy:
             safe_merge=True, adapter_names=all_adapter_names
         )
 
-        # Replace the model object's internals with the merged model so the caller's
-        # reference now points to the clean merged model instead of the PEFT wrapper
         model.__class__ = merged_model.__class__
         model.__dict__ = merged_model.__dict__
 
-        # Remove leftover PEFT metadata
         if hasattr(model, "peft_config"):
             delattr(model, "peft_config")
         if hasattr(model, "active_adapter"):
@@ -242,14 +206,8 @@ class PermanentMergeLoRAStrategy:
         if hasattr(model, "peft_type"):
             delattr(model, "peft_type")
 
-        # Clean up PEFT model from cache
         if model in PeftLoRAStrategy._peft_models:
             del PeftLoRAStrategy._peft_models[model]
-
-        elapsed = time.time() - start_time
-        logger.info(
-            f"load_adapter: Permanently merged LoRA '{Path(lora_path).name}' in {elapsed:.3f}s"
-        )
 
         return str(lora_path)
 
@@ -278,11 +236,6 @@ class PermanentMergeLoRAStrategy:
         if not lora_configs:
             return loaded_adapters
 
-        start_time = time.time()
-        logger.info(
-            f"{logger_prefix}Loading {len(lora_configs)} LoRAs for permanent merge"
-        )
-
         adapter_names = []
         converted_files = []
 
@@ -290,9 +243,6 @@ class PermanentMergeLoRAStrategy:
             for lora_config in lora_configs:
                 lora_path = lora_config.get("path")
                 if not lora_path:
-                    logger.warning(
-                        f"{logger_prefix}Skipping LoRA config with no path specified"
-                    )
                     continue
 
                 scale = lora_config.get("scale", 1.0)
@@ -312,13 +262,11 @@ class PermanentMergeLoRAStrategy:
                     loaded_adapters.append({"path": str(lora_path), "scale": scale})
 
                 except FileNotFoundError as e:
-                    logger.error(f"{logger_prefix}LoRA file not found: {lora_path}")
                     raise RuntimeError(
                         f"{logger_prefix}LoRA loading failed. File not found: {lora_path}. "
                         f"Ensure the file exists in the models/lora/ directory."
                     ) from e
                 except Exception as e:
-                    logger.error(f"{logger_prefix}Failed to load LoRA adapter: {e}")
                     raise RuntimeError(
                         f"{logger_prefix}LoRA loading failed. Pipeline cannot start without all configured LoRAs. "
                         f"Error: {e}"
@@ -327,24 +275,16 @@ class PermanentMergeLoRAStrategy:
             for temp_file in converted_files:
                 if os.path.exists(temp_file):
                     os.unlink(temp_file)
-                    logger.debug(
-                        f"{logger_prefix}Cleaned up temp converted LoRA file: {temp_file}"
-                    )
 
         if adapter_names:
             peft_model = PeftLoRAStrategy._get_peft_model(model)
             if peft_model is None:
-                logger.warning(
-                    f"{logger_prefix}No PEFT model found after loading adapters. "
-                    f"This may indicate that none of the LoRAs matched the model structure."
-                )
                 return loaded_adapters
 
             target_model = (
                 peft_model._orig_mod if hasattr(peft_model, "_orig_mod") else peft_model
             )
 
-            # Include pre-existing adapters to avoid losing them during merge
             all_adapter_names = adapter_names.copy()
             if hasattr(target_model, "peft_config"):
                 existing_adapters = list(target_model.peft_config.keys())
@@ -352,20 +292,13 @@ class PermanentMergeLoRAStrategy:
                     if existing_adapter not in all_adapter_names:
                         all_adapter_names.append(existing_adapter)
 
-            logger.info(
-                f"{logger_prefix}Merging {len(all_adapter_names)} adapters into model weights "
-                f"({len(adapter_names)} new + {len(all_adapter_names) - len(adapter_names)} pre-existing)"
-            )
-
             merged_model = target_model.merge_and_unload(
                 safe_merge=True, adapter_names=all_adapter_names
             )
 
-            # Replace the model object's internals with the merged model
             model.__class__ = merged_model.__class__
             model.__dict__ = merged_model.__dict__
 
-            # Remove leftover PEFT metadata
             if hasattr(model, "peft_config"):
                 delattr(model, "peft_config")
             if hasattr(model, "active_adapter"):
@@ -375,11 +308,6 @@ class PermanentMergeLoRAStrategy:
 
             if model in PeftLoRAStrategy._peft_models:
                 del PeftLoRAStrategy._peft_models[model]
-
-            elapsed = time.time() - start_time
-            logger.info(
-                f"{logger_prefix}Permanently merged {len(all_adapter_names)} LoRAs in {elapsed:.3f}s"
-            )
 
         return loaded_adapters
 
@@ -406,11 +334,4 @@ class PermanentMergeLoRAStrategy:
         Returns:
             Unchanged loaded_adapters list (updates not supported)
         """
-        if scale_updates:
-            logger.warning(
-                f"{logger_prefix}Runtime LoRA scale updates are NOT SUPPORTED in permanent merge mode. "
-                f"LoRA weights are permanently merged at load time. To change scales, reload the model "
-                f"with different scale values in the lora configs."
-            )
-
         return loaded_adapters
