@@ -92,12 +92,11 @@ logging.getLogger("lib").setLevel(logging.INFO)
 logging.getLogger("pipelines").setLevel(logging.INFO)
 
 # Set INFO level for uvicorn
-logging.getLogger("uvicorn").setLevel(logging.INFO)
-logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 logging.getLogger("uvicorn.error").setLevel(logging.INFO)
 
 # Enable verbose logging for other libraries when needed
 if os.getenv("VERBOSE_LOGGING"):
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
 
