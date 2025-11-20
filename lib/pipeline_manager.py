@@ -136,12 +136,16 @@ class PipelineManager:
         self, pipeline_id: str | None = None, load_params: dict | None = None
     ) -> bool:
         """Synchronous wrapper for pipeline loading with proper locking."""
+
+        if pipeline_id is None:
+            pipeline_id = os.getenv("PIPELINE", "longlive")
+
         with self._lock:
-            # If already loaded with same type and same params, return success
             # Normalize None to empty dict for comparison
             current_params = self._load_params or {}
             new_params = load_params or {}
 
+            # If already loaded with same type and same params, return success
             if (
                 self._status == PipelineStatus.LOADED
                 and self._pipeline_id == pipeline_id
@@ -163,38 +167,40 @@ class PipelineManager:
                 logger.info("Pipeline already loading by another thread")
                 return False
 
-            try:
-                self._status = PipelineStatus.LOADING
-                self._error_message = None
+            # Mark as loading
+            self._status = PipelineStatus.LOADING
+            self._error_message = None
 
-                # Determine pipeline type
-                if pipeline_id is None:
-                    pipeline_id = os.getenv("PIPELINE", "longlive")
+        # Release lock during slow loading operation
+        logger.info(f"Loading pipeline: {pipeline_id}")
 
-                logger.info(f"Loading pipeline: {pipeline_id}")
+        try:
+            # Load the pipeline synchronously (we're already in executor thread)
+            pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
 
-                # Load the pipeline synchronously (we're already in executor thread)
-                pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
-
+            # Hold lock while updating state with loaded pipeline
+            with self._lock:
                 self._pipeline = pipeline
                 self._pipeline_id = pipeline_id
                 self._load_params = load_params
                 self._status = PipelineStatus.LOADED
 
-                logger.info(f"Pipeline {pipeline_id} loaded successfully")
-                return True
+            logger.info(f"Pipeline {pipeline_id} loaded successfully")
+            return True
 
-            except Exception as e:
-                error_msg = f"Failed to load pipeline {pipeline_id}: {str(e)}"
-                logger.error(error_msg)
+        except Exception as e:
+            error_msg = f"Failed to load pipeline {pipeline_id}: {str(e)}"
+            logger.error(error_msg)
 
+            # Hold lock while updating state with error
+            with self._lock:
                 self._status = PipelineStatus.ERROR
                 self._error_message = error_msg
                 self._pipeline = None
                 self._pipeline_id = None
                 self._load_params = None
 
-                return False
+            return False
 
     def _apply_load_params(
         self,

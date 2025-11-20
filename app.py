@@ -287,16 +287,11 @@ async def load_pipeline(
         if request.load_params:
             load_params_dict = request.load_params.model_dump()
 
-        success = await pipeline_manager.load_pipeline(
-            request.pipeline_id, load_params_dict
+        # Start loading in background without blocking
+        asyncio.create_task(
+            pipeline_manager.load_pipeline(request.pipeline_id, load_params_dict)
         )
-        if success:
-            return {"message": "Pipeline loading initiated successfully"}
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to load pipeline: {pipeline_manager.error_message}",
-            )
+        return {"message": "Pipeline loading initiated successfully"}
     except Exception as e:
         logger.error(f"Error loading pipeline: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -308,7 +303,7 @@ async def get_pipeline_status(
 ):
     """Get current pipeline status."""
     try:
-        status_info = pipeline_manager.get_status_info()
+        status_info = await pipeline_manager.get_status_info_async()
         return PipelineStatusResponse(**status_info)
     except Exception as e:
         logger.error(f"Error getting pipeline status: {e}")
@@ -324,7 +319,8 @@ async def handle_webrtc_offer(
     """Handle WebRTC offer and return answer."""
     try:
         # Ensure pipeline is loaded before proceeding
-        if not pipeline_manager.is_loaded():
+        status_info = await pipeline_manager.get_status_info_async()
+        if status_info["status"] != "loaded":
             raise HTTPException(
                 status_code=400,
                 detail="Pipeline not loaded. Please load pipeline first.",

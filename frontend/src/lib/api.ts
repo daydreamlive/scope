@@ -114,6 +114,7 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
   const response = await fetch("/api/v1/pipeline/status", {
     method: "GET",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(30000), // 30 second timeout per request
   });
 
   if (!response.ok) {
