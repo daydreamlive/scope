@@ -14,12 +14,23 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
-import type { PipelineId } from "../types";
+import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { createCloudStream, updateCloudStream, type CreateStreamResponse, type StreamParams } from "../lib/daydream";
 import { WhipConnection } from "../components/WhipConnection";
 import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
+import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
+
+function buildLoRAParams(
+  loras?: LoRAConfig[],
+  strategy?: LoraMergeStrategy
+): { loras?: { path: string; scale: number }[]; lora_merge_mode: string } {
+  return {
+    loras: loras?.map(({ path, scale }) => ({ path, scale })),
+    lora_merge_mode: strategy ?? "permanent_merge",
+  };
+}
 
 export function StreamPage() {
   // Use the stream state hook for settings management
@@ -109,6 +120,7 @@ export function StreamPage() {
     isLoading: isPipelineLoading,
     error: pipelineError,
     loadPipeline,
+    pipelineInfo,
   } = usePipeline();
 
   // WebRTC for streaming
@@ -292,6 +304,7 @@ export function StreamPage() {
       pipelineId,
       denoisingSteps: newDenoisingSteps,
       resolution: newResolution,
+      loras: [], // Clear LoRA controls when switching pipelines
     });
   };
 
@@ -424,6 +437,34 @@ export function StreamPage() {
     handleParameterUpdate({
       kv_cache_attention_bias: bias,
     });
+  };
+
+  const handleLorasChange = (loras: LoRAConfig[]) => {
+    updateSettings({ loras });
+
+    // If streaming, send scale updates to backend for runtime adjustment
+    if (isStreaming) {
+      sendLoRAScaleUpdates(
+        loras,
+        pipelineInfo?.loaded_lora_adapters,
+        ({ lora_scales }) => {
+          // Forward only the lora_scales field over the data channel.
+          sendParameterUpdate({
+            // TypeScript doesn't know about lora_scales on this payload yet.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...({ lora_scales } as any),
+          });
+        }
+      );
+    }
+    // Note: Adding/removing LoRAs requires pipeline reload
+  };
+
+  const handleLoraMergeStrategyChange = (
+    loraMergeStrategy: "permanent_merge" | "runtime_peft"
+  ) => {
+    updateSettings({ loraMergeStrategy });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
   const handleResetCache = () => {
@@ -644,9 +685,10 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -661,9 +703,10 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -674,9 +717,10 @@ export function StreamPage() {
             settings.quantization !== undefined
               ? settings.quantization
               : "fp8_e4m3fn",
+          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       }
 
@@ -714,7 +758,7 @@ export function StreamPage() {
       } = {};
 
       // Common parameters for pipelines that support prompts
-      if (pipelineIdToUse !== "passthrough" && pipelineIdToUse !== "vod") {
+      if (pipelineIdToUse !== "passthrough") {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
@@ -919,7 +963,6 @@ export function StreamPage() {
               }}
               disabled={
                 settings.pipelineId === "passthrough" ||
-                settings.pipelineId === "vod" ||
                 isPipelineLoading ||
                 isConnecting ||
                 showDownloadDialog
@@ -997,6 +1040,10 @@ export function StreamPage() {
             kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
+            loras={settings.loras || []}
+            onLorasChange={handleLorasChange}
+            loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
+            onLoraMergeStrategyChange={handleLoraMergeStrategyChange}
           />
         </div>
       </div>

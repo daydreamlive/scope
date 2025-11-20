@@ -34,6 +34,7 @@ export function useStreamState() {
     kvCacheAttentionBias: 0.3, // Default cache bias
     paused: false, // Default to not paused (generating)
     cloudMode: false,
+    loraMergeStrategy: "permanent_merge", // Default LoRA merge strategy
   });
 
   const [promptData, setPromptData] = useState<PromptData>({

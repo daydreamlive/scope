@@ -77,6 +77,15 @@ class PipelineManager:
             pipeline_id = self._pipeline_id
             load_params = self._load_params
 
+            # Capture loaded LoRA adapters if pipeline exposes them
+            loaded_lora_adapters = None
+            if self._pipeline is not None and hasattr(
+                self._pipeline, "loaded_lora_adapters"
+            ):
+                loaded_lora_adapters = getattr(
+                    self._pipeline, "loaded_lora_adapters", None
+                )
+
             # If there's an error, clear it after capturing it
             # This ensures errors don't persist across page reloads
             if self._status == PipelineStatus.ERROR and error_message:
@@ -91,6 +100,7 @@ class PipelineManager:
                 "status": current_status.value,
                 "pipeline_id": pipeline_id,
                 "load_params": load_params,
+                "loaded_lora_adapters": loaded_lora_adapters,
                 "error": error_message,
             }
 
@@ -186,6 +196,44 @@ class PipelineManager:
 
                 return False
 
+    def _apply_load_params(
+        self,
+        config: dict,
+        load_params: dict | None,
+        default_height: int,
+        default_width: int,
+        default_seed: int = 42,
+    ) -> None:
+        """Extract and apply common load parameters (resolution, seed, LoRAs) to config.
+
+        Args:
+            config: Pipeline config dict to update
+            load_params: Load parameters dict (may contain height, width, seed, loras, lora_merge_mode)
+            default_height: Default height if not in load_params
+            default_width: Default width if not in load_params
+            default_seed: Default seed if not in load_params
+        """
+        height = default_height
+        width = default_width
+        seed = default_seed
+        loras = None
+        lora_merge_mode = "permanent_merge"
+
+        if load_params:
+            height = load_params.get("height", default_height)
+            width = load_params.get("width", default_width)
+            seed = load_params.get("seed", default_seed)
+            loras = load_params.get("loras", None)
+            lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
+
+        config["height"] = height
+        config["width"] = width
+        config["seed"] = seed
+        if loras:
+            config["loras"] = loras
+        # Pass merge_mode directly to mixin, not via config
+        config["_lora_merge_mode"] = lora_merge_mode
+
     def _unload_pipeline_unsafe(self):
         """Unload the current pipeline. Must be called with lock held."""
         if self._pipeline:
@@ -216,27 +264,37 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
-            config = OmegaConf.load("pipelines/streamdiffusionv2/model.yaml")
             models_dir = get_models_dir()
-            config["model_dir"] = str(models_dir)
-            config["text_encoder_path"] = str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "StreamDiffusionV2/wan_causal_dmd_v2v/model.pt"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "model_config": OmegaConf.load(
+                        "pipelines/streamdiffusionv2/model.yaml"
+                    ),
+                }
             )
 
-            # Use load parameters for resolution and seed
-            height = 512
-            width = 512
-            seed = 42
-            if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
-                seed = load_params.get("seed", 42)
-
-            config["height"] = height
-            config["width"] = width
-            config["seed"] = seed
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
 
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -263,53 +321,39 @@ class PipelineManager:
             logger.info("Passthrough pipeline initialized")
             return pipeline
 
-        elif pipeline_id == "vod":
-            from pipelines.vod.pipeline import VodPipeline
-
-            # Use load parameters for resolution, default to 512x512
-            height = 512
-            width = 512
-            if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
-
-            pipeline = VodPipeline(
-                height=height,
-                width=width,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-            )
-            logger.info("VOD pipeline initialized")
-            return pipeline
-
         elif pipeline_id == "longlive":
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.longlive.pipeline import LongLivePipeline
 
-            config = OmegaConf.load("pipelines/longlive/model.yaml")
-            models_dir = get_models_dir()
-            config["model_dir"] = str(models_dir)
-            config["generator_path"] = get_model_file_path(
-                "LongLive-1.3B/models/longlive_base.pt"
-            )
-            config["lora_path"] = get_model_file_path("LongLive-1.3B/models/lora.pt")
-            config["text_encoder_path"] = str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
+                    ),
+                    "lora_path": str(
+                        get_model_file_path("LongLive-1.3B/models/lora.pt")
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "model_config": OmegaConf.load("pipelines/longlive/model.yaml"),
+                }
             )
 
-            height = 320
-            width = 576
-            seed = 42
-            if load_params:
-                height = load_params.get("height", 320)
-                width = load_params.get("width", 576)
-                seed = load_params.get("seed", 42)
-
-            config["height"] = height
-            config["width"] = width
-            config["seed"] = seed
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=320,
+                default_width=576,
+                default_seed=42,
+            )
 
             pipeline = LongLivePipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -321,39 +365,43 @@ class PipelineManager:
             from lib.models_config import get_model_file_path, get_models_dir
             from pipelines.krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
 
-            config = OmegaConf.load("pipelines/krea_realtime_video/model.yaml")
-            models_dir = get_models_dir()
-            config["model_dir"] = str(models_dir)
-            config["generator_path"] = str(
-                get_model_file_path(
-                    "krea-realtime-video/krea-realtime-video-14b.safetensors"
-                )
-            )
-            config["text_encoder_path"] = str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
-            )
-            config["tokenizer_path"] = str(
-                get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
-            )
-            config["vae_path"] = str(
-                get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "krea-realtime-video/krea-realtime-video-14b.safetensors"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "vae_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+                    ),
+                    "model_config": OmegaConf.load(
+                        "pipelines/krea_realtime_video/model.yaml"
+                    ),
+                }
             )
 
-            height = 512
-            width = 512
-            seed = 42
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
             quantization = None
             if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
-                seed = load_params.get("seed", 42)
                 quantization = load_params.get("quantization", None)
-
-            config["height"] = height
-            config["width"] = width
-            config["seed"] = seed
 
             pipeline = KreaRealtimeVideoPipeline(
                 config,

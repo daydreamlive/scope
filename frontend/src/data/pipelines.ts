@@ -14,6 +14,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
   pipelineCompatibility?: PipelineCompatibility;
   cloudModelId?: string;
+  supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
 }
 
 export const PIPELINES: Record<string, PipelineInfo> = {
@@ -30,6 +31,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
   },
   longlive: {
     name: "LongLive",
@@ -45,6 +47,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
   },
   "krea-realtime-video": {
     name: "Krea Realtime Video",
@@ -60,6 +63,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     requiresModels: true,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
+    supportsLoRA: true,
   },
   "sd-turbo": {
     name: "SDTurbo",
@@ -100,10 +104,8 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     category: "video-input",
     requiresModels: false,
   },
-  // vod: {
-  //   name: "VOD",
-  //   about:
-  //     "A pipeline that returns a static video file without any processing that is useful for testing and debugging.",
-  //   category: "no-video-input",
-  // },
 };
+
+export function pipelineSupportsLoRA(pipelineId: string): boolean {
+  return PIPELINES[pipelineId]?.supportsLoRA === true;
+}

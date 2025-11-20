@@ -20,12 +20,13 @@ import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import { PIPELINES } from "../data/pipelines";
+import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type { PipelineId } from "../types";
+import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
 
@@ -57,6 +58,10 @@ interface SettingsPanelProps {
   kvCacheAttentionBias?: number;
   onKvCacheAttentionBiasChange?: (bias: number) => void;
   onResetCache?: () => void;
+  loras?: LoRAConfig[];
+  onLorasChange: (loras: LoRAConfig[]) => void;
+  loraMergeStrategy?: LoraMergeStrategy;
+  onLoraMergeStrategyChange?: (strategy: LoraMergeStrategy) => void;
 }
 
 export function SettingsPanel({
@@ -84,6 +89,10 @@ export function SettingsPanel({
   kvCacheAttentionBias = 0.3,
   onKvCacheAttentionBiasChange,
   onResetCache,
+  loras = [],
+  onLorasChange,
+  loraMergeStrategy = "permanent_merge",
+  onLoraMergeStrategyChange,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
@@ -334,6 +343,76 @@ export function SettingsPanel({
           </Card>
         )}
 
+        {pipelineSupportsLoRA(pipelineId) && (
+          <div className="space-y-4">
+            <LoRAManager
+              loras={loras}
+              onLorasChange={onLorasChange}
+              disabled={isDownloading}
+              isStreaming={isStreaming}
+              loraMergeStrategy={loraMergeStrategy}
+            />
+
+            {loras.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.loraMergeStrategy.label}
+                    tooltip={PARAMETER_METADATA.loraMergeStrategy.tooltip}
+                    className="text-sm text-foreground"
+                  />
+                  <Select
+                    value={loraMergeStrategy}
+                    onValueChange={value => {
+                      onLoraMergeStrategyChange?.(value as LoraMergeStrategy);
+                    }}
+                    disabled={isStreaming}
+                  >
+                    <SelectTrigger className="w-[180px] h-7">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <SelectItem value="permanent_merge">
+                              Permanent Merge
+                            </SelectItem>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            <p className="text-xs">
+                              Maximum performance, no runtime updates. LoRA
+                              scales are permanently merged into model weights
+                              at load time. Ideal for when you already know what
+                              scale to use.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <SelectItem value="runtime_peft">
+                              Runtime PEFT
+                            </SelectItem>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            <p className="text-xs">
+                              Lower performance, instant runtime updates. LoRA
+                              scales can be adjusted during streaming without
+                              reloading the model. Faster initialization.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
@@ -341,8 +420,6 @@ export function SettingsPanel({
           pipelineId === "sdxl-turbo") && (
           <div className="space-y-4">
             <div className="space-y-2">
-              <h3 className="text-sm font-medium">Parameters</h3>
-
               <div className="space-y-2">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
