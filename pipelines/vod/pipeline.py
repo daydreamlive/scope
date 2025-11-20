@@ -4,7 +4,7 @@ import time
 import torch
 from einops import rearrange
 
-from ..interface import Pipeline, Requirements
+from ..interface import Pipeline
 from ..process import postprocess_chunk
 from ..video import load_video
 
@@ -55,9 +55,6 @@ class VodPipeline(Pipeline):
             print(
                 f"Error loading video {self.video_path}: {e}. Using gray frames as fallback."
             )
-
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements | None:
-        return None
 
     def __call__(
         self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs

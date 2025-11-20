@@ -235,7 +235,6 @@ class FrameProcessor:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
-        # prepare() will handle any required preparation based on parameters internally
         reset_cache = self.parameters.pop("reset_cache", None)
 
         # Pop lora_scales to prevent re-processing on every frame
@@ -250,15 +249,11 @@ class FrameProcessor:
                 except queue.Empty:
                     break
 
-        requirements = None
-        if hasattr(pipeline, "prepare"):
-            requirements = pipeline.prepare(
-                **self.parameters,
-            )
+        # Get required input frames from pipeline_manager
+        current_chunk_size = self.pipeline_manager.get_required_input_frames()
 
         video_input = None
-        if requirements is not None:
-            current_chunk_size = requirements.input_size
+        if current_chunk_size > 0:
             with self.frame_buffer_lock:
                 if not self.frame_buffer or len(self.frame_buffer) < current_chunk_size:
                     # Sleep briefly to avoid busy waiting

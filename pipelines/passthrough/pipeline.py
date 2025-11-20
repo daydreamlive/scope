@@ -1,7 +1,7 @@
 import torch
 from einops import rearrange
 
-from ..interface import Pipeline, Requirements
+from ..interface import Pipeline
 from ..process import postprocess_chunk, preprocess_chunk
 
 
@@ -20,9 +20,6 @@ class PassthroughPipeline(Pipeline):
         self.device = device if device is not None else torch.device("cuda")
         self.dtype = dtype
         self.prompts = None
-
-    def prepare(self, **kwargs) -> Requirements:
-        return Requirements(input_size=4)
 
     def __call__(
         self,
