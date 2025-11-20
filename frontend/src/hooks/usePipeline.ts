@@ -48,13 +48,22 @@ export function usePipeline(options: UsePipelineOptions = {}) {
       console.error("Failed to get pipeline status:", err);
       const errorMessage =
         err instanceof Error ? err.message : "Failed to get pipeline status";
-      // Show toast for API errors
-      if (shownErrorRef.current !== errorMessage) {
-        toast.error("Pipeline Error", {
-          description: errorMessage,
-          duration: 5000,
-        });
-        shownErrorRef.current = errorMessage;
+
+      // Don't show error toast for timeout errors on initial check
+      // They might be temporary and the pipeline could still be loading
+      const isTimeoutError = errorMessage.includes("524") ||
+                            errorMessage.includes("timeout") ||
+                            errorMessage.includes("timed out");
+
+      if (!isTimeoutError) {
+        // Show toast for non-timeout API errors
+        if (shownErrorRef.current !== errorMessage) {
+          toast.error("Pipeline Error", {
+            description: errorMessage,
+            duration: 5000,
+          });
+          shownErrorRef.current = errorMessage;
+        }
       }
       setError(null); // Don't persist in state
     }
@@ -113,7 +122,24 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         console.error("Polling error:", err);
         const errorMessage =
           err instanceof Error ? err.message : "Failed to get pipeline status";
-        // Show toast for polling errors
+
+        // Check if it's a Cloudflare timeout error (524) or request timeout
+        const isTimeoutError = errorMessage.includes("524") ||
+                              errorMessage.includes("timeout") ||
+                              errorMessage.includes("timed out");
+
+        // For timeout errors during loading, don't show error toast - just continue polling
+        // The pipeline might still be loading, so we don't want to alarm the user
+        if (isTimeoutError && status === "loading") {
+          console.log("Pipeline status request timed out, but pipeline is still loading. Continuing to poll...");
+          // Continue polling without showing error
+          if (isPollingRef.current) {
+            pollTimeoutRef.current = setTimeout(poll, pollInterval);
+          }
+          return;
+        }
+
+        // Show toast for other polling errors
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
             description: errorMessage,
@@ -122,6 +148,11 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           shownErrorRef.current = errorMessage;
         }
         setError(null); // Don't persist in state
+
+        // Continue polling even on error (unless it's a fatal error)
+        if (isPollingRef.current) {
+          pollTimeoutRef.current = setTimeout(poll, pollInterval);
+        }
       }
 
       if (isPollingRef.current) {

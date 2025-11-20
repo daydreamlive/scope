@@ -16,7 +16,7 @@ import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import { checkModelStatus, downloadPipelineModels, getPipelineStatus } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 
 function buildLoRAParams(
@@ -541,14 +541,65 @@ export function StreamPage() {
         );
       }
 
+      // Initiate pipeline loading
       const loadSuccess = await loadPipeline(
         pipelineIdToUse,
         loadParams || undefined
       );
       if (!loadSuccess) {
-        console.error("Failed to load pipeline, cannot start stream");
+        console.error("Failed to initiate pipeline load, cannot start stream");
         return false;
       }
+
+      // Wait for pipeline to be loaded before starting WebRTC
+      console.log("Waiting for pipeline to load...");
+      const maxWaitTime = 300000; // 5 minutes max wait
+      const pollInterval = 2000; // Check every 2 seconds
+      const startTime = Date.now();
+      let pipelineLoaded = false;
+
+      while (!pipelineLoaded && Date.now() - startTime < maxWaitTime) {
+        try {
+          const status = await getPipelineStatus();
+          console.log(`Pipeline status: ${status.status}`);
+
+          if (status.status === "loaded") {
+            // Verify it's the correct pipeline
+            if (status.pipeline_id === pipelineIdToUse) {
+              pipelineLoaded = true;
+              break;
+            }
+          } else if (status.status === "error") {
+            console.error("Pipeline loading failed:", status.error);
+            return false;
+          }
+
+          // Wait before next poll
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        } catch (error) {
+          // Don't fail on timeout/502 errors during loading - just continue polling
+          const errorMessage = error instanceof Error ? error.message : "Unknown error";
+          const isRetryableError = errorMessage.includes("524") ||
+                                  errorMessage.includes("502") ||
+                                  errorMessage.includes("timeout") ||
+                                  errorMessage.includes("timed out");
+
+          if (!isRetryableError) {
+            console.error("Error checking pipeline status:", error);
+            // For non-retryable errors, continue polling but log the error
+          }
+
+          // Wait before next poll even on error
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        }
+      }
+
+      if (!pipelineLoaded) {
+        console.error("Pipeline did not load within timeout period");
+        return false;
+      }
+
+      console.log("Pipeline loaded successfully, starting WebRTC stream...");
 
       // Check if this pipeline needs video input
       const pipelineCategory = PIPELINES[pipelineIdToUse]?.category;

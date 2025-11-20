@@ -303,9 +303,16 @@ async def load_pipeline(
 async def get_pipeline_status(
     pipeline_manager: PipelineManager = Depends(get_pipeline_manager),
 ):
-    """Get current pipeline status."""
+    """Get current pipeline status.
+
+    This endpoint is designed to be fast and non-blocking to avoid Cloudflare timeouts.
+    The status check uses non-blocking lock acquisition, so it won't block even when
+    the pipeline is loading.
+    """
     try:
-        status_info = pipeline_manager.get_status_info()
+        # get_status_info() is now non-blocking, so we can call it directly
+        # or use the async wrapper for consistency
+        status_info = await pipeline_manager.get_status_info_async()
         return PipelineStatusResponse(**status_info)
     except Exception as e:
         logger.error(f"Error getting pipeline status: {e}")
@@ -318,10 +325,16 @@ async def handle_webrtc_offer(
     webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
     pipeline_manager: PipelineManager = Depends(get_pipeline_manager),
 ):
-    """Handle WebRTC offer and return answer."""
+    """Handle WebRTC offer and return answer.
+
+    This endpoint is designed to be fast and non-blocking to avoid Cloudflare timeouts.
+    It checks pipeline status asynchronously to avoid blocking on locks.
+    """
     try:
-        # Ensure pipeline is loaded before proceeding
-        if not pipeline_manager.is_loaded():
+        # Check pipeline status asynchronously to avoid blocking on locks
+        # Use get_status_info_async which is non-blocking
+        status_info = await pipeline_manager.get_status_info_async()
+        if status_info.get("status") != "loaded":
             raise HTTPException(
                 status_code=400,
                 detail="Pipeline not loaded. Please load pipeline first.",
@@ -329,6 +342,8 @@ async def handle_webrtc_offer(
 
         return await webrtc_manager.handle_offer(request, pipeline_manager)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -395,9 +410,17 @@ async def list_lora_files():
 
 @app.get("/api/v1/models/status")
 async def get_model_status(pipeline_id: str):
-    """Check if models for a pipeline are downloaded."""
+    """Check if models for a pipeline are downloaded.
+
+    This endpoint is designed to be fast and non-blocking to avoid Cloudflare timeouts.
+    File I/O operations are run in an executor to avoid blocking the event loop.
+    """
     try:
-        downloaded = models_are_downloaded(pipeline_id)
+        # Run file I/O in executor to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        downloaded = await loop.run_in_executor(
+            None, models_are_downloaded, pipeline_id
+        )
         return ModelStatusResponse(downloaded=downloaded)
     except Exception as e:
         logger.error(f"Error checking model status: {e}")

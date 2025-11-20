@@ -71,23 +71,79 @@ export interface PipelineStatusResponse {
 }
 
 export const sendWebRTCOffer = async (
-  data: WebRTCOfferRequest
+  data: WebRTCOfferRequest,
+  retries: number = 3,
+  retryDelay: number = 1000
 ): Promise<RTCSessionDescriptionInit> => {
-  const response = await fetch("/api/v1/webrtc/offer", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // Create an AbortController for timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `WebRTC offer failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+      const response = await fetch("/api/v1/webrtc/offer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+
+        // Check if it's a Cloudflare timeout error (524) or bad gateway (502)
+        if (response.status === 524 || response.status === 502) {
+          // If we have retries left, wait and retry
+          if (attempt < retries) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+            continue;
+          }
+          // Otherwise throw with a more helpful message
+          const errorType = response.status === 524 ? "timeout (524)" : "bad gateway (502)";
+          throw new Error(
+            `WebRTC offer ${errorType}: Cloudflare error. The pipeline may still be loading.`
+          );
+        }
+
+        throw new Error(
+          `WebRTC offer failed: ${response.status} ${response.statusText}: ${errorText}`
+        );
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      // Handle AbortError from timeout
+      if (error instanceof Error && error.name === "AbortError") {
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+          continue;
+        }
+        throw new Error(
+          `WebRTC offer request timed out. The pipeline may still be loading.`
+        );
+      }
+
+      // Check if error message contains 524/502 (Cloudflare errors)
+      const isCloudflareTimeout = error instanceof Error &&
+        (error.message.includes("524") || error.message.includes("502") ||
+         error.message.includes("timeout") || error.message.includes("timed out") ||
+         error.message.includes("bad gateway"));
+
+      // If it's the last attempt or not a retryable error, throw
+      if (attempt === retries || !isCloudflareTimeout) {
+        throw error;
+      }
+
+      // Wait before retrying with exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+    }
   }
 
-  const result = await response.json();
-  return result;
+  // This should never be reached, but TypeScript needs it
+  throw new Error("Failed to send WebRTC offer after retries");
 };
 
 export const loadPipeline = async (
@@ -110,43 +166,156 @@ export const loadPipeline = async (
   return result;
 };
 
-export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
-  const response = await fetch("/api/v1/pipeline/status", {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
+export const getPipelineStatus = async (
+  retries: number = 3,
+  retryDelay: number = 1000
+): Promise<PipelineStatusResponse> => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // Create an AbortController for timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Pipeline status failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+      const response = await fetch("/api/v1/pipeline/status", {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+
+        // Check if it's a Cloudflare timeout error (524) or bad gateway (502)
+        if (response.status === 524 || response.status === 502) {
+          // If we have retries left, wait and retry
+          if (attempt < retries) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+            continue;
+          }
+          // Otherwise throw with a more helpful message
+          const errorType = response.status === 524 ? "timeout (524)" : "bad gateway (502)";
+          throw new Error(
+            `Pipeline status ${errorType}: Cloudflare error. The pipeline may still be loading.`
+          );
+        }
+
+        throw new Error(
+          `Pipeline status failed: ${response.status} ${response.statusText}: ${errorText}`
+        );
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      // Handle AbortError from timeout
+      if (error instanceof Error && error.name === "AbortError") {
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+          continue;
+        }
+        throw new Error(
+          `Pipeline status request timed out. The pipeline may still be loading.`
+        );
+      }
+
+      // Check if error message contains 524/502 (Cloudflare errors)
+      const isCloudflareTimeout = error instanceof Error &&
+        (error.message.includes("524") || error.message.includes("502") ||
+         error.message.includes("timeout") || error.message.includes("timed out") ||
+         error.message.includes("bad gateway"));
+
+      // If it's the last attempt or not a retryable error, throw
+      if (attempt === retries || !isCloudflareTimeout) {
+        throw error;
+      }
+
+      // Wait before retrying with exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+    }
   }
 
-  const result = await response.json();
-  return result;
+  // This should never be reached, but TypeScript needs it
+  throw new Error("Failed to get pipeline status after retries");
 };
 
 export const checkModelStatus = async (
-  pipelineId: string
+  pipelineId: string,
+  retries: number = 3,
+  retryDelay: number = 1000
 ): Promise<{ downloaded: boolean }> => {
-  const response = await fetch(
-    `/api/v1/models/status?pipeline_id=${pipelineId}`,
-    {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    }
-  );
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // Create an AbortController for timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Model status check failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+      const response = await fetch(
+        `/api/v1/models/status?pipeline_id=${pipelineId}`,
+        {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+
+        // Check if it's a Cloudflare timeout error (524) or bad gateway (502)
+        if (response.status === 524 || response.status === 502) {
+          // If we have retries left, wait and retry
+          if (attempt < retries) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+            continue;
+          }
+          // Otherwise throw with a more helpful message
+          const errorType = response.status === 524 ? "timeout (524)" : "bad gateway (502)";
+          throw new Error(
+            `Model status check ${errorType}: Cloudflare error. The pipeline may still be loading.`
+          );
+        }
+
+        throw new Error(
+          `Model status check failed: ${response.status} ${response.statusText}: ${errorText}`
+        );
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      // Handle AbortError from timeout
+      if (error instanceof Error && error.name === "AbortError") {
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+          continue;
+        }
+        throw new Error(
+          `Model status check request timed out. The pipeline may still be loading.`
+        );
+      }
+
+      // Check if error message contains 524/502 (Cloudflare errors)
+      const isCloudflareTimeout = error instanceof Error &&
+        (error.message.includes("524") || error.message.includes("502") ||
+         error.message.includes("timeout") || error.message.includes("timed out") ||
+         error.message.includes("bad gateway"));
+
+      // If it's the last attempt or not a retryable error, throw
+      if (attempt === retries || !isCloudflareTimeout) {
+        throw error;
+      }
+
+      // Wait before retrying with exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+    }
   }
 
-  const result = await response.json();
-  return result;
+  // This should never be reached, but TypeScript needs it
+  throw new Error("Failed to check model status after retries");
 };
 
 export const downloadPipelineModels = async (

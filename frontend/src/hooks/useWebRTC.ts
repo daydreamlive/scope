@@ -169,6 +169,28 @@ export function useWebRTC(options?: UseWebRTCOptions) {
               await pc.setRemoteDescription(answer);
             } catch (error) {
               console.error("Error in offer/answer exchange:", error);
+              const errorMessage =
+                error instanceof Error ? error.message : "Unknown error";
+
+              // Check if it's a timeout error (524 or request timeout)
+              const isTimeoutError = errorMessage.includes("524") ||
+                                    errorMessage.includes("timeout") ||
+                                    errorMessage.includes("timed out");
+
+              // For timeout errors, show a more helpful message
+              if (isTimeoutError) {
+                toast.error("Connection Timeout", {
+                  description: "The server is still loading the pipeline. Please wait and try again.",
+                  duration: 5000,
+                });
+              } else {
+                // For other errors, show the error message
+                toast.error("WebRTC Connection Error", {
+                  description: errorMessage,
+                  duration: 5000,
+                });
+              }
+
               setIsConnecting(false);
             }
           }

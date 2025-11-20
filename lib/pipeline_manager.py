@@ -65,44 +65,66 @@ class PipelineManager:
             return self._pipeline
 
     def get_status_info(self) -> dict[str, Any]:
-        """Get detailed status information (thread-safe).
+        """Get detailed status information (thread-safe, non-blocking).
 
         Note: If status is ERROR, the error message is returned once and then cleared
         to prevent persistence across page reloads.
+
+        This method is designed to be fast and non-blocking. It reads status values
+        without holding the lock to avoid blocking when the pipeline is loading.
+        Only error clearing requires the lock.
         """
-        with self._lock:
-            # Capture current state before clearing
-            current_status = self._status
-            error_message = self._error_message
-            pipeline_id = self._pipeline_id
-            load_params = self._load_params
+        # Read status values without lock - these are atomic reads
+        # This prevents blocking when pipeline is loading (lock is held)
+        current_status = self._status
+        error_message = self._error_message
+        pipeline_id = self._pipeline_id
+        load_params = self._load_params
 
-            # Capture loaded LoRA adapters if pipeline exposes them
-            loaded_lora_adapters = None
-            if self._pipeline is not None and hasattr(
-                self._pipeline, "loaded_lora_adapters"
-            ):
-                loaded_lora_adapters = getattr(
-                    self._pipeline, "loaded_lora_adapters", None
-                )
+        # Try to acquire lock non-blocking for error clearing and LoRA reading
+        # If lock is held (pipeline loading), skip these operations
+        lock_acquired = False
+        try:
+            # Try non-blocking lock acquisition
+            lock_acquired = self._lock.acquire(blocking=False)
 
-            # If there's an error, clear it after capturing it
-            # This ensures errors don't persist across page reloads
-            if self._status == PipelineStatus.ERROR and error_message:
-                self._error_message = None
-                # Reset status to NOT_LOADED after error is retrieved
-                self._status = PipelineStatus.NOT_LOADED
-                self._pipeline_id = None
-                self._load_params = None
+            if lock_acquired:
+                # Re-read error message with lock to ensure consistency
+                error_message = self._error_message
 
-            # Return the captured state (with error status if it was an error)
-            return {
-                "status": current_status.value,
-                "pipeline_id": pipeline_id,
-                "load_params": load_params,
-                "loaded_lora_adapters": loaded_lora_adapters,
-                "error": error_message,
-            }
+                # Capture loaded LoRA adapters if pipeline exposes them
+                loaded_lora_adapters = None
+                if self._pipeline is not None and hasattr(
+                    self._pipeline, "loaded_lora_adapters"
+                ):
+                    loaded_lora_adapters = getattr(
+                        self._pipeline, "loaded_lora_adapters", None
+                    )
+
+                # If there's an error, clear it after capturing it
+                # This ensures errors don't persist across page reloads
+                if self._status == PipelineStatus.ERROR and error_message:
+                    self._error_message = None
+                    # Reset status to NOT_LOADED after error is retrieved
+                    self._status = PipelineStatus.NOT_LOADED
+                    self._pipeline_id = None
+                    self._load_params = None
+            else:
+                # Lock is held (pipeline is loading), can't safely read LoRA adapters
+                # or clear error state, but we can return current status
+                loaded_lora_adapters = None
+        finally:
+            if lock_acquired:
+                self._lock.release()
+
+        # Return the captured state (with error status if it was an error)
+        return {
+            "status": current_status.value,
+            "pipeline_id": pipeline_id,
+            "load_params": load_params,
+            "loaded_lora_adapters": loaded_lora_adapters,
+            "error": error_message,
+        }
 
     async def get_pipeline_async(self):
         """Get the loaded pipeline instance (async wrapper)."""
