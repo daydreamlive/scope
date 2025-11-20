@@ -9,7 +9,7 @@ interface UsePipelineOptions {
 }
 
 export function usePipeline(options: UsePipelineOptions = {}) {
-  const { pollInterval = 2000, maxTimeout = 45000 } = options;
+  const { pollInterval = 2000, maxTimeout = 600000 } = options;
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
