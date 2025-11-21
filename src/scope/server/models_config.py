@@ -44,12 +44,18 @@ def get_models_dir() -> Path:
 def ensure_models_dir() -> Path:
     """
     Get the models directory path and ensure it exists.
+    Also ensures the models/lora subdirectory exists.
 
     Returns:
         Path: Absolute path to the models directory
     """
     models_dir = get_models_dir()
     models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure the lora subdirectory exists
+    lora_dir = models_dir / "lora"
+    lora_dir.mkdir(parents=True, exist_ok=True)
+
     return models_dir
 
 
