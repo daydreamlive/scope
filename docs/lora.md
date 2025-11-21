@@ -72,7 +72,7 @@ https://github.com/user-attachments/assets/2b3dd3ef-ba68-4254-b0dd-af2ee97bd8a9
 Then, navigate to `~/.daydream-scope/models/lora` and run:
 
 ```
-wget -O <file name> <link address>?token=<TOKEN>
+wget -O <file name> "<link address>?token=<TOKEN>"
 ```
 
 `<TOKEN>` is your API key.
@@ -80,5 +80,8 @@ wget -O <file name> <link address>?token=<TOKEN>
 An example:
 
 ```
-wget -O arcane-jinx.safetensors https://civitai.com/api/download/models/1679582?type=Model&format=SafeTensor&token=<TOKEN>
+wget -O arcane-jinx.safetensors "https://civitai.com/api/download/models/1679582?type=Model&format=SafeTensor&token=<TOKEN>"
 ```
+
+> [!IMPORTANT]
+> Make sure to surround the link address including the token with double quotes!
