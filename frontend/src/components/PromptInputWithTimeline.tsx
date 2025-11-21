@@ -107,12 +107,33 @@ export function PromptInputWithTimeline({
   } = useTimelinePlayback({
     onPromptChange: onPromptSubmit,
     onPromptItemsChange: onPromptItemsSubmit,
-    isStreaming,
+    isStreaming: isStreaming || isStreamingCloud,
     isVideoPaused,
     onPromptsChange: onTimelinePromptsChange,
     onCurrentTimeChange: onTimelineCurrentTimeChange,
     onPlayingChange: onTimelinePlayingChange,
   });
+
+  // Debug: Log prompt changes
+  useEffect(() => {
+    console.log("[PromptInputWithTimeline] Prompts changed:", {
+      prompts,
+      promptCount: prompts.length,
+      isStreaming,
+      isStreamingCloud,
+      disabled,
+    });
+  }, [prompts, isStreaming, isStreamingCloud, disabled]);
+
+  // Debug: Log when callbacks are called
+  useEffect(() => {
+    console.log("[PromptInputWithTimeline] Callbacks:", {
+      hasOnPromptSubmit: !!onPromptSubmit,
+      hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
+      isStreaming,
+      isStreamingCloud,
+    });
+  }, [onPromptSubmit, onPromptItemsSubmit, isStreaming, isStreamingCloud]);
 
   // Compute actual playing state - timeline is playing AND video is not paused
   const isActuallyPlaying = isPlaying && !isVideoPaused;
@@ -206,10 +227,25 @@ export function PromptInputWithTimeline({
 
   // Reset hasStartedPlayback when stream stops
   React.useEffect(() => {
-    if (!isStreaming) {
+    if (!isStreaming && !isStreamingCloud) {
       setHasStartedPlayback(false);
     }
-  }, [isStreaming]);
+  }, [isStreaming, isStreamingCloud]);
+
+  // Debug: Log component props and state
+  useEffect(() => {
+    console.log("[PromptInputWithTimeline] Component state:", {
+      disabled,
+      isStreaming,
+      isStreamingCloud,
+      isVideoPaused,
+      isActuallyPlaying,
+      promptsCount: prompts.length,
+      currentTime,
+      hasOnPromptSubmit: !!onPromptSubmit,
+      hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
+    });
+  }, [disabled, isStreaming, isStreamingCloud, isVideoPaused, isActuallyPlaying, prompts.length, currentTime, onPromptSubmit, onPromptItemsSubmit]);
 
   const buildLivePromptFromCurrent = useCallback(
     (start: number, end: number): TimelinePrompt => {
@@ -287,12 +323,13 @@ export function PromptInputWithTimeline({
 
     const isAtEnd = isAtTimelineEnd();
 
-    if (isAtEnd && !(settings?.cloudMode ?? false)) { // Don't think we need to create another stream for cloud mode
+    if (isAtEnd) {
       setIsLive(true);
       onLiveStateChange?.(true);
 
       // Only create a new live prompt if there are no prompts at all in the timeline
       if (prompts.length === 0) {
+        console.log("[PromptInputWithTimeline] Creating new live prompt ", prompts);
         const streamStartedAgain = await initializeStream();
         if (streamStartedAgain) {
           const livePrompt = buildLivePromptFromCurrent(
@@ -565,7 +602,7 @@ export function PromptInputWithTimeline({
         settings={settings}
         onSettingsImport={onSettingsImport}
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
-        isStreaming={isStreaming}
+        isStreaming={isStreaming || isStreamingCloud}
         isDownloading={isDownloading}
       />
     </div>

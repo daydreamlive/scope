@@ -74,7 +74,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     modified: true,
     category: "video-input",
     defaultPrompt:
-      "",
+      "A dog in the grass looking around, photorealistic",
     requiresModels: false,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
@@ -90,7 +90,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     modified: true,
     category: "video-input",
     defaultPrompt:
-      "",
+      "A dog in the grass looking around, photorealistic",
     requiresModels: false,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,

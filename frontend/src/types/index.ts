@@ -4,7 +4,8 @@ export type PipelineId =
   | "longlive"
   | "krea-realtime-video"
   | "sd-turbo"
-  | "sdxl-turbo";
+  | "sdxl-turbo"
+  | "sd15";
 
 export interface SystemMetrics {
   cpu: number;

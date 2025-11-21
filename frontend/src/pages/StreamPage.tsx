@@ -887,7 +887,7 @@ export function StreamPage() {
             />
           </div>
           {/* Timeline area - compact, always visible */}
-          <div className={`flex-shrink-0 mt-2 ${(settings?.cloudMode ?? false) ? 'hidden' : ''}`}>
+          <div className={`flex-shrink-0 mt-2`}>
             <PromptInputWithTimeline
               currentPrompt={promptItems[0]?.text || ""}
               currentPromptItems={promptItems}
@@ -898,8 +898,8 @@ export function StreamPage() {
                 const prompts = [{ text, weight: 100 }];
                 setPromptItems(prompts);
 
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && transitionSteps > 0) {
+                // Send to backend - use transition if streaming (local or cloud) and transition steps > 0
+                if ((isStreaming || isStreamingCloud) && transitionSteps > 0) {
                   handleParameterUpdate({
                     transition: {
                       target_prompts: prompts,
@@ -942,8 +942,8 @@ export function StreamPage() {
                   );
                 }
 
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && effectiveTransitionSteps > 0) {
+                // Send to backend - use transition if streaming (local or cloud) and transition steps > 0
+                if ((isStreaming || isStreamingCloud) && effectiveTransitionSteps > 0) {
                   handleParameterUpdate({
                     transition: {
                       target_prompts: prompts,
