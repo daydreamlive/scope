@@ -1,17 +1,23 @@
 """Pipeline Manager for lazy loading and managing ML pipelines."""
 
 import asyncio
-import gc
 import logging
+import multiprocessing as mp
 import os
 import threading
 from enum import Enum
 from typing import Any
 
-import torch
-from omegaconf import OmegaConf
+from .pipeline_proxy import PipelineProxy
+from .pipeline_worker import WorkerCommand, WorkerResponse, pipeline_worker_process
 
 logger = logging.getLogger(__name__)
+
+# Constants
+PIPELINE_LOAD_TIMEOUT = 300  # 5 minutes
+WORKER_SHUTDOWN_TIMEOUT = 5  # seconds
+WORKER_TERMINATE_TIMEOUT = 3  # seconds
+WORKER_KILL_TIMEOUT = 1  # seconds
 
 
 class PipelineNotAvailableException(Exception):
@@ -30,7 +36,7 @@ class PipelineStatus(Enum):
 
 
 class PipelineManager:
-    """Manager for ML pipeline lifecycle."""
+    """Manager for ML pipeline lifecycle using separate process for GPU isolation."""
 
     def __init__(self):
         self._status = PipelineStatus.NOT_LOADED
@@ -39,6 +45,11 @@ class PipelineManager:
         self._load_params = None
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
+
+        # Worker process management
+        self._worker_process = None
+        self._command_queue = None
+        self._response_queue = None
 
     @property
     def status(self) -> PipelineStatus:
@@ -56,13 +67,17 @@ class PipelineManager:
         return self._error_message
 
     def get_pipeline(self):
-        """Get the loaded pipeline instance (thread-safe)."""
+        """Get the loaded pipeline instance (thread-safe).
+
+        Returns a proxy object that forwards calls to the worker process.
+        """
         with self._lock:
-            if self._status != PipelineStatus.LOADED or self._pipeline is None:
+            if self._status != PipelineStatus.LOADED or self._worker_process is None:
                 raise PipelineNotAvailableException(
                     f"Pipeline not available. Status: {self._status.value}"
                 )
-            return self._pipeline
+            # Return a proxy that will forward calls to the worker
+            return PipelineProxy(self._command_queue, self._response_queue)
 
     def get_status_info(self) -> dict[str, Any]:
         """Get detailed status information (thread-safe).
@@ -78,13 +93,9 @@ class PipelineManager:
             load_params = self._load_params
 
             # Capture loaded LoRA adapters if pipeline exposes them
+            # Note: With worker process, we can't directly access pipeline attributes
+            # This would require a worker command to query the pipeline state
             loaded_lora_adapters = None
-            if self._pipeline is not None and hasattr(
-                self._pipeline, "loaded_lora_adapters"
-            ):
-                loaded_lora_adapters = getattr(
-                    self._pipeline, "loaded_lora_adapters", None
-                )
 
             # If there's an error, clear it after capturing it
             # This ensures errors don't persist across page reloads
@@ -172,20 +183,24 @@ class PipelineManager:
             self._error_message = None
 
         # Release lock during slow loading operation
-        logger.info(f"Loading pipeline: {pipeline_id}")
+        logger.info(f"Loading pipeline in worker process: {pipeline_id}")
 
         try:
-            # Load the pipeline synchronously (we're already in executor thread)
-            pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
+            # Start worker process and load pipeline
+            success = self._start_worker_and_load_pipeline(pipeline_id, load_params)
+
+            if not success:
+                raise RuntimeError("Failed to load pipeline in worker process")
 
             # Hold lock while updating state with loaded pipeline
             with self._lock:
-                self._pipeline = pipeline
                 self._pipeline_id = pipeline_id
                 self._load_params = load_params
                 self._status = PipelineStatus.LOADED
 
-            logger.info(f"Pipeline {pipeline_id} loaded successfully")
+            logger.info(
+                f"Pipeline {pipeline_id} loaded successfully in worker process"
+            )
             return True
 
         except Exception as e:
@@ -196,9 +211,11 @@ class PipelineManager:
             with self._lock:
                 self._status = PipelineStatus.ERROR
                 self._error_message = error_msg
-                self._pipeline = None
                 self._pipeline_id = None
                 self._load_params = None
+
+            # Cleanup worker on failure
+            self._stop_worker()
 
             return False
 
@@ -241,204 +258,126 @@ class PipelineManager:
         config["_lora_merge_mode"] = lora_merge_mode
 
     def _unload_pipeline_unsafe(self):
-        """Unload the current pipeline. Must be called with lock held."""
-        if self._pipeline:
+        """Unload the current pipeline. Must be called with lock held.
+
+        This will kill the worker process to ensure proper VRAM cleanup.
+        """
+        if self._pipeline_id:
             logger.info(f"Unloading pipeline: {self._pipeline_id}")
 
-        # Change status and pipeline atomically
+        # Stop the worker process (this ensures VRAM is cleaned up)
+        self._stop_worker()
+
+        # Reset state
         self._status = PipelineStatus.NOT_LOADED
         self._pipeline = None
         self._pipeline_id = None
         self._load_params = None
         self._error_message = None
 
-        # Cleanup resources
-        gc.collect()
-        if torch.cuda.is_available():
-            try:
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                logger.info("CUDA cache cleared")
-            except Exception as e:
-                logger.warning(f"CUDA cleanup failed: {e}")
-
-    def _load_pipeline_implementation(
+    def _start_worker_and_load_pipeline(
         self, pipeline_id: str, load_params: dict | None = None
-    ):
-        """Synchronous pipeline loading (runs in thread executor)."""
-        if pipeline_id == "streamdiffusionv2":
-            from scope.core.pipelines import (
-                StreamDiffusionV2Pipeline,
-            )
+    ) -> bool:
+        """Start worker process and load pipeline in it.
 
-            from .models_config import get_model_file_path, get_models_dir
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        # Stop any existing worker first
+        self._stop_worker()
 
-            models_dir = get_models_dir()
-            config = OmegaConf.create(
-                {
-                    "model_dir": str(models_dir),
-                    "generator_path": str(
-                        get_model_file_path(
-                            "StreamDiffusionV2/wan_causal_dmd_v2v/model.pt"
-                        )
-                    ),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
-                    "tokenizer_path": str(
-                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
-                    ),
-                }
-            )
+        # Create communication queues with spawn context for better CUDA compatibility
+        # Using 'spawn' ensures a clean process without CUDA context issues
+        ctx = mp.get_context("spawn")
+        self._command_queue = ctx.Queue()
+        self._response_queue = ctx.Queue()
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=512,
-                default_width=512,
-                default_seed=42,
-            )
+        # Start worker process with spawn context
+        self._worker_process = ctx.Process(
+            target=pipeline_worker_process,
+            args=(self._command_queue, self._response_queue),
+            daemon=False,  # We want to control its lifecycle explicitly
+        )
+        self._worker_process.start()
 
-            quantization = None
-            if load_params:
-                quantization = load_params.get("quantization", None)
+        logger.info(f"Started worker process (PID: {self._worker_process.pid})")
 
-            pipeline = StreamDiffusionV2Pipeline(
-                config,
-                quantization=quantization,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-            )
-            logger.info("StreamDiffusionV2 pipeline initialized")
-            return pipeline
+        # Send load command
+        self._command_queue.put(
+            {
+                "command": WorkerCommand.LOAD_PIPELINE.value,
+                "pipeline_id": pipeline_id,
+                "load_params": load_params,
+            }
+        )
 
-        elif pipeline_id == "passthrough":
-            from scope.core.pipelines import PassthroughPipeline
+        # Wait for response with timeout
+        try:
+            response = self._response_queue.get(timeout=PIPELINE_LOAD_TIMEOUT)
 
-            # Use load parameters for resolution, default to 512x512
-            height = 512
-            width = 512
-            if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
+            if response["status"] == WorkerResponse.SUCCESS.value:
+                logger.info(
+                    f"Pipeline loaded successfully in worker: {response.get('message')}"
+                )
+                return True
+            else:
+                error_msg = response.get("error", "Unknown error")
+                logger.error(f"Failed to load pipeline in worker: {error_msg}")
+                return False
 
-            pipeline = PassthroughPipeline(
-                height=height,
-                width=width,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-            )
-            logger.info("Passthrough pipeline initialized")
-            return pipeline
+        except Exception as e:
+            logger.error(f"Error waiting for pipeline load response: {e}")
+            return False
 
-        elif pipeline_id == "longlive":
-            from scope.core.pipelines import LongLivePipeline
+    def _stop_worker(self):
+        """Stop the worker process if it's running.
 
-            from .models_config import get_model_file_path, get_models_dir
+        This ensures proper VRAM cleanup by killing the process.
+        """
+        if self._worker_process is not None and self._worker_process.is_alive():
+            logger.info(f"Stopping worker process (PID: {self._worker_process.pid})")
 
-            config = OmegaConf.create(
-                {
-                    "model_dir": str(get_models_dir()),
-                    "generator_path": str(
-                        get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
-                    ),
-                    "lora_path": str(
-                        get_model_file_path("LongLive-1.3B/models/lora.pt")
-                    ),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
-                    "tokenizer_path": str(
-                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
-                    ),
-                }
-            )
+            # Try graceful shutdown first
+            try:
+                self._command_queue.put(None)  # Shutdown signal
+                self._worker_process.join(timeout=WORKER_SHUTDOWN_TIMEOUT)
+            except Exception as e:
+                logger.warning(f"Error during graceful shutdown: {e}")
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=320,
-                default_width=576,
-                default_seed=42,
-            )
+            # Force terminate if still alive
+            if self._worker_process.is_alive():
+                logger.warning(
+                    "Worker process did not shut down gracefully, terminating..."
+                )
+                self._worker_process.terminate()
+                self._worker_process.join(timeout=WORKER_TERMINATE_TIMEOUT)
 
-            quantization = None
-            if load_params:
-                quantization = load_params.get("quantization", None)
+            # Final kill if still alive
+            if self._worker_process.is_alive():
+                logger.warning("Worker process did not terminate, killing...")
+                self._worker_process.kill()
+                self._worker_process.join(timeout=WORKER_KILL_TIMEOUT)
 
-            pipeline = LongLivePipeline(
-                config,
-                quantization=quantization,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-            )
-            logger.info("LongLive pipeline initialized")
-            return pipeline
+            logger.info("Worker process stopped")
 
-        elif pipeline_id == "krea-realtime-video":
-            from scope.core.pipelines import (
-                KreaRealtimeVideoPipeline,
-            )
+        # Clean up queues
+        if self._command_queue is not None:
+            try:
+                self._command_queue.close()
+                self._command_queue.join_thread()
+            except Exception:
+                pass
+            self._command_queue = None
 
-            from .models_config import get_model_file_path, get_models_dir
+        if self._response_queue is not None:
+            try:
+                self._response_queue.close()
+                self._response_queue.join_thread()
+            except Exception:
+                pass
+            self._response_queue = None
 
-            config = OmegaConf.create(
-                {
-                    "model_dir": str(get_models_dir()),
-                    "generator_path": str(
-                        get_model_file_path(
-                            "krea-realtime-video/krea-realtime-video-14b.safetensors"
-                        )
-                    ),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
-                    "tokenizer_path": str(
-                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
-                    ),
-                    "vae_path": str(
-                        get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
-                    ),
-                }
-            )
-
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=512,
-                default_width=512,
-                default_seed=42,
-            )
-
-            quantization = None
-            if load_params:
-                quantization = load_params.get("quantization", None)
-
-            pipeline = KreaRealtimeVideoPipeline(
-                config,
-                quantization=quantization,
-                # Only compile diffusion model for hopper right now
-                compile=any(
-                    x in torch.cuda.get_device_name(0).lower()
-                    for x in ("h100", "hopper")
-                ),
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
-            )
-            logger.info("krea-realtime-video pipeline initialized")
-            return pipeline
-
-        else:
-            raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
+        self._worker_process = None
 
     def unload_pipeline(self):
         """Unload the current pipeline (thread-safe)."""
