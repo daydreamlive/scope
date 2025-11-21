@@ -36,10 +36,12 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
             description: errorMessage,
-            duration: 5000,
+            duration: 10000, // Show longer for detailed errors
           });
           shownErrorRef.current = errorMessage;
         }
+        // Ensure loading state is cleared when error occurs
+        setIsLoading(false);
         // Don't set error in state - it's shown as toast and cleared on backend
         setError(null);
       } else {
@@ -50,14 +52,14 @@ export function usePipeline(options: UsePipelineOptions = {}) {
       console.error("Failed to get pipeline status:", err);
       const errorMessage =
         err instanceof Error ? err.message : "Failed to get pipeline status";
-      // Show toast for API errors
-      if (shownErrorRef.current !== errorMessage) {
-        toast.error("Pipeline Error", {
-          description: errorMessage,
-          duration: 5000,
-        });
-        shownErrorRef.current = errorMessage;
-      }
+        // Show toast for API errors
+        if (shownErrorRef.current !== errorMessage) {
+          toast.error("Pipeline Error", {
+            description: errorMessage,
+            duration: 10000, // Show longer for detailed errors
+          });
+          shownErrorRef.current = errorMessage;
+        }
       setError(null); // Don't persist in state
     }
   }, []);
@@ -91,10 +93,12 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           if (shownErrorRef.current !== errorMessage) {
             toast.error("Pipeline Error", {
               description: errorMessage,
-              duration: 5000,
+              duration: 10000, // Show longer for detailed errors
             });
             shownErrorRef.current = errorMessage;
           }
+          // Ensure loading state is cleared when error occurs
+          setIsLoading(false);
           // Don't set error in state - it's shown as toast and cleared on backend
           setError(null);
         } else {
@@ -108,6 +112,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           statusResponse.status === "error"
         ) {
           stopPolling();
+          setIsLoading(false); // Ensure loading is stopped
           return;
         }
       } catch (err) {
@@ -118,7 +123,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
             description: errorMessage,
-            duration: 5000,
+            duration: 10000, // Show longer for detailed errors
           });
           shownErrorRef.current = errorMessage;
         }
@@ -182,10 +187,11 @@ export function usePipeline(options: UsePipelineOptions = {}) {
                 if (shownErrorRef.current !== errorMsg) {
                   toast.error("Pipeline Error", {
                     description: errorMsg,
-                    duration: 5000,
+                    duration: 10000, // Show longer for detailed errors
                   });
                   shownErrorRef.current = errorMsg;
                 }
+                setIsLoading(false); // Ensure loading is stopped on error
                 reject(new Error(errorMsg));
               } else {
                 // Continue polling
@@ -217,7 +223,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
             description: errorMessage,
-            duration: 5000,
+            duration: 10000, // Show longer for detailed errors
           });
           shownErrorRef.current = errorMessage;
         }
