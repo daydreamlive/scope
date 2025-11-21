@@ -3,8 +3,6 @@
 ## Prerequisites
 
 ```bash
-uv sync
-uv run build --server-only
 uv run download_models --pipeline <PIPELINE_ID>
 ```
 
@@ -13,7 +11,7 @@ Pipeline IDs: `streamdiffusionv2` (video input), `longlive` (no video input), `k
 ## Starting the Server
 
 ```bash
-uv run daydream-scope --server-only
+uv run daydream-scope
 # Custom host/port: --host 0.0.0.0 --port 8000
 ```
 
@@ -21,8 +19,10 @@ Server runs on `http://localhost:8000` by default.
 
 ## Loading a Pipeline
 
+**Important**: Pipeline loading is **asynchronous**. The `/api/v1/pipeline/load` endpoint initiates loading in the background and returns immediately. You must poll the `/api/v1/pipeline/status` endpoint to check when the pipeline is fully loaded before starting streaming.
+
 ```javascript
-// Load a pipeline
+// Load a pipeline (initiates async loading)
 async function loadPipeline(pipelineId, loadParams = {}) {
   const response = await fetch("http://localhost:8000/api/v1/pipeline/load", {
     method: "POST",
@@ -43,35 +43,80 @@ async function loadPipeline(pipelineId, loadParams = {}) {
   return await response.json();
 }
 
-// Example: Load StreamDiffusionV2 pipeline
+// Check pipeline status
+async function getPipelineStatus() {
+  const response = await fetch("http://localhost:8000/api/v1/pipeline/status");
+  return await response.json();
+}
+
+// Wait for pipeline to finish loading
+async function waitForPipelineLoaded(maxWaitMs = 300000, pollIntervalMs = 1000) {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const status = await getPipelineStatus();
+
+    if (status.status === "loaded") {
+      console.log("Pipeline loaded successfully:", status);
+      return status;
+    } else if (status.status === "loading") {
+      console.log("Pipeline still loading...");
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    } else {
+      throw new Error(`Unexpected pipeline status: ${status.status}`);
+    }
+  }
+
+  throw new Error("Timeout waiting for pipeline to load");
+}
+
+// Example: Load StreamDiffusionV2 pipeline and wait
 await loadPipeline("streamdiffusionv2", {
   height: 512,
   width: 512,
   seed: 42,
 });
+await waitForPipelineLoaded();
 
-// Example: Load LongLive pipeline
+// Example: Load LongLive pipeline and wait
 await loadPipeline("longlive", {
   height: 320,
   width: 576,
   seed: 42,
 });
+await waitForPipelineLoaded();
 
-// Example: Load Krea Realtime Video pipeline
+// Example: Load Krea Realtime Video pipeline and wait
 await loadPipeline("krea-realtime-video", {
   height: 320,
   width: 576,
   seed: 42,
   quantization: "fp8_e4m3fn", // or null for no quantization
 });
+await waitForPipelineLoaded();
 ```
 
-```javascript
-async function getPipelineStatus() {
-  const response = await fetch("http://localhost:8000/api/v1/pipeline/status");
-  return await response.json();
+### Pipeline Status Response
+
+The `/api/v1/pipeline/status` endpoint returns:
+
+```json
+{
+  "status": "loaded",
+  "pipeline_id": "streamdiffusionv2",
+  "load_params": {
+    "height": 512,
+    "width": 512,
+    "seed": 42
+  },
+  "loaded_lora_adapters": []
 }
 ```
+
+**Status values**:
+- `"not_loaded"` - No pipeline is loaded
+- `"loading"` - Pipeline is currently being loaded
+- `"loaded"` - Pipeline is ready for streaming
 
 ## Connecting to the Server
 
