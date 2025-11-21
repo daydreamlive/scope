@@ -29,11 +29,12 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
-from .models_config import ensure_models_dir, get_models_dir, models_are_downloaded
+from .models_config import get_models_dir, models_are_downloaded
 from .pipeline_manager import PipelineManager
 from .schema import (
     HardwareInfoResponse,
     HealthResponse,
+    PipelineDefaultsResponse,
     PipelineLoadRequest,
     PipelineStatusResponse,
     WebRTCOfferRequest,
@@ -194,8 +195,8 @@ async def lifespan(app: FastAPI):
     logs_dir = get_logs_dir()
     logger.info(f"Logs directory: {logs_dir}")
 
-    # Ensure models directory and lora subdirectory exist
-    models_dir = ensure_models_dir()
+    # Log models directory
+    models_dir = get_models_dir()
     logger.info(f"Models directory: {models_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
@@ -308,6 +309,42 @@ async def get_pipeline_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/pipeline/defaults", response_model=PipelineDefaultsResponse)
+async def get_pipeline_defaults(pipeline_id: str):
+    """Get default parameters for a specific pipeline."""
+    try:
+        # Import pipelines to get their classes
+        if pipeline_id == "streamdiffusionv2":
+            from scope.core.pipelines import StreamDiffusionV2Pipeline
+
+            defaults = StreamDiffusionV2Pipeline.get_defaults()
+        elif pipeline_id == "longlive":
+            from scope.core.pipelines import LongLivePipeline
+
+            defaults = LongLivePipeline.get_defaults()
+        elif pipeline_id == "krea-realtime-video":
+            from scope.core.pipelines import KreaRealtimeVideoPipeline
+
+            defaults = KreaRealtimeVideoPipeline.get_defaults()
+        elif pipeline_id == "passthrough":
+            from scope.core.pipelines import PassthroughPipeline
+
+            defaults = PassthroughPipeline.get_defaults()
+        else:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid pipeline ID: {pipeline_id}"
+            )
+
+        return PipelineDefaultsResponse(
+            pipeline_id=pipeline_id, **defaults.model_dump()
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pipeline defaults: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/api/v1/webrtc/offer", response_model=WebRTCOfferResponse)
 async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
@@ -361,7 +398,13 @@ async def list_lora_files():
     def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
         """Extract LoRA file metadata."""
         size_mb = file_path.stat().st_size / (1024 * 1024)
-        relative_path = file_path.relative_to(lora_dir)
+        # Calculate relative path for folder structure
+        # Both paths should be absolute from rglob() and get_models_dir()
+        try:
+            relative_path = file_path.relative_to(lora_dir)
+        except ValueError:
+            # Fallback if paths don't match (shouldn't happen, but be defensive)
+            relative_path = Path(file_path.name)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
@@ -373,14 +416,20 @@ async def list_lora_files():
         )
 
     try:
-        lora_dir = get_models_dir() / "lora"
+        lora_dir = Path("models/lora")
         lora_files: list[LoRAFileInfo] = []
 
         if lora_dir.exists() and lora_dir.is_dir():
             for pattern in ("*.safetensors", "*.bin", "*.pt"):
                 for file_path in lora_dir.rglob(pattern):
                     if file_path.is_file():
-                        lora_files.append(process_lora_file(file_path, lora_dir))
+                        try:
+                            lora_files.append(process_lora_file(file_path, lora_dir))
+                        except Exception as e:
+                            logger.warning(
+                                f"list_lora_files: Skipping file {file_path}: {e}"
+                            )
+                            continue
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)

@@ -6,7 +6,7 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline
+from ..interface import Pipeline, PipelineDefaults
 from ..process import postprocess_chunk
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
@@ -22,6 +22,18 @@ DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
 class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
+    @classmethod
+    def get_defaults(cls) -> PipelineDefaults:
+        """Return default parameters for LongLive pipeline."""
+        return PipelineDefaults(
+            denoising_steps=DEFAULT_DENOISING_STEP_LIST,
+            resolution={"height": 320, "width": 576},
+            manage_cache=True,
+            base_seed=42,
+            noise_scale=None,
+            noise_controller=None,
+        )
+
     def __init__(
         self,
         config,
@@ -117,15 +129,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         self.blocks = LongLiveBlocks()
         self.components = components
         self.state = PipelineState()
-        # These need to be set right now because InputParam.default on the blocks
-        # does not work properly
-        self.state.set("current_start_frame", 0)
-        self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", 1.0)
 
-        self.state.set("height", config.height)
-        self.state.set("width", config.width)
-        self.state.set("base_seed", getattr(config, "seed", 42))
+        # Initialize state with defaults
+        defaults = self.get_defaults()
+        self._initialize_state_with_defaults(self.state, config, defaults)
 
         self.first_call = True
 

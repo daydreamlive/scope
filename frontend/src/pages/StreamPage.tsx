@@ -13,7 +13,6 @@ import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -31,7 +30,8 @@ function buildLoRAParams(
 
 export function StreamPage() {
   // Use the stream state hook for settings management
-  const { settings, updateSettings } = useStreamState();
+  const { settings, updateSettings, pipelineDefaults, isLoadingDefaults } =
+    useStreamState();
 
   // Prompt state
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
@@ -176,15 +176,10 @@ export function StreamPage() {
     setSelectedTimelinePrompt(null);
     setExternalSelectedPromptId(null);
 
-    // Update denoising steps and resolution based on pipeline
-    const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
-    const newResolution = getDefaultResolution(pipelineId);
-
     // Update the pipeline in settings
+    // Note: defaults will be fetched automatically by useStreamState's useEffect
     updateSettings({
       pipelineId,
-      denoisingSteps: newDenoisingSteps,
-      resolution: newResolution,
       loras: [], // Clear LoRA controls when switching pipelines
     });
   };
@@ -218,13 +213,10 @@ export function StreamPage() {
             setSelectedTimelinePrompt(null);
             setExternalSelectedPromptId(null);
 
-            const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
-            const newResolution = getDefaultResolution(pipelineId);
-
+            // Update the pipeline in settings
+            // Note: defaults will be fetched automatically by useStreamState's useEffect
             updateSettings({
               pipelineId,
-              denoisingSteps: newDenoisingSteps,
-              resolution: newResolution,
             });
 
             // Automatically start the stream after download completes
@@ -363,11 +355,13 @@ export function StreamPage() {
 
     // Also send the updated parameters to the backend immediately
     // Preserve the full blend while live
-    sendParameterUpdate({
-      prompts,
-      prompt_interpolation_method: interpolationMethod,
-      denoising_step_list: settings.denoisingSteps || [700, 500],
-    });
+    if (settings.denoisingSteps) {
+      sendParameterUpdate({
+        prompts,
+        prompt_interpolation_method: interpolationMethod,
+        denoising_step_list: settings.denoisingSteps,
+      });
+    }
   };
 
   const handleTimelinePromptEdit = (prompt: TimelinePrompt | null) => {
@@ -501,7 +495,7 @@ export function StreamPage() {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
-          seed: settings.seed ?? 42,
+          seed: settings.seed,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
@@ -519,7 +513,7 @@ export function StreamPage() {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
-          seed: settings.seed ?? 42,
+          seed: settings.seed,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
@@ -529,11 +523,8 @@ export function StreamPage() {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization:
-            settings.quantization !== undefined
-              ? settings.quantization
-              : "fp8_e4m3fn",
+          seed: settings.seed,
+          quantization: settings.quantization,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
@@ -579,9 +570,9 @@ export function StreamPage() {
       if (pipelineIdToUse !== "passthrough") {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
-        initialParameters.denoising_step_list = settings.denoisingSteps || [
-          700, 500,
-        ];
+        if (settings.denoisingSteps) {
+          initialParameters.denoising_step_list = settings.denoisingSteps;
+        }
       }
 
       // Cache management for krea_realtime_video and longlive
@@ -589,19 +580,27 @@ export function StreamPage() {
         settings.pipelineId === "krea-realtime-video" ||
         settings.pipelineId === "longlive"
       ) {
-        initialParameters.manage_cache = settings.manageCache ?? true;
+        if (settings.manageCache !== undefined) {
+          initialParameters.manage_cache = settings.manageCache;
+        }
       }
 
       // Krea-realtime-video-specific parameters
       if (settings.pipelineId === "krea-realtime-video") {
-        initialParameters.kv_cache_attention_bias =
-          settings.kvCacheAttentionBias ?? 1.0;
+        if (settings.kvCacheAttentionBias !== undefined) {
+          initialParameters.kv_cache_attention_bias =
+            settings.kvCacheAttentionBias;
+        }
       }
 
       // StreamDiffusionV2-specific parameters
       if (pipelineIdToUse === "streamdiffusionv2") {
-        initialParameters.noise_scale = settings.noiseScale ?? 0.7;
-        initialParameters.noise_controller = settings.noiseController ?? true;
+        if (settings.noiseScale !== undefined) {
+          initialParameters.noise_scale = settings.noiseScale;
+        }
+        if (settings.noiseController !== undefined) {
+          initialParameters.noise_controller = settings.noiseController;
+        }
       }
 
       // Reset paused state when starting a fresh stream
@@ -637,9 +636,10 @@ export function StreamPage() {
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={
-              PIPELINES[settings.pipelineId]?.category === "no-video-input"
+              !isLoadingDefaults &&
+              (PIPELINES[settings.pipelineId]?.category === "no-video-input"
                 ? !isInitializing
-                : !!localStream && !isInitializing
+                : !!localStream && !isInitializing)
             }
             onStartStream={handleStartStream}
             onStopStream={stopStream}
@@ -723,11 +723,13 @@ export function StreamPage() {
                   });
                 } else {
                   // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
+                  if (settings.denoisingSteps) {
+                    sendParameterUpdate({
+                      prompts,
+                      prompt_interpolation_method: interpolationMethod,
+                      denoising_step_list: settings.denoisingSteps,
+                    });
+                  }
                 }
               }}
               onPromptItemsSubmit={(
@@ -767,11 +769,13 @@ export function StreamPage() {
                   });
                 } else {
                   // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
+                  if (settings.denoisingSteps) {
+                    sendParameterUpdate({
+                      prompts,
+                      prompt_interpolation_method: interpolationMethod,
+                      denoising_step_list: settings.denoisingSteps,
+                    });
+                  }
                 }
               }}
               disabled={
@@ -813,32 +817,27 @@ export function StreamPage() {
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
             isDownloading={isDownloading}
-            resolution={
-              settings.resolution || getDefaultResolution(settings.pipelineId)
-            }
+            resolution={settings.resolution}
             onResolutionChange={handleResolutionChange}
-            seed={settings.seed ?? 42}
+            seed={settings.seed}
             onSeedChange={handleSeedChange}
-            denoisingSteps={settings.denoisingSteps || [700, 500]}
+            denoisingSteps={settings.denoisingSteps}
             onDenoisingStepsChange={handleDenoisingStepsChange}
-            noiseScale={settings.noiseScale ?? 0.7}
+            denoisingStepsDefaults={pipelineDefaults?.denoising_steps}
+            noiseScale={settings.noiseScale}
             onNoiseScaleChange={handleNoiseScaleChange}
-            noiseController={settings.noiseController ?? true}
+            noiseController={settings.noiseController}
             onNoiseControllerChange={handleNoiseControllerChange}
-            manageCache={settings.manageCache ?? true}
+            manageCache={settings.manageCache}
             onManageCacheChange={handleManageCacheChange}
-            quantization={
-              settings.quantization !== undefined
-                ? settings.quantization
-                : "fp8_e4m3fn"
-            }
+            quantization={settings.quantization}
             onQuantizationChange={handleQuantizationChange}
-            kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
+            kvCacheAttentionBias={settings.kvCacheAttentionBias}
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
-            loras={settings.loras || []}
+            loras={settings.loras}
             onLorasChange={handleLorasChange}
-            loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
+            loraMergeStrategy={settings.loraMergeStrategy}
             onLoraMergeStrategyChange={handleLoraMergeStrategyChange}
           />
         </div>

@@ -70,6 +70,17 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
+export interface PipelineDefaultsResponse {
+  pipeline_id: string;
+  denoising_steps: number[] | null;
+  resolution: { height: number; width: number };
+  manage_cache: boolean;
+  base_seed: number;
+  noise_scale: number | null;
+  noise_controller: boolean | null;
+  kv_cache_attention_bias: number | null;
+}
+
 export const sendWebRTCOffer = async (
   data: WebRTCOfferRequest
 ): Promise<RTCSessionDescriptionInit> => {
@@ -121,6 +132,28 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
     const errorText = await response.text();
     throw new Error(
       `Pipeline status failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export const getPipelineDefaults = async (
+  pipelineId: string
+): Promise<PipelineDefaultsResponse> => {
+  const response = await fetch(
+    `/api/v1/pipeline/defaults?pipeline_id=${pipelineId}`,
+    {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Pipeline defaults failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 

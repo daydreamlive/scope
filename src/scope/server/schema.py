@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from scope.core.pipelines.interface import PipelineDefaults
 from scope.core.pipelines.utils import Quantization
 
 
@@ -260,3 +261,12 @@ class PipelineStatusResponse(BaseModel):
     error: str | None = Field(
         default=None, description="Error message if status is error"
     )
+
+
+class PipelineDefaultsResponse(PipelineDefaults):
+    """Pipeline defaults response schema.
+
+    Inherits all fields and validation from PipelineDefaults.
+    """
+
+    pipeline_id: str = Field(..., description="ID of the pipeline")
