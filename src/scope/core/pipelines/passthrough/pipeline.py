@@ -1,12 +1,24 @@
 import torch
 from einops import rearrange
 
-from ..interface import Pipeline, Requirements
+from ..interface import Pipeline, PipelineDefaults, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 
 
 class PassthroughPipeline(Pipeline):
     """Passthrough pipeline for testing"""
+
+    @classmethod
+    def get_defaults(cls) -> PipelineDefaults:
+        """Return default parameters for Passthrough pipeline."""
+        return PipelineDefaults(
+            denoising_steps=None,
+            resolution={"height": 512, "width": 512},
+            manage_cache=False,
+            base_seed=42,
+            noise_scale=None,
+            noise_controller=None,
+        )
 
     def __init__(
         self,

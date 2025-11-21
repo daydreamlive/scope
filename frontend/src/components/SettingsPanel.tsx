@@ -23,7 +23,6 @@ import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import { LoRAManager } from "./LoRAManager";
@@ -45,6 +44,7 @@ interface SettingsPanelProps {
   onSeedChange?: (seed: number) => void;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
+  denoisingStepsDefaults?: number[] | null;
   noiseScale?: number;
   onNoiseScaleChange?: (noiseScale: number) => void;
   noiseController?: boolean;
@@ -74,6 +74,7 @@ export function SettingsPanel({
   onSeedChange,
   denoisingSteps = [700, 500],
   onDenoisingStepsChange,
+  denoisingStepsDefaults,
   noiseScale = 0.7,
   onNoiseScaleChange,
   noiseController = true,
@@ -90,9 +91,6 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   onLoraMergeStrategyChange,
 }: SettingsPanelProps) {
-  // Use pipeline-specific default if resolution is not provided
-  const effectiveResolution = resolution || getDefaultResolution(pipelineId);
-
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
@@ -146,26 +144,32 @@ export function SettingsPanel({
     }
 
     // Always update the value (even if invalid)
+    if (!resolution) return;
+
     onResolutionChange?.({
-      ...effectiveResolution,
+      ...resolution,
       [dimension]: value,
     });
   };
 
   const incrementResolution = (dimension: "height" | "width") => {
+    if (!resolution) return;
+
     const maxValue = 2048;
-    const newValue = Math.min(maxValue, effectiveResolution[dimension] + 1);
+    const newValue = Math.min(maxValue, resolution[dimension] + 1);
     handleResolutionChange(dimension, newValue);
   };
 
   const decrementResolution = (dimension: "height" | "width") => {
+    if (!resolution) return;
+
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
       pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
-    const newValue = Math.max(minValue, effectiveResolution[dimension] - 1);
+    const newValue = Math.max(minValue, resolution[dimension] - 1);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -390,20 +394,21 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => decrementResolution("height")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.height}
+                        value={resolution?.height ?? ""}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
                             handleResolutionChange("height", value);
                           }
                         }}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
+                        placeholder={!resolution ? "Loading..." : undefined}
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
@@ -413,7 +418,7 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => incrementResolution("height")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>
@@ -439,20 +444,21 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => decrementResolution("width")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.width}
+                        value={resolution?.width ?? ""}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
                             handleResolutionChange("width", value);
                           }
                         }}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
+                        placeholder={!resolution ? "Loading..." : undefined}
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
@@ -462,7 +468,7 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => incrementResolution("width")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>
@@ -594,7 +600,7 @@ export function SettingsPanel({
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
-            defaultValues={getDefaultDenoisingSteps(pipelineId)}
+            defaultValues={denoisingStepsDefaults || undefined}
             tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
           />
         )}

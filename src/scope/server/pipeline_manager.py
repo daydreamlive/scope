@@ -11,6 +11,8 @@ from typing import Any
 import torch
 from omegaconf import OmegaConf
 
+from scope.core.pipelines.defaults import extract_load_params
+
 logger = logging.getLogger(__name__)
 
 
@@ -206,29 +208,22 @@ class PipelineManager:
         self,
         config: dict,
         load_params: dict | None,
-        default_height: int,
-        default_width: int,
-        default_seed: int = 42,
+        pipeline_class,
     ) -> None:
         """Extract and apply common load parameters (resolution, seed, LoRAs) to config.
 
         Args:
             config: Pipeline config dict to update
             load_params: Load parameters dict (may contain height, width, seed, loras, lora_merge_mode)
-            default_height: Default height if not in load_params
-            default_width: Default width if not in load_params
-            default_seed: Default seed if not in load_params
+            pipeline_class: Pipeline class to get defaults from
         """
-        height = default_height
-        width = default_width
-        seed = default_seed
+        # Extract height, width, seed using pipeline defaults
+        height, width, seed = extract_load_params(pipeline_class, load_params)
+
         loras = None
         lora_merge_mode = "permanent_merge"
 
         if load_params:
-            height = load_params.get("height", default_height)
-            width = load_params.get("width", default_width)
-            seed = load_params.get("seed", default_seed)
             loras = load_params.get("loras", None)
             lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
 
@@ -293,14 +288,8 @@ class PipelineManager:
                 }
             )
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=512,
-                default_width=512,
-                default_seed=42,
-            )
+            # Apply load parameters (resolution, seed, LoRAs) to config using pipeline defaults
+            self._apply_load_params(config, load_params, StreamDiffusionV2Pipeline)
 
             pipeline = StreamDiffusionV2Pipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -311,12 +300,8 @@ class PipelineManager:
         elif pipeline_id == "passthrough":
             from scope.core.pipelines import PassthroughPipeline
 
-            # Use load parameters for resolution, default to 512x512
-            height = 512
-            width = 512
-            if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
+            # Use pipeline defaults for resolution
+            height, width, _ = extract_load_params(PassthroughPipeline, load_params)
 
             pipeline = PassthroughPipeline(
                 height=height,
@@ -352,14 +337,8 @@ class PipelineManager:
                 }
             )
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=320,
-                default_width=576,
-                default_seed=42,
-            )
+            # Apply load parameters (resolution, seed, LoRAs) to config using pipeline defaults
+            self._apply_load_params(config, load_params, LongLivePipeline)
 
             pipeline = LongLivePipeline(
                 config, device=torch.device("cuda"), dtype=torch.bfloat16
@@ -396,14 +375,8 @@ class PipelineManager:
                 }
             )
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=512,
-                default_width=512,
-                default_seed=42,
-            )
+            # Apply load parameters (resolution, seed, LoRAs) to config using pipeline defaults
+            self._apply_load_params(config, load_params, KreaRealtimeVideoPipeline)
 
             quantization = None
             if load_params:

@@ -6,7 +6,7 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline, Requirements
+from ..interface import Pipeline, PipelineDefaults, Requirements
 from ..process import postprocess_chunk
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
@@ -24,6 +24,18 @@ CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
+    @classmethod
+    def get_defaults(cls) -> PipelineDefaults:
+        """Return default parameters for StreamDiffusionV2 pipeline."""
+        return PipelineDefaults(
+            denoising_steps=DEFAULT_DENOISING_STEP_LIST,
+            resolution={"height": 512, "width": 512},
+            manage_cache=True,
+            base_seed=42,
+            noise_scale=0.7,
+            noise_controller=True,
+        )
+
     def __init__(
         self,
         config,
@@ -99,17 +111,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.blocks = StreamDiffusionV2Blocks()
         self.components = components
         self.state = PipelineState()
-        # These need to be set right now because InputParam.default on the blocks
-        # does not work properly
-        self.state.set("current_start_frame", 0)
-        self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", 1.0)
-        self.state.set("noise_scale", 0.7)
-        self.state.set("noise_controller", True)
 
-        self.state.set("height", config.height)
-        self.state.set("width", config.width)
-        self.state.set("base_seed", getattr(config, "seed", 42))
+        # Initialize state with defaults
+        defaults = self.get_defaults()
+        self._initialize_state_with_defaults(self.state, config, defaults)
 
         self.first_call = True
 

@@ -5,8 +5,12 @@ import type {
   SettingsState,
   PromptData,
 } from "../types";
-import { getDefaultResolution } from "../lib/utils";
-import { getHardwareInfo, type HardwareInfoResponse } from "../lib/api";
+import {
+  getHardwareInfo,
+  getPipelineDefaults,
+  type HardwareInfoResponse,
+  type PipelineDefaultsResponse,
+} from "../lib/api";
 
 export function useStreamState() {
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
@@ -24,16 +28,16 @@ export function useStreamState() {
 
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
-    resolution: getDefaultResolution("streamdiffusionv2"), // Default resolution for StreamDiffusionV2
-    seed: 42,
-    denoisingSteps: [700, 500], // Default for StreamDiffusionV2
-    noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
-    noiseController: true, // Default noise controller for StreamDiffusionV2
-    manageCache: true, // Default manage cache for StreamDiffusionV2
+    resolution: undefined,
+    seed: undefined,
+    denoisingSteps: undefined,
+    noiseScale: undefined,
+    noiseController: undefined,
+    manageCache: undefined,
     quantization: null,
-    kvCacheAttentionBias: 0.3, // Default cache bias
-    paused: false, // Default to not paused (generating)
-    loraMergeStrategy: "permanent_merge", // Default LoRA merge strategy
+    kvCacheAttentionBias: undefined,
+    paused: false,
+    loraMergeStrategy: "permanent_merge",
   });
 
   const [promptData, setPromptData] = useState<PromptData>({
@@ -46,6 +50,13 @@ export function useStreamState() {
     null
   );
 
+  // Store pipeline defaults separately for reset functionality
+  const [pipelineDefaults, setPipelineDefaults] =
+    useState<PipelineDefaultsResponse | null>(null);
+
+  // Track loading state for defaults
+  const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
+
   // Fetch hardware info on mount
   useEffect(() => {
     const fetchHardwareInfo = async () => {
@@ -53,12 +64,47 @@ export function useStreamState() {
         const info = await getHardwareInfo();
         setHardwareInfo(info);
       } catch (error) {
-        console.error("Failed to fetch hardware info:", error);
+        console.error("useStreamState: Failed to fetch hardware info:", error);
       }
     };
 
     fetchHardwareInfo();
   }, []);
+
+  // Fetch and apply pipeline defaults when pipeline changes
+  useEffect(() => {
+    const fetchDefaults = async () => {
+      setIsLoadingDefaults(true);
+      try {
+        const defaults = await getPipelineDefaults(settings.pipelineId);
+
+        // Store defaults for reset functionality
+        setPipelineDefaults(defaults);
+
+        setSettings(prev => ({
+          ...prev,
+          resolution: defaults.resolution,
+          seed: defaults.base_seed,
+          denoisingSteps: defaults.denoising_steps || [],
+          noiseScale: defaults.noise_scale ?? undefined,
+          noiseController: defaults.noise_controller ?? undefined,
+          manageCache: defaults.manage_cache,
+          kvCacheAttentionBias: defaults.kv_cache_attention_bias ?? undefined,
+        }));
+        setIsLoadingDefaults(false);
+      } catch (error) {
+        console.error(
+          "useStreamState: Failed to fetch pipeline defaults:",
+          error
+        );
+        setIsLoadingDefaults(false);
+        // No fallback - if backend is unreachable, streaming won't work anyway
+        // User will see the error in console and UI will reflect the connection issue
+      }
+    };
+
+    fetchDefaults();
+  }, [settings.pipelineId]);
 
   // Set recommended quantization when krea-realtime-video is selected
   useEffect(() => {
@@ -99,6 +145,8 @@ export function useStreamState() {
     settings,
     promptData,
     hardwareInfo,
+    pipelineDefaults,
+    isLoadingDefaults,
     updateMetrics,
     updateStreamStatus,
     updateSettings,
