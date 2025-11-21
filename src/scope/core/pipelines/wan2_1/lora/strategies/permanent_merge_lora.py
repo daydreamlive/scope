@@ -6,12 +6,10 @@ providing zero inference overhead. LoRA scales are fixed at load time and cannot
 updated at runtime. Ideal for production deployment where maximum FPS is critical.
 """
 
-import os
-import tempfile
 from typing import Any
 
 import torch
-from safetensors.torch import load_file, save_file
+from safetensors.torch import load_file
 
 from ..utils import find_lora_pair, normalize_lora_key
 from .peft_lora import PeftLoRAStrategy
@@ -19,11 +17,11 @@ from .peft_lora import PeftLoRAStrategy
 __all__ = ["PermanentMergeLoRAStrategy"]
 
 
-def convert_community_lora_to_peft_format(
+def standardize_lora_for_peft(
     lora_path: str, model: torch.nn.Module
-) -> str:
+) -> dict[str, torch.Tensor] | None:
     """
-    Convert community LoRA formats to PEFT-compatible format.
+    Standardize LoRA formats to PEFT-compatible format.
 
     Handles LoRAs with:
     - lora_up/lora_down naming (instead of lora_A/lora_B)
@@ -35,7 +33,7 @@ def convert_community_lora_to_peft_format(
         model: Model to check for key compatibility
 
     Returns:
-        Path to converted LoRA file (temp file) or original path if no conversion needed
+        Converted state dict, or None if no conversion needed
     """
     lora_state = (
         load_file(lora_path)
@@ -63,7 +61,7 @@ def convert_community_lora_to_peft_format(
             needs_conversion = True
 
     if not needs_conversion:
-        return lora_path
+        return None
 
     converted_state = {}
     processed_keys = set()
@@ -108,20 +106,7 @@ def convert_community_lora_to_peft_format(
         converted_state[f"{normalized_key}.lora_A.weight"] = lora_A
         converted_state[f"{normalized_key}.lora_B.weight"] = lora_B_scaled
 
-    temp_fd, temp_path = tempfile.mkstemp(
-        suffix=".safetensors", prefix="lora_converted_"
-    )
-    os.close(temp_fd)
-
-    try:
-        save_file(converted_state, temp_path)
-        return temp_path
-    except Exception as e:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
-        raise RuntimeError(
-            f"convert_community_lora_to_peft_format: Failed to save converted LoRA: {e}"
-        ) from e
+    return converted_state
 
 
 class PermanentMergeLoRAStrategy:
@@ -135,6 +120,52 @@ class PermanentMergeLoRAStrategy:
     Ideal for production deployment where maximum FPS is critical.
     Compatible with FP8 quantization.
     """
+
+    @staticmethod
+    def _load_adapter_from_state_dict_or_path(
+        model: torch.nn.Module,
+        lora_path: str,
+        converted_state: dict[str, torch.Tensor] | None,
+        strength: float = 1.0,
+    ) -> str:
+        """
+        Load adapter either from converted state dict or original path.
+
+        Args:
+            model: PyTorch model
+            lora_path: Path to original LoRA file
+            converted_state: Pre-converted state dict, or None to load from path
+            strength: Strength multiplier for LoRA effect
+
+        Returns:
+            The adapter name
+        """
+        if converted_state is None:
+            # No conversion needed, load directly from path
+            return PeftLoRAStrategy.load_adapter(
+                model=model, lora_path=lora_path, strength=strength
+            )
+
+        # Load from in-memory state dict
+        from pathlib import Path
+
+        from pipelines.wan2_1.lora.utils import sanitize_adapter_name
+
+        adapter_name = sanitize_adapter_name(Path(lora_path).stem)
+
+        # Parse the converted state dict through PeftLoRAStrategy
+        # to inject LoRA layers (this handles the PEFT wrapping)
+        model_state = model.state_dict()
+        from pipelines.wan2_1.lora.utils import parse_lora_weights
+
+        lora_mapping = parse_lora_weights(converted_state, model_state)
+
+        # Inject PEFT LoRA layers
+        PeftLoRAStrategy._inject_lora_layers(
+            model, lora_mapping, adapter_name, strength
+        )
+
+        return adapter_name
 
     @staticmethod
     def load_adapter(
@@ -163,19 +194,15 @@ class PermanentMergeLoRAStrategy:
         Raises:
             FileNotFoundError: If the LoRA file does not exist
         """
-        converted_lora_path = None
-        try:
-            converted_lora_path = convert_community_lora_to_peft_format(
-                lora_path=lora_path, model=model
-            )
+        # Convert to PEFT format if needed (in-memory, no disk I/O)
+        converted_state = standardize_lora_for_peft(lora_path=lora_path, model=model)
 
-            adapter_name = PeftLoRAStrategy.load_adapter(
-                model=model, lora_path=converted_lora_path, strength=strength
-            )
-        finally:
-            if converted_lora_path and converted_lora_path != lora_path:
-                if os.path.exists(converted_lora_path):
-                    os.unlink(converted_lora_path)
+        adapter_name = PermanentMergeLoRAStrategy._load_adapter_from_state_dict_or_path(
+            model=model,
+            lora_path=lora_path,
+            converted_state=converted_state,
+            strength=strength,
+        )
 
         peft_model = PeftLoRAStrategy._get_peft_model(model)
         if peft_model is None:
@@ -237,44 +264,41 @@ class PermanentMergeLoRAStrategy:
             return loaded_adapters
 
         adapter_names = []
-        converted_files = []
 
-        try:
-            for lora_config in lora_configs:
-                lora_path = lora_config.get("path")
-                if not lora_path:
-                    continue
+        for lora_config in lora_configs:
+            lora_path = lora_config.get("path")
+            if not lora_path:
+                continue
 
-                scale = lora_config.get("scale", 1.0)
+            scale = lora_config.get("scale", 1.0)
 
-                try:
-                    converted_lora_path = convert_community_lora_to_peft_format(
-                        lora_path=lora_path, model=model
+            try:
+                # Convert to PEFT format if needed (in-memory, no disk I/O)
+                converted_state = standardize_lora_for_peft(
+                    lora_path=lora_path, model=model
+                )
+
+                adapter_name = (
+                    PermanentMergeLoRAStrategy._load_adapter_from_state_dict_or_path(
+                        model=model,
+                        lora_path=lora_path,
+                        converted_state=converted_state,
+                        strength=scale,
                     )
+                )
+                adapter_names.append(adapter_name)
+                loaded_adapters.append({"path": str(lora_path), "scale": scale})
 
-                    if converted_lora_path != lora_path:
-                        converted_files.append(converted_lora_path)
-
-                    adapter_name = PeftLoRAStrategy.load_adapter(
-                        model=model, lora_path=converted_lora_path, strength=scale
-                    )
-                    adapter_names.append(adapter_name)
-                    loaded_adapters.append({"path": str(lora_path), "scale": scale})
-
-                except FileNotFoundError as e:
-                    raise RuntimeError(
-                        f"{logger_prefix}LoRA loading failed. File not found: {lora_path}. "
-                        f"Ensure the file exists in the models/lora/ directory."
-                    ) from e
-                except Exception as e:
-                    raise RuntimeError(
-                        f"{logger_prefix}LoRA loading failed. Pipeline cannot start without all configured LoRAs. "
-                        f"Error: {e}"
-                    ) from e
-        finally:
-            for temp_file in converted_files:
-                if os.path.exists(temp_file):
-                    os.unlink(temp_file)
+            except FileNotFoundError as e:
+                raise RuntimeError(
+                    f"{logger_prefix}LoRA loading failed. File not found: {lora_path}. "
+                    f"Ensure the file exists in the models/lora/ directory."
+                ) from e
+            except Exception as e:
+                raise RuntimeError(
+                    f"{logger_prefix}LoRA loading failed. Pipeline cannot start without all configured LoRAs. "
+                    f"Error: {e}"
+                ) from e
 
         if adapter_names:
             peft_model = PeftLoRAStrategy._get_peft_model(model)
