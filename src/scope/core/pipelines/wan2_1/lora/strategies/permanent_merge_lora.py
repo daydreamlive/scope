@@ -9,104 +9,11 @@ updated at runtime. Ideal for production deployment where maximum FPS is critica
 from typing import Any
 
 import torch
-from safetensors.torch import load_file
 
-from ..utils import find_lora_pair, normalize_lora_key
+from ..utils import standardize_lora_for_peft
 from .peft_lora import PeftLoRAStrategy
 
 __all__ = ["PermanentMergeLoRAStrategy"]
-
-
-def standardize_lora_for_peft(
-    lora_path: str, model: torch.nn.Module
-) -> dict[str, torch.Tensor] | None:
-    """
-    Standardize LoRA formats to PEFT-compatible format.
-
-    Handles LoRAs with:
-    - lora_up/lora_down naming (instead of lora_A/lora_B)
-    - lora_unet_* prefix (instead of diffusion_model.*)
-    - Separate alpha tensors
-
-    Args:
-        lora_path: Path to original LoRA file
-        model: Model to check for key compatibility
-
-    Returns:
-        Converted state dict, or None if no conversion needed
-    """
-    lora_state = (
-        load_file(lora_path)
-        if lora_path.endswith(".safetensors")
-        else torch.load(lora_path, map_location="cpu")
-    )
-
-    needs_conversion = False
-    has_lora_up_down = any(
-        ".lora_up.weight" in k or ".lora_down.weight" in k for k in lora_state.keys()
-    )
-    has_lora_unet_prefix = any(k.startswith("lora_unet_") for k in lora_state.keys())
-    has_peft_format = any(
-        ".lora_A.weight" in k or ".lora_B.weight" in k for k in lora_state.keys()
-    )
-    has_diffusion_model_prefix = any(
-        k.startswith("diffusion_model.") for k in lora_state.keys()
-    )
-
-    if has_lora_up_down or has_lora_unet_prefix:
-        needs_conversion = True
-
-    if not needs_conversion:
-        if not has_diffusion_model_prefix and has_peft_format:
-            needs_conversion = True
-
-    if not needs_conversion:
-        return None
-
-    converted_state = {}
-    processed_keys = set()
-
-    for lora_key in lora_state.keys():
-        if lora_key in processed_keys:
-            continue
-
-        pair_result = find_lora_pair(lora_key, lora_state)
-        if pair_result is None:
-            continue
-
-        base_key, alpha_key, lora_A, lora_B = pair_result
-
-        if ".lora_up.weight" in lora_key:
-            processed_keys.add(lora_key)
-            processed_keys.add(f"{base_key}.lora_down.weight")
-        elif ".lora_B.weight" in lora_key:
-            processed_keys.add(lora_key)
-            processed_keys.add(f"{base_key}.lora_A.weight")
-
-        # Extract alpha and compute pre-scaling
-        # PEFT doesn't use alpha from state_dict, so we must pre-scale the weights
-        alpha = None
-        if alpha_key and alpha_key in lora_state:
-            alpha_tensor = lora_state[alpha_key]
-            alpha = alpha_tensor.item() if alpha_tensor.numel() == 1 else None
-
-        rank = lora_A.shape[0]
-        scale_factor = (alpha / rank) if alpha is not None else 1.0
-
-        # Apply alpha/rank scaling to lora_B (up weight) to match standard LoRA behavior
-        # This ensures PEFT merges the weights with correct magnitude
-        lora_B_scaled = lora_B * scale_factor
-
-        normalized_key = normalize_lora_key(base_key)
-
-        if not normalized_key.startswith("diffusion_model."):
-            normalized_key = f"diffusion_model.{normalized_key}"
-
-        # Store pre-scaled weights (no alpha tensor needed)
-        converted_state[f"{normalized_key}.lora_A.weight"] = lora_A
-        converted_state[f"{normalized_key}.lora_B.weight"] = lora_B_scaled
-
-    return converted_state
 
 
 class PermanentMergeLoRAStrategy:
