@@ -11,7 +11,6 @@ import traceback
 from enum import Enum
 from typing import Any
 
-from .pipeline_proxy import PipelineProxy
 from .pipeline_worker import WorkerCommand, WorkerResponse, pipeline_worker_process
 
 logger = logging.getLogger(__name__)
@@ -72,15 +71,17 @@ class PipelineManager:
     def get_pipeline(self):
         """Get the loaded pipeline instance (thread-safe).
 
-        Returns a proxy object that forwards calls to the worker process.
+        Note: Pipeline is now loaded in worker process. Use create_frame_processor()
+        to get a FrameProcessor that uses the pipeline directly in the worker process.
         """
         with self._lock:
             if self._status != PipelineStatus.LOADED or self._worker_process is None:
                 raise PipelineNotAvailableException(
                     f"Pipeline not available. Status: {self._status.value}"
                 )
-            # Return a proxy that will forward calls to the worker
-            return PipelineProxy(self._command_queue, self._response_queue)
+            # Pipeline is in worker process, return a placeholder to indicate it's loaded
+            # Actual pipeline access is through FrameProcessor in worker process
+            return None
 
     def get_status_info(self) -> dict[str, Any]:
         """Get detailed status information (thread-safe).
@@ -447,3 +448,45 @@ class PipelineManager:
         """Check if pipeline is loaded and ready (thread-safe)."""
         with self._lock:
             return self._status == PipelineStatus.LOADED
+
+    def create_frame_processor(self, frame_processor_id: str, initial_parameters: dict = None):
+        """Create a FrameProcessor in the worker process (thread-safe).
+
+        Args:
+            frame_processor_id: Unique identifier for this FrameProcessor
+            initial_parameters: Initial parameters for the FrameProcessor
+
+        Returns:
+            FrameProcessorProxy instance
+        """
+        from .frame_processor_proxy import FrameProcessorProxy
+
+        with self._lock:
+            if self._status != PipelineStatus.LOADED or self._worker_process is None:
+                raise PipelineNotAvailableException(
+                    f"Pipeline not available. Status: {self._status.value}"
+                )
+
+            # Send command to create FrameProcessor in worker
+            self._command_queue.put(
+                {
+                    "command": WorkerCommand.CREATE_FRAME_PROCESSOR.value,
+                    "frame_processor_id": frame_processor_id,
+                    "initial_parameters": initial_parameters or {},
+                }
+            )
+
+            # Wait for response
+            try:
+                response = self._response_queue.get(timeout=60)
+                if response["status"] == WorkerResponse.FRAME_PROCESSOR_CREATED.value:
+                    return FrameProcessorProxy(
+                        frame_processor_id=frame_processor_id,
+                        command_queue=self._command_queue,
+                        response_queue=self._response_queue,
+                    )
+                else:
+                    error_msg = response.get("error", "Unknown error")
+                    raise RuntimeError(f"Failed to create FrameProcessor: {error_msg}")
+            except queue.Empty:
+                raise RuntimeError("Timeout waiting for FrameProcessor creation")
