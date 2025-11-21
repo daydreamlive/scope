@@ -1,10 +1,11 @@
 import time
+from pathlib import Path
 
 import torch
 from diffusers.utils import export_to_video
 from omegaconf import OmegaConf
 
-from lib.models_config import get_model_file_path, get_models_dir
+from scope.core.config import get_model_file_path, get_models_dir
 
 from .pipeline import LongLivePipeline
 
@@ -19,7 +20,7 @@ config = OmegaConf.create(
             get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
         ),
         "tokenizer_path": str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")),
-        "model_config": OmegaConf.load("pipelines/longlive/model.yaml"),
+        "model_config": OmegaConf.load(Path(__file__).parent / "model.yaml"),
         "height": 480,
         "width": 832,
     }
@@ -67,7 +68,7 @@ for _, prompt_text in enumerate(prompt_texts):
 output_video = torch.concat(outputs)
 print(output_video.shape)
 output_video_np = output_video.contiguous().numpy()
-export_to_video(output_video_np, "pipelines/longlive/output.mp4", fps=16)
+export_to_video(output_video_np, Path(__file__).parent / "output.mp4", fps=16)
 
 # Print statistics
 print("\n=== Performance Statistics ===")

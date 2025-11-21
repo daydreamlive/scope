@@ -16,7 +16,7 @@ from weakref import WeakKeyDictionary
 import torch
 import torch.nn as nn
 
-from pipelines.wan2_1.lora.utils import (
+from ..utils import (
     load_lora_weights,
     parse_lora_weights,
     sanitize_adapter_name,

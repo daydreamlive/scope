@@ -9,7 +9,11 @@ from unittest.mock import patch
 import pytest
 from freezegun import freeze_time
 
-from lib.logs_config import LOGS_DIR_ENV_VAR, cleanup_old_logs, get_most_recent_log_file
+from scope.server.logs_config import (
+    LOGS_DIR_ENV_VAR,
+    cleanup_old_logs,
+    get_most_recent_log_file,
+)
 
 
 @pytest.fixture

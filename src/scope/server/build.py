@@ -37,8 +37,10 @@ def main() -> None:
     """Main build function."""
     print("🚀 Building daydream-scope...")
 
+    project_root = Path(__file__).parent.parent.parent.parent
+
     # Check if we're in the right directory
-    if not Path("pyproject.toml").exists():
+    if not (project_root / "pyproject.toml").exists():
         print(
             "❌ Error: pyproject.toml not found. Please run this script from the project root."
         )
@@ -46,7 +48,7 @@ def main() -> None:
 
     # Build frontend
     print("📦 Building frontend...")
-    frontend_dir = Path("frontend")
+    frontend_dir = project_root / "frontend"
 
     if not frontend_dir.exists():
         print("❌ Error: frontend directory not found")

@@ -13,8 +13,8 @@ from typing import Any
 import torch
 from safetensors.torch import load_file, save_file
 
-from pipelines.wan2_1.lora.strategies.peft_lora import PeftLoRAStrategy
-from pipelines.wan2_1.lora.utils import find_lora_pair, normalize_lora_key
+from ..utils import find_lora_pair, normalize_lora_key
+from .peft_lora import PeftLoRAStrategy
 
 __all__ = ["PermanentMergeLoRAStrategy"]
 

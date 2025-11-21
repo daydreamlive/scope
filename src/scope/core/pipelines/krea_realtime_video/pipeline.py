@@ -4,12 +4,11 @@ import time
 import torch
 from diffusers.modular_pipelines import PipelineState
 
-from lib.schema import Quantization
-
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
+from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from .components import WanVAEWrapper
@@ -39,7 +38,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         tokenizer_path = getattr(config, "tokenizer_path", None)
         vae_path = getattr(config, "vae_path", None)
 
-        model_config = getattr(config, "model_config", {})
+        model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-14B")
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
 

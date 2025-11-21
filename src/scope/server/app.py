@@ -21,17 +21,17 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from download_models import download_models
-from lib.logs_config import (
+from .download_models import download_models
+from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
     get_logs_dir,
     get_most_recent_log_file,
 )
-from lib.models_config import get_models_dir, models_are_downloaded
-from lib.pipeline_manager import PipelineManager
-from lib.schema import (
+from .models_config import get_models_dir, models_are_downloaded
+from .pipeline_manager import PipelineManager
+from .schema import (
     HardwareInfoResponse,
     HealthResponse,
     PipelineLoadRequest,
@@ -39,7 +39,7 @@ from lib.schema import (
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
-from lib.webrtc import WebRTCManager
+from .webrtc import WebRTCManager
 
 
 class STUNErrorFilter(logging.Filter):
@@ -87,9 +87,8 @@ stun_filter = STUNErrorFilter()
 logging.getLogger("asyncio").addFilter(stun_filter)
 
 # Set INFO level for your app modules
-logging.getLogger("app").setLevel(logging.INFO)
-logging.getLogger("lib").setLevel(logging.INFO)
-logging.getLogger("pipelines").setLevel(logging.INFO)
+logging.getLogger("scope.server").setLevel(logging.INFO)
+logging.getLogger("scope.core").setLevel(logging.INFO)
 
 # Set INFO level for uvicorn
 logging.getLogger("uvicorn.error").setLevel(logging.INFO)
@@ -148,7 +147,7 @@ def print_version_info():
 
 def configure_static_files():
     """Configure static file serving for production."""
-    frontend_dist = Path(__file__).parent / "frontend" / "dist"
+    frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
     if frontend_dist.exists():
         app.mount(
             "/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets"
@@ -260,7 +259,7 @@ async def health_check():
 @app.get("/")
 async def root():
     """Serve the frontend at the root URL."""
-    frontend_dist = Path(__file__).parent / "frontend" / "dist"
+    frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
 
     # Only serve SPA if frontend dist exists (production mode)
     if not frontend_dist.exists():
@@ -476,7 +475,7 @@ async def get_current_logs():
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
-    frontend_dist = Path(__file__).parent / "frontend" / "dist"
+    frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
 
     # Only serve SPA if frontend dist exists (production mode)
     if not frontend_dist.exists():
@@ -558,13 +557,13 @@ def main():
     configure_static_files()
 
     # Check if we're in production mode (frontend dist exists)
-    frontend_dist = Path(__file__).parent / "frontend" / "dist"
+    frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
     is_production = frontend_dist.exists()
 
     if is_production:
         # Create server instance for production mode
         config = uvicorn.Config(
-            "app:app",
+            "scope.server.app:app",
             host=args.host,
             port=args.port,
             reload=args.reload,
@@ -591,7 +590,7 @@ def main():
     else:
         # Development mode - just run normally
         uvicorn.run(
-            "app:app",
+            "scope.server.app:app",
             host=args.host,
             port=args.port,
             reload=args.reload,
