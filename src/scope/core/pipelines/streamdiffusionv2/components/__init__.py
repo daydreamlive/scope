@@ -1,3 +1,1 @@
-from .vae import WanVAEWrapper
-
-__all__ = ["WanVAEWrapper"]
+"""StreamDiffusionV2 pipeline components."""

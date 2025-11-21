@@ -8,17 +8,21 @@ from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_TEXT
 from ..interface import Pipeline, PipelineDefaults
-from ..process import postprocess_chunk
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .components import WanVAEWrapper
-from .modular_blocks import KreaRealtimeVideoBlocks
+from .modular_blocks import (
+    KreaRealtimeVideoTextBlocks,
+    KreaRealtimeVideoVideoBlocks,
+)
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
+
+# Chunk size for video input when operating in video-to-video mode
+CHUNK_SIZE = 4
 
 WARMUP_RUNS = 3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
@@ -26,6 +30,7 @@ WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
     NATIVE_GENERATION_MODE = GENERATION_MODE_TEXT
+    PIPELINE_REGISTRY_NAME = "krea_realtime_video"
 
     @classmethod
     def get_defaults(cls) -> PipelineDefaults:
@@ -35,6 +40,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
             "manage_cache": True,
             "base_seed": 42,
             "kv_cache_attention_bias": 0.30,
+            "input_size": CHUNK_SIZE,
         }
         return cls._build_defaults(
             shared=shared,
@@ -42,11 +48,13 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
                 "noise_controller": None,
+                "vae_strategy": "krea_realtime_video",
             },
             video_overrides={
                 "resolution": {"height": 320, "width": 320},
                 "noise_scale": 0.35,
                 "noise_controller": True,
+                "vae_strategy": "krea_realtime_video",
             },
         )
 
@@ -128,14 +136,14 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load vae
-        start = time.time()
-        vae = WanVAEWrapper(
-            model_name=base_model_name, model_dir=model_dir, vae_path=vae_path
+        # Initialize VAE lazy loading infrastructure
+        self._init_vae_lazy_loading(
+            device=device,
+            dtype=dtype,
+            model_name=base_model_name,
+            model_dir=model_dir,
+            vae_path=vae_path,
         )
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
-        # Move VAE to target device and use target dtype
-        vae = vae.to(device=device, dtype=dtype)
 
         # Create components config
         components_config = {}
@@ -146,7 +154,6 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         components = ComponentsManager(components_config)
         components.add("generator", generator)
         components.add("scheduler", generator.get_scheduler())
-        components.add("vae", vae)
         components.add("text_encoder", text_encoder)
 
         embedding_blender = EmbeddingBlender(
@@ -155,7 +162,11 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         )
         components.add("embedding_blender", embedding_blender)
 
-        self.blocks = KreaRealtimeVideoBlocks()
+        # Separate block graphs for text and video modes share the same
+        # underlying modular blocks but avoid requiring video inputs when
+        # running in pure text-to-video mode.
+        self.blocks_text = KreaRealtimeVideoTextBlocks()
+        self.blocks_video = KreaRealtimeVideoVideoBlocks()
         self.components = components
         self.state = PipelineState()
 
@@ -198,8 +209,4 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
-        if self.state.get("denoising_step_list") is None:
-            self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
-
-        _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        return self._prepare_and_execute_blocks(self.state, self.components, **kwargs)

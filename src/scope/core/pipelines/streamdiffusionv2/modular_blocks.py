@@ -8,6 +8,7 @@ from ..wan2_1.blocks import (
     DenoiseBlock,
     EmbeddingBlendingBlock,
     NoiseScaleControllerBlock,
+    PrepareLatentsBlock,
     PrepareNextBlock,
     PrepareVideoLatentsBlock,
     PreprocessVideoBlock,
@@ -18,8 +19,9 @@ from ..wan2_1.blocks import (
 
 logger = diffusers_logging.get_logger(__name__)
 
-# Main pipeline blocks for V2V workflow
-ALL_BLOCKS = InsertableDict(
+# Block sequences for StreamDiffusionV2
+# Video mode: consumes input video and uses motion-aware noise control.
+VIDEO_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("embedding_blending", EmbeddingBlendingBlock),
@@ -35,7 +37,29 @@ ALL_BLOCKS = InsertableDict(
     ]
 )
 
+# Text mode: pure text-to-video, no video-dependent blocks. We still run
+# EmbeddingBlendingBlock so that conditioning_embeds is produced for the
+# DenoiseBlock, matching the behaviour of the video path and other pipelines.
+TEXT_BLOCKS = InsertableDict(
+    [
+        ("text_conditioning", TextConditioningBlock),
+        ("embedding_blending", EmbeddingBlendingBlock),
+        ("set_timesteps", SetTimestepsBlock),
+        ("setup_caches", SetupCachesBlock),
+        ("prepare_latents", PrepareLatentsBlock),
+        ("denoise", DenoiseBlock),
+        ("clean_kv_cache", CleanKVCacheBlock),
+        ("decode", DecodeBlock),
+        ("prepare_next", PrepareNextBlock),
+    ]
+)
 
-class StreamDiffusionV2Blocks(SequentialPipelineBlocks):
-    block_classes = list(ALL_BLOCKS.values())
-    block_names = list(ALL_BLOCKS.keys())
+
+class StreamDiffusionV2VideoBlocks(SequentialPipelineBlocks):
+    block_classes = list(VIDEO_BLOCKS.values())
+    block_names = list(VIDEO_BLOCKS.keys())
+
+
+class StreamDiffusionV2TextBlocks(SequentialPipelineBlocks):
+    block_classes = list(TEXT_BLOCKS.values())
+    block_names = list(TEXT_BLOCKS.keys())

@@ -1,17 +1,21 @@
-# Modified from https://github.com/krea-ai/realtime-video
+"""KreaRealtimeVideo VAE wrapper with encoder/decoder separation."""
+
 import os
 
 import torch
 import torch.nn as nn
 
-from ..modules.vae import (
-    CausalConv3d,
-    WanVAE,
-)
-from ..modules.vae_block3 import VAEDecoder3d
+from ...krea_realtime_video.modules.vae import CausalConv3d, WanVAE
+from ...krea_realtime_video.modules.vae_block3 import VAEDecoder3d
 
 
-class WanVAEWrapper(torch.nn.Module):
+class KreaRealtimeVideoVAE(torch.nn.Module):
+    """VAE wrapper for KreaRealtimeVideo with separated encoder/decoder.
+
+    This VAE uses a specialized architecture optimized for real-time video
+    generation with cached encoding and decoding.
+    """
+
     def __init__(
         self,
         model_name: str = "Wan2.1-T2V-1.3B",
@@ -44,23 +48,44 @@ class WanVAEWrapper(torch.nn.Module):
         self.decoder_cache = [None] * 55
 
     def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
+        """Encode video pixels to latents with caching.
+
+        Args:
+            pixel: Input video tensor [batch, channels, frames, height, width]
+
+        Returns:
+            Latent tensor [batch, frames, channels, height, width]
+        """
         encoder_cache = [None] * 55
         output, _ = self.encoder(pixel, encoder_cache)
         # from [batch_size, num_channels, num_frames, height, width]
         # to [batch_size, num_frames, num_channels, height, width]
         return output.permute(0, 2, 1, 3, 4)
 
-    def decode_to_pixel(
-        self, latent: torch.Tensor, use_cache: bool = False
-    ) -> torch.Tensor:
+    def decode_to_pixel(self, latent: torch.Tensor) -> torch.Tensor:
+        """Decode latents to video pixels with cached processing.
+
+        Args:
+            latent: Latent tensor [batch, frames, channels, height, width]
+
+        Returns:
+            Video tensor [batch, frames, channels, height, width] in range [-1, 1]
+
+        Note:
+            This VAE always uses caching for decoder operations to maintain
+            temporal consistency across frames.
+        """
         output, self.decoder_cache = self.decoder(latent, *self.decoder_cache)
         return output
 
     def clear_cache(self):
+        """Clear decoder cache for next sequence."""
         self.decoder_cache = [None] * 55
 
 
 class VAEEncoderWrapper(nn.Module):
+    """Wrapper for KreaRealtimeVideo VAE encoder."""
+
     def __init__(self, vae):
         super().__init__()
         self.encoder = vae.model.encoder
@@ -101,23 +126,20 @@ class VAEEncoderWrapper(nn.Module):
             2.8251,
             1.9160,
         ]
-        self.register_buffer(
-            "mean", torch.tensor(mean, dtype=torch.float32)
-        )  # use buffers to make sure that these numbers get casted
+        self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32))
         self.register_buffer("std", torch.tensor(std, dtype=torch.float32))
         self.z_dim = 16
 
     def forward(
         self, z: torch.Tensor, feat_cache: list[torch.Tensor], stream: bool = False
     ):
+        """Forward pass through encoder with caching."""
         _, dtype = z.device, z.dtype
         scale = [self.mean.to(dtype=dtype), 1.0 / self.std.to(dtype=dtype)]
 
         # cache
         t = z.shape[2]
         iter_ = 1 + (t - 1) // 4
-        # 对encode输入的x，按时间拆分为1、4、4、4....
-        # range_iter = range(iter_) if
         offset = 1
         for i in range(iter_):
             self._enc_conv_idx = [0]
@@ -159,6 +181,8 @@ class VAEEncoderWrapper(nn.Module):
 
 
 class VAEDecoderWrapper(nn.Module):
+    """Wrapper for KreaRealtimeVideo VAE decoder."""
+
     def __init__(self):
         super().__init__()
         self.decoder = VAEDecoder3d()
@@ -199,14 +223,13 @@ class VAEDecoderWrapper(nn.Module):
             1.9160,
         ]
 
-        self.register_buffer(
-            "mean", torch.tensor(mean, dtype=torch.float32)
-        )  # use buffers to make sure that these numbers get casted
+        self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32))
         self.register_buffer("std", torch.tensor(std, dtype=torch.float32))
         self.z_dim = 16
         self.conv2 = CausalConv3d(self.z_dim, self.z_dim, 1)
 
     def forward(self, z: torch.Tensor, *feat_cache: list[torch.Tensor]):
+        """Forward pass through decoder with caching."""
         # from [batch_size, num_frames, num_channels, height, width]
         # to [batch_size, num_channels, num_frames, height, width]
         z = z.permute(0, 2, 1, 3, 4)
@@ -222,7 +245,6 @@ class VAEDecoderWrapper(nn.Module):
         else:
             z = z / scale[1] + scale[0]
         iter_ = z.shape[2]
-        # print("iter_", iter_)
         x = self.conv2(z)
         for i in range(iter_):
             if i == 0:

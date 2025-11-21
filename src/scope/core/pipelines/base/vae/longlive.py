@@ -1,12 +1,19 @@
-# Modified from https://github.com/NVlabs/LongLive
+"""LongLive VAE wrapper for batch-based encoding/decoding."""
+
 import os
 
 import torch
 
-from ..modules.vae import _video_vae
+from ...longlive.modules.vae import _video_vae
 
 
-class WanVAEWrapper(torch.nn.Module):
+class LongLiveVAE(torch.nn.Module):
+    """VAE wrapper for LongLive with batch-based processing.
+
+    This VAE processes entire video batches at once, providing higher quality
+    but requiring more memory than streaming approaches.
+    """
+
     def __init__(self, model_dir: str | None = None):
         super().__init__()
 
@@ -52,7 +59,7 @@ class WanVAEWrapper(torch.nn.Module):
         self.mean = torch.tensor(mean, dtype=torch.float32)
         self.std = torch.tensor(std, dtype=torch.float32)
 
-        # init model
+        # Init model
         vae_path = os.path.join(model_dir, "Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
         self.model = (
             _video_vae(
@@ -64,7 +71,14 @@ class WanVAEWrapper(torch.nn.Module):
         )
 
     def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
-        # pixel: [batch_size, num_channels, num_frames, height, width]
+        """Encode video pixels to latents with batch processing.
+
+        Args:
+            pixel: Input video tensor [batch, channels, frames, height, width]
+
+        Returns:
+            Latent tensor [batch, frames, channels, height, width]
+        """
         device, dtype = pixel.device, pixel.dtype
         scale = [
             self.mean.to(device=device, dtype=dtype),
@@ -83,6 +97,15 @@ class WanVAEWrapper(torch.nn.Module):
     def decode_to_pixel(
         self, latent: torch.Tensor, use_cache: bool = False
     ) -> torch.Tensor:
+        """Decode latents to video pixels with optional caching.
+
+        Args:
+            latent: Latent tensor [batch, frames, channels, height, width]
+            use_cache: Whether to use cached decoding for temporal consistency
+
+        Returns:
+            Video tensor [batch, frames, channels, height, width] in range [-1, 1]
+        """
         zs = latent.permute(0, 2, 1, 3, 4)
         if use_cache:
             assert latent.shape[0] == 1, "Batch size must be 1 when using cache"
@@ -110,4 +133,5 @@ class WanVAEWrapper(torch.nn.Module):
         return output
 
     def clear_cache(self):
+        """Clear decoder cache for next sequence."""
         self.model.clear_cache()

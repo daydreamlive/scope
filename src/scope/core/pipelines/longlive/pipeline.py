@@ -8,22 +8,24 @@ from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_TEXT
 from ..interface import Pipeline, PipelineDefaults
-from ..process import postprocess_chunk
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from .components import WanVAEWrapper
-from .modular_blocks import LongLiveBlocks
+from .modular_blocks import LongLiveTextBlocks, LongLiveVideoBlocks
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
+# Chunk size for video input when operating in video-to-video mode
+CHUNK_SIZE = 4
+
 
 class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
     NATIVE_GENERATION_MODE = GENERATION_MODE_TEXT
+    PIPELINE_REGISTRY_NAME = "longlive"
 
     @classmethod
     def get_defaults(cls) -> PipelineDefaults:
@@ -32,6 +34,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
             "manage_cache": True,
             "base_seed": 42,
+            "input_size": CHUNK_SIZE,
         }
         return cls._build_defaults(
             shared=shared,
@@ -39,11 +42,13 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
                 "noise_controller": None,
+                "vae_strategy": "longlive",
             },
             video_overrides={
                 "resolution": {"height": 512, "width": 512},
                 "noise_scale": 0.7,
                 "noise_controller": True,
+                "vae_strategy": "streamdiffusionv2_longlive_scaled",
             },
         )
 
@@ -114,12 +119,12 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE
-        start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
-        # Move VAE to target device and use target dtype
-        vae = vae.to(device=device, dtype=dtype)
+        # Initialize VAE lazy loading infrastructure
+        self._init_vae_lazy_loading(
+            device=device,
+            dtype=dtype,
+            model_dir=model_dir,
+        )
 
         # Create components config
         components_config = {}
@@ -130,7 +135,6 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         components = ComponentsManager(components_config)
         components.add("generator", generator)
         components.add("scheduler", generator.get_scheduler())
-        components.add("vae", vae)
         components.add("text_encoder", text_encoder)
 
         embedding_blender = EmbeddingBlender(
@@ -139,7 +143,11 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         )
         components.add("embedding_blender", embedding_blender)
 
-        self.blocks = LongLiveBlocks()
+        # Separate block graphs for text and video modes share the same
+        # underlying modular blocks but avoid requiring video inputs when
+        # running in pure text-to-video mode.
+        self.blocks_text = LongLiveTextBlocks()
+        self.blocks_video = LongLiveVideoBlocks()
         self.components = components
         self.state = PipelineState()
 
@@ -176,8 +184,4 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
-        if self.state.get("denoising_step_list") is None:
-            self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
-
-        _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        return self._prepare_and_execute_blocks(self.state, self.components, **kwargs)
