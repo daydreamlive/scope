@@ -6,6 +6,7 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
+from ..defaults import GENERATION_MODE_VIDEO
 from ..interface import Pipeline, PipelineDefaults, Requirements
 from ..process import postprocess_chunk
 from ..utils import load_model_config
@@ -24,16 +25,28 @@ CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
+    NATIVE_GENERATION_MODE = GENERATION_MODE_VIDEO
+
     @classmethod
     def get_defaults(cls) -> PipelineDefaults:
         """Return default parameters for StreamDiffusionV2 pipeline."""
-        return PipelineDefaults(
-            denoising_steps=DEFAULT_DENOISING_STEP_LIST,
-            resolution={"height": 512, "width": 512},
-            manage_cache=True,
-            base_seed=42,
-            noise_scale=0.7,
-            noise_controller=True,
+        shared = {
+            "resolution": {"height": 512, "width": 512},
+            "manage_cache": True,
+            "base_seed": 42,
+        }
+        return cls._build_defaults(
+            shared=shared,
+            text_overrides={
+                "denoising_steps": [1000, 750],
+                "noise_scale": None,
+                "noise_controller": None,
+            },
+            video_overrides={
+                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
+                "noise_scale": 0.7,
+                "noise_controller": True,
+            },
         )
 
     def __init__(
@@ -112,9 +125,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.components = components
         self.state = PipelineState()
 
-        # Initialize state with defaults
-        defaults = self.get_defaults()
-        self._initialize_state_with_defaults(self.state, config, defaults)
+        # Initialize state with native mode defaults
+        self._initialize_with_native_mode_defaults(self.state, config)
 
         self.first_call = True
 

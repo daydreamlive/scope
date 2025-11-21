@@ -5,8 +5,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from scope.core.pipelines.defaults import GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO
 from scope.core.pipelines.interface import PipelineDefaults
 from scope.core.pipelines.utils import Quantization
+
+# Type alias for generation mode using constants
+# Note: Literal requires string literals, so we reference constants in comments
+# GENERATION_MODE_VIDEO = "video", GENERATION_MODE_TEXT = "text"
+GenerationModeType = Literal["video", "text"]
 
 
 class HealthResponse(BaseModel):
@@ -88,6 +94,13 @@ class Parameters(BaseModel):
     lora_scales: list["LoRAScaleUpdate"] | None = Field(
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
+    )
+    generation_mode: GenerationModeType | None = Field(
+        default=None,
+        description=f"Generation mode for pipelines that support both text-to-video and video-to-video. "
+        f"Use '{GENERATION_MODE_VIDEO}' for video input consumption, '{GENERATION_MODE_TEXT}' for pure text-to-video. "
+        f"When set to '{GENERATION_MODE_VIDEO}', the pipeline will consume input video frames. "
+        f"When set to '{GENERATION_MODE_TEXT}', the pipeline will operate in pure text-to-video mode without consuming video input.",
     )
 
 

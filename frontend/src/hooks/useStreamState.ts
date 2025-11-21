@@ -11,6 +11,7 @@ import {
   type HardwareInfoResponse,
   type PipelineDefaultsResponse,
 } from "../lib/api";
+import { getCurrentModeConfig } from "../lib/utils";
 
 export function useStreamState() {
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
@@ -76,21 +77,26 @@ export function useStreamState() {
     const fetchDefaults = async () => {
       setIsLoadingDefaults(true);
       try {
-        const defaults = await getPipelineDefaults(settings.pipelineId);
+        const defaultsResponse = await getPipelineDefaults(settings.pipelineId);
 
         // Store defaults for reset functionality
-        setPipelineDefaults(defaults);
+        setPipelineDefaults(defaultsResponse);
 
-        setSettings(prev => ({
-          ...prev,
-          resolution: defaults.resolution,
-          seed: defaults.base_seed,
-          denoisingSteps: defaults.denoising_steps || [],
-          noiseScale: defaults.noise_scale ?? undefined,
-          noiseController: defaults.noise_controller ?? undefined,
-          manageCache: defaults.manage_cache,
-          kvCacheAttentionBias: defaults.kv_cache_attention_bias ?? undefined,
-        }));
+        // Extract native mode config using utility function
+        const defaults = getCurrentModeConfig(defaultsResponse);
+
+        if (defaults) {
+          setSettings(prev => ({
+            ...prev,
+            resolution: defaults.resolution,
+            seed: defaults.base_seed,
+            denoisingSteps: defaults.denoising_steps || [],
+            noiseScale: defaults.noise_scale ?? undefined,
+            noiseController: defaults.noise_controller ?? undefined,
+            manageCache: defaults.manage_cache,
+            kvCacheAttentionBias: defaults.kv_cache_attention_bias ?? undefined,
+          }));
+        }
         setIsLoadingDefaults(false);
       } catch (error) {
         console.error(
