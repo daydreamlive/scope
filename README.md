@@ -11,9 +11,9 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 ## Features
 
 - Autoregressive video diffusion models
-  - [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md) (video-to-video)
-  - [LongLive](./pipelines/longlive/docs/usage.md) (text-to-video)
-  - [Krea Realtime Video](./pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
+  - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md) (video-to-video)
+  - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video)
+  - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
 - WebRTC real-time streaming
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
@@ -111,9 +111,9 @@ The easiest way to get started is to replay an example generation and then modif
 
 Examples with importable timeline files can be found here:
 
-- [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md)
-- [LongLive](./pipelines/longlive/docs/usage.md)
-- [Krea Realtime Video](./pipelines/krea_realtime_video/docs/usage.md)
+- [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md)
+- [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md)
+- [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md)
 
 ## Firewalls
 

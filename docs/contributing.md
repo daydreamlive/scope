@@ -97,7 +97,7 @@ PIPELINE="longlive" uv run daydream-scope
 You can also test the `longlive` pipeline on its own:
 
 ```bash
-uv run -m pipelines.longlive.test
+uv run -m score.core.pipelines.longlive.test
 ```
 
 This test outputs a video file.
