@@ -8,6 +8,7 @@ from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
+from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
@@ -33,7 +34,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
 
-        model_config = getattr(config, "model_config", {})
+        model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
         generator_model_name = getattr(

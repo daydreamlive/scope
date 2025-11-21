@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from scope.core.pipelines.utils import Quantization
+
 
 class HealthResponse(BaseModel):
     """Health check response schema."""
@@ -127,12 +129,6 @@ class PipelineStatusEnum(str, Enum):
     LOADING = "loading"
     LOADED = "loaded"
     ERROR = "error"
-
-
-class Quantization(str, Enum):
-    """Quantization method enumeration."""
-
-    FP8_E4M3FN = "fp8_e4m3fn"
 
 
 class LoRAMergeMode(str, Enum):

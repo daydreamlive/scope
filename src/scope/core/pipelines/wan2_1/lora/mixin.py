@@ -13,7 +13,7 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
-from pipelines.wan2_1.lora import LoRAManager
+from .manager import LoRAManager
 
 logger = logging.getLogger(__name__)
 
