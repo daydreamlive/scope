@@ -52,14 +52,14 @@ export function usePipeline(options: UsePipelineOptions = {}) {
       console.error("Failed to get pipeline status:", err);
       const errorMessage =
         err instanceof Error ? err.message : "Failed to get pipeline status";
-        // Show toast for API errors
-        if (shownErrorRef.current !== errorMessage) {
-          toast.error("Pipeline Error", {
-            description: errorMessage,
-            duration: 10000, // Show longer for detailed errors
-          });
-          shownErrorRef.current = errorMessage;
-        }
+      // Show toast for API errors
+      if (shownErrorRef.current !== errorMessage) {
+        toast.error("Pipeline Error", {
+          description: errorMessage,
+          duration: 10000, // Show longer for detailed errors
+        });
+        shownErrorRef.current = errorMessage;
+      }
       setError(null); // Don't persist in state
     }
   }, []);
