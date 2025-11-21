@@ -115,6 +115,10 @@ Examples with importable timeline files can be found here:
 - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md)
 - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md)
 
+After your first generation you can:
+
+- Use [LoRAs](./docs/lora.md) to customize the concepts and styles used in your generations.
+
 ## Firewalls
 
 If you run Scope in a cloud environment with restrictive firewall settings (eg. Runpod), Scope supports using [TURN servers](https://webrtc.org/getting-started/turn-server) to establish a connection between your browser and the streaming server.
