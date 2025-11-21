@@ -258,16 +258,12 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    """Serve the frontend at the root URL or API info in server-only mode."""
+    """Serve the frontend at the root URL."""
     frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
 
     # Only serve SPA if frontend dist exists (production mode)
     if not frontend_dist.exists():
-        return {
-            "message": "Scope API - Frontend not built",
-            "api_docs": "/docs",
-            "health": "/health",
-        }
+        return {"message": "Scope API - Frontend not built"}
 
     # Serve the frontend index.html
     index_file = frontend_dist / "index.html"
@@ -479,10 +475,6 @@ async def get_current_logs():
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
-    # Skip frontend serving for API routes
-    if path.startswith("api/") or path.startswith("docs"):
-        raise HTTPException(status_code=404, detail="Not found")
-
     frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
 
     # Only serve SPA if frontend dist exists (production mode)
@@ -553,11 +545,6 @@ def main():
         action="store_true",
         help="Do not automatically open a browser window after the server starts",
     )
-    parser.add_argument(
-        "--server-only",
-        action="store_true",
-        help="Run in server-only mode (do not serve frontend)",
-    )
 
     args = parser.parse_args()
 
@@ -566,13 +553,12 @@ def main():
         print_version_info()
         sys.exit(0)
 
-    # Configure static file serving (skip if server-only mode)
-    if not args.server_only:
-        configure_static_files()
+    # Configure static file serving
+    configure_static_files()
 
     # Check if we're in production mode (frontend dist exists)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
-    is_production = frontend_dist.exists() and not args.server_only
+    is_production = frontend_dist.exists()
 
     if is_production:
         # Create server instance for production mode
