@@ -11,25 +11,25 @@ ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
-    # System dependencies
-    curl \
-    git \
-    build-essential \
-    software-properties-common \
-    # Dependencies required for OpenCV
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    python3-dev \
-    # Cleanup
-    && rm -rf /var/lib/apt/lists/*
+  # System dependencies
+  curl \
+  git \
+  build-essential \
+  software-properties-common \
+  # Dependencies required for OpenCV
+  libgl1-mesa-glx \
+  libglib2.0-0 \
+  libsm6 \
+  libxext6 \
+  libxrender-dev \
+  libgomp1 \
+  python3-dev \
+  # Cleanup
+  && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
+  && apt-get install -y nodejs
 
 # Install uv (Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -44,9 +44,7 @@ COPY frontend/ ./frontend/
 RUN cd frontend && npm install && npm run build
 
 # Copy project files
-COPY pipelines/ /app/pipelines/
-COPY lib/ /app/lib/
-COPY *.py /app/
+COPY src/ /app/src/
 
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
