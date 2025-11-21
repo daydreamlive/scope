@@ -302,8 +302,15 @@ class PipelineManager:
                 default_seed=42,
             )
 
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
             pipeline = StreamDiffusionV2Pipeline(
-                config, device=torch.device("cuda"), dtype=torch.bfloat16
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
             return pipeline
@@ -361,8 +368,15 @@ class PipelineManager:
                 default_seed=42,
             )
 
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
             pipeline = LongLivePipeline(
-                config, device=torch.device("cuda"), dtype=torch.bfloat16
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
             )
             logger.info("LongLive pipeline initialized")
             return pipeline
