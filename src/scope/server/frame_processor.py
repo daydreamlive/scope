@@ -65,6 +65,11 @@ class FrameProcessor:
 
         self.paused = False
 
+        # Track current generation mode to detect mode changes that should
+        # trigger a cache reset even if the frontend does not explicitly send
+        # reset_cache alongside the mode switch.
+        self.current_generation_mode: str | None = None
+
     def start(self):
         if self.running:
             return
@@ -235,8 +240,20 @@ class FrameProcessor:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
-        # prepare() will handle any required preparation based on parameters internally
-        reset_cache = self.parameters.pop("reset_cache", None)
+        # Detect generation mode changes and treat them as implicit cache
+        # resets if the caller has not requested one explicitly. This keeps
+        # pipeline state consistent when switching between text/video modes.
+        explicit_reset_cache = self.parameters.pop("reset_cache", None)
+        new_generation_mode = self.parameters.get("generation_mode")
+        reset_cache = explicit_reset_cache
+        if new_generation_mode is not None:
+            if new_generation_mode != self.current_generation_mode:
+                logger.info(
+                    f"process_chunk: Generation mode changed from {self.current_generation_mode} to {new_generation_mode}, scheduling cache reset"
+                )
+                self.current_generation_mode = new_generation_mode
+                if reset_cache is None:
+                    reset_cache = True
 
         # Pop lora_scales to prevent re-processing on every frame
         lora_scales = self.parameters.pop("lora_scales", None)

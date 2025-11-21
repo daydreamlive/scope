@@ -17,6 +17,7 @@ import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
+import { getCurrentModeConfig } from "../lib/utils";
 
 function buildLoRAParams(
   loras?: LoRAConfig[],
@@ -823,7 +824,9 @@ export function StreamPage() {
             onSeedChange={handleSeedChange}
             denoisingSteps={settings.denoisingSteps}
             onDenoisingStepsChange={handleDenoisingStepsChange}
-            denoisingStepsDefaults={pipelineDefaults?.denoising_steps}
+            denoisingStepsDefaults={
+              getCurrentModeConfig(pipelineDefaults)?.denoising_steps
+            }
             noiseScale={settings.noiseScale}
             onNoiseScaleChange={handleNoiseScaleChange}
             noiseController={settings.noiseController}

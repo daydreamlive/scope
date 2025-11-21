@@ -1,4 +1,12 @@
 import type { LoRAConfig } from "../types";
+
+// Generation mode constants - must match backend constants
+export const GENERATION_MODE_TEXT = "text";
+export const GENERATION_MODE_VIDEO = "video";
+export type GenerationMode =
+  | typeof GENERATION_MODE_TEXT
+  | typeof GENERATION_MODE_VIDEO;
+
 export interface PromptItem {
   text: string;
   weight: number;
@@ -22,6 +30,7 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
+    generation_mode?: GenerationMode;
   };
 }
 
@@ -70,8 +79,7 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
-export interface PipelineDefaultsResponse {
-  pipeline_id: string;
+export interface PipelineModeConfig {
   denoising_steps: number[] | null;
   resolution: { height: number; width: number };
   manage_cache: boolean;
@@ -79,6 +87,15 @@ export interface PipelineDefaultsResponse {
   noise_scale: number | null;
   noise_controller: boolean | null;
   kv_cache_attention_bias: number | null;
+}
+
+export interface PipelineDefaultsResponse {
+  pipeline_id: string;
+  native_generation_mode: GenerationMode;
+  modes: {
+    [GENERATION_MODE_TEXT]: PipelineModeConfig;
+    [GENERATION_MODE_VIDEO]: PipelineModeConfig;
+  };
 }
 
 export const sendWebRTCOffer = async (
