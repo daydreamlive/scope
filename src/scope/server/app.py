@@ -29,7 +29,7 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
-from .models_config import get_models_dir, models_are_downloaded
+from .models_config import ensure_models_dir, get_models_dir, models_are_downloaded
 from .pipeline_manager import PipelineManager
 from .schema import (
     HardwareInfoResponse,
@@ -194,8 +194,8 @@ async def lifespan(app: FastAPI):
     logs_dir = get_logs_dir()
     logger.info(f"Logs directory: {logs_dir}")
 
-    # Log models directory
-    models_dir = get_models_dir()
+    # Ensure models directory and lora subdirectory exist
+    models_dir = ensure_models_dir()
     logger.info(f"Models directory: {models_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
@@ -373,7 +373,7 @@ async def list_lora_files():
         )
 
     try:
-        lora_dir = Path("models/lora")
+        lora_dir = get_models_dir() / "lora"
         lora_files: list[LoRAFileInfo] = []
 
         if lora_dir.exists() and lora_dir.is_dir():
