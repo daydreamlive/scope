@@ -4,7 +4,10 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
+import queue
 import threading
+import time
+import traceback
 from enum import Enum
 from typing import Any
 
@@ -187,10 +190,8 @@ class PipelineManager:
 
         try:
             # Start worker process and load pipeline
-            success = self._start_worker_and_load_pipeline(pipeline_id, load_params)
-
-            if not success:
-                raise RuntimeError("Failed to load pipeline in worker process")
+            # This will raise RuntimeError if loading fails
+            self._start_worker_and_load_pipeline(pipeline_id, load_params)
 
             # Hold lock while updating state with loaded pipeline
             with self._lock:
@@ -198,13 +199,19 @@ class PipelineManager:
                 self._load_params = load_params
                 self._status = PipelineStatus.LOADED
 
-            logger.info(
-                f"Pipeline {pipeline_id} loaded successfully in worker process"
-            )
+            logger.info(f"Pipeline {pipeline_id} loaded successfully in worker process")
             return True
 
         except Exception as e:
-            error_msg = f"Failed to load pipeline {pipeline_id}: {str(e)}"
+            # Capture full error message including traceback for better debugging
+            error_details = str(e)
+            # If the error already contains detailed info, use it; otherwise add traceback
+            if (
+                "traceback" not in error_details.lower()
+                and "Worker process" not in error_details
+            ):
+                error_details = f"{error_details}\n{traceback.format_exc()}"
+            error_msg = f"Failed to load pipeline {pipeline_id}: {error_details}"
             logger.error(error_msg)
 
             # Hold lock while updating state with error
@@ -282,6 +289,9 @@ class PipelineManager:
 
         Returns:
             bool: True if successful, False otherwise
+
+        Raises:
+            RuntimeError: If worker process dies unexpectedly or fails to load pipeline
         """
         # Stop any existing worker first
         self._stop_worker()
@@ -311,23 +321,72 @@ class PipelineManager:
             }
         )
 
-        # Wait for response with timeout
-        try:
-            response = self._response_queue.get(timeout=PIPELINE_LOAD_TIMEOUT)
+        # Wait for response with timeout, checking if worker is still alive
+        start_time = time.time()
+        check_interval = 0.5  # Check worker status every 0.5 seconds
 
-            if response["status"] == WorkerResponse.SUCCESS.value:
-                logger.info(
-                    f"Pipeline loaded successfully in worker: {response.get('message')}"
+        while True:
+            # Check if worker process is still alive
+            if not self._worker_process.is_alive():
+                # Worker died unexpectedly - get exit code
+                exit_code = self._worker_process.exitcode
+                if exit_code is not None and exit_code != 0:
+                    # Process crashed (e.g., OOM, segmentation fault)
+                    if exit_code == -9:  # SIGKILL (often OOM killer)
+                        error_msg = (
+                            f"Worker process was killed (likely out of memory). "
+                            f"Exit code: {exit_code}. "
+                            f"Pipeline loading failed for {pipeline_id}."
+                        )
+                    elif exit_code < 0:
+                        error_msg = (
+                            f"Worker process crashed with signal {abs(exit_code)}. "
+                            f"Pipeline loading failed for {pipeline_id}."
+                        )
+                    else:
+                        error_msg = (
+                            f"Worker process exited unexpectedly with code {exit_code}. "
+                            f"Pipeline loading failed for {pipeline_id}."
+                        )
+                    logger.error(error_msg)
+                    raise RuntimeError(error_msg)
+                else:
+                    # Process exited normally but we didn't get a response
+                    error_msg = (
+                        f"Worker process exited before sending response. "
+                        f"Pipeline loading failed for {pipeline_id}."
+                    )
+                    logger.error(error_msg)
+                    raise RuntimeError(error_msg)
+
+            # Check for timeout
+            elapsed = time.time() - start_time
+            if elapsed >= PIPELINE_LOAD_TIMEOUT:
+                error_msg = (
+                    f"Timeout waiting for pipeline load response after {PIPELINE_LOAD_TIMEOUT}s. "
+                    f"Pipeline loading failed for {pipeline_id}."
                 )
-                return True
-            else:
-                error_msg = response.get("error", "Unknown error")
-                logger.error(f"Failed to load pipeline in worker: {error_msg}")
-                return False
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
 
-        except Exception as e:
-            logger.error(f"Error waiting for pipeline load response: {e}")
-            return False
+            # Try to get response with short timeout to allow periodic worker checks
+            try:
+                response = self._response_queue.get(timeout=check_interval)
+
+                if response["status"] == WorkerResponse.SUCCESS.value:
+                    logger.info(
+                        f"Pipeline loaded successfully in worker: {response.get('message')}"
+                    )
+                    return True
+                else:
+                    # Worker sent an error response
+                    error_msg = response.get("error", "Unknown error")
+                    logger.error(f"Failed to load pipeline in worker: {error_msg}")
+                    raise RuntimeError(f"Pipeline loading failed: {error_msg}")
+
+            except queue.Empty:
+                # Timeout on queue.get - continue loop to check worker status
+                continue
 
     def _stop_worker(self):
         """Stop the worker process if it's running.
