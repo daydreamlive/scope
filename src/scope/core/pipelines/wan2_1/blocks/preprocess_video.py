@@ -10,7 +10,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ...process import preprocess_chunk
+from scope.core.pipelines.process import preprocess_chunk
 
 
 class PreprocessVideoBlock(ModularPipelineBlocks):

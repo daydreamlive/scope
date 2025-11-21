@@ -9,7 +9,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ...blending import EmbeddingBlender, parse_transition_config
+from scope.core.pipelines.blending import EmbeddingBlender, parse_transition_config
 
 logger = logging.getLogger(__name__)
 

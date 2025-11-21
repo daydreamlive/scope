@@ -1,5 +1,5 @@
 # Modified from https://github.com/chenfengxu714/StreamdiffusionV2
-from ...wan2_1.modules.attention import attention
+from scope.core.pipelines.wan2_1.modules.attention import attention
 from .model import (
     WanRMSNorm,
     rope_apply,

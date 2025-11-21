@@ -8,7 +8,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 )
 from einops import rearrange
 
-from ...wan2_1.utils import initialize_kv_cache
+from scope.core.pipelines.wan2_1.utils import initialize_kv_cache
 
 
 class RecomputeKVCacheBlock(ModularPipelineBlocks):

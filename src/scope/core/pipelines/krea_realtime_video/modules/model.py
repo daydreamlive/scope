@@ -8,7 +8,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from einops import repeat
 
-from ...wan2_1.modules.attention import flash_attention, sageattn_func, SAGEATTN_AVAILABLE, FLASH_ATTN_2_AVAILABLE, FLASH_ATTN_3_AVAILABLE
+from scope.core.pipelines.wan2_1.modules.attention import flash_attention, sageattn_func, SAGEATTN_AVAILABLE, FLASH_ATTN_2_AVAILABLE, FLASH_ATTN_3_AVAILABLE
 print("SAGEATTN_AVAILABLE:", SAGEATTN_AVAILABLE)
 
 __all__ = ['WanModel']

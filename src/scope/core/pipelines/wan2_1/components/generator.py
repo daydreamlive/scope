@@ -6,7 +6,8 @@ import types
 
 import torch
 
-from ...utils import load_state_dict
+from scope.core.pipelines.utils import load_state_dict
+
 from .scheduler import FlowMatchScheduler, SchedulerInterface
 
 
