@@ -4,6 +4,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from diffusers.modular_pipelines import PipelineState
+
     from .interface import Pipeline
 
 logger = logging.getLogger(__name__)
@@ -92,3 +94,40 @@ def extract_load_params(
     seed = params.get("seed", default_seed)
 
     return height, width, seed
+
+
+def apply_mode_defaults_to_state(
+    state: "PipelineState",
+    pipeline_class: type["Pipeline"],
+    mode: str | None = None,
+    kwargs: dict | None = None,
+) -> None:
+    """Apply mode-specific defaults to pipeline state.
+
+    This consolidates the common pattern of applying defaults for denoising_steps,
+    noise_scale, and noise_controller based on the current generation mode.
+
+    Args:
+        state: PipelineState object to update
+        pipeline_class: The pipeline class to get defaults from
+        mode: Current generation mode (text/video). If None, uses native mode.
+        kwargs: Optional kwargs dict to check if parameter was explicitly provided
+    """
+    kwargs = kwargs or {}
+    mode_config = get_mode_config(pipeline_class, mode)
+
+    # Apply denoising steps if not provided
+    denoising_steps = mode_config.get("denoising_steps")
+    if "denoising_step_list" not in kwargs and denoising_steps:
+        state.set("denoising_step_list", denoising_steps)
+
+    # For text mode, noise controls should be None (not used)
+    if mode == GENERATION_MODE_TEXT:
+        state.set("noise_scale", None)
+        state.set("noise_controller", None)
+    else:
+        # For video mode, apply defaults if not provided
+        if "noise_scale" not in kwargs:
+            state.set("noise_scale", mode_config.get("noise_scale"))
+        if "noise_controller" not in kwargs:
+            state.set("noise_controller", mode_config.get("noise_controller"))

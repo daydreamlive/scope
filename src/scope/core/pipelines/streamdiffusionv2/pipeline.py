@@ -8,13 +8,11 @@ from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_VIDEO
 from ..helpers import build_pipeline_schema
-from ..interface import Pipeline, Requirements
-from ..process import postprocess_chunk
+from ..interface import Pipeline
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .components import WanVAEWrapper
-from .modular_blocks import StreamDiffusionV2Blocks
+from .modular_blocks import StreamDiffusionV2TextBlocks, StreamDiffusionV2VideoBlocks
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
@@ -98,12 +96,12 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE
-        start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
-        # Move VAE to target device and use target dtype
-        vae = vae.to(device=device, dtype=dtype)
+        # Initialize VAE lazy loading infrastructure
+        self._init_vae_lazy_loading(
+            device=device,
+            dtype=dtype,
+            model_dir=model_dir,
+        )
 
         # Create components config
         components_config = {}
@@ -114,7 +112,6 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         components = ComponentsManager(components_config)
         components.add("generator", generator)
         components.add("scheduler", generator.get_scheduler())
-        components.add("vae", vae)
         components.add("text_encoder", text_encoder)
 
         embedding_blender = EmbeddingBlender(
@@ -123,7 +120,11 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         )
         components.add("embedding_blender", embedding_blender)
 
-        self.blocks = StreamDiffusionV2Blocks()
+        # Separate block graphs for text and video modes share the same
+        # underlying modular blocks but avoid requiring video inputs when
+        # running in pure text-to-video mode.
+        self.blocks_video = StreamDiffusionV2VideoBlocks()
+        self.blocks_text = StreamDiffusionV2TextBlocks()
         self.components = components
         self.state = PipelineState()
 
@@ -135,9 +136,6 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         initialize_state_from_config(self.state, config, native_mode_config)
 
         self.first_call = True
-
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
-        return Requirements(input_size=CHUNK_SIZE)
 
     def __call__(
         self,
@@ -170,8 +168,4 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
-        if self.state.get("denoising_step_list") is None:
-            self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
-
-        _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        return self._prepare_and_execute_blocks(self.state, self.components, **kwargs)

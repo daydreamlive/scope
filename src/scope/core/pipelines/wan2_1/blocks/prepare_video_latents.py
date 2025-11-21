@@ -31,7 +31,10 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
 
     @property
     def description(self) -> str:
-        return "Prepare Video Latents block that generates noisy latents for a video that will be used for video generation"
+        return (
+            "Prepare Video Latents block that generates noisy latents from input video "
+            "for video-to-video generation."
+        )
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -77,6 +80,11 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
+        # Align video latents with the generator's dtype and device so that downstream
+        # convolutions (e.g. patch_embedding) always receive tensors compatible with
+        # model parameters. This mirrors the behaviour of PrepareLatentsBlock.
+        generator_param = next(components.generator.model.parameters())
+
         target_num_frames = (
             components.config.num_frame_per_block
             * components.config.vae_temporal_downsample_factor
@@ -102,10 +110,18 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
             )
             input_video = input_video[:, :, indices]
 
-        # Encode frames to latents using VAE
+        # Encode frames to latents using VAE. All VAE wrappers are expected to
+        # return latents in [batch, frames, channels, height, width] format so
+        # they can be passed directly into the Wan diffusion backbone, which
+        # denoises in [batch, frames, channels, ...] layout.
         latents = components.vae.encode_to_latent(input_video)
-        # Transpose latents
+        # Transpose latents from [batch, frames, channels, height, width] to
+        # [batch, channels, frames, height, width] for compatibility
         latents = latents.transpose(2, 1)
+
+        # Ensure latents match the generator's parameter dtype/device so that the
+        # Wan backbone (CausalWanModel) sees consistent types.
+        latents = latents.to(device=generator_param.device, dtype=generator_param.dtype)
 
         # The default param for InputParam does not work right now
         # The workaround is to set the default values here
@@ -115,13 +131,13 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
 
         # Create generator from seed for reproducible generation
         block_seed = base_seed + block_state.current_start_frame
-        rng = torch.Generator(device=components.config.device).manual_seed(block_seed)
+        rng = torch.Generator(device=generator_param.device).manual_seed(block_seed)
 
         # Generate empty latents (noise)
         noise = torch.randn(
             latents.shape,
-            device=components.config.device,
-            dtype=components.config.dtype,
+            device=generator_param.device,
+            dtype=generator_param.dtype,
             generator=rng,
         )
         # Determine how noisy the latents should be
