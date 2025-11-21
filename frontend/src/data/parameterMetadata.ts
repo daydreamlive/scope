@@ -70,11 +70,11 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   loraScale: {
     label: "Scale:",
     tooltip:
-      "Adjust LoRA strength. Updates automatically when you release the slider or use +/- buttons. 0.0 = no effect, 1.0 = full strength",
+      "Adjust LoRA strength. Updates automatically when you release the slider or use +/- buttons. Typical values: 0.0 = no effect, 1.0 = full strength. Full range -10.0 to 10.0 available depending on LoRA specifications.",
   },
   loraScaleDisabledDuringStream: {
     label: "Scale:",
     tooltip:
-      "Runtime adjustment is disabled with Permanent Merge strategy. LoRA scales are fixed at load time.",
+      "Runtime adjustment is disabled with Permanent Merge strategy. LoRA scales are fixed at load time. Typical values: 0.0 = no effect, 1.0 = full strength. Full range -10.0 to 10.0 available depending on LoRA specifications.",
   },
 };
