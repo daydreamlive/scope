@@ -35,16 +35,6 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> None:
 
 def main() -> None:
     """Main build function."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Build daydream-scope")
-    parser.add_argument(
-        "--server-only",
-        action="store_true",
-        help="Skip building the frontend (server-only mode)",
-    )
-    args = parser.parse_args()
-
     print("🚀 Building daydream-scope...")
 
     project_root = Path(__file__).parent.parent.parent.parent
@@ -55,10 +45,6 @@ def main() -> None:
             "❌ Error: pyproject.toml not found. Please run this script from the project root."
         )
         sys.exit(1)
-
-    if args.server_only:
-        print("⏭️  Skipping frontend build (server-only mode)")
-        return
 
     # Build frontend
     print("📦 Building frontend...")
