@@ -641,7 +641,9 @@ export function SettingsPanel({
           </div>
         )}
 
-        {pipelineId === "krea-realtime-video" && (
+        {(pipelineId === "longlive" ||
+          pipelineId === "streamdiffusionv2" ||
+          pipelineId === "krea-realtime-video") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">

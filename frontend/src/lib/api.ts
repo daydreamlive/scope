@@ -35,10 +35,20 @@ export interface PassthroughLoadParams extends PipelineLoadParams {
   width?: number;
 }
 
+export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
+  height?: number;
+  width?: number;
+  seed?: number;
+  quantization?: "fp8_e4m3fn" | null;
+  loras?: LoRAConfig[];
+  lora_merge_mode?: "permanent_merge" | "runtime_peft";
+}
+
 export interface LongLiveLoadParams extends PipelineLoadParams {
   height?: number;
   width?: number;
   seed?: number;
+  quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
 }
@@ -56,6 +66,7 @@ export interface PipelineLoadRequest {
   pipeline_id?: string;
   load_params?:
     | PassthroughLoadParams
+    | StreamDiffusionV2LoadParams
     | LongLiveLoadParams
     | KreaRealtimeVideoLoadParams
     | null;
