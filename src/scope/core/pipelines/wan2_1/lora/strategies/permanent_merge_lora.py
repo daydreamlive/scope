@@ -149,15 +149,13 @@ class PermanentMergeLoRAStrategy:
         # Load from in-memory state dict
         from pathlib import Path
 
-        from pipelines.wan2_1.lora.utils import sanitize_adapter_name
+        from ..utils import parse_lora_weights, sanitize_adapter_name
 
         adapter_name = sanitize_adapter_name(Path(lora_path).stem)
 
         # Parse the converted state dict through PeftLoRAStrategy
         # to inject LoRA layers (this handles the PEFT wrapping)
         model_state = model.state_dict()
-        from pipelines.wan2_1.lora.utils import parse_lora_weights
-
         lora_mapping = parse_lora_weights(converted_state, model_state)
 
         # Inject PEFT LoRA layers
