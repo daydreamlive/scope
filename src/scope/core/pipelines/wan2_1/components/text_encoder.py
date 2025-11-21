@@ -3,7 +3,8 @@ import os
 
 import torch
 
-from ...utils import load_state_dict
+from scope.core.pipelines.utils import load_state_dict
+
 from ..modules.t5 import umt5_xxl
 from ..modules.tokenizers import HuggingfaceTokenizer
 

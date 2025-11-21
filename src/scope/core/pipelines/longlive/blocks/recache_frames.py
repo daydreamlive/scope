@@ -7,7 +7,10 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ...wan2_1.utils import initialize_crossattn_cache, initialize_kv_cache
+from scope.core.pipelines.wan2_1.utils import (
+    initialize_crossattn_cache,
+    initialize_kv_cache,
+)
 
 
 class RecacheFramesBlock(ModularPipelineBlocks):

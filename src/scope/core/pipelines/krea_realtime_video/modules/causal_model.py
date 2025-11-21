@@ -12,7 +12,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 
-from ...wan2_1.modules.attention import attention
+from scope.core.pipelines.wan2_1.modules.attention import attention
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
