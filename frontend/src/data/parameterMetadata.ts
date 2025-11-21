@@ -67,4 +67,14 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "LoRA merge strategy affects performance and update capabilities. Permanent Merge: Maximum performance, no runtime updates. Runtime PEFT: Lower performance, instant runtime updates.",
   },
+  loraScale: {
+    label: "Scale:",
+    tooltip:
+      "Adjust LoRA strength. Updates automatically when you release the slider or use +/- buttons. 0.0 = no effect, 1.0 = full strength",
+  },
+  loraScaleDisabledDuringStream: {
+    label: "Scale:",
+    tooltip:
+      "Runtime adjustment is disabled with Permanent Merge strategy. LoRA scales are fixed at load time.",
+  },
 };
