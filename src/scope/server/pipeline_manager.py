@@ -267,7 +267,7 @@ class PipelineManager:
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
         if pipeline_id == "streamdiffusionv2":
-            from scope.core.pipelines.streamdiffusionv2.pipeline import (
+            from scope.core.pipelines import (
                 StreamDiffusionV2Pipeline,
             )
 
@@ -309,7 +309,7 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "passthrough":
-            from scope.core.pipelines.passthrough.pipeline import PassthroughPipeline
+            from scope.core.pipelines import PassthroughPipeline
 
             # Use load parameters for resolution, default to 512x512
             height = 512
@@ -328,7 +328,7 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "longlive":
-            from scope.core.pipelines.longlive.pipeline import LongLivePipeline
+            from scope.core.pipelines import LongLivePipeline
 
             from .models_config import get_model_file_path, get_models_dir
 
@@ -368,7 +368,7 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "krea-realtime-video":
-            from scope.core.pipelines.krea_realtime_video.pipeline import (
+            from scope.core.pipelines import (
                 KreaRealtimeVideoPipeline,
             )
 
