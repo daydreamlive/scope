@@ -151,22 +151,6 @@ def find_lora_pair(
     return (base_key, alpha_key, lora_A, lora_B)
 
 
-def calculate_lora_scale(alpha: float | None, rank: int) -> float:
-    """
-    Calculate LoRA scale from alpha and rank.
-
-    Args:
-        alpha: LoRA alpha value (optional)
-        rank: LoRA rank (dimension of low-rank matrices)
-
-    Returns:
-        Scale value (alpha / rank if alpha provided, else 1.0)
-    """
-    if alpha is not None:
-        return alpha / rank
-    return 1.0
-
-
 def standardize_lora_for_peft(
     lora_path: str, model: torch.nn.Module
 ) -> dict[str, torch.Tensor] | None:
