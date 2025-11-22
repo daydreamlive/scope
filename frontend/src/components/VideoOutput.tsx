@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, type RefObject } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
+import { WhepClient } from "@/lib/WhepClient";
 
 interface VideoOutputProps {
   className?: string;
@@ -16,6 +18,7 @@ interface VideoOutputProps {
   onVideoPlaying?: () => void;
 }
 
+
 export function VideoOutput({
   className = "",
   remoteStream,
@@ -28,7 +31,9 @@ export function VideoOutput({
   onStartStream,
   onVideoPlaying,
 }: VideoOutputProps) {
+  const { playbackUrl } = usePlaybackUrl();
   const videoRef = useRef<HTMLVideoElement>(null);
+
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
@@ -126,13 +131,15 @@ export function VideoOutput({
     };
   }, []);
 
+  useWhepConnection(playbackUrl, videoRef);
+
   return (
     <Card className={`h-full flex flex-col ${className}`}>
       <CardHeader className="flex-shrink-0">
         <CardTitle className="text-base font-medium">Video Output</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
-        {remoteStream ? (
+        {remoteStream || playbackUrl ? (
           <div
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
@@ -189,3 +196,34 @@ export function VideoOutput({
     </Card>
   );
 }
+
+export const useWhepConnection = (
+  playbackUrl: string | null | undefined,
+  videoRef: RefObject<HTMLVideoElement | null>,
+  depsKey?: number,
+) => {
+  const clientRef = useRef<WhepClient | null>(null);
+
+  useEffect(() => {
+    if (!playbackUrl) {
+      if (clientRef.current) {
+        void clientRef.current.stop();
+        clientRef.current = null;
+      }
+      return;
+    }
+
+    const client = new WhepClient(playbackUrl, () => videoRef.current);
+    clientRef.current = client;
+    client.start();
+
+    return () => {
+      if (clientRef.current) {
+        void clientRef.current.stop();
+        clientRef.current = null;
+      }
+    };
+  }, [playbackUrl, videoRef, depsKey]);
+
+  return null;
+};

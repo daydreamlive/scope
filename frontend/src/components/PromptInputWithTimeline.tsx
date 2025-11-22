@@ -19,6 +19,7 @@ interface PromptInputWithTimelineProps {
   ) => void;
   disabled?: boolean;
   isStreaming?: boolean;
+  isStreamingCloud?: boolean;
   isVideoPaused?: boolean;
   timelineRef?: React.RefObject<{
     getCurrentTimelinePrompt: () => string;
@@ -54,6 +55,7 @@ export function PromptInputWithTimeline({
   onPromptItemsSubmit,
   disabled = false,
   isStreaming = false,
+  isStreamingCloud = false,
   isVideoPaused = false,
   timelineRef,
   selectedPrompt: _selectedPrompt = null,
@@ -105,12 +107,33 @@ export function PromptInputWithTimeline({
   } = useTimelinePlayback({
     onPromptChange: onPromptSubmit,
     onPromptItemsChange: onPromptItemsSubmit,
-    isStreaming,
+    isStreaming: isStreaming || isStreamingCloud,
     isVideoPaused,
     onPromptsChange: onTimelinePromptsChange,
     onCurrentTimeChange: onTimelineCurrentTimeChange,
     onPlayingChange: onTimelinePlayingChange,
   });
+
+  // Debug: Log prompt changes
+  useEffect(() => {
+    console.log("[PromptInputWithTimeline] Prompts changed:", {
+      prompts,
+      promptCount: prompts.length,
+      isStreaming,
+      isStreamingCloud,
+      disabled,
+    });
+  }, [prompts, isStreaming, isStreamingCloud, disabled]);
+
+  // Debug: Log when callbacks are called
+  useEffect(() => {
+    console.log("[PromptInputWithTimeline] Callbacks:", {
+      hasOnPromptSubmit: !!onPromptSubmit,
+      hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
+      isStreaming,
+      isStreamingCloud,
+    });
+  }, [onPromptSubmit, onPromptItemsSubmit, isStreaming, isStreamingCloud]);
 
   // Compute actual playing state - timeline is playing AND video is not paused
   const isActuallyPlaying = isPlaying && !isVideoPaused;
@@ -204,10 +227,25 @@ export function PromptInputWithTimeline({
 
   // Reset hasStartedPlayback when stream stops
   React.useEffect(() => {
-    if (!isStreaming) {
+    if (!isStreaming && !isStreamingCloud) {
       setHasStartedPlayback(false);
     }
-  }, [isStreaming]);
+  }, [isStreaming, isStreamingCloud]);
+
+  // Debug: Log component props and state
+  useEffect(() => {
+    console.log("[PromptInputWithTimeline] Component state:", {
+      disabled,
+      isStreaming,
+      isStreamingCloud,
+      isVideoPaused,
+      isActuallyPlaying,
+      promptsCount: prompts.length,
+      currentTime,
+      hasOnPromptSubmit: !!onPromptSubmit,
+      hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
+    });
+  }, [disabled, isStreaming, isStreamingCloud, isVideoPaused, isActuallyPlaying, prompts.length, currentTime, onPromptSubmit, onPromptItemsSubmit]);
 
   const buildLivePromptFromCurrent = useCallback(
     (start: number, end: number): TimelinePrompt => {
@@ -246,7 +284,7 @@ export function PromptInputWithTimeline({
 
   // Initialize stream if needed
   const initializeStream = useCallback(async (): Promise<boolean> => {
-    if (!isStreaming && onStartStream) {
+    if (!isStreaming && !isStreamingCloud && onStartStream) {
       const result = await onStartStream();
       const started = result === true; // Treat undefined/void as false
       if (started) {
@@ -255,8 +293,8 @@ export function PromptInputWithTimeline({
       }
       return false;
     }
-    return isStreaming; // Already streaming
-  }, [isStreaming, onStartStream]);
+    return true; // Already streaming
+  }, [isStreaming, isStreamingCloud, onStartStream]);
 
   // Check if at end of timeline
   const isAtTimelineEnd = useCallback(() => {
@@ -291,6 +329,7 @@ export function PromptInputWithTimeline({
 
       // Only create a new live prompt if there are no prompts at all in the timeline
       if (prompts.length === 0) {
+        console.log("[PromptInputWithTimeline] Creating new live prompt ", prompts);
         const streamStartedAgain = await initializeStream();
         if (streamStartedAgain) {
           const livePrompt = buildLivePromptFromCurrent(
@@ -563,7 +602,7 @@ export function PromptInputWithTimeline({
         settings={settings}
         onSettingsImport={onSettingsImport}
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
-        isStreaming={isStreaming}
+        isStreaming={isStreaming || isStreamingCloud}
         isDownloading={isDownloading}
       />
     </div>
