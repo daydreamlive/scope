@@ -156,6 +156,15 @@ class LoRAConfig(BaseModel):
             "Adapter strength/weight (-10.0 to 10.0, 0.0 = disabled, 1.0 = full strength)."
         ),
     )
+    merge_mode: LoRAMergeMode | None = Field(
+        default=None,
+        description=(
+            "Optional merge strategy for this specific LoRA. "
+            "If not specified, uses the pipeline's default lora_merge_mode. "
+            "Permanent merge offers maximum FPS but no runtime updates; "
+            "runtime_peft offers instant updates at reduced FPS."
+        ),
+    )
 
 
 class LoRAScaleUpdate(BaseModel):

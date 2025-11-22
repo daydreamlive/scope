@@ -22,9 +22,16 @@ import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 function buildLoRAParams(
   loras?: LoRAConfig[],
   strategy?: LoraMergeStrategy
-): { loras?: { path: string; scale: number }[]; lora_merge_mode: string } {
+): {
+  loras?: { path: string; scale: number; merge_mode?: string }[];
+  lora_merge_mode: string;
+} {
   return {
-    loras: loras?.map(({ path, scale }) => ({ path, scale })),
+    loras: loras?.map(({ path, scale, mergeMode }) => ({
+      path,
+      scale,
+      ...(mergeMode && { merge_mode: mergeMode }),
+    })),
     lora_merge_mode: strategy ?? "permanent_merge",
   };
 }
@@ -339,13 +346,6 @@ export function StreamPage() {
       );
     }
     // Note: Adding/removing LoRAs requires pipeline reload
-  };
-
-  const handleLoraMergeStrategyChange = (
-    loraMergeStrategy: "permanent_merge" | "runtime_peft"
-  ) => {
-    updateSettings({ loraMergeStrategy });
-    // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
   const handleResetCache = () => {
@@ -841,7 +841,6 @@ export function StreamPage() {
             loras={settings.loras || []}
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
-            onLoraMergeStrategyChange={handleLoraMergeStrategyChange}
           />
         </div>
       </div>
