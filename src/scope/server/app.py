@@ -257,7 +257,7 @@ async def health_check():
 
 
 @app.get("/ping")
-async def ping():
+async def ping(webrtc_manager: WebRTCManager = Depends(get_webrtc_manager)):
     """Health check endpoint required by RunPod Serverless load balancer."""
     return {"status": "healthy"}
 
@@ -322,16 +322,49 @@ async def handle_webrtc_offer(
 ):
     """Handle WebRTC offer and return answer."""
     try:
-        # Ensure pipeline is loaded before proceeding
+        # Check current pipeline status
         status_info = await pipeline_manager.get_status_info_async()
-        if status_info["status"] != "loaded":
-            raise HTTPException(
-                status_code=400,
-                detail="Pipeline not loaded. Please load pipeline first.",
+
+        # If pipeline is not loaded or not passthrough, load passthrough pipeline
+        if (
+            status_info["status"] != "loaded"
+            or status_info["pipeline_id"] != "passthrough"
+        ):
+            logger.info("Loading passthrough pipeline for WebRTC offer")
+
+            # Load passthrough pipeline with default parameters
+            # Default resolution is 512x512, but we can extract from request if needed
+            load_params = {}
+            if request.initialParameters:
+                # Extract resolution from initial parameters if available
+                initial_params = request.initialParameters.model_dump(exclude_none=True)
+                if "height" in initial_params:
+                    load_params["height"] = initial_params["height"]
+                if "width" in initial_params:
+                    load_params["width"] = initial_params["width"]
+
+            # Load the passthrough pipeline and wait for it to complete
+            success = await pipeline_manager.load_pipeline(
+                "passthrough", load_params if load_params else None
             )
+
+            if not success:
+                # Check if there was an error
+                status_info = await pipeline_manager.get_status_info_async()
+                error_msg = status_info.get(
+                    "error", "Unknown error loading passthrough pipeline"
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to load passthrough pipeline: {error_msg}",
+                )
+
+            logger.info("Passthrough pipeline loaded successfully")
 
         return await webrtc_manager.handle_offer(request, pipeline_manager)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
