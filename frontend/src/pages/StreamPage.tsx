@@ -195,14 +195,17 @@ export function StreamPage() {
 
   // Handle parameter updates - cloud mode vs local mode
   const handleParameterUpdate = useCallback((params: Parameters<typeof sendParameterUpdate>[0]) => {
+    console.trace("[StreamPage] handleParameterUpdate", params);
     if (settings.cloudMode) {
       if (!activeStream?.id) {
         return;
       }
 
+      const prompts = params.prompts || params.transition?.target_prompts || undefined;
+
       // Convert local params format to Daydream API format
       const streamParams = convertToStreamParams(
-        'prompts' in params ? params.prompts : undefined,
+        prompts,
         'denoising_step_list' in params && Array.isArray(params.denoising_step_list) ? params.denoising_step_list : undefined,
       );
 
@@ -475,6 +478,7 @@ export function StreamPage() {
   };
 
   const handleLivePromptSubmit = (prompts: PromptItem[]) => {
+    console.log("[StreamPage] handleLivePromptSubmit", prompts);
     // Use the timeline ref to submit the prompt
     if (timelineRef.current) {
       timelineRef.current.submitLivePrompt(prompts);
@@ -894,6 +898,7 @@ export function StreamPage() {
               transitionSteps={transitionSteps}
               temporalInterpolationMethod={temporalInterpolationMethod}
               onPromptSubmit={text => {
+                console.log("[StreamPage] onPromptSubmit", text);
                 // Update the left panel's prompt state to reflect current timeline prompt
                 const prompts = [{ text, weight: 100 }];
                 setPromptItems(prompts);
@@ -922,6 +927,7 @@ export function StreamPage() {
                 blockTransitionSteps,
                 blockTemporalInterpolationMethod
               ) => {
+                console.log("[StreamPage] onPromptItemsSubmit", prompts);
                 // Update the left panel's prompt state to reflect current timeline prompt blend
                 setPromptItems(prompts);
 
@@ -967,7 +973,7 @@ export function StreamPage() {
                 isConnecting ||
                 showDownloadDialog
               }
-              isStreaming={isStreaming}
+              isStreaming={isStreaming || isStreamingCloud}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}
               onLiveStateChange={setIsLive}
@@ -988,7 +994,6 @@ export function StreamPage() {
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
               isDownloading={isDownloading}
-              isStreamingCloud={isStreamingCloud}
             />
           </div>
         </div>

@@ -47,7 +47,7 @@ export function VideoOutput({
   // Listen for video playing event to notify parent
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !remoteStream) return;
+    if (!video || !(remoteStream || playbackUrl)) return;
 
     const handlePlaying = () => {
       onVideoPlaying?.();
@@ -64,10 +64,11 @@ export function VideoOutput({
     return () => {
       video.removeEventListener("playing", handlePlaying);
     };
-  }, [onVideoPlaying, remoteStream]);
+  }, [onVideoPlaying, remoteStream, playbackUrl]);
 
   const triggerPlayPause = useCallback(() => {
-    if (onPlayPauseToggle && remoteStream) {
+    // Allow play/pause when we have either a direct MediaStream or a cloud playback URL
+    if (onPlayPauseToggle && (remoteStream || playbackUrl)) {
       onPlayPauseToggle();
 
       // Show overlay and immediately start fade out animation
@@ -89,7 +90,7 @@ export function VideoOutput({
         setIsFadingOut(false);
       }, 400);
     }
-  }, [onPlayPauseToggle, remoteStream]);
+  }, [onPlayPauseToggle, remoteStream, playbackUrl]);
 
   const handleVideoClick = () => {
     triggerPlayPause();
@@ -99,7 +100,7 @@ export function VideoOutput({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only trigger if spacebar is pressed and stream is active
-      if (e.code === "Space" && remoteStream) {
+      if (e.code === "Space" && (remoteStream || playbackUrl)) {
         // Don't trigger if user is typing in an input/textarea/select or any contenteditable element
         const target = e.target as HTMLElement;
         const isInputFocused =
@@ -120,7 +121,7 @@ export function VideoOutput({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [remoteStream, triggerPlayPause]);
+  }, [remoteStream, playbackUrl, triggerPlayPause]);
 
   // Cleanup timeout on unmount
   useEffect(() => {

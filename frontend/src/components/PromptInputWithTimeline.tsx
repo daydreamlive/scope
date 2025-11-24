@@ -19,7 +19,6 @@ interface PromptInputWithTimelineProps {
   ) => void;
   disabled?: boolean;
   isStreaming?: boolean;
-  isStreamingCloud?: boolean;
   isVideoPaused?: boolean;
   timelineRef?: React.RefObject<{
     getCurrentTimelinePrompt: () => string;
@@ -55,7 +54,6 @@ export function PromptInputWithTimeline({
   onPromptItemsSubmit,
   disabled = false,
   isStreaming = false,
-  isStreamingCloud = false,
   isVideoPaused = false,
   timelineRef,
   selectedPrompt: _selectedPrompt = null,
@@ -107,7 +105,7 @@ export function PromptInputWithTimeline({
   } = useTimelinePlayback({
     onPromptChange: onPromptSubmit,
     onPromptItemsChange: onPromptItemsSubmit,
-    isStreaming: isStreaming || isStreamingCloud,
+    isStreaming,
     isVideoPaused,
     onPromptsChange: onTimelinePromptsChange,
     onCurrentTimeChange: onTimelineCurrentTimeChange,
@@ -115,25 +113,23 @@ export function PromptInputWithTimeline({
   });
 
   // Debug: Log prompt changes
-  useEffect(() => {
-    console.log("[PromptInputWithTimeline] Prompts changed:", {
-      prompts,
-      promptCount: prompts.length,
-      isStreaming,
-      isStreamingCloud,
-      disabled,
-    });
-  }, [prompts, isStreaming, isStreamingCloud, disabled]);
+  // useEffect(() => {
+  //   console.log("[PromptInputWithTimeline] Prompts changed:", {
+  //     prompts,
+  //     promptCount: prompts.length,
+  //     isStreaming,
+  //     disabled,
+  //   });
+  // }, [prompts, isStreaming, disabled]);
 
   // Debug: Log when callbacks are called
-  useEffect(() => {
-    console.log("[PromptInputWithTimeline] Callbacks:", {
-      hasOnPromptSubmit: !!onPromptSubmit,
-      hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
-      isStreaming,
-      isStreamingCloud,
-    });
-  }, [onPromptSubmit, onPromptItemsSubmit, isStreaming, isStreamingCloud]);
+  // useEffect(() => {
+  //   console.log("[PromptInputWithTimeline] Callbacks:", {
+  //     hasOnPromptSubmit: !!onPromptSubmit,
+  //     hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
+  //     isStreaming,
+  //   });
+  // }, [onPromptSubmit, onPromptItemsSubmit, isStreaming]);
 
   // Compute actual playing state - timeline is playing AND video is not paused
   const isActuallyPlaying = isPlaying && !isVideoPaused;
@@ -227,25 +223,24 @@ export function PromptInputWithTimeline({
 
   // Reset hasStartedPlayback when stream stops
   React.useEffect(() => {
-    if (!isStreaming && !isStreamingCloud) {
+    if (!isStreaming) {
       setHasStartedPlayback(false);
     }
-  }, [isStreaming, isStreamingCloud]);
+  }, [isStreaming]);
 
   // Debug: Log component props and state
-  useEffect(() => {
-    console.log("[PromptInputWithTimeline] Component state:", {
-      disabled,
-      isStreaming,
-      isStreamingCloud,
-      isVideoPaused,
-      isActuallyPlaying,
-      promptsCount: prompts.length,
-      currentTime,
-      hasOnPromptSubmit: !!onPromptSubmit,
-      hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
-    });
-  }, [disabled, isStreaming, isStreamingCloud, isVideoPaused, isActuallyPlaying, prompts.length, currentTime, onPromptSubmit, onPromptItemsSubmit]);
+  // useEffect(() => {
+  //   console.log("[PromptInputWithTimeline] Component state:", {
+  //     disabled,
+  //     isStreaming,
+  //     isVideoPaused,
+  //     isActuallyPlaying,
+  //     promptsCount: prompts.length,
+  //     currentTime,
+  //     hasOnPromptSubmit: !!onPromptSubmit,
+  //     hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
+  //   });
+  // }, [disabled, isStreaming, isVideoPaused, isActuallyPlaying, prompts.length, currentTime, onPromptSubmit, onPromptItemsSubmit]);
 
   const buildLivePromptFromCurrent = useCallback(
     (start: number, end: number): TimelinePrompt => {
@@ -284,7 +279,7 @@ export function PromptInputWithTimeline({
 
   // Initialize stream if needed
   const initializeStream = useCallback(async (): Promise<boolean> => {
-    if (!isStreaming && !isStreamingCloud && onStartStream) {
+    if (!isStreaming && onStartStream) {
       const result = await onStartStream();
       const started = result === true; // Treat undefined/void as false
       if (started) {
@@ -294,7 +289,7 @@ export function PromptInputWithTimeline({
       return false;
     }
     return true; // Already streaming
-  }, [isStreaming, isStreamingCloud, onStartStream]);
+  }, [isStreaming, onStartStream]);
 
   // Check if at end of timeline
   const isAtTimelineEnd = useCallback(() => {
@@ -327,6 +322,7 @@ export function PromptInputWithTimeline({
       setIsLive(true);
       onLiveStateChange?.(true);
 
+      console.log("[PromptInputWithTimeline] handleStartPlayback", prompts.length);
       // Only create a new live prompt if there are no prompts at all in the timeline
       if (prompts.length === 0) {
         console.log("[PromptInputWithTimeline] Creating new live prompt ", prompts);
@@ -602,7 +598,7 @@ export function PromptInputWithTimeline({
         settings={settings}
         onSettingsImport={onSettingsImport}
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
-        isStreaming={isStreaming || isStreamingCloud}
+        isStreaming={isStreaming}
         isDownloading={isDownloading}
       />
     </div>

@@ -178,6 +178,7 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
 
   // Start playback
   const startPlayback = useCallback(() => {
+    console.log("[useTimelinePlayback] Starting playback");
     setIsPlaying(true);
     startTimeRef.current = performance.now() - currentTime * 1000;
 
