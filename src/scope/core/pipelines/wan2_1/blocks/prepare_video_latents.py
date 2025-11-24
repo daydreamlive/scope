@@ -85,6 +85,17 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         # model parameters. This mirrors the behaviour of PrepareLatentsBlock.
         generator_param = next(components.generator.model.parameters())
 
+        # If no video is provided, skip video latent preparation.
+        # This allows pipelines to share the same block graph for both
+        # text-to-video and video-to-video workflows.
+        if not hasattr(block_state, "video") or block_state.video is None:
+            # When there is no video input, we rely on latents prepared by
+            # other blocks (e.g. PrepareLatentsBlock) and mark that no
+            # input video was used.
+            block_state.input_video = False
+            self.set_block_state(state, block_state)
+            return components, state
+
         target_num_frames = (
             components.config.num_frame_per_block
             * components.config.vae_temporal_downsample_factor
@@ -115,9 +126,10 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         # they can be passed directly into the Wan diffusion backbone, which
         # denoises in [batch, frames, channels, ...] layout.
         latents = components.vae.encode_to_latent(input_video)
-        # Transpose latents from [batch, frames, channels, height, width] to
-        # [batch, channels, frames, height, width] for compatibility
-        latents = latents.transpose(2, 1)
+
+        # Ensure latents match the generator's parameter dtype/device so that the
+        # Wan backbone (CausalWanModel) sees consistent types.
+        latents = latents.to(device=generator_param.device, dtype=generator_param.dtype)
 
         # Ensure latents match the generator's parameter dtype/device so that the
         # Wan backbone (CausalWanModel) sees consistent types.
