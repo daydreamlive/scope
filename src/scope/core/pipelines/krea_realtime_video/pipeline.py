@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
-WARMUP_RUNS = 3
+# Warm-up configuration for torch.compile pre-compilation
+# Use a non-1.0 value to trigger the flex_attention code path during warmup
+WARMUP_KV_CACHE_ATTENTION_BIAS = 0.99
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
@@ -142,11 +144,27 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))
 
-        start = time.time()
-        for _ in range(WARMUP_RUNS):
-            self._generate(prompts=WARMUP_PROMPT)
+        # Warm-up: Run enough iterations to fill the KV cache completely.
+        # This ensures torch.compile compiles the flex_attention kernel at the
+        # steady-state cache size, avoiding recompilation during actual streaming.
+        #
+        # Cache fills at: num_frame_per_block frames per iteration
+        # Cache capacity: local_attn_size frames
+        # Iterations needed: ceil(local_attn_size / num_frame_per_block) + 1
+        #   (+1 to exercise the "cache full with eviction" path)
+        local_attn_size = getattr(model_config, "local_attn_size", 6)
+        num_frame_per_block = getattr(model_config, "num_frame_per_block", 3)
+        warmup_runs = (local_attn_size // num_frame_per_block) + 1
 
-        print(f"Warmed up in {time.time() - start:2f}s")
+        start = time.time()
+        for i in range(warmup_runs):
+            self._generate(
+                prompts=WARMUP_PROMPT,
+                kv_cache_attention_bias=WARMUP_KV_CACHE_ATTENTION_BIAS,
+                init_cache=(i == 0),  # Only init on first run, then accumulate
+            )
+
+        print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
 
         self.first_call = True
 
