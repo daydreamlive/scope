@@ -18,7 +18,7 @@ from .modules.causal_model import CausalWanModel
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
-
+TEXT_DENOISING_STEP_LIST = [1000, 250]
 # Chunk size for streamdiffusionv2
 CHUNK_SIZE = 4
 
@@ -38,7 +38,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
                 "base_seed": 42,
             },
             text_overrides={
-                "denoising_steps": [1000, 750],
+                "denoising_steps": TEXT_DENOISING_STEP_LIST,
                 "noise_scale": None,
                 "noise_controller": None,
             },
