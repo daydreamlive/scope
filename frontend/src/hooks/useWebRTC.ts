@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   sendWebRTCOffer,
+  callReserve,
+  buildApiBaseUrl,
   type PromptItem,
   type PromptTransition,
 } from "../lib/api";
@@ -38,6 +40,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const currentStreamRef = useRef<MediaStream | null>(null);
+  const reserveAbortControllerRef = useRef<AbortController | null>(null);
+  const resolvedApiBaseUrlRef = useRef<string | null>(null);
+  const reserveReaderPromiseRef = useRef<Promise<void> | null>(null);
 
   const startStream = useCallback(
     async (initialParameters?: InitialParameters, stream?: MediaStream) => {
@@ -46,6 +51,37 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       setIsConnecting(true);
 
       try {
+        // First, call /reserve endpoint to get host and port
+        console.log("Calling /reserve endpoint...");
+        let resolvedBaseUrl: string | null = null;
+        try {
+          const {
+            data: reserveData,
+            abortController,
+            readerPromise,
+          } = await callReserve();
+          reserveAbortControllerRef.current = abortController;
+          // Store the reader promise to prevent garbage collection and keep connection alive
+          reserveReaderPromiseRef.current = readerPromise;
+
+          // Build API base URL from resolved host, always using port 8000 for API endpoints
+          resolvedBaseUrl = buildApiBaseUrl(reserveData.host);
+          resolvedApiBaseUrlRef.current = resolvedBaseUrl;
+          console.log(
+            `Resolved API base URL: ${resolvedBaseUrl} (host: ${reserveData.host}, port from reserve: ${reserveData.port}, using port 8000 for API)`
+          );
+          console.log(
+            "[useWebRTC] Reserve connection is being kept alive in background"
+          );
+        } catch (error) {
+          console.warn(
+            "Failed to call /reserve endpoint, falling back to default API URL:",
+            error
+          );
+          // Fall back to default API base URL if reserve fails
+          resolvedApiBaseUrlRef.current = null;
+        }
+
         currentStreamRef.current = stream || null;
 
         // Create peer connection
@@ -86,6 +122,17 @@ export function useWebRTC(options?: UseWebRTCOptions) {
                   duration: 5000,
                 });
               }
+
+              // Close reserve connection
+              if (reserveAbortControllerRef.current) {
+                console.log(
+                  "[useWebRTC] Aborting reserve connection (stream stopped)"
+                );
+                reserveAbortControllerRef.current.abort();
+                reserveAbortControllerRef.current = null;
+              }
+              reserveReaderPromiseRef.current = null;
+              resolvedApiBaseUrlRef.current = null;
 
               // Close the peer connection to clean up
               if (peerConnectionRef.current) {
@@ -159,11 +206,14 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             // ICE gathering complete - now send the offer
             console.log("ICE gathering complete, sending offer to server");
             try {
-              const answer = await sendWebRTCOffer({
-                sdp: pc.localDescription!.sdp,
-                type: pc.localDescription!.type,
-                initialParameters,
-              });
+              const answer = await sendWebRTCOffer(
+                {
+                  sdp: pc.localDescription!.sdp,
+                  type: pc.localDescription!.type,
+                  initialParameters,
+                },
+                resolvedApiBaseUrlRef.current || undefined
+              );
 
               console.log("Received server answer:", answer);
               await pc.setRemoteDescription(answer);
@@ -265,6 +315,15 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   );
 
   const stopStream = useCallback(() => {
+    // Close reserve connection
+    if (reserveAbortControllerRef.current) {
+      console.log("[useWebRTC] Aborting reserve connection");
+      reserveAbortControllerRef.current.abort();
+      reserveAbortControllerRef.current = null;
+    }
+    reserveReaderPromiseRef.current = null;
+    resolvedApiBaseUrlRef.current = null;
+
     // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
@@ -285,6 +344,12 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      // Close reserve connection
+      if (reserveAbortControllerRef.current) {
+        reserveAbortControllerRef.current.abort();
+      }
+      reserveReaderPromiseRef.current = null;
+      // Close peer connection
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
       }

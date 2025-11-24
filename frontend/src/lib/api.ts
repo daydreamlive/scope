@@ -8,6 +8,13 @@ const API_BASE_URL = import.meta.env.DEV
   ? "" // Always use proxy in dev to avoid CORS issues
   : import.meta.env.VITE_SCOPE_API_URL || "";
 
+// Reserve endpoint base URL (port 8080)
+// In development: use empty string to route through Vite proxy
+// In production: use VITE_SCOPE_RESERVE_URL if set, otherwise default to localhost:8080
+const RESERVE_BASE_URL = import.meta.env.DEV
+  ? "" // Use proxy in dev to avoid CORS issues
+  : import.meta.env.VITE_SCOPE_RESERVE_URL || "http://localhost:8080";
+
 // Auth token (optional)
 // Set VITE_SCOPE_API_AUTH_TOKEN environment variable to add Authorization header
 // Note: Vite requires the VITE_ prefix for environment variables exposed to client code
@@ -130,9 +137,25 @@ export interface PipelineStatusResponse {
 }
 
 export const sendWebRTCOffer = async (
-  data: WebRTCOfferRequest
+  data: WebRTCOfferRequest,
+  baseUrl?: string
 ): Promise<RTCSessionDescriptionInit> => {
-  const response = await fetch(`${API_BASE_URL}/api/v1/webrtc/offer`, {
+  // Ensure proper URL construction
+  let url: string;
+  if (baseUrl) {
+    // Remove trailing slashes from baseUrl
+    const cleanBase = baseUrl.replace(/\/+$/, "");
+    url = `${cleanBase}/api/v1/webrtc/offer`;
+  } else {
+    // Use default API_BASE_URL (empty string in dev, or configured URL)
+    url = API_BASE_URL
+      ? `${API_BASE_URL}/api/v1/webrtc/offer`
+      : "/api/v1/webrtc/offer";
+  }
+
+  console.log("[sendWebRTCOffer] Using URL:", url, "baseUrl:", baseUrl);
+
+  const response = await fetch(url, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify(data),
@@ -292,5 +315,195 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   }
 
   const result = await response.json();
+  return result;
+};
+
+export interface ReserveResponse {
+  host: string;
+  port: string;
+}
+
+/**
+ * Call the /reserve endpoint and keep the connection open using HTTP event streaming.
+ * Returns the resolved host and port, an AbortController to close the connection,
+ * and a promise that resolves when the reader finishes (for reference).
+ */
+export const callReserve = async (): Promise<{
+  data: ReserveResponse;
+  abortController: AbortController;
+  readerPromise: Promise<void>;
+}> => {
+  const abortController = new AbortController();
+
+  const response = await fetch(`${RESERVE_BASE_URL}/reserve`, {
+    method: "GET",
+    signal: abortController.signal,
+    // Ensure the browser treats this as a streaming response
+    cache: "no-cache",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Reserve endpoint failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  // Ensure we have a readable stream
+  if (!response.body) {
+    throw new Error("Response body is not readable");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  let buffer = "";
+  let reserveData: ReserveResponse | null = null;
+  let jsonParsed = false;
+  let resolveData: ((data: ReserveResponse) => void) | null = null;
+  let rejectData: ((error: Error) => void) | null = null;
+
+  // Promise that resolves when JSON is parsed
+  const dataPromise = new Promise<ReserveResponse>((resolve, reject) => {
+    resolveData = resolve;
+    rejectData = reject;
+  });
+
+  // Function to continuously read from the stream to keep the connection alive
+  // This MUST run continuously without gaps to prevent the browser from closing the connection
+  const keepAliveReader = async (): Promise<void> => {
+    try {
+      // Read continuously without any delays
+      while (!abortController.signal.aborted) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          console.log("[callReserve] Stream ended by server");
+          if (!jsonParsed && rejectData) {
+            rejectData(new Error("Stream ended before JSON was received"));
+          }
+          break;
+        }
+
+        if (value) {
+          // Decode the chunk
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+
+          // Parse JSON from the first line if not already parsed
+          if (!jsonParsed) {
+            const newlineIndex = buffer.indexOf("\n");
+            if (newlineIndex !== -1) {
+              const jsonStr = buffer.substring(0, newlineIndex).trim();
+              if (jsonStr) {
+                try {
+                  reserveData = JSON.parse(jsonStr) as ReserveResponse;
+                  jsonParsed = true;
+                  console.log(
+                    "[callReserve] Parsed reserve data:",
+                    reserveData
+                  );
+                  if (resolveData) {
+                    resolveData(reserveData);
+                  }
+                } catch (e) {
+                  console.error("[callReserve] Failed to parse JSON:", e);
+                  if (rejectData) {
+                    rejectData(
+                      new Error("Failed to parse reserve response JSON")
+                    );
+                  }
+                  break;
+                }
+              }
+            }
+          }
+          // Continue reading subsequent chunks to keep connection alive
+          // The server sends keepalive data periodically (newlines)
+        }
+      }
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        console.log("[callReserve] Connection aborted by client");
+      } else {
+        console.error("[callReserve] Error reading stream:", error);
+        if (rejectData && !jsonParsed) {
+          rejectData(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // Ignore if already released
+      }
+    }
+  };
+
+  // Start reading immediately - this is critical to keep the connection open
+  // The reader must start before we await anything to prevent the browser from closing the connection
+  const readerPromise = keepAliveReader();
+
+  // Wait for JSON to be parsed (with timeout)
+  try {
+    reserveData = await Promise.race([
+      dataPromise,
+      new Promise<ReserveResponse>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Timeout waiting for reserve data")),
+          5000
+        )
+      ),
+    ]);
+  } catch (error) {
+    abortController.abort();
+    await readerPromise.catch(() => {}); // Wait for reader to finish
+    throw error;
+  }
+
+  if (!reserveData) {
+    abortController.abort();
+    await readerPromise.catch(() => {}); // Wait for reader to finish
+    throw new Error("Failed to get reserve data");
+  }
+
+  // Return immediately with the data, but keep the reader running in background
+  // The connection will stay open as long as keepAliveReader continues reading
+  // Store the promise reference to prevent garbage collection
+  return {
+    data: reserveData,
+    abortController,
+    readerPromise: readerPromise as Promise<void>,
+  };
+};
+
+/**
+ * Build API base URL from host, always using port 8000 for API endpoints
+ * The port from /reserve is for reference only, API endpoints are on port 8000
+ */
+export const buildApiBaseUrl = (host: string): string => {
+  if (!host) {
+    return API_BASE_URL;
+  }
+  // Clean the host: remove protocol if present, remove trailing slashes
+  let cleanHost = host.trim();
+  // Remove http:// or https:// if present
+  cleanHost = cleanHost.replace(/^https?:\/\//, "");
+  // Remove trailing slashes and any path
+  cleanHost = cleanHost.replace(/\/+.*$/, "");
+  // Remove any port if present (we'll add our own)
+  cleanHost = cleanHost.replace(/:\d+$/, "");
+
+  console.log(
+    "[buildApiBaseUrl] Original host:",
+    host,
+    "Cleaned host:",
+    cleanHost
+  );
+
+  // Always use port 8000 for API endpoints (WebRTC, pipeline, etc.)
+  const protocol = "http";
+  const result = `${protocol}://${cleanHost}:8000`;
+  console.log("[buildApiBaseUrl] Result:", result);
   return result;
 };
