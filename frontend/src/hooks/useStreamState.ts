@@ -9,9 +9,9 @@ import {
   getHardwareInfo,
   getPipelineDefaults,
   type HardwareInfoResponse,
-  type PipelineDefaultsResponse,
+  type PipelineDefaults,
 } from "../lib/api";
-import { getCurrentModeConfig } from "../lib/utils";
+import { setPipelineDefaults as cachePipelineDefaults } from "../lib/utils";
 
 export function useStreamState() {
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
@@ -29,6 +29,7 @@ export function useStreamState() {
 
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
+    generationMode: undefined,
     resolution: undefined,
     seed: undefined,
     denoisingSteps: undefined,
@@ -53,7 +54,7 @@ export function useStreamState() {
 
   // Store pipeline defaults separately for reset functionality
   const [pipelineDefaults, setPipelineDefaults] =
-    useState<PipelineDefaultsResponse | null>(null);
+    useState<PipelineDefaults | null>(null);
 
   // Track loading state for defaults
   const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
@@ -79,22 +80,28 @@ export function useStreamState() {
       try {
         const defaultsResponse = await getPipelineDefaults(settings.pipelineId);
 
+        // Cache defaults for use by other components
+        cachePipelineDefaults(settings.pipelineId, defaultsResponse);
+
         // Store defaults for reset functionality
         setPipelineDefaults(defaultsResponse);
 
-        // Extract native mode config using utility function
-        const defaults = getCurrentModeConfig(defaultsResponse);
+        // Get native mode and its defaults
+        const nativeMode = defaultsResponse.native_generation_mode;
+        const nativeModeDefaults = defaultsResponse.modes[nativeMode];
 
-        if (defaults) {
+        if (nativeModeDefaults) {
           setSettings(prev => ({
             ...prev,
-            resolution: defaults.resolution,
-            seed: defaults.base_seed,
-            denoisingSteps: defaults.denoising_steps || [],
-            noiseScale: defaults.noise_scale ?? undefined,
-            noiseController: defaults.noise_controller ?? undefined,
-            manageCache: defaults.manage_cache,
-            kvCacheAttentionBias: defaults.kv_cache_attention_bias ?? undefined,
+            generationMode: nativeMode,
+            resolution: nativeModeDefaults.resolution,
+            seed: nativeModeDefaults.base_seed,
+            denoisingSteps: nativeModeDefaults.denoising_steps ?? undefined,
+            noiseScale: nativeModeDefaults.noise_scale ?? undefined,
+            noiseController: nativeModeDefaults.noise_controller ?? undefined,
+            manageCache: nativeModeDefaults.manage_cache,
+            kvCacheAttentionBias:
+              nativeModeDefaults.kv_cache_attention_bias ?? undefined,
           }));
         }
         setIsLoadingDefaults(false);

@@ -15,14 +15,23 @@ import { PIPELINES } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { getPipelineModeCapabilities } from "../lib/pipelineModes";
+import type { PipelineId } from "../types";
 
 interface InputAndControlsPanelProps {
   className?: string;
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
-  mode: VideoSourceMode;
-  onModeChange: (mode: VideoSourceMode) => void;
+  // Generation mode for the pipeline (text-to-video vs video-to-video)
+  // TODO: 'camera' should not be a mode, but should be refactored into a separate input control.
+  // Currently 'camera' is included here for backward compatibility, but it's conceptually
+  // just generationMode="video" + videoSourceMode="camera".
+  mode: "video" | "text" | "camera";
+  onModeChange: (mode: "video" | "text" | "camera") => void;
+  // Underlying video source when in video generation mode
+  videoSourceMode: VideoSourceMode;
+  onVideoSourceModeChange: (mode: VideoSourceMode) => void;
   isStreaming: boolean;
   isConnecting: boolean;
   isPipelineLoading: boolean;
@@ -30,7 +39,7 @@ interface InputAndControlsPanelProps {
   onStartStream: () => void;
   onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
-  pipelineId: string;
+  pipelineId: PipelineId;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
   onPromptsSubmit: (prompts: PromptItem[]) => void;
@@ -58,6 +67,8 @@ export function InputAndControlsPanel({
   error,
   mode,
   onModeChange,
+  videoSourceMode,
+  onVideoSourceModeChange: _onVideoSourceModeChange,
   isStreaming,
   isConnecting,
   isPipelineLoading: _isPipelineLoading,
@@ -97,8 +108,9 @@ export function InputAndControlsPanel({
   };
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Get pipeline category, deafault to video-input
+  // Get pipeline category and capabilities
   const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
+  const pipelineCapabilities = getPipelineModeCapabilities(pipelineId);
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -132,10 +144,10 @@ export function InputAndControlsPanel({
         <div>
           <h3 className="text-sm font-medium mb-2">Mode</h3>
           <Select
-            value={pipelineCategory === "video-input" ? mode : "text"}
+            value={mode}
             onValueChange={value => {
-              if (pipelineCategory === "video-input" && value) {
-                onModeChange(value as VideoSourceMode);
+              if (value) {
+                onModeChange(value as "video" | "text" | "camera");
               }
             }}
             disabled={isStreaming}
@@ -144,77 +156,85 @@ export function InputAndControlsPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {pipelineCategory === "video-input" ? (
+              {pipelineCapabilities.hasGenerationModeControl ? (
                 <>
+                  <SelectItem value="text">Text</SelectItem>
                   <SelectItem value="video">Video</SelectItem>
                   <SelectItem value="camera">Camera</SelectItem>
                 </>
               ) : (
-                <SelectItem value="text">Text</SelectItem>
+                <SelectItem value={pipelineCapabilities.nativeMode}>
+                  {pipelineCapabilities.nativeMode === "text"
+                    ? "Text"
+                    : "Video"}
+                </SelectItem>
               )}
             </SelectContent>
           </Select>
         </div>
 
-        {pipelineCategory === "video-input" && (
-          <div>
-            <h3 className="text-sm font-medium mb-2">Input</h3>
-            <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
-              {isInitializing ? (
-                <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera"
-                    ? "Requesting camera access..."
-                    : "Initializing video..."}
-                </div>
-              ) : error ? (
-                <div className="text-center text-red-500 text-sm p-4">
-                  <p>
-                    {mode === "camera"
-                      ? "Camera access failed:"
-                      : "Video error:"}
-                  </p>
-                  <p className="text-xs mt-1">{error}</p>
-                </div>
-              ) : localStream ? (
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  muted
-                  playsInline
-                />
-              ) : (
-                <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera" ? "Camera Preview" : "Video Preview"}
-                </div>
-              )}
-
-              {/* Upload button - only show in video mode */}
-              {mode === "video" && onVideoFileUpload && (
-                <>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    id="video-upload"
-                    disabled={isStreaming || isConnecting}
+        {pipelineCategory === "video-input" &&
+          (mode === "video" || mode === "camera") && (
+            <div>
+              <h3 className="text-sm font-medium mb-2">Input</h3>
+              <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
+                {isInitializing ? (
+                  <div className="text-center text-muted-foreground text-sm">
+                    {videoSourceMode === "camera"
+                      ? "Requesting camera access..."
+                      : "Initializing video..."}
+                  </div>
+                ) : error ? (
+                  <div className="text-center text-red-500 text-sm p-4">
+                    <p>
+                      {videoSourceMode === "camera"
+                        ? "Camera access failed:"
+                        : "Video error:"}
+                    </p>
+                    <p className="text-xs mt-1">{error}</p>
+                  </div>
+                ) : localStream ? (
+                  <video
+                    ref={videoRef}
+                    className="w-full h-full object-cover"
+                    autoPlay
+                    muted
+                    playsInline
                   />
-                  <label
-                    htmlFor="video-upload"
-                    className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                      isStreaming || isConnecting
-                        ? "opacity-50 cursor-not-allowed"
-                        : "hover:bg-black/70 cursor-pointer"
-                    }`}
-                  >
-                    <Upload className="h-4 w-4 text-white" />
-                  </label>
-                </>
-              )}
+                ) : (
+                  <div className="text-center text-muted-foreground text-sm">
+                    {videoSourceMode === "camera"
+                      ? "Camera Preview"
+                      : "Video Preview"}
+                  </div>
+                )}
+
+                {/* Upload button - only show in video mode */}
+                {videoSourceMode === "video" && onVideoFileUpload && (
+                  <>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="video-upload"
+                      disabled={isStreaming || isConnecting}
+                    />
+                    <label
+                      htmlFor="video-upload"
+                      className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                        isStreaming || isConnecting
+                          ? "opacity-50 cursor-not-allowed"
+                          : "hover:bg-black/70 cursor-pointer"
+                      }`}
+                    >
+                      <Upload className="h-4 w-4 text-white" />
+                    </label>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         <div>
           {(() => {

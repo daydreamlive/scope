@@ -1,11 +1,6 @@
 import type { LoRAConfig } from "../types";
-
-// Generation mode constants - must match backend constants
-export const GENERATION_MODE_TEXT = "text";
-export const GENERATION_MODE_VIDEO = "video";
-export type GenerationMode =
-  | typeof GENERATION_MODE_TEXT
-  | typeof GENERATION_MODE_VIDEO;
+import type { GenerationMode } from "../constants/modes";
+export type { GenerationMode };
 
 export interface PromptItem {
   text: string;
@@ -26,7 +21,7 @@ export interface WebRTCOfferRequest {
     prompt_interpolation_method?: "linear" | "slerp";
     transition?: PromptTransition;
     denoising_step_list?: number[];
-    noise_scale?: number;
+    noise_scale?: number | null;
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
@@ -79,22 +74,21 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
-export interface PipelineModeConfig {
+export interface PipelineModeDefaults {
   denoising_steps: number[] | null;
   resolution: { height: number; width: number };
   manage_cache: boolean;
   base_seed: number;
-  noise_scale: number | null;
-  noise_controller: boolean | null;
-  kv_cache_attention_bias: number | null;
+  noise_scale?: number | null;
+  noise_controller?: boolean | null;
+  kv_cache_attention_bias?: number | null;
 }
 
-export interface PipelineDefaultsResponse {
-  pipeline_id: string;
-  native_generation_mode: GenerationMode;
+export interface PipelineDefaults {
+  native_generation_mode: "video" | "text";
   modes: {
-    [GENERATION_MODE_TEXT]: PipelineModeConfig;
-    [GENERATION_MODE_VIDEO]: PipelineModeConfig;
+    text: PipelineModeDefaults;
+    video: PipelineModeDefaults;
   };
 }
 
@@ -158,7 +152,7 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
 
 export const getPipelineDefaults = async (
   pipelineId: string
-): Promise<PipelineDefaultsResponse> => {
+): Promise<PipelineDefaults> => {
   const response = await fetch(
     `/api/v1/pipeline/defaults?pipeline_id=${pipelineId}`,
     {
