@@ -18,7 +18,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
   streamdiffusionv2: {
     name: "StreamDiffusionV2",
     docsUrl:
-      "https://github.com/daydreamlive/scope/blob/main/pipelines/streamdiffusionv2/docs/usage.md",
+      "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/streamdiffusionv2/docs/usage.md",
     about:
       "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support streaming.",
     modified: true,
@@ -33,7 +33,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
   longlive: {
     name: "LongLive",
     docsUrl:
-      "https://github.com/daydreamlive/scope/blob/main/pipelines/longlive/docs/usage.md",
+      "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md",
     about:
       "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt switching and improved quality over longer time periods while maintaining fast generation.",
     modified: true,
@@ -49,7 +49,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
   "krea-realtime-video": {
     name: "Krea Realtime Video",
     docsUrl:
-      "https://github.com/daydreamlive/scope/blob/main/pipelines/krea_realtime_video/docs/usage.md",
+      "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/krea_realtime_video/docs/usage.md",
     about:
       "A streaming pipeline and autoregressive video diffusion model from Krea. The model is trained using Self-Forcing on Wan2.1 14b.",
     modified: true,
