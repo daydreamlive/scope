@@ -256,6 +256,12 @@ async def health_check():
     return HealthResponse(status="healthy", timestamp=datetime.now().isoformat())
 
 
+@app.get("/ping")
+async def ping():
+    """Health check endpoint required by RunPod Serverless load balancer."""
+    return {"status": "healthy"}
+
+
 @app.get("/")
 async def root():
     """Serve the frontend at the root URL."""
@@ -537,7 +543,10 @@ def main():
         "--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
     )
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port to bind to (default: 8000)"
+        "--port",
+        type=int,
+        default=int(os.getenv("PORT", 8000)),
+        help="Port to bind to (default: PORT env var or 8000)",
     )
     parser.add_argument(
         "-N",
@@ -599,4 +608,21 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # For RunPod serverless mode, run uvicorn directly when PORT env var is set
+    # Otherwise use main() with full argument parsing
+    port_env = os.getenv("PORT")
+    if port_env:
+        # RunPod serverless mode - run uvicorn directly
+        import uvicorn
+
+        port = int(port_env)
+        logger.info(f"Starting server on port {port} (RunPod serverless mode)")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=port,
+            log_config=None,  # Use our logging config
+        )
+    else:
+        # Normal mode - use main() with argument parsing
+        main()
