@@ -14,20 +14,10 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
-import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import type { PipelineId, LoRAConfig } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
-
-function buildLoRAParams(
-  loras?: LoRAConfig[],
-  strategy?: LoraMergeStrategy
-): { loras?: { path: string; scale: number }[]; lora_merge_mode: string } {
-  return {
-    loras: loras?.map(({ path, scale }) => ({ path, scale })),
-    lora_merge_mode: strategy ?? "permanent_merge",
-  };
-}
 
 export function StreamPage() {
   // Use the stream state hook for settings management
@@ -86,7 +76,6 @@ export function StreamPage() {
   const {
     isLoading: isPipelineLoading,
     error: pipelineError,
-    loadPipeline,
     pipelineInfo,
   } = usePipeline();
 
@@ -460,101 +449,23 @@ export function StreamPage() {
   }, [videoResolution, isStreaming, settings.pipelineId, updateSettings]);
 
   const handleStartStream = async (
-    overridePipelineId?: PipelineId
+    _overridePipelineId?: PipelineId
   ): Promise<boolean> => {
     if (isStreaming) {
       stopStream();
       return true;
     }
 
-    // Use override pipeline ID if provided, otherwise use current settings
-    const pipelineIdToUse = overridePipelineId || settings.pipelineId;
+    // Always use passthrough pipeline for WebRTC connection
 
     try {
-      // Check if models are needed but not downloaded
-      const pipelineInfo = PIPELINES[pipelineIdToUse];
-      if (pipelineInfo?.requiresModels) {
-        try {
-          const status = await checkModelStatus(pipelineIdToUse);
-          if (!status.downloaded) {
-            // Show download dialog
-            setPipelineNeedsModels(pipelineIdToUse);
-            setShowDownloadDialog(true);
-            return false; // Stream did not start
-          }
-        } catch (error) {
-          console.error("Error checking model status:", error);
-          // Continue anyway if check fails
-        }
-      }
-
-      // Always load pipeline with current parameters - backend will handle the rest
-      console.log(`Loading ${pipelineIdToUse} pipeline...`);
-
-      // Prepare load parameters based on pipeline type
-      let loadParams = null;
-
-      // Use settings.resolution if available, otherwise fall back to videoResolution
-      const resolution = settings.resolution || videoResolution;
-
-      if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      } else if (pipelineIdToUse === "passthrough" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}`
-        );
-      } else if (pipelineIdToUse === "longlive" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization:
-            settings.quantization !== undefined
-              ? settings.quantization
-              : "fp8_e4m3fn",
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      }
-
-      const loadSuccess = await loadPipeline(
-        pipelineIdToUse,
-        loadParams || undefined
+      // Assume pipeline is already loaded - skip loading step and go directly to WebRTC
+      console.log(
+        `Starting WebRTC connection with passthrough pipeline (assuming pipeline is already loaded)...`
       );
-      if (!loadSuccess) {
-        console.error("Failed to load pipeline, cannot start stream");
-        return false;
-      }
 
-      // Check if this pipeline needs video input
-      const pipelineCategory = PIPELINES[pipelineIdToUse]?.category;
-      const needsVideoInput = pipelineCategory === "video-input";
+      // Passthrough pipeline needs video input
+      const needsVideoInput = true;
 
       // Only send video stream for pipelines that need video input
       const streamToSend = needsVideoInput
@@ -566,7 +477,7 @@ export function StreamPage() {
         return false;
       }
 
-      // Build initial parameters based on pipeline type
+      // Passthrough pipeline doesn't need any initial parameters
       const initialParameters: {
         prompts?: PromptItem[];
         prompt_interpolation_method?: "linear" | "slerp";
@@ -577,39 +488,10 @@ export function StreamPage() {
         kv_cache_attention_bias?: number;
       } = {};
 
-      // Common parameters for pipelines that support prompts
-      if (pipelineIdToUse !== "passthrough") {
-        initialParameters.prompts = promptItems;
-        initialParameters.prompt_interpolation_method = interpolationMethod;
-        initialParameters.denoising_step_list = settings.denoisingSteps || [
-          700, 500,
-        ];
-      }
-
-      // Cache management for krea_realtime_video and longlive
-      if (
-        settings.pipelineId === "krea-realtime-video" ||
-        settings.pipelineId === "longlive"
-      ) {
-        initialParameters.manage_cache = settings.manageCache ?? true;
-      }
-
-      // Krea-realtime-video-specific parameters
-      if (settings.pipelineId === "krea-realtime-video") {
-        initialParameters.kv_cache_attention_bias =
-          settings.kvCacheAttentionBias ?? 1.0;
-      }
-
-      // StreamDiffusionV2-specific parameters
-      if (pipelineIdToUse === "streamdiffusionv2") {
-        initialParameters.noise_scale = settings.noiseScale ?? 0.7;
-        initialParameters.noise_controller = settings.noiseController ?? true;
-      }
-
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
-      // Pipeline is loaded, now start WebRTC stream
+      // Start WebRTC stream (assuming pipeline is already loaded)
       startStream(initialParameters, streamToSend);
 
       return true; // Stream started successfully
