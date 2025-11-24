@@ -1,4 +1,52 @@
 import type { LoRAConfig } from "../types";
+
+// Base API configuration
+// In development: always use empty string to route through Vite proxy (avoids CORS)
+// In production: use VITE_SCOPE_API_URL if set, otherwise empty (for same-origin)
+// The Vite proxy (configured in vite.config.ts) handles forwarding to the correct backend
+const API_BASE_URL = import.meta.env.DEV
+  ? "" // Always use proxy in dev to avoid CORS issues
+  : import.meta.env.VITE_SCOPE_API_URL || "";
+
+// Auth token (optional)
+// Set VITE_SCOPE_API_AUTH_TOKEN environment variable to add Authorization header
+// Note: Vite requires the VITE_ prefix for environment variables exposed to client code
+const API_AUTH_TOKEN = import.meta.env.VITE_SCOPE_API_AUTH_TOKEN;
+
+// Debug: Log configuration (only in dev mode)
+if (import.meta.env.DEV) {
+  console.log("[API] Using relative URLs (routing through Vite proxy)");
+  console.log(
+    "[API] Proxy target:",
+    import.meta.env.VITE_SCOPE_API_URL || "http://localhost:8000"
+  );
+  if (API_AUTH_TOKEN) {
+    console.log(
+      "[API] Authorization token loaded (length:",
+      API_AUTH_TOKEN.length,
+      ")"
+    );
+  } else {
+    console.warn(
+      "[API] No authorization token found. Set VITE_SCOPE_API_AUTH_TOKEN environment variable."
+    );
+  }
+}
+
+// Helper function to get headers with authorization
+const getHeaders = (): HeadersInit => {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+  };
+
+  // Only add Authorization header if token is provided
+  if (API_AUTH_TOKEN) {
+    headers.Authorization = `Bearer ${API_AUTH_TOKEN}`;
+  }
+
+  return headers;
+};
+
 export interface PromptItem {
   text: string;
   weight: number;
@@ -84,9 +132,9 @@ export interface PipelineStatusResponse {
 export const sendWebRTCOffer = async (
   data: WebRTCOfferRequest
 ): Promise<RTCSessionDescriptionInit> => {
-  const response = await fetch("/api/v1/webrtc/offer", {
+  const response = await fetch(`${API_BASE_URL}/api/v1/webrtc/offer`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
 
@@ -104,9 +152,9 @@ export const sendWebRTCOffer = async (
 export const loadPipeline = async (
   data: PipelineLoadRequest = {}
 ): Promise<{ message: string }> => {
-  const response = await fetch("/api/v1/pipeline/load", {
+  const response = await fetch(`${API_BASE_URL}/api/v1/pipeline/load`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
 
@@ -122,9 +170,9 @@ export const loadPipeline = async (
 };
 
 export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
-  const response = await fetch("/api/v1/pipeline/status", {
+  const response = await fetch(`${API_BASE_URL}/api/v1/pipeline/status`, {
     method: "GET",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     signal: AbortSignal.timeout(30000), // 30 second timeout per request
   });
 
@@ -143,10 +191,10 @@ export const checkModelStatus = async (
   pipelineId: string
 ): Promise<{ downloaded: boolean }> => {
   const response = await fetch(
-    `/api/v1/models/status?pipeline_id=${pipelineId}`,
+    `${API_BASE_URL}/api/v1/models/status?pipeline_id=${pipelineId}`,
     {
       method: "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: getHeaders(),
     }
   );
 
@@ -164,9 +212,9 @@ export const checkModelStatus = async (
 export const downloadPipelineModels = async (
   pipelineId: string
 ): Promise<{ message: string }> => {
-  const response = await fetch("/api/v1/models/download", {
+  const response = await fetch(`${API_BASE_URL}/api/v1/models/download`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify({ pipeline_id: pipelineId }),
   });
 
@@ -186,9 +234,9 @@ export interface HardwareInfoResponse {
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
-  const response = await fetch("/api/v1/hardware/info", {
+  const response = await fetch(`${API_BASE_URL}/api/v1/hardware/info`, {
     method: "GET",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
   });
 
   if (!response.ok) {
@@ -203,8 +251,9 @@ export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
 };
 
 export const fetchCurrentLogs = async (): Promise<string> => {
-  const response = await fetch("/api/v1/logs/current", {
+  const response = await fetch(`${API_BASE_URL}/api/v1/logs/current`, {
     method: "GET",
+    headers: getHeaders(),
   });
 
   if (!response.ok) {
@@ -230,8 +279,9 @@ export interface LoRAFilesResponse {
 }
 
 export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
-  const response = await fetch("/api/v1/lora/list", {
+  const response = await fetch(`${API_BASE_URL}/api/v1/lora/list`, {
     method: "GET",
+    headers: getHeaders(),
   });
 
   if (!response.ok) {
