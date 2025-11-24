@@ -38,6 +38,8 @@ export default defineConfig({
         // Configure for streaming/SSE - no timeout, no buffering
         proxyTimeout: 0, // No timeout for streaming connections
         timeout: 0, // No timeout
+        // Don't buffer the response - stream it directly
+        buffer: false,
       },
       "/ping": {
         // Proxy /ping to port 8080 (reserve server) - but also available on main server

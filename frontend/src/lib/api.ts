@@ -335,9 +335,14 @@ export const callReserve = async (): Promise<{
 }> => {
   const abortController = new AbortController();
 
+  const headers = new Headers();
+  headers.set("Connection", "keep-alive");
+  headers.set("Cache-Control", "no-cache");
+
   const response = await fetch(`${RESERVE_BASE_URL}/reserve`, {
     method: "GET",
     signal: abortController.signal,
+    headers: headers,
     // Ensure the browser treats this as a streaming response
     cache: "no-cache",
   });
@@ -371,69 +376,104 @@ export const callReserve = async (): Promise<{
 
   // Function to continuously read from the stream to keep the connection alive
   // This MUST run continuously without gaps to prevent the browser from closing the connection
+  // The connection will stay open as long as this function continues reading
   const keepAliveReader = async (): Promise<void> => {
     try {
-      // Read continuously without any delays
+      // Read continuously without any delays - this keeps the connection alive
+      // The server sends keepalive messages every 0.5 seconds, so we should always have data
       while (!abortController.signal.aborted) {
-        const { value, done } = await reader.read();
+        try {
+          const { value, done } = await reader.read();
 
-        if (done) {
-          console.log("[callReserve] Stream ended by server");
-          if (!jsonParsed && rejectData) {
-            rejectData(new Error("Stream ended before JSON was received"));
+          if (done) {
+            // Stream ended - this should not happen if server is sending keepalive
+            // But if it does, log it and break (connection is closed)
+            console.log(
+              "[callReserve] Stream ended by server (connection closed)"
+            );
+            if (!jsonParsed && rejectData) {
+              rejectData(new Error("Stream ended before JSON was received"));
+            }
+            break;
           }
-          break;
-        }
 
-        if (value) {
-          // Decode the chunk
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
+          if (value) {
+            // Decode the chunk
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
 
-          // Parse JSON from the first line if not already parsed
-          if (!jsonParsed) {
-            const newlineIndex = buffer.indexOf("\n");
-            if (newlineIndex !== -1) {
-              const jsonStr = buffer.substring(0, newlineIndex).trim();
-              if (jsonStr) {
-                try {
-                  reserveData = JSON.parse(jsonStr) as ReserveResponse;
-                  jsonParsed = true;
-                  console.log(
-                    "[callReserve] Parsed reserve data:",
-                    reserveData
-                  );
-                  if (resolveData) {
-                    resolveData(reserveData);
-                  }
-                } catch (e) {
-                  console.error("[callReserve] Failed to parse JSON:", e);
-                  if (rejectData) {
-                    rejectData(
-                      new Error("Failed to parse reserve response JSON")
+            // Parse JSON from the first line if not already parsed
+            if (!jsonParsed) {
+              const newlineIndex = buffer.indexOf("\n");
+              if (newlineIndex !== -1) {
+                const jsonStr = buffer.substring(0, newlineIndex).trim();
+                if (jsonStr) {
+                  try {
+                    reserveData = JSON.parse(jsonStr) as ReserveResponse;
+                    jsonParsed = true;
+                    console.log(
+                      "[callReserve] Parsed reserve data:",
+                      reserveData
                     );
+                    if (resolveData) {
+                      resolveData(reserveData);
+                    }
+                  } catch (e) {
+                    console.error("[callReserve] Failed to parse JSON:", e);
+                    if (rejectData) {
+                      rejectData(
+                        new Error("Failed to parse reserve response JSON")
+                      );
+                    }
+                    // Don't break here - continue reading to keep connection alive
+                    // The error is already reported via rejectData
                   }
-                  break;
                 }
               }
             }
+            // Continue reading subsequent chunks to keep connection alive
+            // The server sends keepalive data periodically (": keepalive\n\n")
           }
-          // Continue reading subsequent chunks to keep connection alive
-          // The server sends keepalive data periodically (newlines)
+        } catch (readError) {
+          // Handle read errors - if aborted, break; otherwise log and continue
+          if (abortController.signal.aborted) {
+            console.log("[callReserve] Connection aborted by client");
+            break;
+          } else {
+            // Log the error but continue reading to try to keep connection alive
+            console.error("[callReserve] Error reading chunk:", readError);
+            // Only reject if we haven't parsed JSON yet
+            if (!jsonParsed && rejectData) {
+              rejectData(
+                readError instanceof Error
+                  ? readError
+                  : new Error(String(readError))
+              );
+              break;
+            }
+            // If JSON is already parsed, continue reading despite errors
+            // This helps maintain the connection even if there are transient read issues
+          }
         }
       }
     } catch (error) {
+      // Outer catch for any unexpected errors
       if (abortController.signal.aborted) {
         console.log("[callReserve] Connection aborted by client");
       } else {
-        console.error("[callReserve] Error reading stream:", error);
+        console.error(
+          "[callReserve] Unexpected error in keepAliveReader:",
+          error
+        );
         if (rejectData && !jsonParsed) {
           rejectData(error instanceof Error ? error : new Error(String(error)));
         }
       }
     } finally {
+      // Only release the lock when we're truly done (aborted or stream ended)
       try {
         reader.releaseLock();
+        console.log("[callReserve] Reader lock released, connection closed");
       } catch {
         // Ignore if already released
       }
