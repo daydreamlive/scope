@@ -9,6 +9,7 @@ from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_VIDEO
 from ..helpers import build_pipeline_schema
 from ..interface import Pipeline
+from ..mode_helpers import UniversalInputModesMixin
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
@@ -23,7 +24,9 @@ TEXT_DENOISING_STEP_LIST = [1000, 250]
 CHUNK_SIZE = 4
 
 
-class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
+class StreamDiffusionV2Pipeline(
+    UniversalInputModesMixin, Pipeline, LoRAEnabledPipeline
+):
     @classmethod
     def get_schema(cls) -> dict:
         """Return schema for StreamDiffusionV2 pipeline."""
@@ -46,6 +49,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
                 "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "noise_scale": 0.7,
                 "noise_controller": True,
+                "input_size": CHUNK_SIZE,
             },
         )
 

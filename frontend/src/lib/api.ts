@@ -74,21 +74,36 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
-export interface PipelineModeDefaults {
-  denoising_steps: number[] | null;
+export interface ModeConfig {
+  denoising_steps?: number[] | null;
   resolution: { height: number; width: number };
   manage_cache: boolean;
   base_seed: number;
   noise_scale?: number | null;
   noise_controller?: boolean | null;
   kv_cache_attention_bias?: number | null;
+  input_size?: number | null;
+  vae_strategy?: string | null;
+  [key: string]:
+    | number
+    | boolean
+    | string
+    | number[]
+    | { height: number; width: number }
+    | null
+    | undefined;
 }
 
-export interface PipelineDefaults {
-  native_generation_mode: "video" | "text";
-  modes: {
-    text: PipelineModeDefaults;
-    video: PipelineModeDefaults;
+export interface PipelineSchema {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  native_mode: "video" | "text";
+  supported_modes: string[];
+  mode_configs: {
+    text: ModeConfig;
+    video: ModeConfig;
   };
 }
 
@@ -150,21 +165,35 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
   return result;
 };
 
-export const getPipelineDefaults = async (
-  pipelineId: string
-): Promise<PipelineDefaults> => {
-  const response = await fetch(
-    `/api/v1/pipeline/defaults?pipeline_id=${pipelineId}`,
-    {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    }
-  );
+export const listPipelines = async (): Promise<string[]> => {
+  const response = await fetch("/api/v1/pipelines", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `Pipeline defaults failed: ${response.status} ${response.statusText}: ${errorText}`
+      `List pipelines failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result.pipelines;
+};
+
+export const getPipelineSchema = async (
+  pipelineId: string
+): Promise<PipelineSchema> => {
+  const response = await fetch(`/api/v1/pipelines/${pipelineId}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get pipeline schema failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 

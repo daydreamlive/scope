@@ -1,7 +1,7 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { PipelineId } from "../types";
-import type { PipelineDefaults, PipelineModeDefaults } from "./api";
+import type { PipelineSchema, ModeConfig } from "./api";
 
 type GenerationMode = "text" | "video";
 
@@ -9,59 +9,60 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Cache for pipeline defaults fetched from API
-const pipelineDefaultsCache = new Map<PipelineId, PipelineDefaults>();
+// Cache for pipeline schemas fetched from API
+const pipelineSchemaCache = new Map<PipelineId, PipelineSchema>();
 
 /**
- * Set cached defaults for a pipeline. Called after fetching from API.
+ * Set cached schema for a pipeline. Called after fetching from API.
  */
-export function setPipelineDefaults(
+export function setPipelineSchema(
   pipelineId: PipelineId,
-  defaults: PipelineDefaults
+  schema: PipelineSchema
 ): void {
-  pipelineDefaultsCache.set(pipelineId, defaults);
+  pipelineSchemaCache.set(pipelineId, schema);
 }
 
 /**
- * Get cached defaults for a pipeline, or null if not cached.
+ * Get cached schema for a pipeline, or null if not cached.
  */
-export function getCachedPipelineDefaults(
+export function getCachedPipelineSchema(
   pipelineId: PipelineId
-): PipelineDefaults | null {
-  return pipelineDefaultsCache.get(pipelineId) || null;
+): PipelineSchema | null {
+  return pipelineSchemaCache.get(pipelineId) || null;
 }
 
 /**
- * Get mode-specific defaults for a pipeline.
- * Throws if defaults not yet loaded - caller should ensure defaults are fetched first.
+ * Get mode-specific config for a pipeline.
+ * Throws if schema not yet loaded - caller should ensure schema is fetched first.
  */
-export function getModeDefaults(
+export function getModeConfig(
   pipelineId: PipelineId,
   mode?: GenerationMode
-): PipelineModeDefaults {
-  const cached = getCachedPipelineDefaults(pipelineId);
-  if (!cached?.modes) {
+): ModeConfig {
+  const cached = getCachedPipelineSchema(pipelineId);
+  if (!cached?.mode_configs) {
     throw new Error(
-      `getModeDefaults: Defaults not loaded for ${pipelineId}. App should fetch defaults before rendering.`
+      `getModeConfig: Schema not loaded for ${pipelineId}. App should fetch schema before rendering.`
     );
   }
 
-  const native_mode = cached.native_generation_mode;
+  const native_mode = cached.native_mode;
   const resolvedMode = mode ?? native_mode;
-  const modeDefaults = cached.modes[resolvedMode] ?? cached.modes[native_mode];
+  const modeConfig =
+    cached.mode_configs[resolvedMode] ?? cached.mode_configs[native_mode];
 
-  if (!modeDefaults) {
+  if (!modeConfig) {
     throw new Error(
-      `getModeDefaults: No defaults for mode ${resolvedMode} in ${pipelineId}`
+      `getModeConfig: No config for mode ${resolvedMode} in ${pipelineId}`
     );
   }
 
   return {
-    ...modeDefaults,
-    denoising_steps: modeDefaults.denoising_steps
-      ? [...modeDefaults.denoising_steps]
+    ...modeConfig,
+    denoising_steps: modeConfig.denoising_steps
+      ? [...modeConfig.denoising_steps]
       : null,
-    resolution: { ...modeDefaults.resolution },
+    resolution: { ...modeConfig.resolution },
   };
 }
 
@@ -69,20 +70,21 @@ export function getDefaultDenoisingSteps(
   pipelineId: PipelineId,
   mode?: GenerationMode
 ): number[] | undefined {
-  const cached = getCachedPipelineDefaults(pipelineId);
-  if (!cached?.modes) {
+  const cached = getCachedPipelineSchema(pipelineId);
+  if (!cached?.mode_configs) {
     return undefined;
   }
 
-  const native_mode = cached.native_generation_mode;
+  const native_mode = cached.native_mode;
   const resolvedMode = mode ?? native_mode;
-  const modeDefaults = cached.modes[resolvedMode] ?? cached.modes[native_mode];
+  const modeConfig =
+    cached.mode_configs[resolvedMode] ?? cached.mode_configs[native_mode];
 
-  if (!modeDefaults || !modeDefaults.denoising_steps) {
+  if (!modeConfig || !modeConfig.denoising_steps) {
     return undefined;
   }
 
-  return [...modeDefaults.denoising_steps];
+  return [...modeConfig.denoising_steps];
 }
 
 export function getDefaultResolution(
@@ -94,18 +96,19 @@ export function getDefaultResolution(
       width: number;
     }
   | undefined {
-  const cached = getCachedPipelineDefaults(pipelineId);
-  if (!cached?.modes) {
+  const cached = getCachedPipelineSchema(pipelineId);
+  if (!cached?.mode_configs) {
     return undefined;
   }
 
-  const native_mode = cached.native_generation_mode;
+  const native_mode = cached.native_mode;
   const resolvedMode = mode ?? native_mode;
-  const modeDefaults = cached.modes[resolvedMode] ?? cached.modes[native_mode];
+  const modeConfig =
+    cached.mode_configs[resolvedMode] ?? cached.mode_configs[native_mode];
 
-  if (!modeDefaults) {
+  if (!modeConfig) {
     return undefined;
   }
 
-  return { ...modeDefaults.resolution };
+  return { ...modeConfig.resolution };
 }

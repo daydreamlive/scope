@@ -9,6 +9,7 @@ from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_TEXT
 from ..helpers import build_pipeline_schema
 from ..interface import Pipeline
+from ..mode_helpers import UniversalInputModesMixin
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
@@ -29,7 +30,9 @@ WARMUP_RUNS = 3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
-class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
+class KreaRealtimeVideoPipeline(
+    UniversalInputModesMixin, Pipeline, LoRAEnabledPipeline
+):
     @classmethod
     def get_schema(cls) -> dict:
         """Return schema for Krea Realtime Video pipeline."""

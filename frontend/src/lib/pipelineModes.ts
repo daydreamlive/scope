@@ -1,5 +1,5 @@
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultResolution, getCachedPipelineDefaults } from "./utils";
+import { getCachedPipelineSchema } from "./utils";
 import type { PipelineCategory, PipelineId } from "../types";
 
 export interface PipelineModeCapabilities {
@@ -49,54 +49,40 @@ export function getPipelineModeCapabilities(
   const info = PIPELINES[id];
   const category: PipelineCategory = info?.category ?? "no-video-input";
 
-  // Get native mode from API defaults
-  const cachedDefaults = getCachedPipelineDefaults(id);
+  // Get schema from cache - this drives all capabilities
+  const cachedSchema = getCachedPipelineSchema(id);
   const nativeMode: "video" | "text" =
-    cachedDefaults?.native_generation_mode ??
+    cachedSchema?.native_mode ??
     info?.nativeGenerationMode ??
     (category === "video-input" ? "video" : "text");
 
-  // For now we derive support flags from category and assume all pipelines
-  // support text prompts. If we introduce pipelines that truly do not support
-  // text in the future we can add explicit metadata for that.
-  const supportsVideo = category === "video-input";
-  const supportsText = true;
+  // Derive support flags from schema's supported_modes
+  const supportsVideo =
+    cachedSchema?.supported_modes?.includes("video") ??
+    category === "video-input";
+  const supportsText = cachedSchema?.supported_modes?.includes("text") ?? true;
 
   const requiresVideoInVideoMode = category === "video-input" && supportsVideo;
 
-  // Get resolution from defaults (may be undefined if not yet loaded)
-  const textResolution = getDefaultResolution(id, "text");
-  const videoResolution = getDefaultResolution(id, "video");
+  // Derive capabilities from schema's mode configs
+  const textConfig = cachedSchema?.mode_configs?.text;
+  const videoConfig = cachedSchema?.mode_configs?.video;
 
-  let showNoiseControlsInText = false;
-  let showNoiseControlsInVideo = false;
-  let hasGenerationModeControl = false;
-  let hasNoiseControls = false;
-  let hasCacheManagement = false;
+  // Noise controls are available if the mode config has non-null noise_scale or noise_controller
+  const showNoiseControlsInText =
+    textConfig?.noise_scale != null || textConfig?.noise_controller != null;
+  const showNoiseControlsInVideo =
+    videoConfig?.noise_scale != null || videoConfig?.noise_controller != null;
 
-  if (id === "streamdiffusionv2") {
-    // StreamDiffusionV2 uses noise controls only in video-to-video mode. In
-    // text-to-video mode we use a fixed denoising schedule, matching LongLive
-    // and Krea.
-    showNoiseControlsInText = false;
-    showNoiseControlsInVideo = true;
-  } else if (id === "longlive" || id === "krea-realtime-video") {
-    // LongLive and Krea only need noise controls in video-to-video workflows.
-    showNoiseControlsInText = false;
-    showNoiseControlsInVideo = true;
-  }
+  // Has generation mode control if both modes are supported
+  const hasGenerationModeControl = supportsVideo && supportsText;
 
-  // All three main pipelines expose generation mode, noise controls and cache
-  // management toggles.
-  if (
-    id === "streamdiffusionv2" ||
-    id === "longlive" ||
-    id === "krea-realtime-video"
-  ) {
-    hasGenerationModeControl = true;
-    hasNoiseControls = true;
-    hasCacheManagement = true;
-  }
+  // Has noise controls if either mode supports them
+  const hasNoiseControls = showNoiseControlsInText || showNoiseControlsInVideo;
+
+  // Cache management is a property of mode configs
+  const hasCacheManagement =
+    textConfig?.manage_cache != null || videoConfig?.manage_cache != null;
 
   return {
     id,
@@ -106,8 +92,8 @@ export function getPipelineModeCapabilities(
     supportsText,
     requiresVideoInVideoMode,
     defaultResolutionByMode: {
-      text: textResolution,
-      video: videoResolution,
+      text: textConfig?.resolution,
+      video: videoConfig?.resolution,
     },
     showNoiseControlsInText,
     showNoiseControlsInVideo,

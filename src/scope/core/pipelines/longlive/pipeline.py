@@ -9,6 +9,7 @@ from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_TEXT
 from ..helpers import build_pipeline_schema
 from ..interface import Pipeline
+from ..mode_helpers import UniversalInputModesMixin
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
@@ -24,7 +25,7 @@ DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 CHUNK_SIZE = 4
 
 
-class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
+class LongLivePipeline(UniversalInputModesMixin, Pipeline, LoRAEnabledPipeline):
     @classmethod
     def get_schema(cls) -> dict:
         """Return schema for LongLive pipeline."""
@@ -47,6 +48,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 512, "width": 512},
                 "noise_scale": 0.7,
                 "noise_controller": True,
+                "input_size": CHUNK_SIZE,
+                "vae_strategy": "streamdiffusionv2_longlive_scaled",
             },
         )
 

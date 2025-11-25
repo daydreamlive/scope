@@ -13,7 +13,7 @@ import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultResolution, getModeDefaults } from "../lib/utils";
+import { getModeConfig } from "../lib/utils";
 import { getPipelineModeCapabilities } from "../lib/pipelineModes";
 import { GENERATION_MODE, VIDEO_SOURCE_MODE } from "../constants/modes";
 import type {
@@ -38,7 +38,7 @@ function buildLoRAParams(
 
 export function StreamPage() {
   // Use the stream state hook for settings management
-  const { settings, updateSettings, isLoadingDefaults } = useStreamState();
+  const { settings, updateSettings, isLoadingSchema } = useStreamState();
 
   // Prompt state
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
@@ -186,20 +186,26 @@ export function StreamPage() {
 
     const updates: Partial<SettingsState> = { generationMode };
 
-    // Set resolution based on the mode using pipeline defaults
+    // Apply all mode-specific defaults when switching modes
+    const modeConfig = getModeConfig(pipelineId, generationMode);
+
     if (generationMode === GENERATION_MODE.TEXT) {
       updates.resolution =
-        caps.defaultResolutionByMode.text ??
-        getDefaultResolution(pipelineId, GENERATION_MODE.TEXT);
+        caps.defaultResolutionByMode.text ?? modeConfig.resolution;
+      updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
+      updates.noiseScale = modeConfig.noise_scale ?? undefined;
+      updates.noiseController = modeConfig.noise_controller ?? undefined;
     } else if (generationMode === GENERATION_MODE.VIDEO) {
       // Use pipeline's default video resolution first, only fall back to video source if no default
       const defaultVideoResolution =
-        caps.defaultResolutionByMode.video ??
-        getDefaultResolution(pipelineId, GENERATION_MODE.VIDEO);
+        caps.defaultResolutionByMode.video ?? modeConfig.resolution;
       // Prioritize pipeline default over video source resolution
       // Convert videoResolution from null to undefined to match SettingsState type
       updates.resolution =
         defaultVideoResolution || (videoResolution ?? undefined);
+      updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
+      updates.noiseScale = modeConfig.noise_scale ?? undefined;
+      updates.noiseController = modeConfig.noise_controller ?? undefined;
     }
 
     updateSettings(updates);
@@ -215,6 +221,10 @@ export function StreamPage() {
       generation_mode: generationMode,
       // Reset cache when switching modes to avoid cross-mode artefacts.
       reset_cache: true,
+      // Send all updated mode-specific parameters
+      denoising_step_list: updates.denoisingSteps,
+      noise_scale: updates.noiseScale,
+      noise_controller: updates.noiseController,
     });
   };
 
@@ -622,7 +632,7 @@ export function StreamPage() {
       // Check if this pipeline needs video input for the current mode
       const caps = getPipelineModeCapabilities(pipelineIdToUse);
       const currentMode = settings.generationMode ?? caps.nativeMode;
-      const modeDefaults = getModeDefaults(pipelineIdToUse, currentMode);
+      const modeConfig = getModeConfig(pipelineIdToUse, currentMode);
       const needsVideoInput =
         caps.requiresVideoInVideoMode && currentMode === GENERATION_MODE.VIDEO;
 
@@ -653,14 +663,14 @@ export function StreamPage() {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list =
-          settings.denoisingSteps || modeDefaults.denoising_steps || undefined;
+          settings.denoisingSteps || modeConfig.denoising_steps || undefined;
       }
 
       // Cache management for pipelines that support it
       const runtimeCaps = caps;
       if (runtimeCaps.hasCacheManagement) {
         const manageCacheValue =
-          settings.manageCache ?? modeDefaults.manage_cache;
+          settings.manageCache ?? modeConfig.manage_cache;
         if (manageCacheValue !== undefined) {
           initialParameters.manage_cache = manageCacheValue;
         }
@@ -670,7 +680,7 @@ export function StreamPage() {
       if (pipelineIdToUse === "krea-realtime-video") {
         const bias =
           settings.kvCacheAttentionBias ??
-          modeDefaults.kv_cache_attention_bias ??
+          modeConfig.kv_cache_attention_bias ??
           1.0;
         initialParameters.kv_cache_attention_bias = bias;
       }
@@ -686,7 +696,7 @@ export function StreamPage() {
         const resolvedNoiseScale =
           settings.noiseScale !== undefined
             ? settings.noiseScale
-            : modeDefaults.noise_scale;
+            : modeConfig.noise_scale;
         if (resolvedNoiseScale !== undefined) {
           initialParameters.noise_scale = resolvedNoiseScale;
         }
@@ -694,7 +704,7 @@ export function StreamPage() {
         const resolvedNoiseController =
           settings.noiseController !== undefined
             ? settings.noiseController
-            : (modeDefaults.noise_controller ?? undefined);
+            : (modeConfig.noise_controller ?? undefined);
         if (resolvedNoiseController !== undefined) {
           initialParameters.noise_controller = resolvedNoiseController;
         }
@@ -755,10 +765,10 @@ export function StreamPage() {
                 effectiveMode === GENERATION_MODE.VIDEO;
 
               if (!needsVideoInput) {
-                return !isInitializing && !isLoadingDefaults;
+                return !isInitializing && !isLoadingSchema;
               }
 
-              return !!localStream && !isInitializing && !isLoadingDefaults;
+              return !!localStream && !isInitializing && !isLoadingSchema;
             })()}
             onStartStream={handleStartStream}
             onStopStream={stopStream}

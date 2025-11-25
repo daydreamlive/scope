@@ -7,11 +7,11 @@ import type {
 } from "../types";
 import {
   getHardwareInfo,
-  getPipelineDefaults,
+  getPipelineSchema,
   type HardwareInfoResponse,
-  type PipelineDefaults,
+  type PipelineSchema,
 } from "../lib/api";
-import { setPipelineDefaults as cachePipelineDefaults } from "../lib/utils";
+import { setPipelineSchema as cachePipelineSchema } from "../lib/utils";
 
 export function useStreamState() {
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
@@ -52,12 +52,13 @@ export function useStreamState() {
     null
   );
 
-  // Store pipeline defaults separately for reset functionality
-  const [pipelineDefaults, setPipelineDefaults] =
-    useState<PipelineDefaults | null>(null);
+  // Store pipeline schema separately for reset functionality
+  const [pipelineSchema, setPipelineSchema] = useState<PipelineSchema | null>(
+    null
+  );
 
-  // Track loading state for defaults
-  const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
+  // Track loading state for schema
+  const [isLoadingSchema, setIsLoadingSchema] = useState(true);
 
   // Fetch hardware info on mount
   useEffect(() => {
@@ -73,50 +74,50 @@ export function useStreamState() {
     fetchHardwareInfo();
   }, []);
 
-  // Fetch and apply pipeline defaults when pipeline changes
+  // Fetch and apply pipeline schema when pipeline changes
   useEffect(() => {
-    const fetchDefaults = async () => {
-      setIsLoadingDefaults(true);
+    const fetchSchema = async () => {
+      setIsLoadingSchema(true);
       try {
-        const defaultsResponse = await getPipelineDefaults(settings.pipelineId);
+        const schemaResponse = await getPipelineSchema(settings.pipelineId);
 
-        // Cache defaults for use by other components
-        cachePipelineDefaults(settings.pipelineId, defaultsResponse);
+        // Cache schema for use by other components
+        cachePipelineSchema(settings.pipelineId, schemaResponse);
 
-        // Store defaults for reset functionality
-        setPipelineDefaults(defaultsResponse);
+        // Store schema for reset functionality
+        setPipelineSchema(schemaResponse);
 
-        // Get native mode and its defaults
-        const nativeMode = defaultsResponse.native_generation_mode;
-        const nativeModeDefaults = defaultsResponse.modes[nativeMode];
+        // Get native mode and its config
+        const nativeMode = schemaResponse.native_mode;
+        const nativeModeConfig = schemaResponse.mode_configs[nativeMode];
 
-        if (nativeModeDefaults) {
+        if (nativeModeConfig) {
           setSettings(prev => ({
             ...prev,
             generationMode: nativeMode,
-            resolution: nativeModeDefaults.resolution,
-            seed: nativeModeDefaults.base_seed,
-            denoisingSteps: nativeModeDefaults.denoising_steps ?? undefined,
-            noiseScale: nativeModeDefaults.noise_scale ?? undefined,
-            noiseController: nativeModeDefaults.noise_controller ?? undefined,
-            manageCache: nativeModeDefaults.manage_cache,
+            resolution: nativeModeConfig.resolution,
+            seed: nativeModeConfig.base_seed,
+            denoisingSteps: nativeModeConfig.denoising_steps ?? undefined,
+            noiseScale: nativeModeConfig.noise_scale ?? undefined,
+            noiseController: nativeModeConfig.noise_controller ?? undefined,
+            manageCache: nativeModeConfig.manage_cache,
             kvCacheAttentionBias:
-              nativeModeDefaults.kv_cache_attention_bias ?? undefined,
+              nativeModeConfig.kv_cache_attention_bias ?? undefined,
           }));
         }
-        setIsLoadingDefaults(false);
+        setIsLoadingSchema(false);
       } catch (error) {
         console.error(
-          "useStreamState: Failed to fetch pipeline defaults:",
+          "useStreamState: Failed to fetch pipeline schema:",
           error
         );
-        setIsLoadingDefaults(false);
+        setIsLoadingSchema(false);
         // No fallback - if backend is unreachable, streaming won't work anyway
         // User will see the error in console and UI will reflect the connection issue
       }
     };
 
-    fetchDefaults();
+    fetchSchema();
   }, [settings.pipelineId]);
 
   // Set recommended quantization when krea-realtime-video is selected
@@ -158,8 +159,8 @@ export function useStreamState() {
     settings,
     promptData,
     hardwareInfo,
-    pipelineDefaults,
-    isLoadingDefaults,
+    pipelineSchema,
+    isLoadingSchema,
     updateMetrics,
     updateStreamStatus,
     updateSettings,
