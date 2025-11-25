@@ -2,27 +2,31 @@ import torch
 from einops import rearrange
 
 from ..defaults import GENERATION_MODE_VIDEO
-from ..interface import Pipeline, PipelineDefaults, Requirements
+from ..helpers import build_pipeline_schema
+from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 
 
 class PassthroughPipeline(Pipeline):
     """Passthrough pipeline for testing"""
 
-    NATIVE_GENERATION_MODE = GENERATION_MODE_VIDEO
-
     @classmethod
-    def get_defaults(cls) -> PipelineDefaults:
-        """Return default parameters for Passthrough pipeline."""
-        shared = {
-            "denoising_steps": None,
-            "resolution": {"height": 512, "width": 512},
-            "manage_cache": False,
-            "base_seed": 42,
-            "noise_scale": None,
-            "noise_controller": None,
-        }
-        return cls._build_defaults(shared=shared)
+    def get_schema(cls) -> dict:
+        """Return schema for Passthrough pipeline."""
+        return build_pipeline_schema(
+            pipeline_id="passthrough",
+            name="Passthrough",
+            description="Simple passthrough pipeline for testing and debugging",
+            native_mode=GENERATION_MODE_VIDEO,
+            shared={
+                "denoising_steps": None,
+                "resolution": {"height": 512, "width": 512},
+                "manage_cache": False,
+                "base_seed": 42,
+                "noise_scale": None,
+                "noise_controller": None,
+            },
+        )
 
     def __init__(
         self,

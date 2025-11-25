@@ -1,12 +1,11 @@
 """Pydantic schemas for FastAPI application."""
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from scope.core.pipelines.defaults import GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO
-from scope.core.pipelines.interface import PipelineDefaults
 from scope.core.pipelines.utils import Quantization
 
 # Type alias for generation mode using constants
@@ -276,10 +275,26 @@ class PipelineStatusResponse(BaseModel):
     )
 
 
-class PipelineDefaultsResponse(PipelineDefaults):
-    """Pipeline defaults response schema.
+class PipelineSchemaResponse(BaseModel):
+    """Pipeline schema response with metadata and configuration.
 
-    Inherits all fields and validation from PipelineDefaults.
+    This response follows OpenAPI/JSON Schema conventions for pipeline introspection.
     """
 
-    pipeline_id: str = Field(..., description="ID of the pipeline")
+    id: str = Field(..., description="Unique pipeline identifier")
+    name: str = Field(..., description="Human-readable pipeline name")
+    description: str = Field(..., description="Pipeline capabilities description")
+    version: str = Field(default="1.0.0", description="Pipeline version")
+    native_mode: str = Field(..., description="Native generation mode (text or video)")
+    supported_modes: list[str] = Field(
+        ..., description="List of supported generation modes"
+    )
+    mode_configs: dict[str, dict[str, Any]] = Field(
+        ..., description="Mode-specific parameter configurations"
+    )
+
+
+class PipelineListResponse(BaseModel):
+    """Response containing list of available pipelines."""
+
+    pipelines: list[str] = Field(..., description="List of available pipeline IDs")

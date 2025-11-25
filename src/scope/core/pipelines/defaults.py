@@ -1,10 +1,10 @@
 """Centralized default extraction for pipelines."""
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .interface import Pipeline, PipelineDefaults, PipelineModeConfig
+    from .interface import Pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -13,54 +13,54 @@ GENERATION_MODE_VIDEO = "video"
 GENERATION_MODE_TEXT = "text"
 
 
-def get_pipeline_defaults(pipeline_class: type["Pipeline"]) -> "PipelineDefaults":
-    """Extract full mode-aware defaults from a pipeline class.
+def get_pipeline_schema(pipeline_class: type["Pipeline"]) -> dict[str, Any]:
+    """Extract full schema from a pipeline class.
 
     Args:
         pipeline_class: The pipeline class (not instance)
 
     Returns:
-        Typed PipelineDefaults object with native mode and mode-specific configurations.
+        Complete pipeline schema dictionary with metadata and mode configurations.
     """
-    return pipeline_class.get_defaults()
+    return pipeline_class.get_schema()
 
 
-def get_mode_defaults(
+def get_mode_config(
     pipeline_class: type["Pipeline"], mode: str | None = None
-) -> "PipelineModeConfig":
+) -> dict[str, Any]:
     """Extract mode-specific configuration from a pipeline class.
 
     Args:
         pipeline_class: The pipeline class (not instance)
-        mode: The mode to get defaults for (text/video). If None, uses native mode.
+        mode: The mode to get config for (text/video). If None, uses native mode.
 
     Returns:
-        PipelineModeConfig with mode-specific defaults including:
-        - denoising_steps: list of int
+        Mode configuration dictionary with parameters including:
         - resolution: dict with height/width
+        - denoising_steps: list of int (if applicable)
         - manage_cache: bool
         - base_seed: int
-        - noise_scale: float | None
-        - noise_controller: bool | None
-        - Additional pipeline-specific keys (e.g. kv_cache_attention_bias)
+        - noise_scale: float (if applicable)
+        - noise_controller: bool (if applicable)
+        - Additional pipeline-specific parameters
     """
-    defaults = get_pipeline_defaults(pipeline_class)
-    native_mode = defaults.native_generation_mode
-    modes = defaults.modes
+    schema = get_pipeline_schema(pipeline_class)
+    native_mode = schema["native_mode"]
+    mode_configs = schema["mode_configs"]
 
     target_mode = mode or native_mode
-    mode_config = modes.get(target_mode)
+    mode_config = mode_configs.get(target_mode)
 
     if mode_config is None and target_mode != native_mode:
         logger.warning(
-            f"get_mode_defaults: Mode '{target_mode}' not found in {pipeline_class.__name__}, "
+            f"get_mode_config: Mode '{target_mode}' not found in {pipeline_class.__name__}, "
             f"falling back to native mode '{native_mode}'"
         )
-        mode_config = modes.get(native_mode)
+        mode_config = mode_configs.get(native_mode)
 
     if mode_config is None:
         raise ValueError(
-            f"get_mode_defaults: No configuration found for mode '{target_mode}' "
+            f"get_mode_config: No configuration found for mode '{target_mode}' "
             f"in pipeline {pipeline_class.__name__}"
         )
 
@@ -81,10 +81,10 @@ def extract_load_params(
     Returns:
         Tuple of (height, width, seed)
     """
-    native_mode_config = get_mode_defaults(pipeline_class)
-    default_height = native_mode_config.resolution["height"]
-    default_width = native_mode_config.resolution["width"]
-    default_seed = native_mode_config.base_seed
+    native_mode_config = get_mode_config(pipeline_class)
+    default_height = native_mode_config["resolution"]["height"]
+    default_width = native_mode_config["resolution"]["width"]
+    default_seed = native_mode_config["base_seed"]
 
     params = load_params or {}
     height = params.get("height", default_height)

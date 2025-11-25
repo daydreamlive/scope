@@ -7,7 +7,8 @@ from diffusers.modular_pipelines import PipelineState
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_TEXT
-from ..interface import Pipeline, PipelineDefaults
+from ..helpers import build_pipeline_schema
+from ..interface import Pipeline
 from ..process import postprocess_chunk
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
@@ -23,18 +24,19 @@ DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
 class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
-    NATIVE_GENERATION_MODE = GENERATION_MODE_TEXT
-
     @classmethod
-    def get_defaults(cls) -> PipelineDefaults:
-        """Return default parameters for LongLive pipeline."""
-        shared = {
-            "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
-            "manage_cache": True,
-            "base_seed": 42,
-        }
-        return cls._build_defaults(
-            shared=shared,
+    def get_schema(cls) -> dict:
+        """Return schema for LongLive pipeline."""
+        return build_pipeline_schema(
+            pipeline_id="longlive",
+            name="LongLive",
+            description="Text-to-video generation optimized for long-form content with efficient recaching",
+            native_mode=GENERATION_MODE_TEXT,
+            shared={
+                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
+                "manage_cache": True,
+                "base_seed": 42,
+            },
             text_overrides={
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
@@ -144,7 +146,11 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         self.state = PipelineState()
 
         # Initialize state with native mode defaults
-        self._initialize_with_native_mode_defaults(self.state, config)
+        from ..defaults import get_mode_config
+        from ..helpers import initialize_state_from_config
+
+        native_mode_config = get_mode_config(self.__class__)
+        initialize_state_from_config(self.state, config, native_mode_config)
 
         self.first_call = True
 

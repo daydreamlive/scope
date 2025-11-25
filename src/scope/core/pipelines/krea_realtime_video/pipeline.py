@@ -7,7 +7,8 @@ from diffusers.modular_pipelines import PipelineState
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_TEXT
-from ..interface import Pipeline, PipelineDefaults
+from ..helpers import build_pipeline_schema
+from ..interface import Pipeline
 from ..process import postprocess_chunk
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
@@ -25,19 +26,20 @@ WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
-    NATIVE_GENERATION_MODE = GENERATION_MODE_TEXT
-
     @classmethod
-    def get_defaults(cls) -> PipelineDefaults:
-        """Return default parameters for Krea Realtime Video pipeline."""
-        shared = {
-            "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
-            "manage_cache": True,
-            "base_seed": 42,
-            "kv_cache_attention_bias": 0.30,
-        }
-        return cls._build_defaults(
-            shared=shared,
+    def get_schema(cls) -> dict:
+        """Return schema for Krea Realtime Video pipeline."""
+        return build_pipeline_schema(
+            pipeline_id="krea-realtime-video",
+            name="Krea Realtime Video",
+            description="Text-to-video generation with advanced KV cache attention control for realtime performance",
+            native_mode=GENERATION_MODE_TEXT,
+            shared={
+                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
+                "manage_cache": True,
+                "base_seed": 42,
+                "kv_cache_attention_bias": 0.30,
+            },
             text_overrides={
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
@@ -160,7 +162,11 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         self.state = PipelineState()
 
         # Initialize state with native mode defaults
-        self._initialize_with_native_mode_defaults(self.state, config)
+        from ..defaults import get_mode_config
+        from ..helpers import initialize_state_from_config
+
+        native_mode_config = get_mode_config(self.__class__)
+        initialize_state_from_config(self.state, config, native_mode_config)
 
         start = time.time()
         for _ in range(WARMUP_RUNS):

@@ -29,13 +29,14 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
-from .models_config import get_models_dir, models_are_downloaded
+from .models_config import ensure_models_dir, get_models_dir, models_are_downloaded
 from .pipeline_manager import PipelineManager
 from .schema import (
     HardwareInfoResponse,
     HealthResponse,
-    PipelineDefaultsResponse,
+    PipelineListResponse,
     PipelineLoadRequest,
+    PipelineSchemaResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
@@ -195,8 +196,8 @@ async def lifespan(app: FastAPI):
     logs_dir = get_logs_dir()
     logger.info(f"Logs directory: {logs_dir}")
 
-    # Log models directory
-    models_dir = get_models_dir()
+    # Ensure models directory and lora subdirectory exist
+    models_dir = ensure_models_dir()
     logger.info(f"Models directory: {models_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
@@ -309,39 +310,47 @@ async def get_pipeline_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/api/v1/pipeline/defaults", response_model=PipelineDefaultsResponse)
-async def get_pipeline_defaults(pipeline_id: str):
-    """Get default parameters for a specific pipeline."""
+@app.get("/api/v1/pipelines", response_model=PipelineListResponse)
+async def list_pipelines():
+    """List all available pipelines."""
     try:
-        # Import pipelines to get their classes
-        if pipeline_id == "streamdiffusionv2":
-            from scope.core.pipelines import StreamDiffusionV2Pipeline
+        from scope.core.pipelines.registry import PipelineRegistry
 
-            defaults = StreamDiffusionV2Pipeline.get_defaults()
-        elif pipeline_id == "longlive":
-            from scope.core.pipelines import LongLivePipeline
+        pipeline_ids = PipelineRegistry.list_pipelines()
+        return PipelineListResponse(pipelines=pipeline_ids)
+    except Exception as e:
+        logger.error(f"list_pipelines: Error listing pipelines: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
-            defaults = LongLivePipeline.get_defaults()
-        elif pipeline_id == "krea-realtime-video":
-            from scope.core.pipelines import KreaRealtimeVideoPipeline
 
-            defaults = KreaRealtimeVideoPipeline.get_defaults()
-        elif pipeline_id == "passthrough":
-            from scope.core.pipelines import PassthroughPipeline
+@app.get("/api/v1/pipelines/{pipeline_id}", response_model=PipelineSchemaResponse)
+async def get_pipeline_schema(pipeline_id: str):
+    """Get complete schema and metadata for a specific pipeline.
 
-            defaults = PassthroughPipeline.get_defaults()
-        else:
+    This endpoint returns pipeline metadata including:
+    - Pipeline identification and description
+    - Supported generation modes (text-to-video, video-to-video)
+    - Mode-specific parameter configurations with defaults
+    - JSON Schema-compatible parameter definitions
+
+    The response follows OpenAPI conventions for API introspection.
+    """
+    try:
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        schema = PipelineRegistry.get_schema(pipeline_id)
+        if schema is None:
             raise HTTPException(
-                status_code=400, detail=f"Invalid pipeline ID: {pipeline_id}"
+                status_code=404, detail=f"Pipeline not found: {pipeline_id}"
             )
 
-        return PipelineDefaultsResponse(
-            pipeline_id=pipeline_id, **defaults.model_dump()
-        )
+        return PipelineSchemaResponse(**schema)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting pipeline defaults: {e}")
+        logger.error(
+            f"get_pipeline_schema: Error getting schema for {pipeline_id}: {e}"
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -416,7 +425,7 @@ async def list_lora_files():
         )
 
     try:
-        lora_dir = Path("models/lora")
+        lora_dir = get_models_dir() / "lora"
         lora_files: list[LoRAFileInfo] = []
 
         if lora_dir.exists() and lora_dir.is_dir():

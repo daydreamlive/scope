@@ -7,7 +7,8 @@ from diffusers.modular_pipelines import PipelineState
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_VIDEO
-from ..interface import Pipeline, PipelineDefaults, Requirements
+from ..helpers import build_pipeline_schema
+from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
@@ -25,18 +26,19 @@ CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
-    NATIVE_GENERATION_MODE = GENERATION_MODE_VIDEO
-
     @classmethod
-    def get_defaults(cls) -> PipelineDefaults:
-        """Return default parameters for StreamDiffusionV2 pipeline."""
-        shared = {
-            "resolution": {"height": 512, "width": 512},
-            "manage_cache": True,
-            "base_seed": 42,
-        }
-        return cls._build_defaults(
-            shared=shared,
+    def get_schema(cls) -> dict:
+        """Return schema for StreamDiffusionV2 pipeline."""
+        return build_pipeline_schema(
+            pipeline_id="streamdiffusionv2",
+            name="StreamDiffusion V2",
+            description="Video-to-video generation with temporal consistency and efficient streaming",
+            native_mode=GENERATION_MODE_VIDEO,
+            shared={
+                "resolution": {"height": 512, "width": 512},
+                "manage_cache": True,
+                "base_seed": 42,
+            },
             text_overrides={
                 "denoising_steps": [1000, 750],
                 "noise_scale": None,
@@ -126,7 +128,11 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.state = PipelineState()
 
         # Initialize state with native mode defaults
-        self._initialize_with_native_mode_defaults(self.state, config)
+        from ..defaults import get_mode_config
+        from ..helpers import initialize_state_from_config
+
+        native_mode_config = get_mode_config(self.__class__)
+        initialize_state_from_config(self.state, config, native_mode_config)
 
         self.first_call = True
 
