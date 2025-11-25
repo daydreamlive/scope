@@ -45,6 +45,9 @@ If you do not have access to a GPU with these specs then we recommend installing
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is needed to run the server and [Node.js](https://nodejs.org/en/download) which is needed to build the frontend.
 
+> [!IMPORTANT]
+> If you are using Windows, install [Microsoft Visual C++ Redistributable (vcredist)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
+
 #### Clone
 
 ```
