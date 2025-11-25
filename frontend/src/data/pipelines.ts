@@ -1,3 +1,5 @@
+import { type GenerationMode } from "../constants/modes";
+
 export type PipelineCategory = "video-input" | "no-video-input";
 
 export interface PipelineInfo {
@@ -6,7 +8,7 @@ export interface PipelineInfo {
   docsUrl?: string;
   modified?: boolean;
   category: PipelineCategory;
-  nativeGenerationMode?: "video" | "text";
+  nativeGenerationMode?: GenerationMode;
   defaultPrompt?: string;
   estimatedVram?: number; // GB
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
@@ -24,7 +26,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support streaming.",
     modified: true,
     category: "video-input",
-    nativeGenerationMode: "video",
+    nativeGenerationMode: "video" as const,
     defaultPrompt: "A dog in the grass looking around, photorealistic",
     estimatedVram: 20,
     requiresModels: true,
@@ -57,12 +59,12 @@ export const PIPELINES: Record<string, PipelineInfo> = {
       "A streaming pipeline and autoregressive video diffusion model from Krea. The model is trained using Self-Forcing on Wan2.1 14b.",
     modified: true,
     category: "video-input",
-    nativeGenerationMode: "text",
+    nativeGenerationMode: "text" as const,
     defaultPrompt:
       "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
     estimatedVram: 32,
     requiresModels: true,
-    defaultTemporalInterpolationMethod: "linear",
+    defaultTemporalInterpolationMethod: "linear" as const,
     defaultTemporalInterpolationSteps: 4,
     supportsLoRA: true,
   },
@@ -71,7 +73,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     about:
       "A pipeline that returns the input video without any processing that is useful for testing and debugging.",
     category: "video-input",
-    nativeGenerationMode: "video",
+    nativeGenerationMode: "video" as const,
     requiresModels: false,
   },
 };

@@ -27,6 +27,48 @@ def get_pipeline_schema(pipeline_class: type["Pipeline"]) -> dict[str, Any]:
     return pipeline_class.get_schema()
 
 
+def resolve_generation_mode(
+    explicit_mode: str | None,
+    kwargs: dict[str, Any],
+    pipeline_class: type["Pipeline"],
+) -> str:
+    """Resolve generation mode with explicit > kwargs > native fallback.
+
+    This utility eliminates duplication of mode resolution logic across
+    pipeline implementations by providing a single source of truth for
+    mode determination.
+
+    Args:
+        explicit_mode: Explicitly provided mode (highest priority)
+        kwargs: Dictionary that may contain 'generation_mode' key
+        pipeline_class: Pipeline class to get native mode from
+
+    Returns:
+        Resolved generation mode string (text or video)
+
+    Example:
+        mode = resolve_generation_mode(
+            explicit_mode=None,
+            kwargs={"generation_mode": "video"},
+            pipeline_class=MyPipeline
+        )
+        # Returns "video" from kwargs
+
+        mode = resolve_generation_mode(
+            explicit_mode="text",
+            kwargs={"generation_mode": "video"},
+            pipeline_class=MyPipeline
+        )
+        # Returns "text" (explicit takes priority)
+    """
+    if explicit_mode:
+        return explicit_mode
+    if "generation_mode" in kwargs:
+        return kwargs["generation_mode"]
+    schema = get_pipeline_schema(pipeline_class)
+    return schema["native_mode"]
+
+
 def get_mode_config(
     pipeline_class: type["Pipeline"], mode: str | None = None
 ) -> dict[str, Any]:
@@ -74,7 +116,8 @@ def extract_load_params(
 ) -> tuple[int, int, int]:
     """Extract height, width, and seed from load_params with pipeline defaults as fallback.
 
-    Uses the native mode's defaults as the fallback values.
+    Uses the native mode's defaults as the fallback values. Extracts defaults from
+    JSON Schema format.
 
     Args:
         pipeline_class: The pipeline class to get defaults from
@@ -84,9 +127,15 @@ def extract_load_params(
         Tuple of (height, width, seed)
     """
     native_mode_config = get_mode_config(pipeline_class)
-    default_height = native_mode_config["resolution"]["height"]
-    default_width = native_mode_config["resolution"]["width"]
-    default_seed = native_mode_config["base_seed"]
+
+    # Extract from JSON Schema objects
+    resolution_schema = native_mode_config.get("resolution", {})
+    resolution_default = resolution_schema.get("default", {"height": 512, "width": 512})
+    default_height = resolution_default["height"]
+    default_width = resolution_default["width"]
+
+    base_seed_schema = native_mode_config.get("base_seed", {})
+    default_seed = base_seed_schema.get("default", 42)
 
     params = load_params or {}
     height = params.get("height", default_height)
@@ -106,6 +155,7 @@ def apply_mode_defaults_to_state(
 
     This consolidates the common pattern of applying defaults for denoising_steps,
     noise_scale, and noise_controller based on the current generation mode.
+    Extracts defaults from JSON Schema format.
 
     Args:
         state: PipelineState object to update
@@ -116,10 +166,12 @@ def apply_mode_defaults_to_state(
     kwargs = kwargs or {}
     mode_config = get_mode_config(pipeline_class, mode)
 
-    # Apply denoising steps if not provided
-    denoising_steps = mode_config.get("denoising_steps")
-    if "denoising_step_list" not in kwargs and denoising_steps:
-        state.set("denoising_step_list", denoising_steps)
+    # Extract from JSON Schema objects
+    denoising_steps_schema = mode_config.get("denoising_steps")
+    if denoising_steps_schema:
+        denoising_steps = denoising_steps_schema.get("default")
+        if "denoising_step_list" not in kwargs and denoising_steps:
+            state.set("denoising_step_list", denoising_steps)
 
     # For text mode, noise controls should be None (not used)
     if mode == GENERATION_MODE_TEXT:
@@ -128,6 +180,10 @@ def apply_mode_defaults_to_state(
     else:
         # For video mode, apply defaults if not provided
         if "noise_scale" not in kwargs:
-            state.set("noise_scale", mode_config.get("noise_scale"))
+            noise_scale_schema = mode_config.get("noise_scale")
+            if noise_scale_schema:
+                state.set("noise_scale", noise_scale_schema.get("default"))
         if "noise_controller" not in kwargs:
-            state.set("noise_controller", mode_config.get("noise_controller"))
+            noise_controller_schema = mode_config.get("noise_controller")
+            if noise_controller_schema:
+                state.set("noise_controller", noise_controller_schema.get("default"))

@@ -233,7 +233,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       transition?: PromptTransition;
       denoising_step_list?: number[];
       noise_scale?: number | null;
-      noise_controller?: boolean;
+      noise_controller?: boolean | null;
       manage_cache?: boolean;
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;

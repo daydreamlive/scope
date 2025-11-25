@@ -110,18 +110,26 @@ def initialize_state_from_config(
     """Initialize pipeline state from config and mode-specific defaults.
 
     This iterates through the mode configuration and sets state values,
-    using config overrides when present.
+    using config overrides when present. Extracts default values from
+    JSON Schema-formatted parameters.
 
     Args:
         state: PipelineState object to initialize
         config: Configuration object with optional overrides
-        mode_config: Mode-specific configuration dictionary
+        mode_config: Mode-specific configuration dictionary with JSON Schema format
     """
     # Common state initialization
     state.set("current_start_frame", 0)
 
     # Iterate through mode config and apply to state
-    for key, default_value in mode_config.items():
+    for key, schema_value in mode_config.items():
+        # Extract default value from JSON Schema object
+        if isinstance(schema_value, dict) and "default" in schema_value:
+            default_value = schema_value["default"]
+        else:
+            # Fallback for non-schema values (shouldn't happen with new format)
+            default_value = schema_value
+
         if key == "resolution":
             # Special handling for resolution dict
             state.set("height", getattr(config, "height", default_value["height"]))

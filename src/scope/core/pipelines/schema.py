@@ -16,6 +16,7 @@ def create_parameter_schema(
     maximum: int | float | None = None,
     items: dict[str, Any] | None = None,
     enum: list[Any] | None = None,
+    required: bool = False,
 ) -> dict[str, Any]:
     """Create a JSON Schema-compatible parameter definition.
 
@@ -27,6 +28,7 @@ def create_parameter_schema(
         maximum: Maximum value (for numeric types)
         items: Schema for array items (for array type)
         enum: Allowed values (for enum constraints)
+        required: Whether this parameter is required
 
     Returns:
         JSON Schema parameter definition
@@ -45,6 +47,8 @@ def create_parameter_schema(
         schema["items"] = items
     if enum is not None:
         schema["enum"] = enum
+    if required:
+        schema["required"] = required
 
     return schema
 
@@ -58,7 +62,10 @@ def create_mode_config(
     noise_controller: bool | None = None,
     **extra_params: Any,
 ) -> dict[str, Any]:
-    """Create a mode-specific configuration dictionary.
+    """Create a mode-specific configuration dictionary with JSON Schema format.
+
+    Each parameter is wrapped in a JSON Schema object with type information,
+    default values, and constraints following OpenAPI conventions.
 
     Args:
         resolution: Dict with 'height' and 'width' keys
@@ -70,26 +77,150 @@ def create_mode_config(
         **extra_params: Additional pipeline-specific parameters
 
     Returns:
-        Mode configuration dictionary with all parameters
+        Mode configuration dictionary with JSON Schema-formatted parameters
     """
     config: dict[str, Any] = {
-        "resolution": resolution,
-        "manage_cache": manage_cache,
-        "base_seed": base_seed,
+        "resolution": create_parameter_schema(
+            param_type="object",
+            default=resolution,
+            description="Output resolution for generated frames",
+        ),
+        "manage_cache": create_parameter_schema(
+            param_type="boolean",
+            default=manage_cache,
+            description="Enable automatic cache management for performance optimization",
+        ),
+        "base_seed": create_parameter_schema(
+            param_type="integer",
+            default=base_seed,
+            description="Base random seed for reproducible generation",
+            minimum=0,
+        ),
     }
 
     # Optional parameters - only include if not None
     if denoising_steps is not None:
-        config["denoising_steps"] = denoising_steps
+        config["denoising_steps"] = create_parameter_schema(
+            param_type="array",
+            default=denoising_steps,
+            description="Denoising step schedule for progressive generation",
+            items={"type": "integer", "minimum": 1},
+        )
     if noise_scale is not None:
-        config["noise_scale"] = noise_scale
+        config["noise_scale"] = create_parameter_schema(
+            param_type="number",
+            default=noise_scale,
+            description="Amount of noise to add during generation",
+            minimum=0.0,
+            maximum=1.0,
+        )
     if noise_controller is not None:
-        config["noise_controller"] = noise_controller
+        config["noise_controller"] = create_parameter_schema(
+            param_type="boolean",
+            default=noise_controller,
+            description="Enable dynamic noise control during generation",
+        )
 
-    # Add any extra parameters
-    config.update(extra_params)
+    # Wrap extra parameters in JSON Schema format
+    for key, value in extra_params.items():
+        if value is None:
+            continue
+
+        # Infer type from value
+        if isinstance(value, bool):
+            config[key] = create_parameter_schema(
+                param_type="boolean",
+                default=value,
+            )
+        elif isinstance(value, int):
+            config[key] = create_parameter_schema(
+                param_type="integer",
+                default=value,
+            )
+        elif isinstance(value, float):
+            config[key] = create_parameter_schema(
+                param_type="number",
+                default=value,
+            )
+        elif isinstance(value, str):
+            config[key] = create_parameter_schema(
+                param_type="string",
+                default=value,
+            )
+        elif isinstance(value, list):
+            config[key] = create_parameter_schema(
+                param_type="array",
+                default=value,
+            )
+        elif isinstance(value, dict):
+            config[key] = create_parameter_schema(
+                param_type="object",
+                default=value,
+            )
+        else:
+            # For unknown types, store as-is
+            config[key] = value
 
     return config
+
+
+def compute_capabilities(
+    supported_modes: list[str],
+    mode_configs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Compute pipeline capabilities from mode configurations.
+
+    This function derives UI-relevant capabilities from the schema structure,
+    eliminating the need for frontend logic to perform these derivations.
+
+    Works with JSON Schema-formatted parameters (extracts from schema objects).
+
+    Args:
+        supported_modes: List of supported generation modes
+        mode_configs: Dict mapping mode names to their configurations
+
+    Returns:
+        Dictionary of computed capabilities including:
+        - hasGenerationModeControl: Whether pipeline supports mode switching
+        - hasNoiseControls: Whether any mode supports noise controls
+        - showNoiseControlsInText: Whether text mode has noise controls
+        - showNoiseControlsInVideo: Whether video mode has noise controls
+        - hasCacheManagement: Whether any mode supports cache management
+        - requiresVideoInVideoMode: Whether video mode requires video input
+    """
+    text_config = mode_configs.get("text", {})
+    video_config = mode_configs.get("video", {})
+
+    # Check if noise controls are available in each mode
+    # Parameters are now JSON Schema objects, so check for their presence
+    show_noise_controls_in_text = (
+        text_config.get("noise_scale") is not None
+        or text_config.get("noise_controller") is not None
+    )
+    show_noise_controls_in_video = (
+        video_config.get("noise_scale") is not None
+        or video_config.get("noise_controller") is not None
+    )
+
+    # Derive high-level capabilities
+    has_generation_mode_control = len(supported_modes) > 1
+    has_noise_controls = show_noise_controls_in_text or show_noise_controls_in_video
+    has_cache_management = (
+        text_config.get("manage_cache") is not None
+        or video_config.get("manage_cache") is not None
+    )
+
+    # Video mode requires video input if it has input_size specified
+    requires_video_in_video_mode = video_config.get("input_size") is not None
+
+    return {
+        "hasGenerationModeControl": has_generation_mode_control,
+        "hasNoiseControls": has_noise_controls,
+        "showNoiseControlsInText": show_noise_controls_in_text,
+        "showNoiseControlsInVideo": show_noise_controls_in_video,
+        "hasCacheManagement": has_cache_management,
+        "requiresVideoInVideoMode": requires_video_in_video_mode,
+    }
 
 
 def create_pipeline_schema(
@@ -107,6 +238,7 @@ def create_pipeline_schema(
     - Pipeline identification and metadata
     - Supported generation modes
     - Mode-specific parameter configurations
+    - Computed capabilities for UI generation
     - JSON Schema-compatible parameter definitions
 
     Args:
@@ -119,8 +251,11 @@ def create_pipeline_schema(
         version: Pipeline version string
 
     Returns:
-        Complete pipeline schema dictionary
+        Complete pipeline schema dictionary with computed capabilities
     """
+    # Compute capabilities from mode configs
+    capabilities = compute_capabilities(supported_modes, mode_configs)
+
     return {
         "id": pipeline_id,
         "name": name,
@@ -129,4 +264,5 @@ def create_pipeline_schema(
         "native_mode": native_mode,
         "supported_modes": supported_modes,
         "mode_configs": mode_configs,
+        "capabilities": capabilities,
     }

@@ -32,6 +32,13 @@ export interface LoRAConfig {
   scale: number;
 }
 
+/**
+ * Settings state for stream configuration.
+ *
+ * Convention for optional fields:
+ * - undefined = not loaded yet / not set by user (waiting for schema)
+ * - null = explicitly not applicable / disabled for current mode
+ */
 export interface SettingsState {
   pipelineId: PipelineId;
   generationMode?: GenerationMode;
@@ -41,9 +48,12 @@ export interface SettingsState {
   };
   seed?: number;
   denoisingSteps?: number[];
-  noiseScale?: number;
-  noiseController?: boolean;
+  // noiseScale and noiseController are undefined when not loaded,
+  // null when not applicable (e.g., in text-to-video mode)
+  noiseScale?: number | null;
+  noiseController?: boolean | null;
   manageCache?: boolean;
+  // quantization is null when not used/disabled
   quantization?: "fp8_e4m3fn" | null;
   kvCacheAttentionBias?: number;
   paused?: boolean;
@@ -59,5 +69,5 @@ export interface PipelineInfo {
   projectUrl?: string;
   modified?: boolean;
   category: PipelineCategory;
-  nativeGenerationMode?: "video" | "text";
+  nativeGenerationMode?: GenerationMode;
 }

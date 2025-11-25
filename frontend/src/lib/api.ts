@@ -1,5 +1,6 @@
-import type { LoRAConfig } from "../types";
+import type { LoRAConfig, PipelineId } from "../types";
 import type { GenerationMode } from "../constants/modes";
+import { setPipelineSchema } from "./utils";
 export type { GenerationMode };
 
 export interface PromptItem {
@@ -74,24 +75,37 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
+export interface JSONSchemaParameter<T = unknown> {
+  type: string;
+  default: T;
+  description?: string;
+  minimum?: number;
+  maximum?: number;
+  items?: Record<string, unknown>;
+  enum?: unknown[];
+  required?: boolean;
+}
+
 export interface ModeConfig {
-  denoising_steps?: number[] | null;
-  resolution: { height: number; width: number };
-  manage_cache: boolean;
-  base_seed: number;
-  noise_scale?: number | null;
-  noise_controller?: boolean | null;
-  kv_cache_attention_bias?: number | null;
-  input_size?: number | null;
-  vae_strategy?: string | null;
-  [key: string]:
-    | number
-    | boolean
-    | string
-    | number[]
-    | { height: number; width: number }
-    | null
-    | undefined;
+  denoising_steps?: JSONSchemaParameter<number[]>;
+  resolution: JSONSchemaParameter<{ height: number; width: number }>;
+  manage_cache: JSONSchemaParameter<boolean>;
+  base_seed: JSONSchemaParameter<number>;
+  noise_scale?: JSONSchemaParameter<number>;
+  noise_controller?: JSONSchemaParameter<boolean>;
+  kv_cache_attention_bias?: JSONSchemaParameter<number>;
+  input_size?: JSONSchemaParameter<number>;
+  vae_strategy?: JSONSchemaParameter<string>;
+  [key: string]: JSONSchemaParameter<unknown> | undefined;
+}
+
+export interface PipelineCapabilities {
+  hasGenerationModeControl: boolean;
+  hasNoiseControls: boolean;
+  showNoiseControlsInText: boolean;
+  showNoiseControlsInVideo: boolean;
+  hasCacheManagement: boolean;
+  requiresVideoInVideoMode: boolean;
 }
 
 export interface PipelineSchema {
@@ -105,6 +119,7 @@ export interface PipelineSchema {
     text: ModeConfig;
     video: ModeConfig;
   };
+  capabilities: PipelineCapabilities;
 }
 
 export const sendWebRTCOffer = async (
@@ -199,6 +214,45 @@ export const getPipelineSchema = async (
 
   const result = await response.json();
   return result;
+};
+
+/**
+ * Pre-fetch all pipeline schemas and cache them.
+ * This should be called on app initialization to avoid waiting for
+ * schema fetches when switching pipelines.
+ *
+ * @returns Promise that resolves when all schemas are fetched and cached
+ */
+export const prefetchAllPipelineSchemas = async (): Promise<void> => {
+  try {
+    const pipelineIds = await listPipelines();
+
+    // Fetch all schemas in parallel
+    const schemaPromises = pipelineIds.map(async pipelineId => {
+      try {
+        const schema = await getPipelineSchema(pipelineId);
+        setPipelineSchema(pipelineId as PipelineId, schema);
+        return { pipelineId, success: true };
+      } catch (error) {
+        console.error(
+          `prefetchAllPipelineSchemas: Failed to fetch schema for ${pipelineId}:`,
+          error
+        );
+        return { pipelineId, success: false, error };
+      }
+    });
+
+    const results = await Promise.all(schemaPromises);
+    const successCount = results.filter(r => r.success).length;
+    console.log(
+      `prefetchAllPipelineSchemas: Cached ${successCount}/${pipelineIds.length} pipeline schemas`
+    );
+  } catch (error) {
+    console.error(
+      "prefetchAllPipelineSchemas: Failed to list pipelines:",
+      error
+    );
+  }
 };
 
 export const checkModelStatus = async (

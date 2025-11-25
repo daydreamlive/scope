@@ -46,9 +46,9 @@ interface SettingsPanelProps {
   onSeedChange?: (seed: number) => void;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
-  noiseScale?: number;
+  noiseScale?: number | null;
   onNoiseScaleChange?: (noiseScale: number) => void;
-  noiseController?: boolean;
+  noiseController?: boolean | null;
   onNoiseControllerChange?: (enabled: boolean) => void;
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
@@ -76,9 +76,9 @@ export function SettingsPanel({
   onSeedChange,
   denoisingSteps,
   onDenoisingStepsChange,
-  noiseScale = 0.7,
+  noiseScale,
   onNoiseScaleChange,
-  noiseController = true,
+  noiseController,
   onNoiseControllerChange,
   manageCache = true,
   onManageCacheChange,
@@ -96,7 +96,12 @@ export function SettingsPanel({
   const effectiveGenerationMode = generationMode ?? modeCapabilities.nativeMode;
 
   // Local slider state management hooks
-  const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
+  // Convert null to default value for slider (null means not applicable, treat as default)
+  const effectiveNoiseScale = noiseScale ?? 0.7;
+  const noiseScaleSlider = useLocalSliderValue(
+    effectiveNoiseScale,
+    onNoiseScaleChange
+  );
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
     onKvCacheAttentionBiasChange
@@ -621,14 +626,14 @@ export function SettingsPanel({
                       className="text-sm text-foreground"
                     />
                     <Toggle
-                      pressed={noiseController}
+                      pressed={noiseController ?? true}
                       onPressedChange={onNoiseControllerChange || (() => {})}
                       disabled={isStreaming}
                       variant="outline"
                       size="sm"
                       className="h-7"
                     >
-                      {noiseController ? "ON" : "OFF"}
+                      {(noiseController ?? true) ? "ON" : "OFF"}
                     </Toggle>
                   </div>
                 </div>
@@ -643,7 +648,7 @@ export function SettingsPanel({
                   max={1.0}
                   step={0.01}
                   incrementAmount={0.01}
-                  disabled={noiseController}
+                  disabled={noiseController ?? true}
                   labelClassName="text-sm text-foreground w-20"
                   valueFormatter={noiseScaleSlider.formatValue}
                   inputParser={v => parseFloat(v) || 0.0}

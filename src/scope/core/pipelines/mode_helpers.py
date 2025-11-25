@@ -37,17 +37,22 @@ class UniversalInputModesMixin:
         Returns:
             Requirements object specifying input_size, or None if no input required
         """
-        from .defaults import GENERATION_MODE_VIDEO, get_mode_config
+        from .defaults import (
+            GENERATION_MODE_VIDEO,
+            get_mode_config,
+            resolve_generation_mode,
+        )
 
-        schema = self.__class__.get_schema()
-        native_mode = schema["native_mode"]
-        mode = generation_mode or kwargs.get("generation_mode") or native_mode
+        mode = resolve_generation_mode(generation_mode, kwargs, self.__class__)
 
         if mode == GENERATION_MODE_VIDEO:
             mode_config = get_mode_config(self.__class__, mode)
-            input_size = mode_config.get("input_size")
-            if input_size is not None:
-                return Requirements(input_size=input_size)
+            # Extract from JSON Schema object
+            input_size_schema = mode_config.get("input_size")
+            if input_size_schema is not None:
+                input_size = input_size_schema.get("default")
+                if input_size is not None:
+                    return Requirements(input_size=input_size)
 
         return None
 
@@ -92,7 +97,9 @@ class UniversalInputModesMixin:
         mode_config = get_mode_config(self.__class__, mode)
 
         strategy_key = f"{component_name}_strategy"
-        strategy = mode_config.get(strategy_key)
+        # Extract from JSON Schema object
+        strategy_schema = mode_config.get(strategy_key)
+        strategy = strategy_schema.get("default") if strategy_schema else None
 
         if cache_attr:
             if not hasattr(self, cache_attr):
@@ -120,17 +127,55 @@ class UniversalInputModesMixin:
     def _select_blocks_for_mode(self, mode: str) -> Any:
         """Select appropriate block graph based on generation mode.
 
+        Uses a dictionary-based mapping that can be extended via overriding
+        _get_mode_to_blocks_mapping() for custom modes without modifying this method.
+
         Args:
             mode: Current generation mode (text/video)
 
         Returns:
             Block graph instance for the specified mode
         """
-        from .defaults import GENERATION_MODE_VIDEO
+        import logging
 
-        if mode == GENERATION_MODE_VIDEO:
-            return self.blocks_video
-        return self.blocks_text
+        from .defaults import GENERATION_MODE_TEXT
+
+        logger = logging.getLogger(__name__)
+
+        mapping = self._get_mode_to_blocks_mapping()
+
+        if mode not in mapping:
+            logger.warning(
+                f"_select_blocks_for_mode: Unknown mode '{mode}', falling back to {GENERATION_MODE_TEXT}"
+            )
+            mode = GENERATION_MODE_TEXT
+
+        return mapping[mode]
+
+    def _get_mode_to_blocks_mapping(self) -> dict[str, Any]:
+        """Return mapping of mode names to block graphs.
+
+        Override this in pipeline subclasses to support custom modes beyond
+        the standard text/video modes.
+
+        Returns:
+            Dictionary mapping mode names to block graph instances
+
+        Example:
+            def _get_mode_to_blocks_mapping(self):
+                from .defaults import GENERATION_MODE_VIDEO, GENERATION_MODE_TEXT
+                return {
+                    GENERATION_MODE_VIDEO: self.blocks_video,
+                    GENERATION_MODE_TEXT: self.blocks_text,
+                    "hybrid": self.blocks_hybrid,  # Custom mode
+                }
+        """
+        from .defaults import GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO
+
+        return {
+            GENERATION_MODE_VIDEO: self.blocks_video,
+            GENERATION_MODE_TEXT: self.blocks_text,
+        }
 
     def _init_vae_lazy_loading(
         self, device: torch.device, dtype: torch.dtype, **vae_init_kwargs
@@ -149,6 +194,70 @@ class UniversalInputModesMixin:
         self._vae_device = device
         self._vae_dtype = dtype
         self._vae_cache = {}
+
+    def _initialize_pipeline_state(
+        self,
+        config: Any,
+        generator: Any,
+        text_encoder: Any,
+        blocks_text: Any,
+        blocks_video: Any,
+        model_config: Any,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> None:
+        """Initialize pipeline state and components from configuration.
+
+        This helper consolidates the common pattern of initializing pipeline
+        components, state, and applying mode-specific defaults. This reduces
+        boilerplate across pipeline implementations.
+
+        Args:
+            config: Configuration object with pipeline parameters
+            generator: Diffusion model wrapper
+            text_encoder: Text encoder wrapper
+            blocks_text: Modular blocks for text-to-video mode
+            blocks_video: Modular blocks for video-to-video mode
+            model_config: Model configuration with additional parameters
+            device: Target device
+            dtype: Target dtype
+
+        Side effects:
+            Sets self.components, self.state, self.blocks_text, self.blocks_video,
+            and self.first_call attributes.
+        """
+        from diffusers.modular_pipelines import PipelineState
+
+        from .blending import EmbeddingBlender
+        from .components import ComponentsManager
+        from .defaults import get_mode_config
+        from .helpers import initialize_state_from_config
+
+        # Create components config
+        components_config = {}
+        components_config.update(model_config)
+        components_config["device"] = device
+        components_config["dtype"] = dtype
+
+        components = ComponentsManager(components_config)
+        components.add("generator", generator)
+        components.add("scheduler", generator.get_scheduler())
+        components.add("text_encoder", text_encoder)
+
+        embedding_blender = EmbeddingBlender(device=device, dtype=dtype)
+        components.add("embedding_blender", embedding_blender)
+
+        # Store block graphs and components
+        self.blocks_text = blocks_text
+        self.blocks_video = blocks_video
+        self.components = components
+        self.state = PipelineState()
+
+        # Initialize state with native mode defaults
+        native_mode_config = get_mode_config(self.__class__)
+        initialize_state_from_config(self.state, config, native_mode_config)
+
+        self.first_call = True
 
     def _prepare_and_execute_blocks(
         self, state: Any, components: Any, **kwargs
@@ -170,12 +279,12 @@ class UniversalInputModesMixin:
             Post-processed output tensor
         """
         from .base.vae import create_vae
-        from .defaults import apply_mode_defaults_to_state
+        from .defaults import apply_mode_defaults_to_state, resolve_generation_mode
         from .process import postprocess_chunk
 
-        schema = self.__class__.get_schema()
-        native_mode = schema["native_mode"]
-        mode = state.get("generation_mode") or native_mode
+        mode = resolve_generation_mode(
+            state.get("generation_mode"), kwargs, self.__class__
+        )
 
         apply_mode_defaults_to_state(state, self.__class__, mode, kwargs)
 

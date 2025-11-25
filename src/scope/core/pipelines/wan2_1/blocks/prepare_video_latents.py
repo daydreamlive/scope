@@ -131,10 +131,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         # Wan backbone (CausalWanModel) sees consistent types.
         latents = latents.to(device=generator_param.device, dtype=generator_param.dtype)
 
-        # Ensure latents match the generator's parameter dtype/device so that the
-        # Wan backbone (CausalWanModel) sees consistent types.
-        latents = latents.to(device=generator_param.device, dtype=generator_param.dtype)
-
         # The default param for InputParam does not work right now
         # The workaround is to set the default values here
         base_seed = block_state.base_seed

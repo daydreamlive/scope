@@ -2,10 +2,7 @@ import logging
 import time
 
 import torch
-from diffusers.modular_pipelines import PipelineState
 
-from ..blending import EmbeddingBlender
-from ..components import ComponentsManager
 from ..defaults import GENERATION_MODE_TEXT
 from ..helpers import build_pipeline_schema
 from ..interface import Pipeline
@@ -127,39 +124,17 @@ class LongLivePipeline(UniversalInputModesMixin, Pipeline, LoRAEnabledPipeline):
             model_dir=model_dir,
         )
 
-        # Create components config
-        components_config = {}
-        components_config.update(model_config)
-        components_config["device"] = device
-        components_config["dtype"] = dtype
-
-        components = ComponentsManager(components_config)
-        components.add("generator", generator)
-        components.add("scheduler", generator.get_scheduler())
-        components.add("text_encoder", text_encoder)
-
-        embedding_blender = EmbeddingBlender(
+        # Initialize pipeline state and components using shared helper
+        self._initialize_pipeline_state(
+            config=config,
+            generator=generator,
+            text_encoder=text_encoder,
+            blocks_text=LongLiveTextBlocks(),
+            blocks_video=LongLiveVideoBlocks(),
+            model_config=model_config,
             device=device,
             dtype=dtype,
         )
-        components.add("embedding_blender", embedding_blender)
-
-        # Separate block graphs for text and video modes share the same
-        # underlying modular blocks but avoid requiring video inputs when
-        # running in pure text-to-video mode.
-        self.blocks_text = LongLiveTextBlocks()
-        self.blocks_video = LongLiveVideoBlocks()
-        self.components = components
-        self.state = PipelineState()
-
-        # Initialize state with native mode defaults
-        from ..defaults import get_mode_config
-        from ..helpers import initialize_state_from_config
-
-        native_mode_config = get_mode_config(self.__class__)
-        initialize_state_from_config(self.state, config, native_mode_config)
-
-        self.first_call = True
 
     def __call__(self, **kwargs) -> torch.Tensor:
         if self.first_call:

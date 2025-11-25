@@ -705,7 +705,11 @@ export function StreamPage() {
           settings.noiseController !== undefined
             ? settings.noiseController
             : (modeConfig.noise_controller ?? undefined);
-        if (resolvedNoiseController !== undefined) {
+        // Filter out null values - backend expects boolean | undefined, not null
+        if (
+          resolvedNoiseController !== undefined &&
+          resolvedNoiseController !== null
+        ) {
           initialParameters.noise_controller = resolvedNoiseController;
         }
       }

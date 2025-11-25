@@ -29,6 +29,7 @@ export function useStreamState() {
 
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
+    // undefined = not loaded yet (waiting for schema)
     generationMode: undefined,
     resolution: undefined,
     seed: undefined,
@@ -36,6 +37,7 @@ export function useStreamState() {
     noiseScale: undefined,
     noiseController: undefined,
     manageCache: undefined,
+    // null = explicitly disabled/not used
     quantization: null,
     kvCacheAttentionBias: undefined,
     paused: false,
@@ -77,12 +79,22 @@ export function useStreamState() {
   // Fetch and apply pipeline schema when pipeline changes
   useEffect(() => {
     const fetchSchema = async () => {
+      const targetPipelineId = settings.pipelineId; // Capture current pipelineId
       setIsLoadingSchema(true);
       try {
-        const schemaResponse = await getPipelineSchema(settings.pipelineId);
+        const schemaResponse = await getPipelineSchema(targetPipelineId);
+
+        // Check if pipeline hasn't changed while we were fetching
+        // (avoids race condition if user quickly switches pipelines)
+        if (targetPipelineId !== settings.pipelineId) {
+          console.log(
+            `useStreamState: Ignoring stale schema for ${targetPipelineId}`
+          );
+          return;
+        }
 
         // Cache schema for use by other components
-        cachePipelineSchema(settings.pipelineId, schemaResponse);
+        cachePipelineSchema(targetPipelineId, schemaResponse);
 
         // Store schema for reset functionality
         setPipelineSchema(schemaResponse);
@@ -92,18 +104,39 @@ export function useStreamState() {
         const nativeModeConfig = schemaResponse.mode_configs[nativeMode];
 
         if (nativeModeConfig) {
-          setSettings(prev => ({
-            ...prev,
-            generationMode: nativeMode,
-            resolution: nativeModeConfig.resolution,
-            seed: nativeModeConfig.base_seed,
-            denoisingSteps: nativeModeConfig.denoising_steps ?? undefined,
-            noiseScale: nativeModeConfig.noise_scale ?? undefined,
-            noiseController: nativeModeConfig.noise_controller ?? undefined,
-            manageCache: nativeModeConfig.manage_cache,
-            kvCacheAttentionBias:
-              nativeModeConfig.kv_cache_attention_bias ?? undefined,
-          }));
+          // Extract default values from JSON Schema objects
+          // Force new object creation for resolution to ensure React detects the change
+          const newResolution = nativeModeConfig.resolution?.default
+            ? {
+                height: nativeModeConfig.resolution.default.height,
+                width: nativeModeConfig.resolution.default.width,
+              }
+            : undefined;
+
+          setSettings(prev => {
+            // Double-check we're still on the same pipeline
+            if (prev.pipelineId !== targetPipelineId) {
+              console.log(
+                `useStreamState: Pipeline changed during schema fetch, skipping settings update`
+              );
+              return prev;
+            }
+
+            return {
+              ...prev,
+              generationMode: nativeMode,
+              resolution: newResolution,
+              seed: nativeModeConfig.base_seed?.default,
+              denoisingSteps:
+                nativeModeConfig.denoising_steps?.default ?? undefined,
+              noiseScale: nativeModeConfig.noise_scale?.default ?? undefined,
+              noiseController:
+                nativeModeConfig.noise_controller?.default ?? undefined,
+              manageCache: nativeModeConfig.manage_cache?.default,
+              kvCacheAttentionBias:
+                nativeModeConfig.kv_cache_attention_bias?.default ?? undefined,
+            };
+          });
         }
         setIsLoadingSchema(false);
       } catch (error) {
