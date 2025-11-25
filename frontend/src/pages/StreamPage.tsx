@@ -423,13 +423,13 @@ export function StreamPage() {
 
     // Also send the updated parameters to the backend immediately
     // Preserve the full blend while live
-    if (settings.denoisingSteps) {
-      sendParameterUpdate({
-        prompts,
-        prompt_interpolation_method: interpolationMethod,
+    sendParameterUpdate({
+      prompts,
+      prompt_interpolation_method: interpolationMethod,
+      ...(settings.denoisingSteps && {
         denoising_step_list: settings.denoisingSteps,
-      });
-    }
+      }),
+    });
   };
 
   const handleTimelinePromptEdit = (prompt: TimelinePrompt | null) => {
@@ -829,13 +829,13 @@ export function StreamPage() {
                   });
                 } else {
                   // Send direct prompts without transition
-                  if (settings.denoisingSteps) {
-                    sendParameterUpdate({
-                      prompts,
-                      prompt_interpolation_method: interpolationMethod,
+                  sendParameterUpdate({
+                    prompts,
+                    prompt_interpolation_method: interpolationMethod,
+                    ...(settings.denoisingSteps && {
                       denoising_step_list: settings.denoisingSteps,
-                    });
-                  }
+                    }),
+                  });
                 }
               }}
               onPromptItemsSubmit={(
@@ -875,13 +875,13 @@ export function StreamPage() {
                   });
                 } else {
                   // Send direct prompts without transition
-                  if (settings.denoisingSteps) {
-                    sendParameterUpdate({
-                      prompts,
-                      prompt_interpolation_method: interpolationMethod,
+                  sendParameterUpdate({
+                    prompts,
+                    prompt_interpolation_method: interpolationMethod,
+                    ...(settings.denoisingSteps && {
                       denoising_step_list: settings.denoisingSteps,
-                    });
-                  }
+                    }),
+                  });
                 }
               }}
               disabled={

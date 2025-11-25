@@ -652,7 +652,7 @@ export function SettingsPanel({
                   max={1.0}
                   step={0.01}
                   incrementAmount={0.01}
-                  disabled={noiseController ?? true}
+                  disabled={!noiseController}
                   labelClassName="text-sm text-foreground w-20"
                   valueFormatter={noiseScaleSlider.formatValue}
                   inputParser={v => parseFloat(v) || 0.0}
