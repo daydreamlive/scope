@@ -21,6 +21,11 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Import PipelineRegistry at module level to ensure it's initialized during server startup
+# This prevents lazy import overhead in schema endpoints and ensures SageAttention
+# loads during startup rather than blocking the first schema API call
+from scope.core.pipelines.registry import PipelineRegistry
+
 from .download_models import download_models
 from .logs_config import (
     cleanup_old_logs,
@@ -314,8 +319,6 @@ async def get_pipeline_status(
 async def list_pipelines():
     """List all available pipelines."""
     try:
-        from scope.core.pipelines.registry import PipelineRegistry
-
         pipeline_ids = PipelineRegistry.list_pipelines()
         return PipelineListResponse(pipelines=pipeline_ids)
     except Exception as e:
@@ -336,8 +339,6 @@ async def get_pipeline_schema(pipeline_id: str):
     The response follows OpenAPI conventions for API introspection.
     """
     try:
-        from scope.core.pipelines.registry import PipelineRegistry
-
         schema = PipelineRegistry.get_schema(pipeline_id)
         if schema is None:
             raise HTTPException(
