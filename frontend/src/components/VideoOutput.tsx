@@ -43,6 +43,27 @@ export function VideoOutput({
     }
   }, [remoteStream]);
 
+  // Sync video element play/pause state with isPlaying prop
+  useEffect(() => {
+    const video = videoRef.current;
+    // playbackUrl indicates a cloud stream is playing
+    if (!video || !playbackUrl) return;
+
+    // Check if video state is out of sync with prop
+    const shouldBePlaying = isPlaying;
+    const isActuallyPlaying = !video.paused;
+
+    if (shouldBePlaying !== isActuallyPlaying) {
+      if (shouldBePlaying) {
+        video.play().catch((err) => {
+          console.error("[VideoOutput] Error playing video:", err);
+        });
+      } else {
+        video.pause();
+      }
+    }
+  }, [isPlaying, remoteStream, playbackUrl]);
+
   // Listen for video playing event to notify parent
   useEffect(() => {
     const video = videoRef.current;
