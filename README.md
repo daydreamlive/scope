@@ -34,7 +34,6 @@ The following models currently have more restrictive requirements:
 **Krea Realtime Video**
 
 - Requires a Nvidia GPU with >= 32 GB VRAM
-- Requires Linux for usable performance and Windows support is limited without any guarantees
 - At the default resolution of 320x576, a 32 GB VRAM GPU (eg RTX 5090) can run the model with fp8 quantization
 - If you want to use a higher resolution like 480x832, we suggest using a > 40GB VRAM GPU (eg H100, RTX 6000 Pro)
 
