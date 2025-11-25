@@ -1,4 +1,6 @@
 import argparse
+import asyncio
+import json
 import logging
 import os
 import subprocess
@@ -12,6 +14,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 
 from .logs_config import (
     cleanup_old_logs,
@@ -131,45 +134,117 @@ app = FastAPI(
 )
 
 
+# Middleware to force keep-alive for streaming responses
+@app.middleware("http")
+async def force_keep_alive(request, call_next):
+    response = await call_next(request)
+    # Force Connection: keep-alive for streaming responses
+    content_type = response.headers.get("content-type", "")
+    if "text/event-stream" in content_type or "/reserve" in str(request.url):
+        # Remove any existing connection header (case-insensitive)
+        headers_to_remove = [
+            k for k in response.headers.keys() if k.lower() == "connection"
+        ]
+        for key in headers_to_remove:
+            del response.headers[key]
+        # Set keep-alive
+        response.headers["Connection"] = "keep-alive"
+        # Also set it in the raw headers if available
+        if hasattr(response, "raw_headers"):
+            response.raw_headers = [
+                (k, v) for k, v in response.raw_headers if k.lower() != b"connection"
+            ] + [(b"connection", b"keep-alive")]
+    return response
+
+
 @app.get("/ping")
 async def ping():
     """Health check endpoint required by RunPod Serverless load balancer."""
     return {"status": "healthy"}
 
 
-@app.post("/reserve")
+@app.get("/reserve")
 async def reserve():
-    """Start the API server on port 8080."""
+    """
+    Reserve endpoint that starts the API server, returns RunPod environment variables,
+    and keeps connection open.
+    Returns JSON with RUNPOD_PUBLIC_IP and RUNPOD_TCP_PORT_8000, then streams to keep connection alive.
+    """
     global _api_server_thread, _api_server_running
 
-    if _api_server_running:
-        return {
-            "message": "API server is already running on port 8080",
-            "status": "running",
-        }
+    # Start the API server if not already running
+    if not _api_server_running:
 
-    def start_api_server():
-        global _api_server_running
-        try:
-            from .api_server import run_api_server
+        def start_api_server():
+            global _api_server_running
+            try:
+                from .api_server import run_api_server
 
-            _api_server_running = True
-            run_api_server(port=8080, host="0.0.0.0")
-        except Exception as e:
-            logger.error(f"Error starting API server: {e}")
-            _api_server_running = False
+                _api_server_running = True
+                run_api_server(port=8080, host="0.0.0.0")
+            except Exception as e:
+                logger.error(f"Error starting API server: {e}")
+                _api_server_running = False
 
-    _api_server_thread = threading.Thread(target=start_api_server, daemon=True)
-    _api_server_thread.start()
+        _api_server_thread = threading.Thread(target=start_api_server, daemon=True)
+        _api_server_thread.start()
 
-    # Give the server a moment to start
-    time.sleep(0.5)
+        # Give the server a moment to start
+        await asyncio.sleep(0.5)
 
-    return {
-        "message": "API server started on port 8080",
-        "status": "started",
-        "api_url": "http://0.0.0.0:8080",
+    # Get RunPod environment variables
+    public_ip = os.getenv("RUNPOD_PUBLIC_IP", "")
+    tcp_port = os.getenv("RUNPOD_TCP_PORT_8080", "")
+
+    # Create JSON response
+    response_data = {
+        "host": public_ip,
+        "port": tcp_port,
     }
+
+    # Convert to JSON string
+    json_str = json.dumps(response_data) + "\n"
+
+    async def stream_response():
+        """Stream the JSON response and then keep connection alive."""
+        # Send the JSON response first
+        yield json_str.encode("utf-8")
+
+        # Keep connection alive by periodically sending keepalive data
+        # This will continue until the client closes the connection
+        # Use shorter intervals to ensure connection stays alive
+        try:
+            while True:
+                await asyncio.sleep(0.5)  # Send keepalive every 0.5 seconds
+                yield b": keepalive\n\n"  # SSE format: comment line followed by double newline
+        except asyncio.CancelledError:
+            # Connection was closed by client
+            pass
+        except Exception:
+            # Handle any other exceptions gracefully
+            pass
+
+    # Use StreamingResponse with proper headers for HTTP event streaming
+    class KeepAliveStreamingResponse(StreamingResponse):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # Ensure Connection header is set to keep-alive
+            self.headers["Connection"] = "keep-alive"
+            # Remove connection header if it exists with different casing
+            for key in list(self.headers.keys()):
+                if key.lower() == "connection" and key != "Connection":
+                    del self.headers[key]
+
+    return KeepAliveStreamingResponse(
+        stream_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering in nginx
+            "Keep-Alive": "timeout=300",  # Keep connection alive for 5 minutes
+        },
+    )
 
 
 def open_browser_when_ready(host: str, port: int, server):
@@ -246,6 +321,7 @@ def main():
             port=args.port,
             reload=args.reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_keep_alive=300,  # Keep connections alive for 5 minutes
         )
         server = uvicorn.Server(config)
 
@@ -273,6 +349,7 @@ def main():
             port=args.port,
             reload=args.reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_keep_alive=300,  # Keep connections alive for 5 minutes
         )
 
 
@@ -291,6 +368,7 @@ if __name__ == "__main__":
             host="0.0.0.0",
             port=port,
             log_config=None,  # Use our logging config
+            timeout_keep_alive=300,  # Keep connections alive for 5 minutes
         )
     else:
         # Normal mode - use main() with argument parsing
