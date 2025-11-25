@@ -72,7 +72,7 @@ export function SettingsPanel({
   generationMode,
   resolution,
   onResolutionChange,
-  seed = 42,
+  seed,
   onSeedChange,
   denoisingSteps,
   onDenoisingStepsChange,
@@ -80,11 +80,11 @@ export function SettingsPanel({
   onNoiseScaleChange,
   noiseController,
   onNoiseControllerChange,
-  manageCache = true,
+  manageCache,
   onManageCacheChange,
-  quantization = "fp8_e4m3fn",
+  quantization,
   onQuantizationChange,
-  kvCacheAttentionBias = 0.3,
+  kvCacheAttentionBias,
   onKvCacheAttentionBiasChange,
   onResetCache,
   loras = [],
@@ -96,15 +96,17 @@ export function SettingsPanel({
   const effectiveGenerationMode = generationMode ?? modeCapabilities.nativeMode;
 
   // Local slider state management hooks
-  // Convert null to default value for slider (null means not applicable, treat as default)
-  const effectiveNoiseScale = noiseScale ?? 0.7;
   const noiseScaleSlider = useLocalSliderValue(
-    effectiveNoiseScale,
-    onNoiseScaleChange
+    noiseScale,
+    onNoiseScaleChange,
+    2,
+    0.7
   );
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
-    onKvCacheAttentionBiasChange
+    onKvCacheAttentionBiasChange,
+    2,
+    0.3
   );
 
   // Validation error states
@@ -200,12 +202,14 @@ export function SettingsPanel({
   };
 
   const incrementSeed = () => {
+    if (seed == null) return;
     const maxValue = 2147483647;
     const newValue = Math.min(maxValue, seed + 1);
     handleSeedChange(newValue);
   };
 
   const decrementSeed = () => {
+    if (seed == null) return;
     const minValue = 0;
     const newValue = Math.max(minValue, seed - 1);
     handleSeedChange(newValue);
@@ -509,7 +513,7 @@ export function SettingsPanel({
                       </Button>
                       <Input
                         type="number"
-                        value={seed}
+                        value={seed ?? ""}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {

@@ -1,5 +1,11 @@
 import type { GenerationMode } from "../constants/modes";
 
+/**
+ * Null/Undefined Convention:
+ * - undefined: Not loaded yet, not set, or using default
+ * - null: Explicitly disabled or not applicable
+ */
+
 export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"

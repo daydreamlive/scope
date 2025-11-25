@@ -157,8 +157,7 @@ export function useStreamState() {
   useEffect(() => {
     if (
       settings.pipelineId === "krea-realtime-video" &&
-      hardwareInfo?.vram_gb !== null &&
-      hardwareInfo?.vram_gb !== undefined
+      hardwareInfo?.vram_gb != null
     ) {
       // > 40GB = no quantization (null), <= 40GB = fp8_e4m3fn
       const recommendedQuantization =

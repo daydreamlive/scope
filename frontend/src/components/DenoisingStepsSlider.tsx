@@ -6,7 +6,7 @@ import { Plus, Minus } from "lucide-react";
 
 interface DenoisingStepsSliderProps {
   className?: string;
-  value: number[];
+  value?: number[];
   onChange: (value: number[]) => void;
   disabled?: boolean;
   defaultValues?: number[];
@@ -28,13 +28,13 @@ export function DenoisingStepsSlider({
   tooltip,
 }: DenoisingStepsSliderProps) {
   const [localValue, setLocalValue] = useState<number[]>(
-    value.length > 0 ? value : defaultValues
+    value && value.length > 0 ? value : defaultValues
   );
   const [validationError, setValidationError] = useState<string>("");
 
   // Sync with external value changes
   useEffect(() => {
-    if (value.length > 0) {
+    if (value && value.length > 0) {
       setLocalValue(value);
     }
   }, [value]);
