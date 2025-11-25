@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -115,6 +115,15 @@ export function StreamPage() {
     isStreaming,
   });
 
+  // Determine if video source should be enabled
+  const shouldEnableVideoSource = useMemo(() => {
+    const caps = getPipelineModeCapabilities(settings.pipelineId);
+    const currentMode = settings.generationMode ?? caps.nativeMode;
+    return (
+      caps.requiresVideoInVideoMode && currentMode === GENERATION_MODE.VIDEO
+    );
+  }, [settings.pipelineId, settings.generationMode]);
+
   // Video source for preview (camera or video)
   const {
     localStream,
@@ -128,11 +137,7 @@ export function StreamPage() {
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
-    enabled: (() => {
-      const caps = getPipelineModeCapabilities(settings.pipelineId);
-      const currentMode = settings.generationMode ?? caps.nativeMode;
-      return caps.requiresVideoInVideoMode && currentMode === "video";
-    })(),
+    enabled: shouldEnableVideoSource,
   });
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
@@ -153,36 +158,10 @@ export function StreamPage() {
     });
   };
 
-  const handleGenerationModeChange = (mode: "video" | "text" | "camera") => {
-    // TODO: 'camera' should not be a mode, but should be refactored into a separate input control.
-    // Currently we handle 'camera' by converting it to generationMode="video" + videoSourceMode="camera".
-    // Update generation mode and restore the appropriate resolution for the mode.
+  const handleGenerationModeChange = (mode: "video" | "text") => {
     const pipelineId = settings.pipelineId;
     const caps = getPipelineModeCapabilities(pipelineId);
-
-    // Convert "camera" mode to generationMode="video" + videoSourceMode="camera"
-    let generationMode:
-      | typeof GENERATION_MODE.VIDEO
-      | typeof GENERATION_MODE.TEXT;
-    let newVideoSourceMode:
-      | typeof VIDEO_SOURCE_MODE.VIDEO
-      | typeof VIDEO_SOURCE_MODE.CAMERA
-      | undefined;
-
-    if (mode === VIDEO_SOURCE_MODE.CAMERA) {
-      generationMode = GENERATION_MODE.VIDEO;
-      newVideoSourceMode = VIDEO_SOURCE_MODE.CAMERA;
-    } else if (mode === GENERATION_MODE.VIDEO) {
-      generationMode = GENERATION_MODE.VIDEO;
-      // When switching to "video" mode, ensure videoSourceMode is set to "video"
-      // (unless it's already "video", in which case we don't need to change it)
-      if (videoSourceMode !== VIDEO_SOURCE_MODE.VIDEO) {
-        newVideoSourceMode = VIDEO_SOURCE_MODE.VIDEO;
-      }
-    } else {
-      generationMode = mode;
-      // For "text" mode, don't change videoSourceMode
-    }
+    const generationMode = mode;
 
     const updates: Partial<SettingsState> = { generationMode };
 
@@ -206,14 +185,15 @@ export function StreamPage() {
       updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
       updates.noiseScale = modeConfig.noise_scale ?? undefined;
       updates.noiseController = modeConfig.noise_controller ?? undefined;
+
+      // When switching to "video" mode, ensure videoSourceMode is set to "video"
+      // (unless it's already "video", in which case we don't need to change it)
+      if (videoSourceMode !== VIDEO_SOURCE_MODE.VIDEO) {
+        switchMode(VIDEO_SOURCE_MODE.VIDEO);
+      }
     }
 
     updateSettings(updates);
-
-    // Update video source mode if needed
-    if (newVideoSourceMode && newVideoSourceMode !== videoSourceMode) {
-      switchMode(newVideoSourceMode);
-    }
 
     // Inform backend of mode change so pipelines can switch between
     // text-to-video and video-to-video behaviour.
@@ -747,14 +727,7 @@ export function StreamPage() {
             localStream={localStream}
             isInitializing={isInitializing}
             error={videoSourceError}
-            mode={
-              // Convert generationMode + videoSourceMode back to the combined mode for the UI
-              // TODO: This conversion should be removed when 'camera' is refactored into a separate input control
-              settings.generationMode === GENERATION_MODE.VIDEO &&
-              videoSourceMode === VIDEO_SOURCE_MODE.CAMERA
-                ? VIDEO_SOURCE_MODE.CAMERA
-                : (settings.generationMode ?? GENERATION_MODE.VIDEO)
-            }
+            mode={settings.generationMode ?? GENERATION_MODE.VIDEO}
             onModeChange={handleGenerationModeChange}
             videoSourceMode={videoSourceMode}
             onVideoSourceModeChange={switchMode}
