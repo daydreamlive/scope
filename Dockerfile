@@ -48,6 +48,7 @@ COPY src/ /app/src/
 
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
+EXPOSE 8080
 
 # Default command to run the application
 CMD ["uv", "run", "daydream-scope", "--host", "0.0.0.0", "--port", "8000"]
