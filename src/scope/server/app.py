@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import json
 import logging
 import os
 import subprocess
@@ -18,7 +17,7 @@ import torch
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -181,18 +180,6 @@ async def lifespan(app: FastAPI):
     # Startup
     global webrtc_manager, pipeline_manager
 
-    # Print RunPod environment variables
-    logger.info("=" * 60)
-    logger.info("RunPod Environment Variables:")
-    logger.info(
-        f"  RUNPOD_HTTP_PORT_8000: {os.getenv('RUNPOD_HTTP_PORT_8000', 'Not set')}"
-    )
-    logger.info(
-        f"  RUNPOD_TCP_PORT_8000: {os.getenv('RUNPOD_TCP_PORT_8000', 'Not set')}"
-    )
-    logger.info(f"  RUNPOD_PUBLIC_IP: {os.getenv('RUNPOD_PUBLIC_IP', 'Not set')}")
-    logger.info("=" * 60)
-
     # Check CUDA availability before proceeding
     if not torch.cuda.is_available():
         error_msg = (
@@ -270,107 +257,9 @@ async def health_check():
 
 
 @app.get("/ping")
-async def ping(webrtc_manager: WebRTCManager = Depends(get_webrtc_manager)):
+async def ping():
     """Health check endpoint required by RunPod Serverless load balancer."""
     return {"status": "healthy"}
-
-
-# Separate FastAPI app for port 8080 (RunPod health check and reserve endpoints)
-reserve_app = FastAPI(
-    title="Scope Reserve API",
-    description="Reserve endpoint for RunPod",
-)
-
-
-# Middleware to force keep-alive for streaming responses
-@reserve_app.middleware("http")
-async def force_keep_alive(request, call_next):
-    response = await call_next(request)
-    # Force Connection: keep-alive for streaming responses
-    content_type = response.headers.get("content-type", "")
-    if "text/event-stream" in content_type or "/reserve" in str(request.url):
-        # Remove any existing connection header (case-insensitive)
-        headers_to_remove = [
-            k for k in response.headers.keys() if k.lower() == "connection"
-        ]
-        for key in headers_to_remove:
-            del response.headers[key]
-        # Set keep-alive
-        response.headers["Connection"] = "keep-alive"
-        # Also set it in the raw headers if available
-        if hasattr(response, "raw_headers"):
-            response.raw_headers = [
-                (k, v) for k, v in response.raw_headers if k.lower() != b"connection"
-            ] + [(b"connection", b"keep-alive")]
-    return response
-
-
-@reserve_app.get("/ping")
-async def reserve_ping():
-    """Health check endpoint required by RunPod Serverless load balancer."""
-    return {"status": "healthy"}
-
-
-@reserve_app.get("/reserve")
-async def reserve():
-    """
-    Reserve endpoint that returns RunPod environment variables and keeps connection open.
-    Returns JSON with RUNPOD_PUBLIC_IP and RUNPOD_TCP_PORT_8000, then streams to keep connection alive.
-    """
-    # Get environment variables
-    public_ip = os.getenv("RUNPOD_PUBLIC_IP", "")
-    tcp_port = os.getenv("RUNPOD_TCP_PORT_8000", "")
-
-    # Create JSON response
-    response_data = {
-        "host": public_ip,
-        "port": tcp_port,
-    }
-
-    # Convert to JSON string
-    json_str = json.dumps(response_data) + "\n"
-
-    async def stream_response():
-        """Stream the JSON response and then keep connection alive."""
-        # Send the JSON response first
-        yield json_str.encode("utf-8")
-
-        # Keep connection alive by periodically sending keepalive data
-        # This will continue until the client closes the connection
-        # Use shorter intervals to ensure connection stays alive
-        try:
-            while True:
-                await asyncio.sleep(0.5)  # Send keepalive every 0.5 seconds
-                yield b": keepalive\n\n"  # SSE format: comment line followed by double newline
-        except asyncio.CancelledError:
-            # Connection was closed by client
-            pass
-        except Exception:
-            # Handle any other exceptions gracefully
-            pass
-
-    # Use StreamingResponse with proper headers for HTTP event streaming
-    # Create a custom response that ensures Connection: keep-alive
-    class KeepAliveStreamingResponse(StreamingResponse):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            # Ensure Connection header is set to keep-alive
-            self.headers["Connection"] = "keep-alive"
-            # Remove connection header if it exists with different casing
-            for key in list(self.headers.keys()):
-                if key.lower() == "connection" and key != "Connection":
-                    del self.headers[key]
-
-    return KeepAliveStreamingResponse(
-        stream_response(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable buffering in nginx
-            "Keep-Alive": "timeout=300",  # Keep connection alive for 5 minutes
-        },
-    )
 
 
 @app.get("/")
@@ -433,49 +322,16 @@ async def handle_webrtc_offer(
 ):
     """Handle WebRTC offer and return answer."""
     try:
-        # Check current pipeline status
+        # Ensure pipeline is loaded before proceeding
         status_info = await pipeline_manager.get_status_info_async()
-
-        # If pipeline is not loaded or not passthrough, load passthrough pipeline
-        if (
-            status_info["status"] != "loaded"
-            or status_info["pipeline_id"] != "passthrough"
-        ):
-            logger.info("Loading passthrough pipeline for WebRTC offer")
-
-            # Load passthrough pipeline with default parameters
-            # Default resolution is 512x512, but we can extract from request if needed
-            load_params = {}
-            if request.initialParameters:
-                # Extract resolution from initial parameters if available
-                initial_params = request.initialParameters.model_dump(exclude_none=True)
-                if "height" in initial_params:
-                    load_params["height"] = initial_params["height"]
-                if "width" in initial_params:
-                    load_params["width"] = initial_params["width"]
-
-            # Load the passthrough pipeline and wait for it to complete
-            success = await pipeline_manager.load_pipeline(
-                "passthrough", load_params if load_params else None
+        if status_info["status"] != "loaded":
+            raise HTTPException(
+                status_code=400,
+                detail="Pipeline not loaded. Please load pipeline first.",
             )
-
-            if not success:
-                # Check if there was an error
-                status_info = await pipeline_manager.get_status_info_async()
-                error_msg = status_info.get(
-                    "error", "Unknown error loading passthrough pipeline"
-                )
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to load passthrough pipeline: {error_msg}",
-                )
-
-            logger.info("Passthrough pipeline loaded successfully")
 
         return await webrtc_manager.handle_offer(request, pipeline_manager)
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -668,23 +524,6 @@ def open_browser_when_ready(host: str, port: int, server):
         logger.info(f"🌐 UI is available at: {url}")
 
 
-def run_reserve_server(host: str = "0.0.0.0", port: int = 8080):
-    """Run the reserve server on port 8080."""
-    logger.info(f"Starting reserve server on {host}:{port}")
-    config = uvicorn.Config(
-        reserve_app,
-        host=host,
-        port=port,
-        log_config=None,  # Use our logging config
-        timeout_keep_alive=300,  # Keep connections alive for 5 minutes
-        timeout_graceful_shutdown=10,
-        # Use h11 HTTP/1.1 implementation which properly supports keep-alive
-        http="h11",
-    )
-    server = uvicorn.Server(config)
-    server.run()
-
-
 def main():
     """Main entry point for the daydream-scope command."""
     parser = argparse.ArgumentParser(
@@ -725,15 +564,6 @@ def main():
 
     # Configure static file serving
     configure_static_files()
-
-    # Start reserve server on port 8080 in a separate thread
-    reserve_server_thread = threading.Thread(
-        target=run_reserve_server,
-        args=(args.host, 8080),
-        daemon=True,
-    )
-    reserve_server_thread.start()
-    logger.info("Reserve server thread started")
 
     # Check if we're in production mode (frontend dist exists)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
@@ -787,17 +617,6 @@ if __name__ == "__main__":
 
         port = int(port_env)
         logger.info(f"Starting server on port {port} (RunPod serverless mode)")
-
-        # Start reserve server on port 8080 in a separate thread
-        reserve_server_thread = threading.Thread(
-            target=run_reserve_server,
-            args=("0.0.0.0", 8080),
-            daemon=True,
-        )
-        reserve_server_thread.start()
-        logger.info("Reserve server thread started")
-
-        # Run main app on the specified port
         uvicorn.run(
             app,
             host="0.0.0.0",
