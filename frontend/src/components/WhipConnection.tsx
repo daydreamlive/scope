@@ -1,3 +1,4 @@
+// from http://github.com/livepeer/pipelines/blob/main/apps/streamdiffusion/src/components/WhipConnection.tsx
 "use client";
 
 import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";

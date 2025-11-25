@@ -57,14 +57,6 @@ const createUpdateTimeFunction = (
       (activePrompt.id !== lastAppliedPromptIdRef.current ||
         activePrompt.text !== lastAppliedPromptTextRef.current)
     ) {
-      console.log("[useTimelinePlayback] Active prompt changed:", {
-        promptId: activePrompt.id,
-        text: activePrompt.text,
-        previousId: lastAppliedPromptIdRef.current,
-        previousText: lastAppliedPromptTextRef.current,
-        hasOnPromptChange: !!optionsRef.current?.onPromptChange,
-        hasOnPromptItemsChange: !!optionsRef.current?.onPromptItemsChange,
-      });
       submitTimelinePrompt(activePrompt, {
         onPromptSubmit: optionsRef.current?.onPromptChange,
         onPromptItemsSubmit: optionsRef.current?.onPromptItemsChange,
@@ -73,7 +65,6 @@ const createUpdateTimeFunction = (
       lastAppliedPromptTextRef.current = activePrompt.text;
     } else if (!activePrompt && lastAppliedPromptIdRef.current !== null) {
       // No active prompt, reset the last applied prompt
-      console.log("[useTimelinePlayback] No active prompt, resetting");
       lastAppliedPromptIdRef.current = null;
       lastAppliedPromptTextRef.current = null;
     }
@@ -178,7 +169,6 @@ export function useTimelinePlayback(options?: UseTimelinePlaybackOptions) {
 
   // Start playback
   const startPlayback = useCallback(() => {
-    console.log("[useTimelinePlayback] Starting playback");
     setIsPlaying(true);
     startTimeRef.current = performance.now() - currentTime * 1000;
 

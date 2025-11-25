@@ -1,3 +1,4 @@
+// from https://github.com/livepeer/pipelines/blob/main/apps/streamdiffusion/src/lib/WhipClient.ts
 export type GetStream = () => MediaStream | null;
 
 type AccessControlParams = {

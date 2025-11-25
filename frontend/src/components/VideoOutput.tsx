@@ -18,7 +18,6 @@ interface VideoOutputProps {
   onVideoPlaying?: () => void;
 }
 
-
 export function VideoOutput({
   className = "",
   remoteStream,

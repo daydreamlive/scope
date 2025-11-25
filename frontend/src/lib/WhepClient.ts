@@ -1,3 +1,4 @@
+// from https://github.com/livepeer/pipelines/blob/main/apps/streamdiffusion/src/lib/WhepClient.ts
 export type GetVideoElement = () => HTMLVideoElement | null;
 
 export class WhepClient {

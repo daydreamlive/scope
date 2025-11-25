@@ -112,25 +112,6 @@ export function PromptInputWithTimeline({
     onPlayingChange: onTimelinePlayingChange,
   });
 
-  // Debug: Log prompt changes
-  // useEffect(() => {
-  //   console.log("[PromptInputWithTimeline] Prompts changed:", {
-  //     prompts,
-  //     promptCount: prompts.length,
-  //     isStreaming,
-  //     disabled,
-  //   });
-  // }, [prompts, isStreaming, disabled]);
-
-  // Debug: Log when callbacks are called
-  // useEffect(() => {
-  //   console.log("[PromptInputWithTimeline] Callbacks:", {
-  //     hasOnPromptSubmit: !!onPromptSubmit,
-  //     hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
-  //     isStreaming,
-  //   });
-  // }, [onPromptSubmit, onPromptItemsSubmit, isStreaming]);
-
   // Compute actual playing state - timeline is playing AND video is not paused
   const isActuallyPlaying = isPlaying && !isVideoPaused;
 
@@ -227,20 +208,6 @@ export function PromptInputWithTimeline({
       setHasStartedPlayback(false);
     }
   }, [isStreaming]);
-
-  // Debug: Log component props and state
-  // useEffect(() => {
-  //   console.log("[PromptInputWithTimeline] Component state:", {
-  //     disabled,
-  //     isStreaming,
-  //     isVideoPaused,
-  //     isActuallyPlaying,
-  //     promptsCount: prompts.length,
-  //     currentTime,
-  //     hasOnPromptSubmit: !!onPromptSubmit,
-  //     hasOnPromptItemsSubmit: !!onPromptItemsSubmit,
-  //   });
-  // }, [disabled, isStreaming, isVideoPaused, isActuallyPlaying, prompts.length, currentTime, onPromptSubmit, onPromptItemsSubmit]);
 
   const buildLivePromptFromCurrent = useCallback(
     (start: number, end: number): TimelinePrompt => {
