@@ -32,16 +32,17 @@ class LongLivePipeline(UniversalInputModesMixin, Pipeline, LoRAEnabledPipeline):
             description="Text-to-video generation optimized for long-form content with efficient recaching",
             native_mode=GENERATION_MODE_TEXT,
             shared={
-                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "manage_cache": True,
                 "base_seed": 42,
             },
             text_overrides={
+                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
                 "noise_controller": None,
             },
             video_overrides={
+                "denoising_steps": [1000, 750],
                 "resolution": {"height": 512, "width": 512},
                 "noise_scale": 0.7,
                 "noise_controller": True,
