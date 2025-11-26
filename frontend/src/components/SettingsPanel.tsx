@@ -96,17 +96,16 @@ export function SettingsPanel({
   const effectiveInputMode = inputMode ?? modeCapabilities.nativeMode;
 
   // Local slider state management hooks
+  // No hardcoded defaults - values come from backend pipeline schema
   const noiseScaleSlider = useLocalSliderValue(
     noiseScale,
     onNoiseScaleChange,
-    2,
-    0.7
+    2
   );
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
     onKvCacheAttentionBiasChange,
-    2,
-    0.3
+    2
   );
 
   // Validation error states
