@@ -18,7 +18,7 @@ from .components import ComponentsManager
 from .defaults import (
     apply_mode_defaults_to_state,
     get_mode_config,
-    resolve_generation_mode,
+    resolve_input_mode,
 )
 from .helpers import initialize_state_from_config
 from .interface import Pipeline, Requirements
@@ -195,7 +195,7 @@ class MultiModePipeline(Pipeline):
         based on kwargs, then checks if that mode requires video input.
 
         Args:
-            **kwargs: Generation parameters that may include generation_mode
+            **kwargs: Generation parameters that may include input_mode
 
         Returns:
             Requirements object if video input is needed, None otherwise
@@ -211,7 +211,7 @@ class MultiModePipeline(Pipeline):
     def _infer_mode_from_kwargs(self, kwargs: dict) -> str:
         """Infer which mode would be triggered from kwargs.
 
-        This checks for explicit generation_mode parameter first, then falls back
+        This checks for explicit input_mode parameter first, then falls back
         to the native mode from schema.
 
         Args:
@@ -220,9 +220,7 @@ class MultiModePipeline(Pipeline):
         Returns:
             Inferred mode name (e.g., "text", "video")
         """
-        return resolve_generation_mode(
-            kwargs.get("generation_mode"), kwargs, self.__class__
-        )
+        return resolve_input_mode(kwargs.get("input_mode"), kwargs, self.__class__)
 
     def __call__(self, **kwargs) -> torch.Tensor:
         """Execute pipeline with given parameters.
@@ -234,8 +232,8 @@ class MultiModePipeline(Pipeline):
             Post-processed output tensor
         """
         # Detect mode to check for mode changes
-        current_mode = resolve_generation_mode(
-            kwargs.get("generation_mode"), kwargs, self.__class__
+        current_mode = resolve_input_mode(
+            kwargs.get("input_mode"), kwargs, self.__class__
         )
 
         # Initialize cache on first call or when mode changes
@@ -262,7 +260,7 @@ class MultiModePipeline(Pipeline):
         """Execute pipeline blocks based on detected mode.
 
         This method:
-        1. Resolves generation mode
+        1. Resolves input mode
         2. Applies mode-specific defaults to state
         3. Stores detected mode in state for self-configuring blocks
         4. Executes block graph (blocks self-configure based on state)
@@ -274,9 +272,7 @@ class MultiModePipeline(Pipeline):
         Returns:
             Post-processed output tensor
         """
-        mode = resolve_generation_mode(
-            self.state.get("generation_mode"), kwargs, self.__class__
-        )
+        mode = resolve_input_mode(self.state.get("input_mode"), kwargs, self.__class__)
 
         apply_mode_defaults_to_state(self.state, self.__class__, mode, kwargs)
 

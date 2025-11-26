@@ -36,7 +36,7 @@ interface SettingsPanelProps {
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
-  generationMode?: "video" | "text";
+  inputMode?: "video" | "text";
   resolution?: {
     height: number;
     width: number;
@@ -69,7 +69,7 @@ export function SettingsPanel({
   onPipelineIdChange,
   isStreaming = false,
   isDownloading = false,
-  generationMode,
+  inputMode,
   resolution,
   onResolutionChange,
   seed,
@@ -93,7 +93,7 @@ export function SettingsPanel({
   onLoraMergeStrategyChange,
 }: SettingsPanelProps) {
   const modeCapabilities = getPipelineModeCapabilities(pipelineId);
-  const effectiveGenerationMode = generationMode ?? modeCapabilities.nativeMode;
+  const effectiveInputMode = inputMode ?? modeCapabilities.nativeMode;
 
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(
@@ -616,9 +616,9 @@ export function SettingsPanel({
         )}
 
         {modeCapabilities &&
-          ((effectiveGenerationMode === "text" &&
+          ((effectiveInputMode === "text" &&
             modeCapabilities.showNoiseControlsInText) ||
-            (effectiveGenerationMode === "video" &&
+            (effectiveInputMode === "video" &&
               modeCapabilities.showNoiseControlsInVideo)) && (
             <div className="space-y-4">
               <div className="space-y-2">

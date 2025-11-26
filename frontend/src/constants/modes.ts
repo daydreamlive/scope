@@ -1,10 +1,9 @@
-export const GENERATION_MODE = {
+export const INPUT_MODE = {
   VIDEO: "video",
   TEXT: "text",
 } as const;
 
-export type GenerationMode =
-  (typeof GENERATION_MODE)[keyof typeof GENERATION_MODE];
+export type InputMode = (typeof INPUT_MODE)[keyof typeof INPUT_MODE];
 
 export const VIDEO_SOURCE_MODE = {
   VIDEO: "video",

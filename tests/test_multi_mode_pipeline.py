@@ -13,7 +13,7 @@ from diffusers.modular_pipelines import (
 )
 
 from scope.core.pipelines.components import ComponentsManager
-from scope.core.pipelines.defaults import GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO
+from scope.core.pipelines.defaults import INPUT_MODE_TEXT, INPUT_MODE_VIDEO
 from scope.core.pipelines.helpers import build_pipeline_schema
 from scope.core.pipelines.interface import Requirements
 from scope.core.pipelines.multi_mode import MultiModePipeline
@@ -102,7 +102,7 @@ class MockPipeline(MultiModePipeline):
             pipeline_id="test-pipeline",
             name="Test Pipeline",
             description="Test pipeline for unit tests",
-            native_mode=GENERATION_MODE_TEXT,
+            native_mode=INPUT_MODE_TEXT,
             shared={"manage_cache": True, "base_seed": 42},
             text_overrides={
                 "denoising_steps": [1000, 750],
@@ -186,7 +186,7 @@ class TestMultiModePipeline:
             dtype=torch.float32,
         )
 
-        requirements = pipeline.prepare(generation_mode="text")
+        requirements = pipeline.prepare(input_mode="text")
         assert requirements is None
 
     def test_prepare_video_mode(self):
@@ -205,7 +205,7 @@ class TestMultiModePipeline:
             dtype=torch.float32,
         )
 
-        requirements = pipeline.prepare(generation_mode="video")
+        requirements = pipeline.prepare(input_mode="video")
         assert requirements is not None
         assert isinstance(requirements, Requirements)
         assert requirements.input_size == 4
@@ -227,12 +227,12 @@ class TestMultiModePipeline:
         )
 
         # Test explicit mode
-        mode = pipeline._infer_mode_from_kwargs({"generation_mode": "video"})
-        assert mode == GENERATION_MODE_VIDEO
+        mode = pipeline._infer_mode_from_kwargs({"input_mode": "video"})
+        assert mode == INPUT_MODE_VIDEO
 
         # Test default mode (native)
         mode = pipeline._infer_mode_from_kwargs({})
-        assert mode == GENERATION_MODE_TEXT
+        assert mode == INPUT_MODE_TEXT
 
     def test_declarative_methods(self):
         """Test all declarative methods return expected types."""

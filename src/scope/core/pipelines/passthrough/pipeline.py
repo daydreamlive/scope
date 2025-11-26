@@ -1,7 +1,7 @@
 import torch
 from einops import rearrange
 
-from ..defaults import GENERATION_MODE_VIDEO
+from ..defaults import INPUT_MODE_VIDEO
 from ..helpers import build_pipeline_schema
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
@@ -17,7 +17,7 @@ class PassthroughPipeline(Pipeline):
             pipeline_id="passthrough",
             name="Passthrough",
             description="Simple passthrough pipeline for testing and debugging",
-            native_mode=GENERATION_MODE_VIDEO,
+            native_mode=INPUT_MODE_VIDEO,
             shared={
                 "denoising_steps": None,
                 "resolution": {"height": 512, "width": 512},

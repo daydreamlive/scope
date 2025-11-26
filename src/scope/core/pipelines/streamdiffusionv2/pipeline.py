@@ -3,7 +3,7 @@ import time
 
 import torch
 
-from ..defaults import GENERATION_MODE_VIDEO
+from ..defaults import INPUT_MODE_VIDEO
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
 from ..utils import calculate_input_size, load_model_config
@@ -33,7 +33,7 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
             pipeline_id="streamdiffusionv2",
             name="StreamDiffusion V2",
             description="Video-to-video generation with temporal consistency and efficient streaming",
-            native_mode=GENERATION_MODE_VIDEO,
+            native_mode=INPUT_MODE_VIDEO,
             shared={
                 "resolution": {"height": 512, "width": 512},
                 "manage_cache": True,

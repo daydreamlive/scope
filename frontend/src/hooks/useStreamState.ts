@@ -30,7 +30,7 @@ export function useStreamState() {
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
     // undefined = not loaded yet (waiting for schema)
-    generationMode: undefined,
+    inputMode: undefined,
     resolution: undefined,
     seed: undefined,
     denoisingSteps: undefined,
@@ -124,7 +124,7 @@ export function useStreamState() {
 
             return {
               ...prev,
-              generationMode: nativeMode,
+              inputMode: nativeMode,
               resolution: newResolution,
               seed: nativeModeConfig.base_seed?.default,
               denoisingSteps:

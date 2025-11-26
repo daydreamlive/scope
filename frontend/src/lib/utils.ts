@@ -3,7 +3,7 @@ import { twMerge } from "tailwind-merge";
 import type { PipelineId } from "../types";
 import type { PipelineSchema } from "./api";
 
-type GenerationMode = "text" | "video";
+type InputMode = "text" | "video";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -102,7 +102,7 @@ export interface ExtractedModeConfig {
  */
 export function getModeConfig(
   pipelineId: PipelineId,
-  mode?: GenerationMode
+  mode?: InputMode
 ): ExtractedModeConfig {
   const cached = getCachedPipelineSchema(pipelineId);
   if (!cached?.mode_configs) {

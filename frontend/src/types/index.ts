@@ -1,4 +1,4 @@
-import type { GenerationMode } from "../constants/modes";
+import type { InputMode } from "../constants/modes";
 
 /**
  * Null/Undefined Convention:
@@ -47,7 +47,7 @@ export interface LoRAConfig {
  */
 export interface SettingsState {
   pipelineId: PipelineId;
-  generationMode?: GenerationMode;
+  inputMode?: InputMode;
   resolution?: {
     height: number;
     width: number;
@@ -75,5 +75,5 @@ export interface PipelineInfo {
   projectUrl?: string;
   modified?: boolean;
   category: PipelineCategory;
-  nativeGenerationMode?: GenerationMode;
+  nativeInputMode?: InputMode;
 }

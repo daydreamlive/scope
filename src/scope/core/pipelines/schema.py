@@ -176,12 +176,12 @@ def compute_capabilities(
     Works with JSON Schema-formatted parameters (extracts from schema objects).
 
     Args:
-        supported_modes: List of supported generation modes
+        supported_modes: List of supported input modes
         mode_configs: Dict mapping mode names to their configurations
 
     Returns:
         Dictionary of computed capabilities including:
-        - hasGenerationModeControl: Whether pipeline supports mode switching
+        - hasInputModeControl: Whether pipeline supports mode switching
         - hasNoiseControls: Whether any mode supports noise controls
         - showNoiseControlsInText: Whether text mode has noise controls
         - showNoiseControlsInVideo: Whether video mode has noise controls
@@ -203,7 +203,7 @@ def compute_capabilities(
     )
 
     # Derive high-level capabilities
-    has_generation_mode_control = len(supported_modes) > 1
+    has_input_mode_control = len(supported_modes) > 1
     has_noise_controls = show_noise_controls_in_text or show_noise_controls_in_video
     has_cache_management = (
         text_config.get("manage_cache") is not None
@@ -214,7 +214,7 @@ def compute_capabilities(
     requires_video_in_video_mode = video_config.get("input_size") is not None
 
     return {
-        "hasGenerationModeControl": has_generation_mode_control,
+        "hasInputModeControl": has_input_mode_control,
         "hasNoiseControls": has_noise_controls,
         "showNoiseControlsInText": show_noise_controls_in_text,
         "showNoiseControlsInVideo": show_noise_controls_in_video,
@@ -236,7 +236,7 @@ def create_pipeline_schema(
 
     This creates an OpenAPI-compatible schema that includes:
     - Pipeline identification and metadata
-    - Supported generation modes
+    - Supported input modes
     - Mode-specific parameter configurations
     - Computed capabilities for UI generation
     - JSON Schema-compatible parameter definitions
@@ -245,7 +245,7 @@ def create_pipeline_schema(
         pipeline_id: Unique identifier for the pipeline
         name: Human-readable pipeline name
         description: Description of pipeline capabilities
-        native_mode: Native generation mode (text or video)
+        native_mode: Native input mode (text or video)
         supported_modes: List of supported modes
         mode_configs: Dict mapping mode names to their configurations
         version: Pipeline version string

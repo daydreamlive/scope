@@ -1,7 +1,7 @@
 import type { LoRAConfig, PipelineId } from "../types";
-import type { GenerationMode } from "../constants/modes";
+import type { InputMode } from "../constants/modes";
 import { setPipelineSchema } from "./utils";
-export type { GenerationMode };
+export type { InputMode };
 
 export interface PromptItem {
   text: string;
@@ -26,7 +26,7 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
-    generation_mode?: GenerationMode;
+    input_mode?: InputMode;
   };
 }
 
@@ -100,7 +100,7 @@ export interface ModeConfig {
 }
 
 export interface PipelineCapabilities {
-  hasGenerationModeControl: boolean;
+  hasInputModeControl: boolean;
   hasNoiseControls: boolean;
   showNoiseControlsInText: boolean;
   showNoiseControlsInVideo: boolean;

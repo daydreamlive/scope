@@ -39,8 +39,8 @@ class Pipeline(ABC):
         - name: Human-readable pipeline name
         - description: Pipeline capabilities description
         - version: Pipeline version string
-        - native_mode: Native generation mode ("text" or "video")
-        - supported_modes: List of supported generation modes
+        - native_mode: Native input mode ("text" or "video")
+        - supported_modes: List of supported input modes
         - mode_configs: Dict mapping mode names to their parameter configurations
 
         Returns:
@@ -48,13 +48,13 @@ class Pipeline(ABC):
 
         Example:
             from .helpers import build_pipeline_schema
-            from .defaults import GENERATION_MODE_VIDEO
+            from .defaults import INPUT_MODE_VIDEO
 
             return build_pipeline_schema(
                 pipeline_id="my-pipeline",
                 name="My Pipeline",
                 description="Description of capabilities",
-                native_mode=GENERATION_MODE_VIDEO,
+                native_mode=INPUT_MODE_VIDEO,
                 shared={"manage_cache": True, "base_seed": 42},
                 text_overrides={
                     "resolution": {"height": 512, "width": 512},

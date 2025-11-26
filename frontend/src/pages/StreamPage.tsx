@@ -19,7 +19,7 @@ import {
   requiresVideoInVideoMode,
   hasNoiseControls,
 } from "../lib/pipelineModes";
-import { GENERATION_MODE, VIDEO_SOURCE_MODE } from "../constants/modes";
+import { INPUT_MODE, VIDEO_SOURCE_MODE } from "../constants/modes";
 import type {
   PipelineId,
   LoRAConfig,
@@ -122,11 +122,9 @@ export function StreamPage() {
   // Determine if video source should be enabled
   const shouldEnableVideoSource = useMemo(() => {
     const caps = getPipelineModeCapabilities(settings.pipelineId);
-    const currentMode = settings.generationMode ?? caps.nativeMode;
-    return (
-      requiresVideoInVideoMode(caps) && currentMode === GENERATION_MODE.VIDEO
-    );
-  }, [settings.pipelineId, settings.generationMode]);
+    const currentMode = settings.inputMode ?? caps.nativeMode;
+    return requiresVideoInVideoMode(caps) && currentMode === INPUT_MODE.VIDEO;
+  }, [settings.pipelineId, settings.inputMode]);
 
   // Video source for preview (camera or video)
   const {
@@ -162,23 +160,23 @@ export function StreamPage() {
     });
   };
 
-  const handleGenerationModeChange = (mode: "video" | "text") => {
+  const handleInputModeChange = (mode: "video" | "text") => {
     const pipelineId = settings.pipelineId;
     const caps = getPipelineModeCapabilities(pipelineId);
-    const generationMode = mode;
+    const inputMode = mode;
 
-    const updates: Partial<SettingsState> = { generationMode };
+    const updates: Partial<SettingsState> = { inputMode };
 
     // Apply all mode-specific defaults when switching modes
-    const modeConfig = getModeConfig(pipelineId, generationMode);
+    const modeConfig = getModeConfig(pipelineId, inputMode);
 
-    if (generationMode === GENERATION_MODE.TEXT) {
+    if (inputMode === INPUT_MODE.TEXT) {
       updates.resolution =
         caps.defaultResolutionByMode.text ?? modeConfig.resolution;
       updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
       updates.noiseScale = modeConfig.noise_scale ?? undefined;
       updates.noiseController = modeConfig.noise_controller ?? undefined;
-    } else if (generationMode === GENERATION_MODE.VIDEO) {
+    } else if (inputMode === INPUT_MODE.VIDEO) {
       // Use pipeline's default video resolution first, only fall back to video source if no default
       const defaultVideoResolution =
         caps.defaultResolutionByMode.video ?? modeConfig.resolution;
@@ -202,7 +200,7 @@ export function StreamPage() {
     // Inform backend of mode change so pipelines can switch between
     // text-to-video and video-to-video behaviour.
     sendParameterUpdate({
-      generation_mode: generationMode,
+      input_mode: inputMode,
       // Reset cache when switching modes to avoid cross-mode artefacts.
       reset_cache: true,
       // Send all updated mode-specific parameters
@@ -615,10 +613,10 @@ export function StreamPage() {
 
       // Check if this pipeline needs video input for the current mode
       const caps = getPipelineModeCapabilities(pipelineIdToUse);
-      const currentMode = settings.generationMode ?? caps.nativeMode;
+      const currentMode = settings.inputMode ?? caps.nativeMode;
       const modeConfig = getModeConfig(pipelineIdToUse, currentMode);
       const needsVideoInput =
-        requiresVideoInVideoMode(caps) && currentMode === GENERATION_MODE.VIDEO;
+        requiresVideoInVideoMode(caps) && currentMode === INPUT_MODE.VIDEO;
 
       // Only send video stream for pipelines that need video input
       const streamToSend = needsVideoInput
@@ -639,7 +637,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
-        generation_mode?: "video" | "text";
+        input_mode?: "video" | "text";
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -669,12 +667,12 @@ export function StreamPage() {
         initialParameters.kv_cache_attention_bias = bias;
       }
 
-      // Noise control and generation mode for pipelines that expose them
+      // Noise control and input mode for pipelines that expose them
       const shouldSendNoiseControls =
         hasNoiseControls(runtimeCaps) &&
-        ((currentMode === GENERATION_MODE.VIDEO &&
+        ((currentMode === INPUT_MODE.VIDEO &&
           runtimeCaps.showNoiseControlsInVideo) ||
-          (currentMode === GENERATION_MODE.TEXT &&
+          (currentMode === INPUT_MODE.TEXT &&
             runtimeCaps.showNoiseControlsInText));
       if (shouldSendNoiseControls) {
         const resolvedNoiseScale =
@@ -698,10 +696,9 @@ export function StreamPage() {
         }
       }
 
-      if (runtimeCaps.hasGenerationModeControl) {
-        const nativeGenerationMode = runtimeCaps.nativeMode;
-        initialParameters.generation_mode =
-          settings.generationMode ?? nativeGenerationMode;
+      if (runtimeCaps.hasInputModeControl) {
+        const nativeInputMode = runtimeCaps.nativeMode;
+        initialParameters.input_mode = settings.inputMode ?? nativeInputMode;
       }
 
       // Reset paused state when starting a fresh stream
@@ -731,8 +728,8 @@ export function StreamPage() {
             localStream={localStream}
             isInitializing={isInitializing}
             error={videoSourceError}
-            mode={settings.generationMode ?? GENERATION_MODE.VIDEO}
-            onModeChange={handleGenerationModeChange}
+            mode={settings.inputMode ?? INPUT_MODE.VIDEO}
+            onModeChange={handleInputModeChange}
             videoSourceMode={videoSourceMode}
             onVideoSourceModeChange={switchMode}
             isStreaming={isStreaming}
@@ -740,10 +737,10 @@ export function StreamPage() {
             isPipelineLoading={isPipelineLoading}
             canStartStream={(() => {
               const caps = getPipelineModeCapabilities(settings.pipelineId);
-              const effectiveMode = settings.generationMode ?? caps.nativeMode;
+              const effectiveMode = settings.inputMode ?? caps.nativeMode;
               const needsVideoInput =
                 requiresVideoInVideoMode(caps) &&
-                effectiveMode === GENERATION_MODE.VIDEO;
+                effectiveMode === INPUT_MODE.VIDEO;
 
               if (!needsVideoInput) {
                 return !isInitializing && !isLoadingSchema;
@@ -925,7 +922,7 @@ export function StreamPage() {
             className="h-full"
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
-            generationMode={settings.generationMode}
+            inputMode={settings.inputMode}
             isStreaming={isStreaming}
             isDownloading={isDownloading}
             resolution={settings.resolution}

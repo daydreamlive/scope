@@ -3,7 +3,7 @@ import time
 
 import torch
 
-from ..defaults import GENERATION_MODE_TEXT
+from ..defaults import INPUT_MODE_TEXT
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
 from ..utils import Quantization, calculate_input_size, load_model_config
@@ -36,7 +36,7 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
             pipeline_id="krea-realtime-video",
             name="Krea Realtime Video",
             description="Text-to-video generation with advanced KV cache attention control for realtime performance",
-            native_mode=GENERATION_MODE_TEXT,
+            native_mode=INPUT_MODE_TEXT,
             shared={
                 "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "manage_cache": True,

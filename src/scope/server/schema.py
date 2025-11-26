@@ -5,13 +5,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from scope.core.pipelines.defaults import GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO
+from scope.core.pipelines.defaults import INPUT_MODE_TEXT, INPUT_MODE_VIDEO
 from scope.core.pipelines.utils import Quantization
 
-# Type alias for generation mode using constants
+# Type alias for input mode using constants
 # Note: Literal requires string literals, so we reference constants in comments
-# GENERATION_MODE_VIDEO = "video", GENERATION_MODE_TEXT = "text"
-GenerationModeType = Literal["video", "text"]
+# INPUT_MODE_VIDEO = "video", INPUT_MODE_TEXT = "text"
+InputModeType = Literal["video", "text"]
 
 
 class HealthResponse(BaseModel):
@@ -94,12 +94,12 @@ class Parameters(BaseModel):
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
     )
-    generation_mode: GenerationModeType | None = Field(
+    input_mode: InputModeType | None = Field(
         default=None,
-        description=f"Generation mode for pipelines that support both text-to-video and video-to-video. "
-        f"Use '{GENERATION_MODE_VIDEO}' for video input consumption, '{GENERATION_MODE_TEXT}' for pure text-to-video. "
-        f"When set to '{GENERATION_MODE_VIDEO}', the pipeline will consume input video frames. "
-        f"When set to '{GENERATION_MODE_TEXT}', the pipeline will operate in pure text-to-video mode without consuming video input.",
+        description=f"Input mode for pipelines that support both text-to-video and video-to-video. "
+        f"Use '{INPUT_MODE_VIDEO}' for video input consumption, '{INPUT_MODE_TEXT}' for pure text-to-video. "
+        f"When set to '{INPUT_MODE_VIDEO}', the pipeline will consume input video frames. "
+        f"When set to '{INPUT_MODE_TEXT}', the pipeline will operate in pure text-to-video mode without consuming video input.",
     )
 
 
@@ -278,7 +278,7 @@ class PipelineStatusResponse(BaseModel):
 class PipelineCapabilities(BaseModel):
     """Computed capabilities for UI generation."""
 
-    hasGenerationModeControl: bool = Field(
+    hasInputModeControl: bool = Field(
         ..., description="Whether pipeline supports mode switching"
     )
     hasNoiseControls: bool = Field(
@@ -308,10 +308,8 @@ class PipelineSchemaResponse(BaseModel):
     name: str = Field(..., description="Human-readable pipeline name")
     description: str = Field(..., description="Pipeline capabilities description")
     version: str = Field(default="1.0.0", description="Pipeline version")
-    native_mode: str = Field(..., description="Native generation mode (text or video)")
-    supported_modes: list[str] = Field(
-        ..., description="List of supported generation modes"
-    )
+    native_mode: str = Field(..., description="Native input mode (text or video)")
+    supported_modes: list[str] = Field(..., description="List of supported input modes")
     mode_configs: dict[str, dict[str, Any]] = Field(
         ..., description="Mode-specific parameter configurations"
     )

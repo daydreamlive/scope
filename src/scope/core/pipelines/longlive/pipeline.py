@@ -9,7 +9,7 @@ import time
 
 import torch
 
-from ..defaults import GENERATION_MODE_TEXT
+from ..defaults import INPUT_MODE_TEXT
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
 from ..utils import calculate_input_size, load_model_config
@@ -39,7 +39,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             pipeline_id="longlive",
             name="LongLive",
             description="Text-to-video generation optimized for long-form content with efficient recaching",
-            native_mode=GENERATION_MODE_TEXT,
+            native_mode=INPUT_MODE_TEXT,
             shared={
                 "manage_cache": True,
                 "base_seed": 42,

@@ -69,7 +69,7 @@ print(f"test.py: Video input format: list of {len(video_input)} tensors")
 print(f"test.py: First tensor shape: {video_input[0].shape}")
 
 start = time.time()
-output_video = pipeline(video=video_input, prompts=prompt, generation_mode="video")
+output_video = pipeline(video=video_input, prompts=prompt, input_mode="video")
 latency_video = time.time() - start
 
 num_frames_video = output_video.shape[0]

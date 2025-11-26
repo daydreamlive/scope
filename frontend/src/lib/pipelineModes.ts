@@ -1,11 +1,11 @@
 import { PIPELINES } from "../data/pipelines";
 import { getCachedPipelineSchema } from "./utils";
-import { GENERATION_MODE, type GenerationMode } from "../constants/modes";
+import { INPUT_MODE, type InputMode } from "../constants/modes";
 import type { PipelineId } from "../types";
 
 export interface PipelineModeCapabilities {
   id: PipelineId;
-  nativeMode: GenerationMode;
+  nativeMode: InputMode;
   defaultResolutionByMode: {
     text?: {
       height: number;
@@ -19,10 +19,10 @@ export interface PipelineModeCapabilities {
   showNoiseControlsInText: boolean;
   showNoiseControlsInVideo: boolean;
   /**
-   * Whether this pipeline exposes an explicit generation_mode control that
+   * Whether this pipeline exposes an explicit input_mode control that
    * allows switching between text-to-video and video-to-video behaviour.
    */
-  hasGenerationModeControl: boolean;
+  hasInputModeControl: boolean;
   /**
    * Whether this pipeline exposes a cache management toggle (manage_cache).
    */
@@ -30,7 +30,7 @@ export interface PipelineModeCapabilities {
   /**
    * Whether this pipeline requires an actual video stream when running in
    * video mode. If false, the pipeline can operate without input video even
-   * when generationMode is set to video.
+   * when inputMode is set to video.
    */
   requiresVideoInVideoMode: boolean;
 }
@@ -38,7 +38,7 @@ export interface PipelineModeCapabilities {
 /**
  * Whether this pipeline requires an actual video stream when running in
  * video mode. If false, the pipeline can operate without input video even
- * when generationMode is set to video.
+ * when inputMode is set to video.
  */
 export function requiresVideoInVideoMode(
   caps: PipelineModeCapabilities
@@ -63,10 +63,10 @@ export function getPipelineModeCapabilities(
 
   // Get schema from cache - this drives all capabilities
   const cachedSchema = getCachedPipelineSchema(id);
-  const nativeMode: GenerationMode =
+  const nativeMode: InputMode =
     cachedSchema?.native_mode ??
-    info?.nativeGenerationMode ??
-    (category === "video-input" ? GENERATION_MODE.VIDEO : GENERATION_MODE.TEXT);
+    info?.nativeInputMode ??
+    (category === "video-input" ? INPUT_MODE.VIDEO : INPUT_MODE.TEXT);
 
   const textConfig = cachedSchema?.mode_configs?.text;
   const videoConfig = cachedSchema?.mode_configs?.video;
@@ -83,7 +83,7 @@ export function getPipelineModeCapabilities(
     },
     showNoiseControlsInText: capabilities?.showNoiseControlsInText ?? false,
     showNoiseControlsInVideo: capabilities?.showNoiseControlsInVideo ?? false,
-    hasGenerationModeControl: capabilities?.hasGenerationModeControl ?? false,
+    hasInputModeControl: capabilities?.hasInputModeControl ?? false,
     hasCacheManagement: capabilities?.hasCacheManagement ?? false,
     requiresVideoInVideoMode:
       capabilities?.requiresVideoInVideoMode ?? category === "video-input",

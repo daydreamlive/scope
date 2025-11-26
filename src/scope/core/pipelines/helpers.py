@@ -29,11 +29,11 @@ def create_mode_configs(
     text_overrides = text_overrides or {}
     video_overrides = video_overrides or {}
 
-    from .defaults import GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO
+    from .defaults import INPUT_MODE_TEXT, INPUT_MODE_VIDEO
 
     return {
-        GENERATION_MODE_TEXT: create_mode_config(**{**shared, **text_overrides}),
-        GENERATION_MODE_VIDEO: create_mode_config(**{**shared, **video_overrides}),
+        INPUT_MODE_TEXT: create_mode_config(**{**shared, **text_overrides}),
+        INPUT_MODE_VIDEO: create_mode_config(**{**shared, **video_overrides}),
     }
 
 
@@ -70,7 +70,7 @@ def build_pipeline_schema(
             pipeline_id="streamdiffusionv2",
             name="StreamDiffusion V2",
             description="Video-to-video generation with temporal consistency",
-            native_mode=GENERATION_MODE_VIDEO,
+            native_mode=INPUT_MODE_VIDEO,
             shared={"manage_cache": True, "base_seed": 42},
             text_overrides={
                 "resolution": {"height": 512, "width": 512},
@@ -84,12 +84,12 @@ def build_pipeline_schema(
             },
         )
     """
-    from .defaults import GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO
+    from .defaults import INPUT_MODE_TEXT, INPUT_MODE_VIDEO
     from .schema import create_pipeline_schema
 
     mode_configs = create_mode_configs(shared, text_overrides, video_overrides)
 
-    supported_modes = [GENERATION_MODE_TEXT, GENERATION_MODE_VIDEO]
+    supported_modes = [INPUT_MODE_TEXT, INPUT_MODE_VIDEO]
 
     return create_pipeline_schema(
         pipeline_id=pipeline_id,

@@ -11,8 +11,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Mode constants - use these everywhere instead of magic strings
-GENERATION_MODE_VIDEO = "video"
-GENERATION_MODE_TEXT = "text"
+INPUT_MODE_VIDEO = "video"
+INPUT_MODE_TEXT = "text"
 
 
 def get_pipeline_schema(pipeline_class: type["Pipeline"]) -> dict[str, Any]:
@@ -27,12 +27,12 @@ def get_pipeline_schema(pipeline_class: type["Pipeline"]) -> dict[str, Any]:
     return pipeline_class.get_schema()
 
 
-def resolve_generation_mode(
+def resolve_input_mode(
     explicit_mode: str | None,
     kwargs: dict[str, Any],
     pipeline_class: type["Pipeline"],
 ) -> str:
-    """Resolve generation mode with explicit > kwargs > native fallback.
+    """Resolve input mode with explicit > kwargs > native fallback.
 
     This utility eliminates duplication of mode resolution logic across
     pipeline implementations by providing a single source of truth for
@@ -40,31 +40,31 @@ def resolve_generation_mode(
 
     Args:
         explicit_mode: Explicitly provided mode (highest priority)
-        kwargs: Dictionary that may contain 'generation_mode' key
+        kwargs: Dictionary that may contain 'input_mode' key
         pipeline_class: Pipeline class to get native mode from
 
     Returns:
-        Resolved generation mode string (text or video)
+        Resolved input mode string (text or video)
 
     Example:
-        mode = resolve_generation_mode(
+        mode = resolve_input_mode(
             explicit_mode=None,
-            kwargs={"generation_mode": "video"},
+            kwargs={"input_mode": "video"},
             pipeline_class=MyPipeline
         )
         # Returns "video" from kwargs
 
-        mode = resolve_generation_mode(
+        mode = resolve_input_mode(
             explicit_mode="text",
-            kwargs={"generation_mode": "video"},
+            kwargs={"input_mode": "video"},
             pipeline_class=MyPipeline
         )
         # Returns "text" (explicit takes priority)
     """
     if explicit_mode:
         return explicit_mode
-    if "generation_mode" in kwargs:
-        return kwargs["generation_mode"]
+    if "input_mode" in kwargs:
+        return kwargs["input_mode"]
     schema = get_pipeline_schema(pipeline_class)
     return schema["native_mode"]
 
@@ -154,13 +154,13 @@ def apply_mode_defaults_to_state(
     """Apply mode-specific defaults to pipeline state.
 
     This consolidates the common pattern of applying defaults for denoising_steps,
-    noise_scale, and noise_controller based on the current generation mode.
+    noise_scale, and noise_controller based on the current input mode.
     Extracts defaults from JSON Schema format.
 
     Args:
         state: PipelineState object to update
         pipeline_class: The pipeline class to get defaults from
-        mode: Current generation mode (text/video). If None, uses native mode.
+        mode: Current input mode (text/video). If None, uses native mode.
         kwargs: Optional kwargs dict to check if parameter was explicitly provided
     """
     kwargs = kwargs or {}
@@ -174,7 +174,7 @@ def apply_mode_defaults_to_state(
             state.set("denoising_step_list", denoising_steps)
 
     # For text mode, noise controls should be None (not used)
-    if mode == GENERATION_MODE_TEXT:
+    if mode == INPUT_MODE_TEXT:
         state.set("noise_scale", None)
         state.set("noise_controller", None)
     else:

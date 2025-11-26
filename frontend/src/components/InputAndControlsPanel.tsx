@@ -23,10 +23,10 @@ interface InputAndControlsPanelProps {
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
-  // Generation mode for the pipeline (text-to-video vs video-to-video)
+  // Input mode for the pipeline (text-to-video vs video-to-video)
   mode: "video" | "text";
   onModeChange: (mode: "video" | "text") => void;
-  // Underlying video source when in video generation mode
+  // Underlying video source when in video input mode
   videoSourceMode: VideoSourceMode;
   onVideoSourceModeChange: (mode: VideoSourceMode) => void;
   isStreaming: boolean;
@@ -152,7 +152,7 @@ export function InputAndControlsPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {pipelineCapabilities.hasGenerationModeControl ? (
+              {pipelineCapabilities.hasInputModeControl ? (
                 <>
                   <SelectItem value="text">Text</SelectItem>
                   <SelectItem value="video">Video</SelectItem>
