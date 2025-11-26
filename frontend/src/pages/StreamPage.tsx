@@ -170,12 +170,15 @@ export function StreamPage() {
     // Apply all mode-specific defaults when switching modes
     const modeConfig = getModeConfig(pipelineId, inputMode);
 
+    // Common mode-specific defaults (from schema, already mode-aware)
+    updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
+    updates.noiseScale = modeConfig.noise_scale ?? undefined;
+    updates.noiseController = modeConfig.noise_controller ?? undefined;
+
+    // Mode-specific resolution handling
     if (inputMode === INPUT_MODE.TEXT) {
       updates.resolution =
         caps.defaultResolutionByMode.text ?? modeConfig.resolution;
-      updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
-      updates.noiseScale = modeConfig.noise_scale ?? undefined;
-      updates.noiseController = modeConfig.noise_controller ?? undefined;
     } else if (inputMode === INPUT_MODE.VIDEO) {
       // Use pipeline's default video resolution first, only fall back to video source if no default
       const defaultVideoResolution =
@@ -184,9 +187,6 @@ export function StreamPage() {
       // Convert videoResolution from null to undefined to match SettingsState type
       updates.resolution =
         defaultVideoResolution || (videoResolution ?? undefined);
-      updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
-      updates.noiseScale = modeConfig.noise_scale ?? undefined;
-      updates.noiseController = modeConfig.noise_controller ?? undefined;
 
       // When switching to "video" mode, ensure videoSourceMode is set to "video"
       // (unless it's already "video", in which case we don't need to change it)
