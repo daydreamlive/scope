@@ -9,7 +9,6 @@ import {
   getHardwareInfo,
   getPipelineSchema,
   type HardwareInfoResponse,
-  type PipelineSchema,
 } from "../lib/api";
 import { setPipelineSchema as cachePipelineSchema } from "../lib/utils";
 
@@ -54,11 +53,6 @@ export function useStreamState() {
     null
   );
 
-  // Store pipeline schema separately for reset functionality
-  const [pipelineSchema, setPipelineSchema] = useState<PipelineSchema | null>(
-    null
-  );
-
   // Track loading state for schema
   const [isLoadingSchema, setIsLoadingSchema] = useState(true);
 
@@ -95,9 +89,6 @@ export function useStreamState() {
 
         // Cache schema for use by other components
         cachePipelineSchema(targetPipelineId, schemaResponse);
-
-        // Store schema for reset functionality
-        setPipelineSchema(schemaResponse);
 
         // Get native mode and its config
         const nativeMode = schemaResponse.native_mode;
@@ -191,7 +182,6 @@ export function useStreamState() {
     settings,
     promptData,
     hardwareInfo,
-    pipelineSchema,
     isLoadingSchema,
     updateMetrics,
     updateStreamStatus,

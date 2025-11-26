@@ -66,14 +66,3 @@ export interface SettingsState {
   loras?: LoRAConfig[];
   loraMergeStrategy?: LoraMergeStrategy;
 }
-
-export type PipelineCategory = "video-input" | "no-video-input";
-
-export interface PipelineInfo {
-  name: string;
-  about: string;
-  projectUrl?: string;
-  modified?: boolean;
-  category: PipelineCategory;
-  nativeInputMode?: InputMode;
-}
