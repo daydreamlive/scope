@@ -12,7 +12,7 @@ import torch
 from ..defaults import GENERATION_MODE_TEXT
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
-from ..utils import load_model_config
+from ..utils import calculate_input_size, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
@@ -22,9 +22,6 @@ from .modules.causal_model import CausalWanModel
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
-
-# Chunk size for video input when operating in video-to-video mode
-CHUNK_SIZE = 4
 
 
 class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
@@ -58,7 +55,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 512, "width": 512},
                 "noise_scale": 0.7,
                 "noise_controller": True,
-                "input_size": CHUNK_SIZE,
+                "input_size": calculate_input_size(__file__),
                 "vae_strategy": "streamdiffusionv2_longlive_scaled",
             },
         )
@@ -97,7 +94,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 512, "width": 512},
                 "noise_scale": 0.7,
                 "noise_controller": True,
-                "input_size": CHUNK_SIZE,
+                "input_size": calculate_input_size(__file__),
             },
         }
 

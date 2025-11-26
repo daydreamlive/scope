@@ -6,7 +6,7 @@ import torch
 from ..defaults import GENERATION_MODE_TEXT
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
-from ..utils import Quantization, load_model_config
+from ..utils import Quantization, calculate_input_size, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from .modular_blocks import KreaRealtimeVideoUnifiedWorkflow
@@ -15,9 +15,6 @@ from .modules.causal_model import CausalWanModel
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
-
-# Chunk size for video input when operating in video-to-video mode
-CHUNK_SIZE = 4
 
 WARMUP_RUNS = 3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
@@ -55,6 +52,7 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 320, "width": 320},
                 "noise_scale": 0.35,
                 "noise_controller": True,
+                "input_size": calculate_input_size(__file__),
             },
         )
 
@@ -90,6 +88,7 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 320, "width": 320},
                 "noise_scale": 0.35,
                 "noise_controller": True,
+                "input_size": calculate_input_size(__file__),
             },
         }
 

@@ -6,7 +6,7 @@ import torch
 from ..defaults import GENERATION_MODE_VIDEO
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
-from ..utils import load_model_config
+from ..utils import calculate_input_size, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from .modular_blocks import StreamDiffusionV2UnifiedWorkflow
@@ -16,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
 TEXT_DENOISING_STEP_LIST = [1000, 250]
-# Chunk size for streamdiffusionv2
-CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
@@ -50,7 +48,7 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "noise_scale": 0.7,
                 "noise_controller": True,
-                "input_size": CHUNK_SIZE,
+                "input_size": calculate_input_size(__file__),
             },
         )
 
@@ -86,7 +84,7 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "noise_scale": 0.7,
                 "noise_controller": True,
-                "input_size": CHUNK_SIZE,
+                "input_size": calculate_input_size(__file__),
             },
         }
 
