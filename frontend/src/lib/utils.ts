@@ -11,50 +11,29 @@ export function cn(...inputs: ClassValue[]) {
 
 interface CachedSchema {
   schema: PipelineSchema;
-  timestamp: number;
-  version: string;
 }
 
-// Cache for pipeline schemas fetched from API with expiration
+// Cache for pipeline schemas fetched from API
 const pipelineSchemaCache = new Map<PipelineId, CachedSchema>();
-
-// Cache TTL: 5 minutes
-const SCHEMA_CACHE_TTL = 5 * 60 * 1000;
 
 /**
  * Set cached schema for a pipeline. Called after fetching from API.
- * Stores the schema with timestamp and version for cache invalidation.
  */
 export function setPipelineSchema(
   pipelineId: PipelineId,
   schema: PipelineSchema
 ): void {
-  pipelineSchemaCache.set(pipelineId, {
-    schema,
-    timestamp: Date.now(),
-    version: schema.version,
-  });
+  pipelineSchemaCache.set(pipelineId, { schema });
 }
 
 /**
- * Get cached schema for a pipeline, or null if not cached or expired.
- * Automatically removes expired entries from cache.
+ * Get cached schema for a pipeline, or null if not cached.
  */
 export function getCachedPipelineSchema(
   pipelineId: PipelineId
 ): PipelineSchema | null {
   const cached = pipelineSchemaCache.get(pipelineId);
-  if (!cached) {
-    return null;
-  }
-
-  // Check if expired
-  if (Date.now() - cached.timestamp > SCHEMA_CACHE_TTL) {
-    pipelineSchemaCache.delete(pipelineId);
-    return null;
-  }
-
-  return cached.schema;
+  return cached?.schema ?? null;
 }
 
 /**
@@ -123,52 +102,38 @@ export function getModeConfig(
   }
 
   // Extract default values from JSON Schema objects
-  const extracted: ExtractedModeConfig = {
-    resolution: modeConfig.resolution?.default ?? { height: 512, width: 512 },
-    manage_cache: modeConfig.manage_cache?.default ?? true,
-    base_seed: modeConfig.base_seed?.default ?? 42,
-  };
+  const extracted: ExtractedModeConfig = {} as ExtractedModeConfig;
 
-  // Optional parameters
-  if (modeConfig.denoising_steps) {
-    extracted.denoising_steps = modeConfig.denoising_steps.default
-      ? [...modeConfig.denoising_steps.default]
-      : null;
-  }
-  if (modeConfig.noise_scale) {
-    extracted.noise_scale = modeConfig.noise_scale.default ?? null;
-  }
-  if (modeConfig.noise_controller) {
-    extracted.noise_controller = modeConfig.noise_controller.default ?? null;
-  }
-  if (modeConfig.kv_cache_attention_bias) {
-    extracted.kv_cache_attention_bias =
-      modeConfig.kv_cache_attention_bias.default ?? null;
-  }
-  if (modeConfig.input_size) {
-    extracted.input_size = modeConfig.input_size.default ?? null;
-  }
-  if (modeConfig.vae_strategy) {
-    extracted.vae_strategy = modeConfig.vae_strategy.default ?? null;
-  }
-
-  // Extract any extra parameters
+  // Iterate over all fields in modeConfig
   for (const key in modeConfig) {
-    if (
-      !Object.hasOwn(extracted, key) &&
-      typeof modeConfig[key] === "object" &&
-      modeConfig[key] !== null &&
-      "default" in modeConfig[key]
-    ) {
-      extracted[key] = modeConfig[key].default as
-        | number
-        | boolean
-        | string
-        | number[]
-        | { height: number; width: number }
-        | null
-        | undefined;
+    const param = modeConfig[key];
+    if (typeof param === "object" && param !== null && "default" in param) {
+      // Special handling for denoising_steps: copy array to avoid mutation
+      if (key === "denoising_steps" && Array.isArray(param.default)) {
+        extracted[key] = [...param.default] as number[];
+      } else {
+        // Extract default value from schema
+        extracted[key] = param.default as
+          | number
+          | boolean
+          | string
+          | number[]
+          | { height: number; width: number }
+          | null
+          | undefined;
+      }
     }
+  }
+
+  // Ensure required fields have defaults (in case they weren't in modeConfig or had null defaults)
+  if (!extracted.resolution) {
+    extracted.resolution = { height: 512, width: 512 };
+  }
+  if (extracted.manage_cache === undefined) {
+    extracted.manage_cache = true;
+  }
+  if (extracted.base_seed === undefined) {
+    extracted.base_seed = 42;
   }
 
   return extracted;
