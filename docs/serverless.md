@@ -4,6 +4,10 @@
 
 Scope can be run on RunPod Serverless with a few modifications to the codebase and Docker configuration. This guide walks you through the necessary changes and deployment steps.
 
+## Video Tutorial
+
+[![Running Scope on RunPod Serverless](https://img.youtube.com/vi/WrwgfcKpmVs/0.jpg)](https://www.youtube.com/watch?v=WrwgfcKpmVs)
+
 ## Code Changes
 
 To run Scope on RunPod Serverless, you need to make the following changes:
