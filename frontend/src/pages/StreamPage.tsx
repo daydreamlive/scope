@@ -18,6 +18,8 @@ import {
   getPipelineModeCapabilities,
   requiresVideoInVideoMode,
   hasNoiseControls,
+  getEffectiveMode,
+  pipelineNeedsVideoSource,
 } from "../lib/pipelineModes";
 import { INPUT_MODE, VIDEO_SOURCE_MODE } from "../constants/modes";
 import type {
@@ -122,8 +124,8 @@ export function StreamPage() {
   // Determine if video source should be enabled
   const shouldEnableVideoSource = useMemo(() => {
     const caps = getPipelineModeCapabilities(settings.pipelineId);
-    const currentMode = settings.inputMode ?? caps.nativeMode;
-    return requiresVideoInVideoMode(caps) && currentMode === INPUT_MODE.VIDEO;
+    const effectiveMode = getEffectiveMode(settings.inputMode, caps);
+    return pipelineNeedsVideoSource(caps, effectiveMode);
   }, [settings.pipelineId, settings.inputMode]);
 
   // Video source for preview (camera or video)
@@ -613,10 +615,9 @@ export function StreamPage() {
 
       // Check if this pipeline needs video input for the current mode
       const caps = getPipelineModeCapabilities(pipelineIdToUse);
-      const currentMode = settings.inputMode ?? caps.nativeMode;
+      const currentMode = getEffectiveMode(settings.inputMode, caps);
       const modeConfig = getModeConfig(pipelineIdToUse, currentMode);
-      const needsVideoInput =
-        requiresVideoInVideoMode(caps) && currentMode === INPUT_MODE.VIDEO;
+      const needsVideoInput = pipelineNeedsVideoSource(caps, currentMode);
 
       // Only send video stream for pipelines that need video input
       const streamToSend = needsVideoInput
@@ -737,10 +738,11 @@ export function StreamPage() {
             isPipelineLoading={isPipelineLoading}
             canStartStream={(() => {
               const caps = getPipelineModeCapabilities(settings.pipelineId);
-              const effectiveMode = settings.inputMode ?? caps.nativeMode;
-              const needsVideoInput =
-                requiresVideoInVideoMode(caps) &&
-                effectiveMode === INPUT_MODE.VIDEO;
+              const effectiveMode = getEffectiveMode(settings.inputMode, caps);
+              const needsVideoInput = pipelineNeedsVideoSource(
+                caps,
+                effectiveMode
+              );
 
               if (!needsVideoInput) {
                 return !isInitializing && !isLoadingSchema;

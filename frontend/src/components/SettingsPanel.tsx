@@ -26,7 +26,10 @@ import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import { LoRAManager } from "./LoRAManager";
-import { getPipelineModeCapabilities } from "../lib/pipelineModes";
+import {
+  getPipelineModeCapabilities,
+  getEffectiveMode,
+} from "../lib/pipelineModes";
 
 const MIN_DIMENSION = 16;
 
@@ -93,7 +96,7 @@ export function SettingsPanel({
   onLoraMergeStrategyChange,
 }: SettingsPanelProps) {
   const modeCapabilities = getPipelineModeCapabilities(pipelineId);
-  const effectiveInputMode = inputMode ?? modeCapabilities.nativeMode;
+  const effectiveInputMode = getEffectiveMode(inputMode, modeCapabilities);
 
   // Local slider state management hooks
   // No hardcoded defaults - values come from backend pipeline schema
@@ -629,14 +632,14 @@ export function SettingsPanel({
                       className="text-sm text-foreground"
                     />
                     <Toggle
-                      pressed={noiseController ?? true}
+                      pressed={noiseController ?? false}
                       onPressedChange={onNoiseControllerChange || (() => {})}
-                      disabled={isStreaming}
+                      disabled={isStreaming || noiseController === undefined}
                       variant="outline"
                       size="sm"
                       className="h-7"
                     >
-                      {(noiseController ?? true) ? "ON" : "OFF"}
+                      {noiseController ? "ON" : "OFF"}
                     </Toggle>
                   </div>
                 </div>

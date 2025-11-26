@@ -55,6 +55,28 @@ export function hasNoiseControls(caps: PipelineModeCapabilities): boolean {
   return caps.showNoiseControlsInText || caps.showNoiseControlsInVideo;
 }
 
+/**
+ * Resolve the effective input mode, falling back to the pipeline's native mode
+ * when no explicit mode is set.
+ */
+export function getEffectiveMode(
+  inputMode: InputMode | undefined,
+  caps: PipelineModeCapabilities
+): InputMode {
+  return inputMode ?? caps.nativeMode;
+}
+
+/**
+ * Whether the pipeline needs an actual video source for the given mode.
+ * Returns true only when the pipeline requires video input AND we're in video mode.
+ */
+export function pipelineNeedsVideoSource(
+  caps: PipelineModeCapabilities,
+  effectiveMode: InputMode
+): boolean {
+  return requiresVideoInVideoMode(caps) && effectiveMode === INPUT_MODE.VIDEO;
+}
+
 export function getPipelineModeCapabilities(
   id: PipelineId
 ): PipelineModeCapabilities {
