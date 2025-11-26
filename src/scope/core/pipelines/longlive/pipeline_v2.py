@@ -16,7 +16,7 @@ from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from .auto_blocks import LongLiveAutoBlocks
+from .auto_blocks import LongLiveUnifiedWorkflow
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
@@ -65,8 +65,12 @@ class LongLivePipelineV2(MultiModePipeline, LoRAEnabledPipeline):
 
     @classmethod
     def get_blocks(cls):
-        """Return AutoPipelineBlocks for LongLive workflows."""
-        return LongLiveAutoBlocks()
+        """Return unified workflow for LongLive pipeline.
+
+        This returns a single SequentialPipelineBlocks that handles both
+        text-to-video and video-to-video modes through conditional block execution.
+        """
+        return LongLiveUnifiedWorkflow()
 
     @classmethod
     def get_components(cls) -> dict:

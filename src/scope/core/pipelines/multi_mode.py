@@ -11,7 +11,7 @@ from abc import abstractmethod
 from typing import Any
 
 import torch
-from diffusers.modular_pipelines import AutoPipelineBlocks, PipelineState
+from diffusers.modular_pipelines import PipelineState
 
 from .blending import EmbeddingBlender
 from .components import ComponentsManager
@@ -34,7 +34,7 @@ class MultiModePipeline(Pipeline):
     across pipeline implementations. Pipelines inherit from this class and declare
     their capabilities via three class methods:
 
-    - get_blocks(): Returns AutoPipelineBlocks defining mode-specific workflows
+    - get_blocks(): Returns block graph (can be SequentialPipelineBlocks or AutoPipelineBlocks)
     - get_components(): Declares component requirements (generator, VAE, etc.)
     - get_defaults(): Specifies mode-specific default parameters
 
@@ -45,11 +45,17 @@ class MultiModePipeline(Pipeline):
     - State management
     - Auto-generation of prepare() method
 
+    Block Graph Design:
+    Pipelines can use either:
+    1. Single unified workflow (SequentialPipelineBlocks) where blocks conditionally
+       execute based on input presence (recommended, aligns with diffusers philosophy)
+    2. Multiple workflows with routing (AutoPipelineBlocks) for more complex scenarios
+
     Example:
         class MyPipeline(MultiModePipeline):
             @classmethod
-            def get_blocks(cls) -> AutoPipelineBlocks:
-                return MyAutoBlocks()
+            def get_blocks(cls):
+                return MyUnifiedWorkflow()
 
             @classmethod
             def get_components(cls) -> dict:
@@ -72,11 +78,15 @@ class MultiModePipeline(Pipeline):
 
     @classmethod
     @abstractmethod
-    def get_blocks(cls) -> AutoPipelineBlocks:
-        """Return AutoPipelineBlocks defining mode-specific workflows.
+    def get_blocks(cls):
+        """Return block graph for pipeline execution.
+
+        Can return either:
+        - SequentialPipelineBlocks: Single unified workflow with conditional execution
+        - AutoPipelineBlocks: Multiple workflows with automatic routing
 
         Returns:
-            AutoPipelineBlocks instance with workflow definitions for each mode
+            Block graph instance (SequentialPipelineBlocks or AutoPipelineBlocks)
         """
         pass
 
@@ -273,7 +283,7 @@ class MultiModePipeline(Pipeline):
         # Store detected mode in state for self-configuring blocks
         self.state.set("_detected_mode", mode)
 
-        # Execute unified block graph (AutoPipelineBlocks routes to correct workflow)
+        # Execute unified block graph (blocks conditionally execute based on input presence)
         _, state = self.blocks(self.components, self.state)
 
         return postprocess_chunk(state.values["output_video"])

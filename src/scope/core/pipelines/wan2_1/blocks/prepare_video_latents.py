@@ -41,7 +41,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         return [
             InputParam(
                 "video",
-                required=True,
+                required=False,
                 type_hint=list[torch.Tensor] | torch.Tensor,
                 description="Input video to convert into noisy latents",
             ),
@@ -90,10 +90,9 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         # text-to-video and video-to-video workflows.
         if not hasattr(block_state, "video") or block_state.video is None:
             # When there is no video input, we rely on latents prepared by
-            # other blocks (e.g. PrepareLatentsBlock) and mark that no
-            # input video was used.
-            block_state.input_video = False
-            self.set_block_state(state, block_state)
+            # other blocks (e.g. PrepareLatentsBlock). We don't modify state
+            # since the required outputs (latents, generator) should already
+            # be present from PrepareLatentsBlock.
             return components, state
 
         target_num_frames = (
