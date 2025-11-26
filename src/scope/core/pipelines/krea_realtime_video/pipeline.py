@@ -21,7 +21,7 @@ DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 # Warm-up configuration for torch.compile pre-compilation
 # Use a non-1.0 value to trigger the flex_attention code path during warmup
-WARMUP_KV_CACHE_ATTENTION_BIAS = 0.99
+WARMUP_KV_CACHE_ATTENTION_BIAS = 0.3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
@@ -138,7 +138,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # does not work properly
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", 1.0)
+        self.state.set("kv_cache_attention_bias", WARMUP_KV_CACHE_ATTENTION_BIAS)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
