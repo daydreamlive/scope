@@ -549,10 +549,11 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -567,10 +568,11 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
+          quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -624,7 +626,7 @@ export function StreamPage() {
       } = {};
 
       // Common parameters for pipelines that support prompts
-      if (pipelineIdToUse !== "passthrough" && pipelineIdToUse !== "vod") {
+      if (pipelineIdToUse !== "passthrough") {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
@@ -832,7 +834,6 @@ export function StreamPage() {
               }}
               disabled={
                 settings.pipelineId === "passthrough" ||
-                settings.pipelineId === "vod" ||
                 isPipelineLoading ||
                 isConnecting ||
                 showDownloadDialog
