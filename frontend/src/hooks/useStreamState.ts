@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type {
   SystemMetrics,
   StreamStatus,
@@ -56,6 +56,9 @@ export function useStreamState() {
   // Track loading state for schema
   const [isLoadingSchema, setIsLoadingSchema] = useState(true);
 
+  // Track previous pipeline ID to detect changes
+  const previousPipelineIdRef = useRef<string>(settings.pipelineId);
+
   // Fetch hardware info on mount
   useEffect(() => {
     const fetchHardwareInfo = async () => {
@@ -69,6 +72,24 @@ export function useStreamState() {
 
     fetchHardwareInfo();
   }, []);
+
+  // Reset inputMode to undefined when pipeline changes, so it gets set to native mode
+  useEffect(() => {
+    const currentPipelineId = settings.pipelineId;
+    const previousPipelineId = previousPipelineIdRef.current;
+
+    if (currentPipelineId !== previousPipelineId) {
+      console.log(
+        `useStreamState: Pipeline changed from ${previousPipelineId} to ${currentPipelineId}, resetting inputMode`
+      );
+      setSettings(prev => ({
+        ...prev,
+        inputMode: undefined,
+      }));
+    }
+
+    previousPipelineIdRef.current = currentPipelineId;
+  }, [settings.pipelineId]);
 
   // Fetch and apply pipeline schema when pipeline changes
   useEffect(() => {
@@ -95,15 +116,6 @@ export function useStreamState() {
         const nativeModeConfig = schemaResponse.mode_configs[nativeMode];
 
         if (nativeModeConfig) {
-          // Extract default values from JSON Schema objects
-          // Force new object creation for resolution to ensure React detects the change
-          const newResolution = nativeModeConfig.resolution?.default
-            ? {
-                height: nativeModeConfig.resolution.default.height,
-                width: nativeModeConfig.resolution.default.width,
-              }
-            : undefined;
-
           setSettings(prev => {
             // Double-check we're still on the same pipeline
             if (prev.pipelineId !== targetPipelineId) {
@@ -113,19 +125,41 @@ export function useStreamState() {
               return prev;
             }
 
+            // Use native mode when inputMode is undefined (pipeline just changed)
+            // Otherwise preserve current mode (user explicitly selected a mode)
+            const currentMode = prev.inputMode ?? nativeMode;
+            const modeConfig =
+              schemaResponse.mode_configs[currentMode] ?? nativeModeConfig;
+
+            // Extract default values from JSON Schema objects
+            // Force new object creation for resolution to ensure React detects the change
+            const newResolution = modeConfig.resolution?.default
+              ? {
+                  height: modeConfig.resolution.default.height,
+                  width: modeConfig.resolution.default.width,
+                }
+              : undefined;
+
             return {
               ...prev,
-              inputMode: nativeMode,
+              inputMode: prev.inputMode ?? nativeMode, // Set to native mode if undefined
               resolution: newResolution,
-              seed: nativeModeConfig.base_seed?.default,
+              seed: modeConfig.base_seed?.default ?? prev.seed,
               denoisingSteps:
-                nativeModeConfig.denoising_steps?.default ?? undefined,
-              noiseScale: nativeModeConfig.noise_scale?.default ?? undefined,
+                modeConfig.denoising_steps?.default ??
+                prev.denoisingSteps ??
+                undefined,
+              noiseScale:
+                modeConfig.noise_scale?.default ?? prev.noiseScale ?? undefined,
               noiseController:
-                nativeModeConfig.noise_controller?.default ?? undefined,
-              manageCache: nativeModeConfig.manage_cache?.default,
+                modeConfig.noise_controller?.default ??
+                prev.noiseController ??
+                undefined,
+              manageCache: modeConfig.manage_cache?.default ?? prev.manageCache,
               kvCacheAttentionBias:
-                nativeModeConfig.kv_cache_attention_bias?.default ?? undefined,
+                modeConfig.kv_cache_attention_bias?.default ??
+                prev.kvCacheAttentionBias ??
+                undefined,
             };
           });
         }

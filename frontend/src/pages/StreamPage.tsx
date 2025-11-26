@@ -186,9 +186,10 @@ export function StreamPage() {
       const defaultVideoResolution =
         caps.defaultResolutionByMode.video ?? modeConfig.resolution;
       // Prioritize pipeline default over video source resolution
+      // Only fall back to videoResolution if defaultVideoResolution is null/undefined
       // Convert videoResolution from null to undefined to match SettingsState type
       updates.resolution =
-        defaultVideoResolution || (videoResolution ?? undefined);
+        defaultVideoResolution ?? videoResolution ?? undefined;
 
       // When switching to "video" mode, ensure videoSourceMode is set to "video"
       // (unless it's already "video", in which case we don't need to change it)
@@ -510,12 +511,28 @@ export function StreamPage() {
   // Ref to store callback that should execute when video starts playing
   const onVideoPlayingCallbackRef = useRef<(() => void) | null>(null);
   // Sync resolution with videoResolution when video source changes
-  // Only sync for video-input pipelines
+  // Only sync for video-input pipelines that DON'T have a preferred video mode resolution.
+  // Pipelines like krea-realtime-video define specific resolutions (e.g., 320x320 for video mode)
+  // and should not be overridden by the video source resolution.
   useEffect(() => {
     const pipelineCategory = PIPELINES[settings.pipelineId]?.category;
     const isVideoInputPipeline = pipelineCategory === "video-input";
 
-    if (videoResolution && !isStreaming && isVideoInputPipeline) {
+    // Check if the pipeline has a preferred video mode resolution
+    const caps = getPipelineModeCapabilities(settings.pipelineId);
+    const hasPipelineVideoResolution = !!caps.defaultResolutionByMode.video;
+
+    // Only sync with video source resolution if:
+    // 1. Pipeline is video-input type
+    // 2. Pipeline does NOT have a preferred video mode resolution
+    // 3. We're not streaming
+    // 4. We have a video resolution to sync with
+    if (
+      videoResolution &&
+      !isStreaming &&
+      isVideoInputPipeline &&
+      !hasPipelineVideoResolution
+    ) {
       updateSettings({
         resolution: {
           height: videoResolution.height,
@@ -560,8 +577,32 @@ export function StreamPage() {
       // Prepare load parameters based on pipeline type
       let loadParams = null;
 
-      // Use settings.resolution if available, otherwise fall back to videoResolution
-      const resolution = settings.resolution || videoResolution;
+      // Get capabilities to determine current mode (needed for resolution fallback)
+      const caps = getPipelineModeCapabilities(pipelineIdToUse);
+      const currentMode = getEffectiveMode(settings.inputMode, caps);
+
+      // Determine resolution to use for loading pipeline
+      // Priority: settings.resolution > schema default for current mode
+      // NEVER use videoResolution - schema defaults are the source of truth
+      let resolution = settings.resolution;
+
+      // If no resolution in settings, ALWAYS get it from schema based on current mode
+      if (!resolution) {
+        const modeConfig = getModeConfig(pipelineIdToUse, currentMode);
+        resolution = modeConfig.resolution;
+
+        // Schema MUST provide resolution - if it doesn't, that's a configuration error
+        if (!resolution) {
+          throw new Error(
+            `Pipeline ${pipelineIdToUse} has no resolution configured for ${currentMode} mode`
+          );
+        }
+      }
+
+      // Ensure resolution is valid before proceeding
+      if (!resolution || !resolution.height || !resolution.width) {
+        throw new Error(`Invalid resolution: ${JSON.stringify(resolution)}`);
+      }
 
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
         loadParams = {
@@ -614,8 +655,7 @@ export function StreamPage() {
       }
 
       // Check if this pipeline needs video input for the current mode
-      const caps = getPipelineModeCapabilities(pipelineIdToUse);
-      const currentMode = getEffectiveMode(settings.inputMode, caps);
+      // (caps and currentMode already computed above)
       const modeConfig = getModeConfig(pipelineIdToUse, currentMode);
       const needsVideoInput = pipelineNeedsVideoSource(caps, currentMode);
 

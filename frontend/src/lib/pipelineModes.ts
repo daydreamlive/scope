@@ -96,12 +96,14 @@ export function getPipelineModeCapabilities(
   // Use backend-computed capabilities directly
   const capabilities = cachedSchema?.capabilities;
 
+  const defaultVideoResolution = videoConfig?.resolution?.default;
+
   return {
     id,
     nativeMode,
     defaultResolutionByMode: {
       text: textConfig?.resolution?.default,
-      video: videoConfig?.resolution?.default,
+      video: defaultVideoResolution,
     },
     showNoiseControlsInText: capabilities?.showNoiseControlsInText ?? false,
     showNoiseControlsInVideo: capabilities?.showNoiseControlsInVideo ?? false,
