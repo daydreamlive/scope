@@ -24,7 +24,8 @@ class Pipeline(ABC):
     - Mode-specific configuration
 
     See helpers.py and schema.py for utilities to simplify schema creation.
-    For universal input modes support, see mode_helpers.UniversalInputModesMixin.
+    For multi-mode pipeline support (text/video), use multi_mode.MultiModePipeline
+    as the base class which provides declarative mode configuration.
     """
 
     @classmethod
