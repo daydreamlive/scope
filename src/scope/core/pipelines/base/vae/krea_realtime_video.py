@@ -62,18 +62,22 @@ class KreaRealtimeVideoVAE(torch.nn.Module):
         # to [batch_size, num_frames, num_channels, height, width]
         return output.permute(0, 2, 1, 3, 4)
 
-    def decode_to_pixel(self, latent: torch.Tensor) -> torch.Tensor:
+    def decode_to_pixel(
+        self, latent: torch.Tensor, use_cache: bool = True
+    ) -> torch.Tensor:
         """Decode latents to video pixels with cached processing.
 
         Args:
             latent: Latent tensor [batch, frames, channels, height, width]
+            use_cache: Whether to use decoder cache (always True for this VAE)
 
         Returns:
             Video tensor [batch, frames, channels, height, width] in range [-1, 1]
 
         Note:
             This VAE always uses caching for decoder operations to maintain
-            temporal consistency across frames.
+            temporal consistency across frames. The use_cache parameter is
+            accepted for API compatibility but ignored since caching is always on.
         """
         output, self.decoder_cache = self.decoder(latent, *self.decoder_cache)
         return output

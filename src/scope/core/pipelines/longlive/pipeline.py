@@ -16,7 +16,7 @@ from ..utils import load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from .auto_blocks import LongLiveUnifiedWorkflow
+from .modular_blocks import LongLiveUnifiedWorkflow
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)

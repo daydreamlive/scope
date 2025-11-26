@@ -5,15 +5,11 @@ import torch
 
 from ..defaults import GENERATION_MODE_TEXT
 from ..helpers import build_pipeline_schema
-from ..interface import Pipeline
-from ..mode_helpers import UniversalInputModesMixin
+from ..multi_mode import MultiModePipeline
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .modular_blocks import (
-    KreaRealtimeVideoTextBlocks,
-    KreaRealtimeVideoVideoBlocks,
-)
+from .modular_blocks import KreaRealtimeVideoUnifiedWorkflow
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
@@ -27,9 +23,15 @@ WARMUP_RUNS = 3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
-class KreaRealtimeVideoPipeline(
-    UniversalInputModesMixin, Pipeline, LoRAEnabledPipeline
-):
+class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
+    """KreaRealtimeVideo pipeline using declarative MultiModePipeline architecture.
+
+    This pipeline supports both text-to-video and video-to-video generation
+    with advanced KV cache attention control for realtime performance. It uses
+    the new declarative pattern where the pipeline simply declares its capabilities
+    via class methods.
+    """
+
     @classmethod
     def get_schema(cls) -> dict:
         """Return schema for Krea Realtime Video pipeline."""
@@ -55,6 +57,41 @@ class KreaRealtimeVideoPipeline(
                 "noise_controller": True,
             },
         )
+
+    @classmethod
+    def get_blocks(cls):
+        """Return unified workflow for KreaRealtimeVideo pipeline.
+
+        This returns a single SequentialPipelineBlocks that handles both
+        text-to-video and video-to-video modes through conditional block execution.
+        """
+        return KreaRealtimeVideoUnifiedWorkflow()
+
+    @classmethod
+    def get_components(cls) -> dict:
+        """Declare component requirements for KreaRealtimeVideo pipeline."""
+        return {
+            "generator": WanDiffusionWrapper,
+            "text_encoder": WanTextEncoderWrapper,
+            "vae": {
+                "text": {"strategy": "krea_realtime_video"},
+                "video": {"strategy": "krea_realtime_video"},
+            },
+        }
+
+    @classmethod
+    def get_defaults(cls) -> dict:
+        """Return mode-specific defaults for KreaRealtimeVideo pipeline."""
+        return {
+            "text": {
+                "resolution": {"height": 320, "width": 576},
+            },
+            "video": {
+                "resolution": {"height": 320, "width": 320},
+                "noise_scale": 0.35,
+                "noise_controller": True,
+            },
+        }
 
     def __init__(
         self,
@@ -134,46 +171,46 @@ class KreaRealtimeVideoPipeline(
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Initialize VAE lazy loading infrastructure
-        self._init_vae_lazy_loading(
-            device=device,
-            dtype=dtype,
-            model_name=base_model_name,
-            model_dir=model_dir,
-            vae_path=vae_path,
-        )
+        # Prepare VAE initialization kwargs for lazy loading
+        vae_init_kwargs = {
+            "model_name": base_model_name,
+            "model_dir": model_dir,
+            "vae_path": vae_path,
+        }
 
-        # Initialize pipeline state and components using shared helper
-        self._initialize_pipeline_state(
+        # Convert model_config to dict for MultiModePipeline
+        from omegaconf import OmegaConf
+
+        model_config_dict = OmegaConf.to_container(model_config, resolve=True)
+
+        # Initialize via MultiModePipeline
+        super().__init__(
             config=config,
             generator=generator,
             text_encoder=text_encoder,
-            blocks_text=KreaRealtimeVideoTextBlocks(),
-            blocks_video=KreaRealtimeVideoVideoBlocks(),
-            model_config=model_config,
+            model_config=model_config_dict,
             device=device,
             dtype=dtype,
+            vae_init_kwargs=vae_init_kwargs,
         )
 
         # Warmup runs for JIT optimization
         start = time.time()
         for _ in range(WARMUP_RUNS):
-            self._generate(prompts=WARMUP_PROMPT)
+            super().__call__(prompts=WARMUP_PROMPT)
 
         print(f"Warmed up in {time.time() - start:2f}s")
 
     def __call__(self, **kwargs) -> torch.Tensor:
-        if self.first_call:
-            self.state.set("init_cache", True)
-            self.first_call = False
-        else:
-            # This will be overriden if the init_cache is passed in kwargs
-            self.state.set("init_cache", False)
+        """Execute pipeline with LoRA handling.
 
-        return self._generate(**kwargs)
+        Args:
+            **kwargs: Generation parameters
 
-    def _generate(self, **kwargs) -> torch.Tensor:
-        # Handle runtime LoRA scale updates before writing into state.
+        Returns:
+            Post-processed output tensor
+        """
+        # Handle runtime LoRA scale updates before execution
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:
             self._handle_lora_scale_updates(
@@ -183,11 +220,5 @@ class KreaRealtimeVideoPipeline(
             if self.state.get("manage_cache", True):
                 kwargs["init_cache"] = True
 
-        for k, v in kwargs.items():
-            self.state.set(k, v)
-
-        # Clear transition from state if not provided to prevent stale transitions
-        if "transition" not in kwargs:
-            self.state.set("transition", None)
-
-        return self._prepare_and_execute_blocks(self.state, self.components, **kwargs)
+        # Call parent implementation which handles the rest
+        return super().__call__(**kwargs)

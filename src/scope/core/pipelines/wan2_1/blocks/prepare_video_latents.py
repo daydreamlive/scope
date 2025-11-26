@@ -85,11 +85,16 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         # model parameters. This mirrors the behaviour of PrepareLatentsBlock.
         generator_param = next(components.generator.model.parameters())
 
-        # If no video is provided, skip video latent preparation.
+        # If no video is provided or noise_scale is None (text mode), skip video latent preparation.
         # This allows pipelines to share the same block graph for both
         # text-to-video and video-to-video workflows.
-        if not hasattr(block_state, "video") or block_state.video is None:
-            # When there is no video input, we rely on latents prepared by
+        if (
+            not hasattr(block_state, "video")
+            or block_state.video is None
+            or not hasattr(block_state, "noise_scale")
+            or block_state.noise_scale is None
+        ):
+            # When there is no video input or in text mode, we rely on latents prepared by
             # other blocks (e.g. PrepareLatentsBlock). We don't modify state
             # since the required outputs (latents, generator) should already
             # be present from PrepareLatentsBlock.
