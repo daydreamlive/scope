@@ -275,6 +275,29 @@ class PipelineStatusResponse(BaseModel):
     )
 
 
+class PipelineCapabilities(BaseModel):
+    """Computed capabilities for UI generation."""
+
+    hasGenerationModeControl: bool = Field(
+        ..., description="Whether pipeline supports mode switching"
+    )
+    hasNoiseControls: bool = Field(
+        ..., description="Whether any mode supports noise controls"
+    )
+    showNoiseControlsInText: bool = Field(
+        ..., description="Whether text mode has noise controls"
+    )
+    showNoiseControlsInVideo: bool = Field(
+        ..., description="Whether video mode has noise controls"
+    )
+    hasCacheManagement: bool = Field(
+        ..., description="Whether any mode supports cache management"
+    )
+    requiresVideoInVideoMode: bool = Field(
+        ..., description="Whether video mode requires video input"
+    )
+
+
 class PipelineSchemaResponse(BaseModel):
     """Pipeline schema response with metadata and configuration.
 
@@ -291,6 +314,9 @@ class PipelineSchemaResponse(BaseModel):
     )
     mode_configs: dict[str, dict[str, Any]] = Field(
         ..., description="Mode-specific parameter configurations"
+    )
+    capabilities: PipelineCapabilities = Field(
+        ..., description="Computed capabilities for UI generation"
     )
 
 

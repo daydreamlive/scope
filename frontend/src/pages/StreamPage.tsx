@@ -14,7 +14,11 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
 import { getModeConfig } from "../lib/utils";
-import { getPipelineModeCapabilities } from "../lib/pipelineModes";
+import {
+  getPipelineModeCapabilities,
+  requiresVideoInVideoMode,
+  hasNoiseControls,
+} from "../lib/pipelineModes";
 import { GENERATION_MODE, VIDEO_SOURCE_MODE } from "../constants/modes";
 import type {
   PipelineId,
@@ -120,7 +124,7 @@ export function StreamPage() {
     const caps = getPipelineModeCapabilities(settings.pipelineId);
     const currentMode = settings.generationMode ?? caps.nativeMode;
     return (
-      caps.requiresVideoInVideoMode && currentMode === GENERATION_MODE.VIDEO
+      requiresVideoInVideoMode(caps) && currentMode === GENERATION_MODE.VIDEO
     );
   }, [settings.pipelineId, settings.generationMode]);
 
@@ -221,8 +225,8 @@ export function StreamPage() {
     const newCaps = getPipelineModeCapabilities(pipelineId);
 
     if (
-      !currentCaps.requiresVideoInVideoMode &&
-      newCaps.requiresVideoInVideoMode
+      !requiresVideoInVideoMode(currentCaps) &&
+      requiresVideoInVideoMode(newCaps)
     ) {
       // Trigger video source reinitialization
       // Otherwise the camera or video file is not visible while switching the pipeline types
@@ -614,7 +618,7 @@ export function StreamPage() {
       const currentMode = settings.generationMode ?? caps.nativeMode;
       const modeConfig = getModeConfig(pipelineIdToUse, currentMode);
       const needsVideoInput =
-        caps.requiresVideoInVideoMode && currentMode === GENERATION_MODE.VIDEO;
+        requiresVideoInVideoMode(caps) && currentMode === GENERATION_MODE.VIDEO;
 
       // Only send video stream for pipelines that need video input
       const streamToSend = needsVideoInput
@@ -667,7 +671,7 @@ export function StreamPage() {
 
       // Noise control and generation mode for pipelines that expose them
       const shouldSendNoiseControls =
-        runtimeCaps.hasNoiseControls &&
+        hasNoiseControls(runtimeCaps) &&
         ((currentMode === GENERATION_MODE.VIDEO &&
           runtimeCaps.showNoiseControlsInVideo) ||
           (currentMode === GENERATION_MODE.TEXT &&
@@ -738,7 +742,7 @@ export function StreamPage() {
               const caps = getPipelineModeCapabilities(settings.pipelineId);
               const effectiveMode = settings.generationMode ?? caps.nativeMode;
               const needsVideoInput =
-                caps.requiresVideoInVideoMode &&
+                requiresVideoInVideoMode(caps) &&
                 effectiveMode === GENERATION_MODE.VIDEO;
 
               if (!needsVideoInput) {

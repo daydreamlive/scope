@@ -12,7 +12,6 @@ import { Upload } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { PIPELINES } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
@@ -106,8 +105,7 @@ export function InputAndControlsPanel({
   };
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Get pipeline category and capabilities
-  const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
+  // Get pipeline capabilities
   const pipelineCapabilities = getPipelineModeCapabilities(pipelineId);
 
   useEffect(() => {
@@ -170,7 +168,7 @@ export function InputAndControlsPanel({
           </Select>
         </div>
 
-        {pipelineCategory === "video-input" && mode === "video" && (
+        {pipelineCapabilities.requiresVideoInVideoMode && mode === "video" && (
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium">Input Source</h3>
