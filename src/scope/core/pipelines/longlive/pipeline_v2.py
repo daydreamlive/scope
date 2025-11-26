@@ -27,7 +27,7 @@ DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 CHUNK_SIZE = 4
 
 
-class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
+class LongLivePipelineV2(MultiModePipeline, LoRAEnabledPipeline):
     """LongLive pipeline using declarative MultiModePipeline architecture.
 
     This pipeline supports both text-to-video and video-to-video generation
@@ -75,7 +75,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             "generator": WanDiffusionWrapper,
             "text_encoder": WanTextEncoderWrapper,
             "vae": {
-                "text": {"strategy": "longlive"},
+                "text": {"strategy": "wan_vae"},
                 "video": {"strategy": "streamdiffusionv2_longlive_scaled"},
             },
         }
@@ -136,7 +136,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
         )
 
         print(
-            f"LongLivePipeline.__init__: Loaded diffusion model in {time.time() - start:.3f}s"
+            f"LongLivePipelineV2.__init__: Loaded diffusion model in {time.time() - start:.3f}s"
         )
 
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
@@ -150,7 +150,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             )
             ModuleTargetedLoRAStrategy._load_lora_checkpoint(generator.model, lora_path)
             print(
-                f"LongLivePipeline.__init__: Loaded diffusion LoRA in {time.time() - start:.3f}s"
+                f"LongLivePipelineV2.__init__: Loaded diffusion LoRA in {time.time() - start:.3f}s"
             )
 
         # Initialize any additional, user-configured LoRA adapters via shared manager.
@@ -166,7 +166,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             tokenizer_path=tokenizer_path,
         )
         print(
-            f"LongLivePipeline.__init__: Loaded text encoder in {time.time() - start:.3f}s"
+            f"LongLivePipelineV2.__init__: Loaded text encoder in {time.time() - start:.3f}s"
         )
         text_encoder = text_encoder.to(device=device)
 
@@ -175,12 +175,11 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             "model_dir": model_dir,
         }
 
-        # Convert model_config (OmegaConf) to dict for MultiModePipeline
-        # This includes all properties from model.yaml that blocks may need
-        # (e.g., max_rope_freq_table_seq_len, num_frame_per_block, etc.)
-        from omegaconf import OmegaConf
-
-        model_config_dict = OmegaConf.to_container(model_config, resolve=True)
+        # Convert model_config to dict for MultiModePipeline
+        model_config_dict = {
+            "base_model_name": base_model_name,
+            "generator_model_name": generator_model_name,
+        }
 
         # Initialize via MultiModePipeline
         super().__init__(
