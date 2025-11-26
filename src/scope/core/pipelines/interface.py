@@ -69,30 +69,6 @@ class Pipeline(ABC):
         """
         pass
 
-    def prepare(self, **kwargs) -> Requirements | None:
-        """Determine input requirements for this generation call.
-
-        This method is called before __call__ to determine if video input is needed.
-        Pipelines that support multiple modes (e.g., text-to-video and video-to-video)
-        should override this to return Requirements when video input is required.
-
-        Args:
-            **kwargs: Generation parameters that may include generation_mode
-
-        Returns:
-            Requirements object if video input is needed, None otherwise.
-
-        Example:
-            # Text-to-video mode - no video input needed
-            requirements = pipeline.prepare(generation_mode="text")
-            assert requirements is None
-
-            # Video-to-video mode - video input required
-            requirements = pipeline.prepare(generation_mode="video")
-            assert requirements.input_size > 0
-        """
-        return None
-
     @abstractmethod
     def __call__(
         self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs
