@@ -161,6 +161,13 @@ export function SettingsPanel({
       } else {
         setWidthError(`Must be at most ${maxValue}`);
       }
+    } else if (cloudMode && value % 64 !== 0) {
+      // In cloud mode, dimension must be a multiple of 64
+      if (dimension === "height") {
+        setHeightError(`Must be a multiple of 64 in cloud mode`);
+      } else {
+        setWidthError(`Must be a multiple of 64 in cloud mode`);
+      }
     } else {
       // Clear error if valid
       if (dimension === "height") {
@@ -179,7 +186,18 @@ export function SettingsPanel({
 
   const incrementResolution = (dimension: "height" | "width") => {
     const maxValue = 2048;
-    const newValue = Math.min(maxValue, effectiveResolution[dimension] + 1);
+    const currentValue = effectiveResolution[dimension];
+
+    let newValue: number;
+    if (cloudMode && currentValue % 64 !== 0) {
+      // Snap to next multiple of 64
+      newValue = Math.ceil(currentValue / 64) * 64;
+    } else {
+      const step = cloudMode ? 64 : 1;
+      newValue = currentValue + step;
+    }
+
+    newValue = Math.min(maxValue, newValue);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -190,7 +208,18 @@ export function SettingsPanel({
       pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
-    const newValue = Math.max(minValue, effectiveResolution[dimension] - 1);
+    const currentValue = effectiveResolution[dimension];
+
+    let newValue: number;
+    if (cloudMode && currentValue % 64 !== 0) {
+      // Snap to previous multiple of 64
+      newValue = Math.floor(currentValue / 64) * 64;
+    } else {
+      const step = cloudMode ? 64 : 1;
+      newValue = currentValue - step;
+    }
+
+    newValue = Math.max(minValue, newValue);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -453,6 +482,7 @@ export function SettingsPanel({
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
+                        step={cloudMode ? 64 : 1}
                       />
                       <Button
                         variant="ghost"
@@ -502,6 +532,7 @@ export function SettingsPanel({
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
+                        step={cloudMode ? 64 : 1}
                       />
                       <Button
                         variant="ghost"

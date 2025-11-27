@@ -49,6 +49,7 @@ interface InputAndControlsPanelProps {
   timelinePrompts?: TimelinePrompt[];
   transitionSteps: number;
   onTransitionStepsChange: (steps: number) => void;
+  cloudMode?: boolean;
 }
 
 export function InputAndControlsPanel({
@@ -84,6 +85,7 @@ export function InputAndControlsPanel({
   timelinePrompts: _timelinePrompts = [],
   transitionSteps,
   onTransitionStepsChange,
+  cloudMode = false,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -271,6 +273,7 @@ export function InputAndControlsPanel({
                     transitionSteps={transitionSteps}
                     onTransitionStepsChange={onTransitionStepsChange}
                     timelinePrompts={_timelinePrompts}
+                    cloudMode={cloudMode}
                   />
                 )}
               </div>

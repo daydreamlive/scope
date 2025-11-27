@@ -21,6 +21,7 @@ import { createCloudStream, updateCloudStream, type CreateStreamResponse, type S
 import { WhipConnection } from "../components/WhipConnection";
 import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
+import type { WhepClient } from "@/lib/WhepClient";
 
 function buildLoRAParams(
   loras?: LoRAConfig[],
@@ -61,6 +62,15 @@ export function StreamPage() {
   const [activeStream, setActiveStream] = useState<CreateStreamResponse | null>(null);
   const isStartingCloudRef = useRef(false);
   const { setPlaybackUrl } = usePlaybackUrl();
+  const whepClientRef = useRef<WhepClient | null>(null);
+
+  // Reusable function to disconnect/cleanup cloud stream state
+  const disconnectCloudStream = useCallback(() => {
+    setActiveStream(null);
+    setIsStreamingCloud(false);
+    setIsConnectingCloud(false);
+    setPlaybackUrl(null);
+  }, [setPlaybackUrl]);
 
   // Stable callbacks for WHIP to avoid effect churn in WhipConnection
   const onWhipConnectionStateChange = useCallback((state: RTCPeerConnectionState) => {
@@ -79,11 +89,8 @@ export function StreamPage() {
   }, [setIsStreamingCloud, setIsConnectingCloud]);
 
   const onWhipRetryLimitExceeded = useCallback(() => {
-    setIsStreamingCloud(false);
-    setIsConnectingCloud(false);
-    setActiveStream(null);
-    setPlaybackUrl(null);
-  }, [setIsStreamingCloud, setIsConnectingCloud, setPlaybackUrl]);
+    disconnectCloudStream();
+  }, [disconnectCloudStream]);
 
   // Timeline state for left panel
   const [timelinePrompts, setTimelinePrompts] = useState<TimelinePrompt[]>([]);
@@ -221,7 +228,8 @@ export function StreamPage() {
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
     peerConnectionRef,
-    isStreaming,
+    isStreaming: isStreaming || isStreamingCloud,
+    whepClientRef,
   });
 
   // Video source for preview (camera or video)
@@ -264,10 +272,7 @@ export function StreamPage() {
       stopStream();
     }
     if (isStreamingCloud) {
-      setActiveStream(null);
-      setIsStreamingCloud(false);
-      setIsConnectingCloud(false);
-      setPlaybackUrl(null);
+      disconnectCloudStream();
     }
 
     // Check if we're switching from no-video-input to video-input pipeline
@@ -582,6 +587,17 @@ export function StreamPage() {
     }
   }, [videoResolution, isStreaming, settings.pipelineId, updateSettings]);
 
+  // Unified disconnect handler for both local and cloud streams
+  const handleDisconnect = useCallback(() => {
+    if (settings.cloudMode) {
+      // Disconnect cloud stream
+      disconnectCloudStream();
+    } else {
+      // Disconnect local WebRTC stream
+      stopStream();
+    }
+  }, [settings.cloudMode, stopStream, disconnectCloudStream]);
+
   const handleStartStream = async (
     overridePipelineId?: PipelineId
   ): Promise<boolean> => {
@@ -592,10 +608,7 @@ export function StreamPage() {
       }
     } else {
       if (isStreamingCloud) {
-        setActiveStream(null);
-        setIsStreamingCloud(false);
-        setIsConnectingCloud(false);
-        setPlaybackUrl(null);
+        disconnectCloudStream();
         return true;
       }
       // Ignore new start requests while a cloud connection is being established
@@ -852,6 +865,7 @@ export function StreamPage() {
             timelinePrompts={timelinePrompts}
             transitionSteps={transitionSteps}
             onTransitionStepsChange={setTransitionSteps}
+            cloudMode={settings.cloudMode}
           />
         </div>
 
@@ -888,6 +902,7 @@ export function StreamPage() {
                   onVideoPlayingCallbackRef.current = null; // Clear after execution
                 }
               }}
+              whepClientRef={whepClientRef}
             />
           </div>
           {/* Timeline area - compact, always visible */}
@@ -978,7 +993,7 @@ export function StreamPage() {
               timelineRef={timelineRef}
               onLiveStateChange={setIsLive}
               onLivePromptSubmit={handleLivePromptSubmit}
-              onDisconnect={stopStream}
+              onDisconnect={handleDisconnect}
               onStartStream={handleStartStream}
               onVideoPlayPauseToggle={handlePlayPauseToggle}
               onPromptEdit={handleTimelinePromptEdit}
@@ -1004,7 +1019,7 @@ export function StreamPage() {
             className="h-full"
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
-            isStreaming={isStreaming}
+            isStreaming={isStreaming || isStreamingCloud}
             isDownloading={isDownloading}
             cloudMode={settings.cloudMode ?? false}
             onCloudModeChange={enabled => {
@@ -1014,10 +1029,7 @@ export function StreamPage() {
                   stopStream();
                 }
               if (isStreamingCloud) {
-                setActiveStream(null);
-                setIsStreamingCloud(false);
-                setIsConnectingCloud(false);
-                setPlaybackUrl(null);
+                disconnectCloudStream();
               }
               })();
               updateSettings({ cloudMode: enabled });

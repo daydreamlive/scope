@@ -65,22 +65,6 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationSteps: 4,
     supportsLoRA: true,
   },
-  "sd-turbo": {
-    name: "SDTurbo",
-    docsUrl:
-      "",
-    about:
-      "",
-    modified: true,
-    category: "video-input",
-    defaultPrompt:
-      "A dog in the grass looking around, photorealistic",
-    requiresModels: false,
-    defaultTemporalInterpolationMethod: "linear",
-    defaultTemporalInterpolationSteps: 4,
-    pipelineCompatibility: "cloud",
-    cloudModelId: "stabilityai/sd-turbo",
-  },
   "sdxl-turbo": {
     name: "SDXL Turbo",
     docsUrl:
@@ -96,6 +80,22 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationSteps: 4,
     pipelineCompatibility: "cloud",
     cloudModelId: "stabilityai/sdxl-turbo",
+  },
+  "sd-turbo": {
+    name: "SDTurbo",
+    docsUrl:
+      "",
+    about:
+      "",
+    modified: true,
+    category: "video-input",
+    defaultPrompt:
+      "A dog in the grass looking around, photorealistic",
+    requiresModels: false,
+    defaultTemporalInterpolationMethod: "linear",
+    defaultTemporalInterpolationSteps: 4,
+    pipelineCompatibility: "cloud",
+    cloudModelId: "stabilityai/sd-turbo",
   },
   passthrough: {
     name: "Passthrough",

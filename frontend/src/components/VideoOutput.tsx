@@ -16,6 +16,7 @@ interface VideoOutputProps {
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
   onVideoPlaying?: () => void;
+  whepClientRef?: React.MutableRefObject<WhepClient | null>;
 }
 
 export function VideoOutput({
@@ -29,6 +30,7 @@ export function VideoOutput({
   onPlayPauseToggle,
   onStartStream,
   onVideoPlaying,
+  whepClientRef,
 }: VideoOutputProps) {
   const { playbackUrl } = usePlaybackUrl();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -152,7 +154,14 @@ export function VideoOutput({
     };
   }, []);
 
-  useWhepConnection(playbackUrl, videoRef);
+  // Callback to sync whepClientRef when the client is created
+  const handleClientCreated = useCallback((client: WhepClient | null) => {
+    if (whepClientRef) {
+      whepClientRef.current = client;
+    }
+  }, [whepClientRef]);
+
+  useWhepConnection(playbackUrl, videoRef, handleClientCreated);
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
@@ -221,6 +230,7 @@ export function VideoOutput({
 export const useWhepConnection = (
   playbackUrl: string | null | undefined,
   videoRef: RefObject<HTMLVideoElement | null>,
+  onClientCreated?: (client: WhepClient | null) => void,
   depsKey?: number,
 ) => {
   const clientRef = useRef<WhepClient | null>(null);
@@ -231,12 +241,14 @@ export const useWhepConnection = (
         void clientRef.current.stop();
         clientRef.current = null;
       }
+      onClientCreated?.(null);
       return;
     }
 
     const client = new WhepClient(playbackUrl, () => videoRef.current);
     clientRef.current = client;
     client.start();
+    onClientCreated?.(client);
 
     return () => {
       if (clientRef.current) {
@@ -246,5 +258,5 @@ export const useWhepConnection = (
     };
   }, [playbackUrl, videoRef, depsKey]);
 
-  return null;
+  return clientRef;
 };

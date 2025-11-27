@@ -54,6 +54,7 @@ export function useStreamState() {
         const info = await getHardwareInfo();
         setHardwareInfo(info);
       } catch (error) {
+        // TODO disable local gpu mode if this fails and only allow cloud?
         console.error("Failed to fetch hardware info:", error);
       }
     };

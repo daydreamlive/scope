@@ -141,6 +141,10 @@ export class WhepClient {
     await this.cleanupPeerConnection();
   }
 
+  getPeerConnection(): RTCPeerConnection | null {
+    return this.pc;
+  }
+
   private scheduleReconnect(): void {
     if (this.stopped) return;
     if (this.reconnectTimeout) {
