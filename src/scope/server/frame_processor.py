@@ -376,7 +376,11 @@ class FrameProcessor:
                 if self.image_frames_cache is None:
                     # Convert and cache image frames
                     # Use PIL image if available, otherwise base64 string
-                    src = self.current_pil_image if self.current_pil_image else self.current_image_data
+                    src = (
+                        self.current_pil_image
+                        if self.current_pil_image
+                        else self.current_image_data
+                    )
 
                     self.image_frames_cache = self._convert_image_to_frames(
                         src, current_chunk_size

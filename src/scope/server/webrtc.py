@@ -367,9 +367,15 @@ def sanitize_params_for_logging(params: dict) -> dict:
     """Create a safe version of parameters for logging that truncates large strings."""
     safe_params = {}
     for key, value in params.items():
-        if key in ("input_image", "adapter_image") and isinstance(value, str) and len(value) > 100:
+        if (
+            key in ("input_image", "adapter_image")
+            and isinstance(value, str)
+            and len(value) > 100
+        ):
             # Truncate base64 images to first 50 chars + ellipsis + last 10 chars
-            safe_params[key] = value[:50] + "..." + value[-10:] if len(value) > 60 else value
+            safe_params[key] = (
+                value[:50] + "..." + value[-10:] if len(value) > 60 else value
+            )
         else:
             safe_params[key] = value
     return safe_params
