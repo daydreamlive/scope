@@ -156,6 +156,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         """Pause or resume the video track processing"""
         with self._paused_lock:
             self._paused = paused
+
         logger.info(f"Video track {'paused' if paused else 'resumed'}")
 
     async def stop(self):

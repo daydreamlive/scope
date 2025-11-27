@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import click
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -43,6 +43,11 @@ from .models_config import (
     get_assets_dir,
     get_models_dir,
     models_are_downloaded,
+)
+from .pipeline_manager import PipelineManager
+from .recording import (
+    cleanup_recording_files,
+    cleanup_temp_file,
 )
 from .schema import (
     AssetFileInfo,
@@ -234,6 +239,9 @@ async def lifespan(app: FastAPI):
             "The application will start, but pipeline functionality may be limited."
         )
         logger.warning(warning_msg)
+
+    # Clean up recording files from previous sessions (in case of crashes)
+    cleanup_recording_files()
 
     # Log logs directory
     logs_dir = get_logs_dir()
@@ -481,6 +489,59 @@ async def add_ice_candidate(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error adding ICE candidate to session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/recordings/{session_id}")
+async def download_recording(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Download the recording file for the specified session.
+    This will finalize the current recording and create a copy for download,
+    then continue recording with a new file."""
+    try:
+        # Get the session by ID
+        session = webrtc_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found",
+            )
+
+        # Check if session has a recording manager
+        if not session.recording_manager:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Recording not available for session {session_id}",
+            )
+
+        # Finalize the recording and get the download file
+        download_file = await session.recording_manager.finalize_and_get_recording()
+        if not download_file or not Path(download_file).exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Recording file not available",
+            )
+
+        # Schedule cleanup of the temp file after download
+        background_tasks.add_task(cleanup_temp_file, download_file)
+
+        # Generate filename with datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"recording-{timestamp}.mp4"
+
+        # Return the file for download
+        return FileResponse(
+            download_file,
+            media_type="video/mp4",
+            filename=filename,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading recording: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

@@ -182,6 +182,24 @@ When you start Scope, it will automatically use Cloudflare's TURN servers and yo
 uv run daydream-scope
 ```
 
+## Environment Variables
+
+### `HF_TOKEN`
+HuggingFace access token for using Cloudflare's TURN servers. See [Firewalls](#firewalls) for details.
+
+### `RECORDING_ENABLED`
+- **Default**: `true`
+- **Description**: Enable/disable recording. When `false`, recording is disabled.
+
+### `RECORDING_MAX_LENGTH`
+- **Default**: `1h`
+- **Description**: Maximum total recording length (sum of all segments). Recording stops when reached.
+- **Format**: Supports `1h`, `30m`, `120s`, or plain seconds (e.g., `3600`)
+
+### `RECORDING_STARTUP_CLEANUP_ENABLED`
+- **Default**: `true`
+- **Description**: Enable/disable cleanup of recording files from previous sessions at startup.
+
 ## Contributing
 
 Read the [contribution guide](./docs/contributing.md).
