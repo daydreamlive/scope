@@ -1,7 +1,8 @@
 """Self-configuring blocks for multi-mode pipelines.
 
-This module provides blocks that automatically configure themselves based on
-pipeline state and mode detection, eliminating the need for external orchestration.
+This module provides blocks that work with input-based routing (AutoPipelineBlocks).
+The resolved mode is derived from input presence and stored in state for blocks
+that need mode-specific behavior (like VAE loading).
 """
 
 import logging
@@ -13,46 +14,44 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigureForModeBlock(ModularPipelineBlocks):
-    """Block that detects mode and applies mode-specific configuration.
+    """Block that logs the resolved mode for debugging.
 
-    This block:
-    1. Detects the current generation mode from state (_detected_mode)
-    2. Validates mode is supported
-    3. Logs configuration for debugging
+    The mode is resolved from input presence (e.g., 'video' input triggers video mode)
+    and stored in state as _resolved_mode by MultiModePipeline._execute().
 
-    The mode should already be set in state by the pipeline's _execute() method
-    via _detected_mode. This block serves as a validation and logging checkpoint.
+    This block primarily serves as a logging checkpoint to track which mode
+    is being used for a given generation call.
 
     Example:
         class MyWorkflow(SequentialPipelineBlocks):
             block_classes = [
-                ConfigureForModeBlock,  # First block validates mode
-                LoadComponentsBlock,    # Then loads mode-specific components
+                ConfigureForModeBlock,  # Logs resolved mode
+                LoadComponentsBlock,    # Loads mode-specific components
                 # ... rest of workflow
             ]
     """
 
     def __call__(self, components: Any, state: Any) -> tuple[Any, Any]:
-        """Configure for detected mode.
+        """Log resolved mode.
 
         Args:
             components: Components manager
-            state: Pipeline state with _detected_mode set
+            state: Pipeline state with _resolved_mode set
 
         Returns:
             Tuple of (components, state) unchanged
         """
-        mode = state.get("_detected_mode")
+        mode = state.get("_resolved_mode")
 
         if mode is None:
             logger.warning(
-                "ConfigureForModeBlock: No _detected_mode in state. "
+                "ConfigureForModeBlock: No _resolved_mode in state. "
                 "This should be set by MultiModePipeline._execute()"
             )
             mode = "text"
-            state.set("_detected_mode", mode)
+            state.set("_resolved_mode", mode)
 
-        logger.info(f"ConfigureForModeBlock: Configured for mode '{mode}'")
+        logger.info(f"ConfigureForModeBlock: Using mode '{mode}'")
 
         return components, state
 
@@ -61,11 +60,12 @@ class LoadComponentsBlock(ModularPipelineBlocks):
     """Block that loads mode-appropriate components with lazy loading.
 
     This block:
-    1. Detects current mode from state (_detected_mode)
+    1. Gets resolved mode from state (_resolved_mode)
     2. Loads mode-specific components (currently VAE) based on component declarations
     3. Caches loaded components to avoid redundant loading
     4. Adds components to the components manager
 
+    The mode is resolved from input presence by MultiModePipeline.
     Component specifications come from the pipeline's get_components() method.
     For mode-specific components, the declaration looks like:
         "vae": {
@@ -77,26 +77,26 @@ class LoadComponentsBlock(ModularPipelineBlocks):
         class MyWorkflow(SequentialPipelineBlocks):
             block_classes = [
                 ConfigureForModeBlock,
-                LoadComponentsBlock,  # Loads VAE for current mode
+                LoadComponentsBlock,  # Loads VAE for resolved mode
                 # ... blocks that use VAE
             ]
     """
 
     def __call__(self, components: Any, state: Any) -> tuple[Any, Any]:
-        """Load components for detected mode.
+        """Load components for resolved mode.
 
         Args:
             components: Components manager
-            state: Pipeline state with _detected_mode set
+            state: Pipeline state with _resolved_mode set
 
         Returns:
             Tuple of (components, state) with components loaded
         """
-        mode = state.get("_detected_mode")
+        mode = state.get("_resolved_mode")
 
         if mode is None:
             logger.warning(
-                "LoadComponentsBlock: No _detected_mode in state. "
+                "LoadComponentsBlock: No _resolved_mode in state. "
                 "Defaulting to 'text' mode."
             )
             mode = "text"

@@ -34,22 +34,19 @@ class MultiModePipeline(Pipeline):
     input modes (text-to-video, video-to-video). Pipelines declare their
     capabilities via three class methods:
 
-    - get_blocks(): Returns single workflow with AutoPrepareLatentsBlock
+    - get_blocks(): Returns single workflow with nested AutoPipelineBlocks
     - get_components(): Declares component requirements
     - get_defaults(): Specifies mode-specific default parameters
 
-    Block-Level Routing:
-    AutoPrepareLatentsBlock provides automatic routing between T2V and V2V
-    latent preparation at the block level, eliminating the need for:
-    - Conditional logic in blocks
-    - Duplicate workflows per pipeline
-    - Pipeline-level routing complexity
-
-    MultiModePipeline complements AutoPrepareLatentsBlock by:
-    - Resolving input modes and applying mode-specific defaults
-    - Managing component lifecycle (VAE lazy loading, etc.)
+    Architecture Pattern:
+    Uses nested AutoPipelineBlocks for input-based routing (e.g., AutoPrepareLatentsBlock
+    routes based on presence of 'video' input). MultiModePipeline complements this by:
+    - Resolving mode from inputs and applying mode-specific defaults
+    - Managing component lifecycle (mode-specific VAE lazy loading, etc.)
     - Handling mode transitions and cache initialization
     - Providing configuration and schema management
+
+    This eliminates duplicate workflows while maintaining clear separation of concerns
 
     Example:
         class MyPipeline(MultiModePipeline):
@@ -257,13 +254,13 @@ class MultiModePipeline(Pipeline):
         return self._execute(**kwargs)
 
     def _execute(self, **kwargs) -> torch.Tensor:
-        """Execute pipeline blocks based on detected mode.
+        """Execute pipeline blocks based on resolved mode.
 
         This method:
-        1. Resolves input mode
+        1. Resolves input mode from inputs (presence of 'video', etc.)
         2. Applies mode-specific defaults to state
-        3. Stores detected mode in state for self-configuring blocks
-        4. Executes block graph (blocks self-configure based on state)
+        3. Stores resolved mode in state for blocks that need it
+        4. Executes block graph (AutoBlocks route based on input presence)
         5. Post-processes output
 
         Args:
@@ -276,10 +273,10 @@ class MultiModePipeline(Pipeline):
 
         apply_mode_defaults_to_state(self.state, self.__class__, mode, kwargs)
 
-        # Store detected mode in state for self-configuring blocks
-        self.state.set("_detected_mode", mode)
+        # Store resolved mode in state for blocks that need mode-specific behavior
+        self.state.set("_resolved_mode", mode)
 
-        # Execute unified block graph (blocks conditionally execute based on input presence)
+        # Execute unified block graph (AutoBlocks route based on input presence)
         _, state = self.blocks(self.components, self.state)
 
         return postprocess_chunk(state.values["output_video"])

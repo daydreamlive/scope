@@ -24,9 +24,9 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
     """KreaRealtimeVideo pipeline using declarative MultiModePipeline architecture.
 
     This pipeline supports both text-to-video and video-to-video generation
-    with advanced KV cache attention control for realtime performance. It uses
-    the new declarative pattern where the pipeline simply declares its capabilities
-    via class methods.
+    with advanced KV cache attention control for realtime performance. Mode routing
+    is handled automatically based on input presence (video input triggers V2V mode).
+    Uses nested AutoPipelineBlocks for input-based workflow routing.
     """
 
     @classmethod
@@ -58,10 +58,12 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
 
     @classmethod
     def get_blocks(cls):
-        """Return single workflow with AutoPrepareLatentsBlock routing.
+        """Return single workflow with nested AutoPipelineBlocks routing.
 
-        This returns a single workflow that uses AutoPrepareLatentsBlock for
-        automatic routing between text-to-video and video-to-video modes.
+        Returns a unified workflow that uses nested AutoPipelineBlocks
+        (AutoPreprocessVideoBlock and AutoPrepareLatentsBlock) for automatic
+        routing based on input presence. Routes to V2V when 'video' input is
+        provided, otherwise uses T2V latent preparation.
         """
         return KreaRealtimeVideoWorkflow()
 
