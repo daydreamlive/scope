@@ -1,23 +1,14 @@
-"""Unified workflow for KreaRealtimeVideo pipeline.
-
-This module defines a single unified workflow for KreaRealtimeVideo pipeline that
-conditionally executes blocks based on input presence. This aligns with
-the original diffusers modular pipeline design philosophy where blocks
-handle conditional execution internally rather than using separate workflows.
-"""
+"""Single workflow for KreaRealtimeVideo pipeline using AutoPrepareLatentsBlock."""
 
 from diffusers.modular_pipelines import SequentialPipelineBlocks
 
 from ..multi_mode_blocks import ConfigureForModeBlock, LoadComponentsBlock
 from ..wan2_1.blocks import (
+    AutoPrepareLatentsBlock,
     DecodeBlock,
     DenoiseBlock,
     EmbeddingBlendingBlock,
-    NoiseScaleControllerBlock,
-    PrepareLatentsBlock,
     PrepareNextBlock,
-    PrepareVideoLatentsBlock,
-    PreprocessVideoBlock,
     SetTimestepsBlock,
     SetupCachesBlock,
     TextConditioningBlock,
@@ -25,52 +16,33 @@ from ..wan2_1.blocks import (
 from .blocks import PrepareContextFramesBlock, RecomputeKVCacheBlock
 
 
-class KreaRealtimeVideoUnifiedWorkflow(SequentialPipelineBlocks):
-    """Unified workflow for KreaRealtimeVideo supporting both text-to-video and video-to-video.
+class KreaRealtimeVideoWorkflow(SequentialPipelineBlocks):
+    """Single workflow for KreaRealtimeVideo supporting both T2V and V2V.
 
-    This workflow uses conditional block execution to support both modes in a single
-    block graph, eliminating the need for separate workflows. Blocks self-determine
-    whether to execute based on input presence:
-
-    Text-to-video path:
-    - PrepareLatentsBlock generates pure noise latents
-    - Video-specific blocks (PreprocessVideo, NoiseScaleController, PrepareVideoLatents) skip
-
-    Video-to-video path:
-    - PreprocessVideoBlock preprocesses input video
-    - NoiseScaleControllerBlock adjusts noise based on motion
-    - PrepareVideoLatentsBlock encodes video to noisy latents
-    - PrepareLatentsBlock skips
-
-    This design aligns with the original diffusers modular pipeline philosophy where
-    the block graph structure is shared across modes, with conditional execution
-    determined by input availability rather than separate workflow routing.
+    Uses AutoPrepareLatentsBlock for automatic routing between text-to-video
+    and video-to-video latent preparation. All shared blocks appear once.
     """
 
     block_classes = [
-        # Configuration and component loading
+        # Configuration
         ConfigureForModeBlock,
         LoadComponentsBlock,
-        # Text conditioning (shared across modes)
+        # Text conditioning (shared)
         TextConditioningBlock,
         EmbeddingBlendingBlock,
         SetTimestepsBlock,
-        # Video preprocessing (skips if no video input)
-        PreprocessVideoBlock,
-        NoiseScaleControllerBlock,
-        # Setup (shared across modes)
+        # Latent preparation (AUTO-ROUTED: T2V vs V2V)
+        AutoPrepareLatentsBlock,
+        # Setup (shared)
         SetupCachesBlock,
-        # Latent preparation (one skips based on video presence)
-        PrepareLatentsBlock,
-        PrepareVideoLatentsBlock,
-        # KV cache management for realtime performance
+        # KV cache management (shared)
         RecomputeKVCacheBlock,
-        # Core generation (shared across modes)
+        # Generation (shared)
         DenoiseBlock,
         DecodeBlock,
-        # Context frame preparation for temporal consistency
+        # Context frame preparation (shared)
         PrepareContextFramesBlock,
-        # Preparation for next iteration
+        # Preparation for next iteration (shared)
         PrepareNextBlock,
     ]
 
@@ -80,11 +52,8 @@ class KreaRealtimeVideoUnifiedWorkflow(SequentialPipelineBlocks):
         "text_conditioning",
         "embedding_blending",
         "set_timesteps",
-        "preprocess_video",
-        "noise_scale_controller",
+        "auto_prepare_latents",
         "setup_caches",
-        "prepare_latents",
-        "prepare_video_latents",
         "recompute_kv_cache",
         "denoise",
         "decode",

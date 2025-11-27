@@ -9,7 +9,7 @@ from ..multi_mode import MultiModePipeline
 from ..utils import calculate_input_size, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .modular_blocks import StreamDiffusionV2UnifiedWorkflow
+from .modular_blocks import StreamDiffusionV2Workflow
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
@@ -54,12 +54,12 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
 
     @classmethod
     def get_blocks(cls):
-        """Return unified workflow for StreamDiffusionV2 pipeline.
+        """Return single workflow with AutoPrepareLatentsBlock routing.
 
-        This returns a single SequentialPipelineBlocks that handles both
-        text-to-video and video-to-video modes through conditional block execution.
+        This returns a single workflow that uses AutoPrepareLatentsBlock for
+        automatic routing between text-to-video and video-to-video modes.
         """
-        return StreamDiffusionV2UnifiedWorkflow()
+        return StreamDiffusionV2Workflow()
 
     @classmethod
     def get_components(cls) -> dict:

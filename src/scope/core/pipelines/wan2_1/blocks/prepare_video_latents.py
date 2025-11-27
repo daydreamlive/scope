@@ -41,7 +41,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         return [
             InputParam(
                 "video",
-                required=False,
+                required=True,
                 type_hint=list[torch.Tensor] | torch.Tensor,
                 description="Input video to convert into noisy latents",
             ),
@@ -80,25 +80,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
-        # Align video latents with the generator's dtype and device so that downstream
-        # convolutions (e.g. patch_embedding) always receive tensors compatible with
-        # model parameters. This mirrors the behaviour of PrepareLatentsBlock.
         generator_param = next(components.generator.model.parameters())
-
-        # If no video is provided or noise_scale is None (text mode), skip video latent preparation.
-        # This allows pipelines to share the same block graph for both
-        # text-to-video and video-to-video workflows.
-        if (
-            not hasattr(block_state, "video")
-            or block_state.video is None
-            or not hasattr(block_state, "noise_scale")
-            or block_state.noise_scale is None
-        ):
-            # When there is no video input or in text mode, we rely on latents prepared by
-            # other blocks (e.g. PrepareLatentsBlock). We don't modify state
-            # since the required outputs (latents, generator) should already
-            # be present from PrepareLatentsBlock.
-            return components, state
 
         target_num_frames = (
             components.config.num_frame_per_block

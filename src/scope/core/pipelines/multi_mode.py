@@ -30,32 +30,32 @@ logger = logging.getLogger(__name__)
 class MultiModePipeline(Pipeline):
     """Base class for multi-mode pipelines with declarative configuration.
 
-    This class centralizes all orchestration logic that was previously duplicated
-    across pipeline implementations. Pipelines inherit from this class and declare
-    their capabilities via three class methods:
+    This class centralizes orchestration logic for pipelines supporting multiple
+    input modes (text-to-video, video-to-video). Pipelines declare their
+    capabilities via three class methods:
 
-    - get_blocks(): Returns block graph (can be SequentialPipelineBlocks or AutoPipelineBlocks)
-    - get_components(): Declares component requirements (generator, VAE, etc.)
+    - get_blocks(): Returns single workflow with AutoPrepareLatentsBlock
+    - get_components(): Declares component requirements
     - get_defaults(): Specifies mode-specific default parameters
 
-    The base class automatically handles:
-    - Component initialization
-    - Mode inference and detection
-    - Block graph execution
-    - State management
-    - Auto-generation of prepare() method
+    Block-Level Routing:
+    AutoPrepareLatentsBlock provides automatic routing between T2V and V2V
+    latent preparation at the block level, eliminating the need for:
+    - Conditional logic in blocks
+    - Duplicate workflows per pipeline
+    - Pipeline-level routing complexity
 
-    Block Graph Design:
-    Pipelines can use either:
-    1. Single unified workflow (SequentialPipelineBlocks) where blocks conditionally
-       execute based on input presence (recommended, aligns with diffusers philosophy)
-    2. Multiple workflows with routing (AutoPipelineBlocks) for more complex scenarios
+    MultiModePipeline complements AutoPrepareLatentsBlock by:
+    - Resolving input modes and applying mode-specific defaults
+    - Managing component lifecycle (VAE lazy loading, etc.)
+    - Handling mode transitions and cache initialization
+    - Providing configuration and schema management
 
     Example:
         class MyPipeline(MultiModePipeline):
             @classmethod
             def get_blocks(cls):
-                return MyUnifiedWorkflow()
+                return MyWorkflow()
 
             @classmethod
             def get_components(cls) -> dict:

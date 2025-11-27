@@ -47,7 +47,7 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
         return [
             InputParam(
                 "video",
-                required=False,
+                required=True,
                 type_hint=torch.Tensor,
                 description="Input video tensor to analyze for motion",
             ),
@@ -105,13 +105,6 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
-
-        # If no video is provided, skip motion-aware noise control.
-        # This allows pipelines to share the same block graph for both
-        # text-to-video and video-to-video workflows.
-        if not hasattr(block_state, "video") or block_state.video is None:
-            self.set_block_state(state, block_state)
-            return components, state
 
         # Reset last_frame when initializing caches
         if block_state.init_cache:

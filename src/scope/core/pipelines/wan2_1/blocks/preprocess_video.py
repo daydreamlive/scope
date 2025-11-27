@@ -25,7 +25,7 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
         return [
             InputParam(
                 "video",
-                required=False,
+                required=True,
                 type_hint=list[torch.Tensor] | torch.Tensor,
                 description="Input video to convert into noisy latents",
             ),
@@ -56,13 +56,6 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
-
-        # If no video is provided, skip preprocessing.
-        # This allows pipelines to share the same block graph for both
-        # text-to-video and video-to-video workflows.
-        if not hasattr(block_state, "video") or block_state.video is None:
-            self.set_block_state(state, block_state)
-            return components, state
 
         if isinstance(block_state.video, list):
             block_state.video = preprocess_chunk(

@@ -37,12 +37,6 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "video",
-                required=False,
-                type_hint=list[torch.Tensor] | torch.Tensor,
-                description="Input video (if present, this block skips)",
-            ),
-            InputParam(
                 "base_seed",
                 type_hint=int,
                 default=42,
@@ -80,15 +74,6 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
-
-        # If video is provided, skip pure noise latent preparation.
-        # This allows pipelines to share the same block graph for both
-        # text-to-video and video-to-video workflows. When video is present,
-        # PrepareVideoLatentsBlock will handle latent preparation instead.
-        # We don't modify state since the required outputs (latents, generator)
-        # will be provided by PrepareVideoLatentsBlock.
-        if hasattr(block_state, "video") and block_state.video is not None:
-            return components, state
 
         generator_param = next(components.generator.model.parameters())
         latent_height = (
