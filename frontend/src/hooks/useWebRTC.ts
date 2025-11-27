@@ -402,6 +402,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     isConnecting,
     isStreaming,
     peerConnectionRef,
+    sessionId: sessionIdRef.current,
     startStream,
     stopStream,
     updateVideoTrack,

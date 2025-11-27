@@ -14,10 +14,12 @@ from aiortc import (
     RTCSessionDescription,
 )
 from aiortc.codecs import h264, vpx
+from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
 from .credentials import get_turn_credentials
 from .pipeline_manager import PipelineManager
+from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
 from .tracks import VideoProcessingTrack
 
@@ -46,11 +48,15 @@ class Session:
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
         data_channel: RTCDataChannel | None = None,
+        relay: MediaRelay | None = None,
+        recording_manager: RecordingManager | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
         self.data_channel = data_channel
+        self.relay = relay
+        self.recording_manager = recording_manager
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -173,7 +179,38 @@ class WebRTCManager:
                 notification_callback=notification_sender.call,
             )
             session.video_track = video_track
-            pc.addTrack(video_track)
+
+            # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
+            relay = MediaRelay()
+            relayed_track = relay.subscribe(video_track)
+
+            # Create RecordingManager and store it in the session
+            # Pass the original video_track - RecordingManager will subscribe to relay itself
+            recording_manager = RecordingManager(video_track=video_track)
+            session.recording_manager = recording_manager
+
+            # Set the relay on the recording manager so it can create a recording track
+            recording_manager.set_relay(relay)
+
+            # Add the relayed track to WebRTC connection
+            pc.addTrack(relayed_track)
+
+            # Store relay for cleanup
+            session.relay = relay
+
+            # Start recording when ready
+            # We start it in a background task to avoid blocking the offer/answer flow
+            async def start_recording_when_ready():
+                """Start recording when frames start flowing."""
+                try:
+                    # Wait a bit for the connection to establish and frames to start flowing
+                    await asyncio.sleep(0.1)
+                    # Try to start recording
+                    await recording_manager.start_recording()
+                except Exception as e:
+                    logger.debug(f"Could not start recording yet: {e}")
+
+            asyncio.create_task(start_recording_when_ready())
 
             logger.info(f"Created new session: {session}")
 
@@ -272,6 +309,11 @@ class WebRTCManager:
         if session_id in self.sessions:
             session = self.sessions.pop(session_id)
             logger.info(f"Removing session: {session}")
+
+            # Delete recording file when session ends
+            if session.recording_manager:
+                await session.recording_manager.delete_recording()
+
             await session.close()
         else:
             logger.warning(f"Attempted to remove non-existent session: {session_id}")
