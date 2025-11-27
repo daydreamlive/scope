@@ -26,8 +26,13 @@ import type {
   VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import {
+  checkModelStatus,
+  downloadPipelineModels,
+  downloadRecording,
+} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
+import { toast } from "sonner";
 
 // Delay before resetting video reinitialization flag (ms)
 // This allows useVideoSource to detect the flag change and trigger reinitialization
@@ -1057,6 +1062,21 @@ export function StreamPage() {
     }
   };
 
+  const handleSaveGeneration = async () => {
+    try {
+      await downloadRecording();
+    } catch (error) {
+      console.error("Error downloading recording:", error);
+      toast.error("Error downloading recording", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "An error occurred while downloading the recording",
+        duration: 5000,
+      });
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
@@ -1274,6 +1294,8 @@ export function StreamPage() {
               onVideoScaleModeToggle={() =>
                 setVideoScaleMode(prev => (prev === "fit" ? "native" : "fit"))
               }
+              isDownloading={isDownloading}
+              onSaveGeneration={handleSaveGeneration}
             />
           </div>
         </div>

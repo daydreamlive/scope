@@ -432,3 +432,27 @@ export const getPipelineSchemas =
     const result = await response.json();
     return result;
   };
+
+export const downloadRecording = async (): Promise<void> => {
+  const response = await fetch("/api/v1/recording/download", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Download recording failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  // Get the blob and trigger download
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `recording-${new Date().toISOString().split("T")[0]}.mp4`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};

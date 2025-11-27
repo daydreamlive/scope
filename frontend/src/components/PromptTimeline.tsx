@@ -22,6 +22,7 @@ import {
   Maximize2,
   Minimize2,
 } from "lucide-react";
+import { ExportDialog } from "./ExportDialog";
 
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
@@ -163,6 +164,8 @@ interface PromptTimelineProps {
   isLoading?: boolean;
   videoScaleMode?: "fit" | "native";
   onVideoScaleModeToggle?: () => void;
+  isDownloading?: boolean;
+  onSaveGeneration?: () => void;
 }
 
 export function PromptTimeline({
@@ -191,6 +194,8 @@ export function PromptTimeline({
   isLoading = false,
   videoScaleMode = "fit",
   onVideoScaleModeToggle,
+  isDownloading = false,
+  onSaveGeneration,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -389,7 +394,9 @@ export function PromptTimeline({
     [selectedPromptId, onPromptSelect, onPromptEdit]
   );
 
-  const handleExport = useCallback(() => {
+  const [showExportDialog, setShowExportDialog] = useState(false);
+
+  const handleSaveTimeline = useCallback(() => {
     // Filter out 0-length prompt boxes and only include prompts array and timing
     const exportPrompts = prompts
       .filter(prompt => prompt.startTime !== prompt.endTime) // Exclude 0-length prompt boxes
@@ -444,6 +451,10 @@ export function PromptTimeline({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }, [prompts, settings]);
+
+  const handleExport = useCallback(() => {
+    setShowExportDialog(true);
+  }, []);
 
   const handleImport = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -705,6 +716,16 @@ export function PromptTimeline({
               <Upload className="h-4 w-4 mr-1" />
               Export
             </Button>
+            <ExportDialog
+              open={showExportDialog}
+              onClose={() => setShowExportDialog(false)}
+              onSaveGeneration={() => {
+                if (onSaveGeneration) {
+                  onSaveGeneration();
+                }
+              }}
+              onSaveTimeline={handleSaveTimeline}
+            />
             <div className="relative">
               <input
                 type="file"

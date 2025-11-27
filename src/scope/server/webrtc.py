@@ -14,6 +14,7 @@ from aiortc import (
     RTCSessionDescription,
 )
 from aiortc.codecs import h264, vpx
+from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
 from .credentials import get_turn_credentials
@@ -46,11 +47,13 @@ class Session:
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
         data_channel: RTCDataChannel | None = None,
+        relay: MediaRelay | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
         self.data_channel = data_channel
+        self.relay = relay
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -173,7 +176,19 @@ class WebRTCManager:
                 notification_callback=notification_sender.call,
             )
             session.video_track = video_track
-            pc.addTrack(video_track)
+
+            # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
+            relay = MediaRelay()
+            relayed_track = relay.subscribe(video_track)
+
+            # Set the relay on the video track so it can create a recording track
+            video_track.recording_manager.set_relay(relay)
+
+            # Add the relayed track to WebRTC connection
+            pc.addTrack(relayed_track)
+
+            # Store relay for cleanup
+            session.relay = relay
 
             logger.info(f"Created new session: {session}")
 
@@ -272,6 +287,11 @@ class WebRTCManager:
         if session_id in self.sessions:
             session = self.sessions.pop(session_id)
             logger.info(f"Removing session: {session}")
+
+            # Delete recording file when session ends
+            if session.video_track:
+                await session.video_track.recording_manager.delete_recording()
+
             await session.close()
         else:
             logger.warning(f"Attempted to remove non-existent session: {session_id}")
