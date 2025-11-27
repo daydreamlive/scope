@@ -540,21 +540,13 @@ class CausalWanSelfAttention(nn.Module):
 
                 # Convert scalars to tensors to avoid ShapeAsConstantBuffer dtype issues during compilation
                 # This is critical when using torch.compile with flex_attention
-                frame_seqlen_tensor = torch.tensor(
+                frame_seqlen_tensor = torch.as_tensor(
                     frame_seqlen, dtype=torch.int32, device=roped_query.device
                 )
-                # Always convert cache_current_block_start to a tensor to avoid ShapeAsConstantBuffer issues
-                if isinstance(cache_current_block_start, torch.Tensor):
-                    if cache_current_block_start.ndim > 0:
-                        cache_current_block_start_tensor = cache_current_block_start.squeeze()
-                    else:
-                        cache_current_block_start_tensor = cache_current_block_start
-                else:
-                    cache_current_block_start_tensor = torch.tensor(
-                        cache_current_block_start, dtype=torch.int32, device=roped_query.device
-                    )
-                # Convert log_scale to a tensor to avoid ShapeAsConstantBuffer dtype issues
-                log_scale_tensor = torch.tensor(
+                cache_current_block_start_tensor = torch.as_tensor(
+                    cache_current_block_start, dtype=torch.int32, device=roped_query.device
+                ).squeeze()
+                log_scale_tensor = torch.as_tensor(
                     log_scale, dtype=roped_query.dtype, device=roped_query.device
                 )
 
