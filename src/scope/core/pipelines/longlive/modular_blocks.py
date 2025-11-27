@@ -1,10 +1,11 @@
-"""Single workflow for LongLive pipeline using AutoPrepareLatentsBlock."""
+"""Single workflow for LongLive pipeline using AutoPipelineBlocks for routing."""
 
 from diffusers.modular_pipelines import SequentialPipelineBlocks
 
 from ..multi_mode_blocks import ConfigureForModeBlock, LoadComponentsBlock
 from ..wan2_1.blocks import (
     AutoPrepareLatentsBlock,
+    AutoPreprocessVideoBlock,
     CleanKVCacheBlock,
     DecodeBlock,
     DenoiseBlock,
@@ -24,8 +25,12 @@ from .blocks import (
 class LongLiveWorkflow(SequentialPipelineBlocks):
     """Single workflow for LongLive supporting both T2V and V2V.
 
-    Uses AutoPrepareLatentsBlock for automatic routing between text-to-video
-    and video-to-video latent preparation. All shared blocks appear once.
+    Uses two AutoPipelineBlocks for routing:
+    1. AutoPreprocessVideoBlock - routes video preprocessing before cache setup
+    2. AutoPrepareLatentsBlock - routes latent preparation after cache setup
+
+    This maintains the correct execution order where video preprocessing happens
+    before SetupCachesBlock, but latent encoding happens after.
     """
 
     block_classes = [
@@ -36,11 +41,13 @@ class LongLiveWorkflow(SequentialPipelineBlocks):
         TextConditioningBlock,
         EmbeddingBlendingBlock,
         SetTimestepsBlock,
-        # Latent preparation (AUTO-ROUTED: T2V vs V2V)
-        AutoPrepareLatentsBlock,
+        # Video preprocessing (AUTO-ROUTED: V2V only, before cache setup)
+        AutoPreprocessVideoBlock,
         # Setup (shared)
         SetupCachesBlock,
         SetTransformerBlocksLocalAttnSizeBlock,
+        # Latent preparation (AUTO-ROUTED: T2V vs V2V, after cache setup)
+        AutoPrepareLatentsBlock,
         # Frame management (shared)
         RecacheFramesBlock,
         # Generation (shared)
@@ -58,9 +65,10 @@ class LongLiveWorkflow(SequentialPipelineBlocks):
         "text_conditioning",
         "embedding_blending",
         "set_timesteps",
-        "auto_prepare_latents",
+        "auto_preprocess_video",
         "setup_caches",
         "set_transformer_blocks_local_attn_size",
+        "auto_prepare_latents",
         "recache_frames",
         "denoise",
         "clean_kv_cache",

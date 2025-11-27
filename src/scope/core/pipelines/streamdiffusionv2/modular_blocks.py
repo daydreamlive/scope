@@ -1,10 +1,11 @@
-"""Single workflow for StreamDiffusionV2 pipeline using AutoPrepareLatentsBlock."""
+"""Single workflow for StreamDiffusionV2 pipeline using AutoPipelineBlocks for routing."""
 
 from diffusers.modular_pipelines import SequentialPipelineBlocks
 
 from ..multi_mode_blocks import ConfigureForModeBlock, LoadComponentsBlock
 from ..wan2_1.blocks import (
     AutoPrepareLatentsBlock,
+    AutoPreprocessVideoBlock,
     CleanKVCacheBlock,
     DecodeBlock,
     DenoiseBlock,
@@ -19,8 +20,12 @@ from ..wan2_1.blocks import (
 class StreamDiffusionV2Workflow(SequentialPipelineBlocks):
     """Single workflow for StreamDiffusionV2 supporting both T2V and V2V.
 
-    Uses AutoPrepareLatentsBlock for automatic routing between text-to-video
-    and video-to-video latent preparation. All shared blocks appear once.
+    Uses two AutoPipelineBlocks for routing:
+    1. AutoPreprocessVideoBlock - routes video preprocessing before cache setup
+    2. AutoPrepareLatentsBlock - routes latent preparation after cache setup
+
+    This maintains the correct execution order where video preprocessing happens
+    before SetupCachesBlock, but latent encoding happens after.
     """
 
     block_classes = [
@@ -31,10 +36,12 @@ class StreamDiffusionV2Workflow(SequentialPipelineBlocks):
         TextConditioningBlock,
         EmbeddingBlendingBlock,
         SetTimestepsBlock,
-        # Latent preparation (AUTO-ROUTED: T2V vs V2V)
-        AutoPrepareLatentsBlock,
+        # Video preprocessing (AUTO-ROUTED: V2V only, before cache setup)
+        AutoPreprocessVideoBlock,
         # Setup (shared)
         SetupCachesBlock,
+        # Latent preparation (AUTO-ROUTED: T2V vs V2V, after cache setup)
+        AutoPrepareLatentsBlock,
         # Generation (shared)
         DenoiseBlock,
         CleanKVCacheBlock,
@@ -49,8 +56,9 @@ class StreamDiffusionV2Workflow(SequentialPipelineBlocks):
         "text_conditioning",
         "embedding_blending",
         "set_timesteps",
-        "auto_prepare_latents",
+        "auto_preprocess_video",
         "setup_caches",
+        "auto_prepare_latents",
         "denoise",
         "clean_kv_cache",
         "decode",
