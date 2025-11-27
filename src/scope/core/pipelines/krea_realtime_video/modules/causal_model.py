@@ -512,11 +512,7 @@ class CausalWanSelfAttention(nn.Module):
             if kv_cache_attention_bias != KV_CACHE_ATTENTION_BIAS_DISABLED:
                 # Use flex_attention with bias to mitigate error accumulation in past frames
                 # log_scale in (0, 1]: smaller values = less attention to past frame tokens
-                log_scale = torch.tensor(
-                    math.log(kv_cache_attention_bias),
-                    device=roped_query.device,
-                    dtype=torch.float32,
-                )
+                log_scale = math.log(kv_cache_attention_bias)
 
                 # Exclude first frame and current block from bias
                 cache_len = local_end_index - kv_start_idx
