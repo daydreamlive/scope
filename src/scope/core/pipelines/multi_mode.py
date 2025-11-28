@@ -32,11 +32,11 @@ class MultiModePipeline(Pipeline):
 
     This class centralizes orchestration logic for pipelines supporting multiple
     input modes (text-to-video, video-to-video). Pipelines declare their
-    capabilities via three class methods:
+    capabilities via class methods:
 
+    - get_schema(): Returns pipeline metadata and mode-specific configurations
     - get_blocks(): Returns single workflow with nested AutoPipelineBlocks
     - get_components(): Declares component requirements
-    - get_defaults(): Specifies mode-specific default parameters
 
     Architecture Pattern:
     Uses nested AutoPipelineBlocks for input-based routing (e.g., AutoPrepareLatentsBlock
@@ -51,6 +51,14 @@ class MultiModePipeline(Pipeline):
     Example:
         class MyPipeline(MultiModePipeline):
             @classmethod
+            def get_schema(cls) -> dict:
+                return build_pipeline_schema(
+                    pipeline_id="my-pipeline",
+                    name="My Pipeline",
+                    ...
+                )
+
+            @classmethod
             def get_blocks(cls):
                 return MyWorkflow()
 
@@ -63,13 +71,6 @@ class MultiModePipeline(Pipeline):
                         "text": {"strategy": "text_vae"},
                         "video": {"strategy": "video_vae"},
                     },
-                }
-
-            @classmethod
-            def get_defaults(cls) -> dict:
-                return {
-                    "text": {"denoising_steps": [1000, 750]},
-                    "video": {"denoising_steps": [1000, 750], "input_size": 4},
                 }
     """
 
@@ -103,31 +104,6 @@ class MultiModePipeline(Pipeline):
                 "vae": {
                     "text": {"strategy": "longlive"},
                     "video": {"strategy": "streamdiffusionv2_longlive_scaled"},
-                },
-            }
-        """
-        pass
-
-    @classmethod
-    @abstractmethod
-    def get_defaults(cls) -> dict:
-        """Specify mode-specific default parameters.
-
-        Returns:
-            Dictionary mapping mode names to their default configurations.
-            Include "input_size" in a mode's config to signal video input requirement.
-
-        Example:
-            {
-                "text": {
-                    "denoising_steps": [1000, 750, 500, 250],
-                    "resolution": {"height": 320, "width": 576},
-                },
-                "video": {
-                    "denoising_steps": [1000, 750],
-                    "resolution": {"height": 512, "width": 512},
-                    "noise_scale": 0.7,
-                    "input_size": 4,
                 },
             }
         """
@@ -188,8 +164,8 @@ class MultiModePipeline(Pipeline):
     def prepare(self, **kwargs) -> Requirements | None:
         """Determine input requirements for this generation call.
 
-        Auto-generated from mode defaults. Infers which mode would be triggered
-        based on kwargs, then checks if that mode requires video input.
+        Infers which mode would be triggered based on kwargs, then checks
+        if that mode requires video input by examining the schema.
 
         Args:
             **kwargs: Generation parameters that may include input_mode
@@ -198,8 +174,10 @@ class MultiModePipeline(Pipeline):
             Requirements object if video input is needed, None otherwise
         """
         mode = self._infer_mode_from_kwargs(kwargs)
-        defaults = self.__class__.get_defaults().get(mode, {})
-        input_size = defaults.get("input_size")
+        schema = self.__class__.get_schema()
+        mode_config = schema["mode_configs"].get(mode, {})
+        input_size_schema = mode_config.get("input_size")
+        input_size = input_size_schema.get("default") if input_size_schema else None
 
         if input_size:
             return Requirements(input_size=input_size)

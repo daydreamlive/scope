@@ -80,21 +80,6 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
             },
         }
 
-    @classmethod
-    def get_defaults(cls) -> dict:
-        """Return mode-specific defaults for StreamDiffusionV2 pipeline."""
-        return {
-            "text": {
-                "denoising_steps": TEXT_DENOISING_STEP_LIST,
-            },
-            "video": {
-                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
-                "noise_scale": 0.7,
-                "noise_controller": True,
-                "input_size": calculate_input_size(__file__),
-            },
-        }
-
     def __init__(
         self,
         config,

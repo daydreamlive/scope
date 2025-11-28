@@ -83,21 +83,6 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
             },
         }
 
-    @classmethod
-    def get_defaults(cls) -> dict:
-        """Return mode-specific defaults for KreaRealtimeVideo pipeline."""
-        return {
-            "text": {
-                "resolution": {"height": 320, "width": 576},
-            },
-            "video": {
-                "resolution": {"height": 320, "width": 320},
-                "noise_scale": 0.35,
-                "noise_controller": True,
-                "input_size": calculate_input_size(__file__),
-            },
-        }
-
     def __init__(
         self,
         config,

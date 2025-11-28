@@ -88,23 +88,6 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             },
         }
 
-    @classmethod
-    def get_defaults(cls) -> dict:
-        """Return mode-specific defaults for LongLive pipeline."""
-        return {
-            "text": {
-                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
-                "resolution": {"height": 320, "width": 576},
-            },
-            "video": {
-                "denoising_steps": [1000, 750],
-                "resolution": {"height": 512, "width": 512},
-                "noise_scale": 0.7,
-                "noise_controller": True,
-                "input_size": calculate_input_size(__file__),
-            },
-        }
-
     def __init__(
         self,
         config,
