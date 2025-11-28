@@ -1,12 +1,14 @@
-from diffusers.modular_pipelines import SequentialPipelineBlocks
-from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
-from diffusers.utils import logging as diffusers_logging
+"""Single workflow for KreaRealtimeVideo pipeline using AutoPipelineBlocks for routing."""
 
+from diffusers.modular_pipelines import SequentialPipelineBlocks
+
+from ..multi_mode_blocks import ConfigureForModeBlock, LoadComponentsBlock
 from ..wan2_1.blocks import (
+    AutoPrepareLatentsBlock,
+    AutoPreprocessVideoBlock,
     DecodeBlock,
     DenoiseBlock,
     EmbeddingBlendingBlock,
-    PrepareLatentsBlock,
     PrepareNextBlock,
     SetTimestepsBlock,
     SetupCachesBlock,
@@ -14,25 +16,55 @@ from ..wan2_1.blocks import (
 )
 from .blocks import PrepareContextFramesBlock, RecomputeKVCacheBlock
 
-logger = diffusers_logging.get_logger(__name__)
 
-# Main pipeline blocks for T2V workflow
-ALL_BLOCKS = InsertableDict(
-    [
-        ("text_conditioning", TextConditioningBlock),
-        ("embedding_blending", EmbeddingBlendingBlock),
-        ("set_timesteps", SetTimestepsBlock),
-        ("setup_caches", SetupCachesBlock),
-        ("prepare_latents", PrepareLatentsBlock),
-        ("recompute_kv_cache", RecomputeKVCacheBlock),
-        ("denoise", DenoiseBlock),
-        ("decode", DecodeBlock),
-        ("prepare_context_frames", PrepareContextFramesBlock),
-        ("prepare_next", PrepareNextBlock),
+class KreaRealtimeVideoWorkflow(SequentialPipelineBlocks):
+    """Single workflow for KreaRealtimeVideo supporting both T2V and V2V.
+
+    Uses two AutoPipelineBlocks for routing:
+    1. AutoPreprocessVideoBlock - routes video preprocessing before cache setup
+    2. AutoPrepareLatentsBlock - routes latent preparation after cache setup
+
+    This maintains the correct execution order where video preprocessing happens
+    before SetupCachesBlock, but latent encoding happens after.
+    """
+
+    block_classes = [
+        # Configuration
+        ConfigureForModeBlock,
+        LoadComponentsBlock,
+        # Text conditioning (shared)
+        TextConditioningBlock,
+        EmbeddingBlendingBlock,
+        SetTimestepsBlock,
+        # Video preprocessing (AUTO-ROUTED: V2V only, before cache setup)
+        AutoPreprocessVideoBlock,
+        # Setup (shared)
+        SetupCachesBlock,
+        # Latent preparation (AUTO-ROUTED: T2V vs V2V, after cache setup)
+        AutoPrepareLatentsBlock,
+        # KV cache management (shared)
+        RecomputeKVCacheBlock,
+        # Generation (shared)
+        DenoiseBlock,
+        DecodeBlock,
+        # Context frame preparation (shared)
+        PrepareContextFramesBlock,
+        # Preparation for next iteration (shared)
+        PrepareNextBlock,
     ]
-)
 
-
-class KreaRealtimeVideoBlocks(SequentialPipelineBlocks):
-    block_classes = list(ALL_BLOCKS.values())
-    block_names = list(ALL_BLOCKS.keys())
+    block_names = [
+        "configure_for_mode",
+        "load_components",
+        "text_conditioning",
+        "embedding_blending",
+        "set_timesteps",
+        "auto_preprocess_video",
+        "setup_caches",
+        "auto_prepare_latents",
+        "recompute_kv_cache",
+        "denoise",
+        "decode",
+        "prepare_context_frames",
+        "prepare_next",
+    ]

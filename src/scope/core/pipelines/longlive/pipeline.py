@@ -1,19 +1,22 @@
+"""LongLive pipeline implementation using MultiModePipeline architecture.
+
+This is the new declarative implementation of LongLive pipeline that uses
+the MultiModePipeline base class for simplified configuration.
+"""
+
 import logging
 import time
 
 import torch
-from diffusers.modular_pipelines import PipelineState
 
-from ..blending import EmbeddingBlender
-from ..components import ComponentsManager
-from ..interface import Pipeline
-from ..process import postprocess_chunk
-from ..utils import load_model_config
+from ..defaults import INPUT_MODE_TEXT
+from ..helpers import build_pipeline_schema
+from ..multi_mode import MultiModePipeline
+from ..utils import calculate_input_size, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from .components import WanVAEWrapper
-from .modular_blocks import LongLiveBlocks
+from .modular_blocks import LongLiveWorkflow
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
@@ -21,13 +24,83 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
+class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
+    """LongLive pipeline using declarative MultiModePipeline architecture.
+
+    This pipeline supports both text-to-video and video-to-video generation
+    with efficient recaching for long-form content. Mode routing is handled
+    automatically based on input presence (video input triggers V2V mode).
+    Uses nested AutoPipelineBlocks for input-based workflow routing.
+    """
+
+    @classmethod
+    def get_schema(cls) -> dict:
+        """Return schema for LongLive pipeline."""
+        return build_pipeline_schema(
+            pipeline_id="longlive",
+            name="LongLive",
+            description="Text-to-video generation optimized for long-form content with efficient recaching",
+            native_mode=INPUT_MODE_TEXT,
+            shared={
+                "manage_cache": True,
+                "base_seed": 42,
+                "default_temporal_interpolation_method": "slerp",
+                "default_temporal_interpolation_steps": 0,
+            },
+            text_overrides={
+                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
+                "resolution": {"height": 320, "width": 576},
+                "noise_scale": None,
+                "noise_controller": None,
+                "default_prompt": "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
+            },
+            video_overrides={
+                "denoising_steps": [1000, 750],
+                "resolution": {"height": 512, "width": 512},
+                "noise_scale": 0.7,
+                "noise_controller": True,
+                "input_size": calculate_input_size(__file__),
+                "vae_strategy": "streamdiffusionv2_longlive_scaled",
+                "default_prompt": "A 3D animated scene. A **panda** is sitting at a desk.",
+            },
+        )
+
+    @classmethod
+    def get_blocks(cls):
+        """Return single workflow with nested AutoPipelineBlocks routing.
+
+        Returns a unified workflow that uses nested AutoPipelineBlocks
+        (AutoPreprocessVideoBlock and AutoPrepareLatentsBlock) for automatic
+        routing based on input presence. Routes to V2V when 'video' input is
+        provided, otherwise uses T2V latent preparation.
+        """
+        return LongLiveWorkflow()
+
+    @classmethod
+    def get_components(cls) -> dict:
+        """Declare component requirements for LongLive pipeline."""
+        return {
+            "generator": WanDiffusionWrapper,
+            "text_encoder": WanTextEncoderWrapper,
+            "vae": {
+                "text": {"strategy": "longlive"},
+                "video": {"strategy": "streamdiffusionv2_longlive_scaled"},
+            },
+        }
+
     def __init__(
         self,
         config,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        """Initialize LongLive pipeline.
+
+        Args:
+            config: Configuration object with model paths and settings
+            device: Target device for computation
+            dtype: Target dtype for tensors
+        """
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
         lora_path = getattr(config, "lora_path", None)
@@ -53,16 +126,13 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             **base_model_kwargs,
         )
 
-        print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+        print(
+            f"LongLivePipeline.__init__: Loaded diffusion model in {time.time() - start:.3f}s"
+        )
 
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
-        # This mirrors the original LongLive behavior and is independent of any
-        # additional runtime LoRA strategies managed by LoRAEnabledPipeline.
         if lora_path is not None:
             start = time.time()
-            # LongLive's adapter config is passed through unchanged so the
-            # module-targeted manager can construct the PEFT config exactly
-            # like the original implementation.
             longlive_lora_config = dict(lora_config) if lora_config is not None else {}
             generator.model = ModuleTargetedLoRAStrategy._configure_lora_for_model(
                 generator.model,
@@ -70,10 +140,11 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
                 lora_config=longlive_lora_config,
             )
             ModuleTargetedLoRAStrategy._load_lora_checkpoint(generator.model, lora_path)
-            print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
+            print(
+                f"LongLivePipeline.__init__: Loaded diffusion LoRA in {time.time() - start:.3f}s"
+            )
 
         # Initialize any additional, user-configured LoRA adapters via shared manager.
-        # This is additive and does not replace the original LongLive performance LoRA.
         generator.model = self._init_loras(config, generator.model)
 
         generator = generator.to(device=device, dtype=dtype)
@@ -85,62 +156,44 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             text_encoder_path=text_encoder_path,
             tokenizer_path=tokenizer_path,
         )
-        print(f"Loaded text encoder in {time.time() - start:3f}s")
-        # Move text encoder to target device but use dtype of weights
+        print(
+            f"LongLivePipeline.__init__: Loaded text encoder in {time.time() - start:.3f}s"
+        )
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE
-        start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
-        # Move VAE to target device and use target dtype
-        vae = vae.to(device=device, dtype=dtype)
+        # Prepare VAE initialization kwargs for lazy loading
+        vae_init_kwargs = {
+            "model_dir": model_dir,
+        }
 
-        # Create components config
-        components_config = {}
-        components_config.update(model_config)
-        components_config["device"] = device
-        components_config["dtype"] = dtype
+        # Convert model_config (OmegaConf) to dict for MultiModePipeline
+        # This includes all properties from model.yaml that blocks may need
+        # (e.g., max_rope_freq_table_seq_len, num_frame_per_block, etc.)
+        from omegaconf import OmegaConf
 
-        components = ComponentsManager(components_config)
-        components.add("generator", generator)
-        components.add("scheduler", generator.get_scheduler())
-        components.add("vae", vae)
-        components.add("text_encoder", text_encoder)
+        model_config_dict = OmegaConf.to_container(model_config, resolve=True)
 
-        embedding_blender = EmbeddingBlender(
+        # Initialize via MultiModePipeline
+        super().__init__(
+            config=config,
+            generator=generator,
+            text_encoder=text_encoder,
+            model_config=model_config_dict,
             device=device,
             dtype=dtype,
+            vae_init_kwargs=vae_init_kwargs,
         )
-        components.add("embedding_blender", embedding_blender)
-
-        self.blocks = LongLiveBlocks()
-        self.components = components
-        self.state = PipelineState()
-        # These need to be set right now because InputParam.default on the blocks
-        # does not work properly
-        self.state.set("current_start_frame", 0)
-        self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", 1.0)
-
-        self.state.set("height", config.height)
-        self.state.set("width", config.width)
-        self.state.set("base_seed", getattr(config, "seed", 42))
-
-        self.first_call = True
 
     def __call__(self, **kwargs) -> torch.Tensor:
-        if self.first_call:
-            self.state.set("init_cache", True)
-            self.first_call = False
-        else:
-            # This will be overriden if the init_cache is passed in kwargs
-            self.state.set("init_cache", False)
+        """Execute pipeline with LoRA handling.
 
-        return self._generate(**kwargs)
+        Args:
+            **kwargs: Generation parameters
 
-    def _generate(self, **kwargs) -> torch.Tensor:
-        # Handle runtime LoRA scale updates before writing into state.
+        Returns:
+            Post-processed output tensor
+        """
+        # Handle runtime LoRA scale updates before execution
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:
             self._handle_lora_scale_updates(
@@ -150,15 +203,5 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             if self.state.get("manage_cache", True):
                 kwargs["init_cache"] = True
 
-        for k, v in kwargs.items():
-            self.state.set(k, v)
-
-        # Clear transition from state if not provided to prevent stale transitions
-        if "transition" not in kwargs:
-            self.state.set("transition", None)
-
-        if self.state.get("denoising_step_list") is None:
-            self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
-
-        _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        # Call parent implementation which handles the rest
+        return super().__call__(**kwargs)

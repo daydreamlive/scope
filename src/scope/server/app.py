@@ -21,6 +21,11 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Import PipelineRegistry at module level to ensure it's initialized during server startup
+# This prevents lazy import overhead in schema endpoints and ensures SageAttention
+# loads during startup rather than blocking the first schema API call
+from scope.core.pipelines.registry import PipelineRegistry
+
 from .download_models import download_models
 from .logs_config import (
     cleanup_old_logs,
@@ -34,7 +39,9 @@ from .pipeline_manager import PipelineManager
 from .schema import (
     HardwareInfoResponse,
     HealthResponse,
+    PipelineListResponse,
     PipelineLoadRequest,
+    PipelineSchemaResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
@@ -308,6 +315,46 @@ async def get_pipeline_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/pipelines", response_model=PipelineListResponse)
+async def list_pipelines():
+    """List all available pipelines."""
+    try:
+        pipeline_ids = PipelineRegistry.list_pipelines()
+        return PipelineListResponse(pipelines=pipeline_ids)
+    except Exception as e:
+        logger.error(f"list_pipelines: Error listing pipelines: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/pipelines/{pipeline_id}", response_model=PipelineSchemaResponse)
+async def get_pipeline_schema(pipeline_id: str):
+    """Get complete schema and metadata for a specific pipeline.
+
+    This endpoint returns pipeline metadata including:
+    - Pipeline identification and description
+    - Supported generation modes (text-to-video, video-to-video)
+    - Mode-specific parameter configurations with defaults
+    - JSON Schema-compatible parameter definitions
+
+    The response follows OpenAPI conventions for API introspection.
+    """
+    try:
+        schema = PipelineRegistry.get_schema(pipeline_id)
+        if schema is None:
+            raise HTTPException(
+                status_code=404, detail=f"Pipeline not found: {pipeline_id}"
+            )
+
+        return PipelineSchemaResponse(**schema)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"get_pipeline_schema: Error getting schema for {pipeline_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/api/v1/webrtc/offer", response_model=WebRTCOfferResponse)
 async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
@@ -361,7 +408,13 @@ async def list_lora_files():
     def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
         """Extract LoRA file metadata."""
         size_mb = file_path.stat().st_size / (1024 * 1024)
-        relative_path = file_path.relative_to(lora_dir)
+        # Calculate relative path for folder structure
+        # Both paths should be absolute from rglob() and get_models_dir()
+        try:
+            relative_path = file_path.relative_to(lora_dir)
+        except ValueError:
+            # Fallback if paths don't match (shouldn't happen, but be defensive)
+            relative_path = Path(file_path.name)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
@@ -380,7 +433,13 @@ async def list_lora_files():
             for pattern in ("*.safetensors", "*.bin", "*.pt"):
                 for file_path in lora_dir.rglob(pattern):
                     if file_path.is_file():
-                        lora_files.append(process_lora_file(file_path, lora_dir))
+                        try:
+                            lora_files.append(process_lora_file(file_path, lora_dir))
+                        except Exception as e:
+                            logger.warning(
+                                f"list_lora_files: Skipping file {file_path}: {e}"
+                            )
+                            continue
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)

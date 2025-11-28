@@ -2,28 +2,84 @@ import logging
 import time
 
 import torch
-from diffusers.modular_pipelines import PipelineState
 
-from ..blending import EmbeddingBlender
-from ..components import ComponentsManager
-from ..interface import Pipeline, Requirements
-from ..process import postprocess_chunk
-from ..utils import load_model_config
+from ..defaults import INPUT_MODE_VIDEO
+from ..helpers import build_pipeline_schema
+from ..multi_mode import MultiModePipeline
+from ..utils import calculate_input_size, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .components import WanVAEWrapper
-from .modular_blocks import StreamDiffusionV2Blocks
+from .modular_blocks import StreamDiffusionV2Workflow
 from .modules.causal_model import CausalWanModel
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
-
-# Chunk size for streamdiffusionv2
-CHUNK_SIZE = 4
+TEXT_DENOISING_STEP_LIST = [1000, 250]
 
 
-class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
+class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
+    """StreamDiffusionV2 pipeline using declarative MultiModePipeline architecture.
+
+    This pipeline supports both text-to-video and video-to-video generation
+    with efficient streaming and temporal consistency. Mode routing is handled
+    automatically based on input presence (video input triggers V2V mode).
+    Uses nested AutoPipelineBlocks for input-based workflow routing.
+    """
+
+    @classmethod
+    def get_schema(cls) -> dict:
+        """Return schema for StreamDiffusionV2 pipeline."""
+        return build_pipeline_schema(
+            pipeline_id="streamdiffusionv2",
+            name="StreamDiffusion V2",
+            description="Video-to-video generation with temporal consistency and efficient streaming",
+            native_mode=INPUT_MODE_VIDEO,
+            shared={
+                "resolution": {"height": 512, "width": 512},
+                "manage_cache": True,
+                "base_seed": 42,
+                "default_temporal_interpolation_method": "slerp",
+                "default_temporal_interpolation_steps": 0,
+            },
+            text_overrides={
+                "denoising_steps": TEXT_DENOISING_STEP_LIST,
+                "noise_scale": None,
+                "noise_controller": None,
+                "default_prompt": "A dog is sitting center frame, looking at the camera",
+            },
+            video_overrides={
+                "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
+                "noise_scale": 0.7,
+                "noise_controller": True,
+                "input_size": calculate_input_size(__file__),
+                "default_prompt": "A dog in the grass looking around, photorealistic",
+            },
+        )
+
+    @classmethod
+    def get_blocks(cls):
+        """Return single workflow with nested AutoPipelineBlocks routing.
+
+        Returns a unified workflow that uses nested AutoPipelineBlocks
+        (AutoPreprocessVideoBlock and AutoPrepareLatentsBlock) for automatic
+        routing based on input presence. Routes to V2V when 'video' input is
+        provided, otherwise uses T2V latent preparation.
+        """
+        return StreamDiffusionV2Workflow()
+
+    @classmethod
+    def get_components(cls) -> dict:
+        """Declare component requirements for StreamDiffusionV2 pipeline."""
+        return {
+            "generator": WanDiffusionWrapper,
+            "text_encoder": WanTextEncoderWrapper,
+            "vae": {
+                "text": {"strategy": "streamdiffusionv2"},
+                "video": {"strategy": "streamdiffusionv2"},
+            },
+        }
+
     def __init__(
         self,
         config,
@@ -71,66 +127,37 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE
-        start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
-        # Move VAE to target device and use target dtype
-        vae = vae.to(device=device, dtype=dtype)
+        # Prepare VAE initialization kwargs for lazy loading
+        vae_init_kwargs = {
+            "model_dir": model_dir,
+        }
 
-        # Create components config
-        components_config = {}
-        components_config.update(model_config)
-        components_config["device"] = device
-        components_config["dtype"] = dtype
+        # Convert model_config to dict for MultiModePipeline
+        from omegaconf import OmegaConf
 
-        components = ComponentsManager(components_config)
-        components.add("generator", generator)
-        components.add("scheduler", generator.get_scheduler())
-        components.add("vae", vae)
-        components.add("text_encoder", text_encoder)
+        model_config_dict = OmegaConf.to_container(model_config, resolve=True)
 
-        embedding_blender = EmbeddingBlender(
+        # Initialize via MultiModePipeline
+        super().__init__(
+            config=config,
+            generator=generator,
+            text_encoder=text_encoder,
+            model_config=model_config_dict,
             device=device,
             dtype=dtype,
+            vae_init_kwargs=vae_init_kwargs,
         )
-        components.add("embedding_blender", embedding_blender)
 
-        self.blocks = StreamDiffusionV2Blocks()
-        self.components = components
-        self.state = PipelineState()
-        # These need to be set right now because InputParam.default on the blocks
-        # does not work properly
-        self.state.set("current_start_frame", 0)
-        self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", 1.0)
-        self.state.set("noise_scale", 0.7)
-        self.state.set("noise_controller", True)
+    def __call__(self, **kwargs) -> torch.Tensor:
+        """Execute pipeline with LoRA handling.
 
-        self.state.set("height", config.height)
-        self.state.set("width", config.width)
-        self.state.set("base_seed", getattr(config, "seed", 42))
+        Args:
+            **kwargs: Generation parameters
 
-        self.first_call = True
-
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
-        return Requirements(input_size=CHUNK_SIZE)
-
-    def __call__(
-        self,
-        **kwargs,
-    ) -> torch.Tensor:
-        if self.first_call:
-            self.state.set("init_cache", True)
-            self.first_call = False
-        else:
-            # This will be overriden if the init_cache is passed in kwargs
-            self.state.set("init_cache", False)
-
-        return self._generate(**kwargs)
-
-    def _generate(self, **kwargs) -> torch.Tensor:
-        # Handle runtime LoRA scale updates before writing into state.
+        Returns:
+            Post-processed output tensor
+        """
+        # Handle runtime LoRA scale updates before execution
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:
             self._handle_lora_scale_updates(
@@ -140,15 +167,5 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             if self.state.get("manage_cache", True):
                 kwargs["init_cache"] = True
 
-        for k, v in kwargs.items():
-            self.state.set(k, v)
-
-        # Clear transition from state if not provided to prevent stale transitions
-        if "transition" not in kwargs:
-            self.state.set("transition", None)
-
-        if self.state.get("denoising_step_list") is None:
-            self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
-
-        _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        # Call parent implementation which handles the rest
+        return super().__call__(**kwargs)

@@ -1,11 +1,17 @@
 """Pydantic schemas for FastAPI application."""
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from scope.core.pipelines.defaults import INPUT_MODE_TEXT, INPUT_MODE_VIDEO
 from scope.core.pipelines.utils import Quantization
+
+# Type alias for input mode using constants
+# Note: Literal requires string literals, so we reference constants in comments
+# INPUT_MODE_VIDEO = "video", INPUT_MODE_TEXT = "text"
+InputModeType = Literal["video", "text"]
 
 
 class HealthResponse(BaseModel):
@@ -87,6 +93,13 @@ class Parameters(BaseModel):
     lora_scales: list["LoRAScaleUpdate"] | None = Field(
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
+    )
+    input_mode: InputModeType | None = Field(
+        default=None,
+        description=f"Input mode for pipelines that support both text-to-video and video-to-video. "
+        f"Use '{INPUT_MODE_VIDEO}' for video input consumption, '{INPUT_MODE_TEXT}' for pure text-to-video. "
+        f"When set to '{INPUT_MODE_VIDEO}', the pipeline will consume input video frames. "
+        f"When set to '{INPUT_MODE_TEXT}', the pipeline will operate in pure text-to-video mode without consuming video input.",
     )
 
 
@@ -260,3 +273,52 @@ class PipelineStatusResponse(BaseModel):
     error: str | None = Field(
         default=None, description="Error message if status is error"
     )
+
+
+class PipelineCapabilities(BaseModel):
+    """Computed capabilities for UI generation."""
+
+    hasInputModeControl: bool = Field(
+        ..., description="Whether pipeline supports mode switching"
+    )
+    hasNoiseControls: bool = Field(
+        ..., description="Whether any mode supports noise controls"
+    )
+    showNoiseControlsInText: bool = Field(
+        ..., description="Whether text mode has noise controls"
+    )
+    showNoiseControlsInVideo: bool = Field(
+        ..., description="Whether video mode has noise controls"
+    )
+    hasCacheManagement: bool = Field(
+        ..., description="Whether any mode supports cache management"
+    )
+    requiresVideoInVideoMode: bool = Field(
+        ..., description="Whether video mode requires video input"
+    )
+
+
+class PipelineSchemaResponse(BaseModel):
+    """Pipeline schema response with metadata and configuration.
+
+    This response follows OpenAPI/JSON Schema conventions for pipeline introspection.
+    """
+
+    id: str = Field(..., description="Unique pipeline identifier")
+    name: str = Field(..., description="Human-readable pipeline name")
+    description: str = Field(..., description="Pipeline capabilities description")
+    version: str = Field(default="1.0.0", description="Pipeline version")
+    native_mode: str = Field(..., description="Native input mode (text or video)")
+    supported_modes: list[str] = Field(..., description="List of supported input modes")
+    mode_configs: dict[str, dict[str, Any]] = Field(
+        ..., description="Mode-specific parameter configurations"
+    )
+    capabilities: PipelineCapabilities = Field(
+        ..., description="Computed capabilities for UI generation"
+    )
+
+
+class PipelineListResponse(BaseModel):
+    """Response containing list of available pipelines."""
+
+    pipelines: list[str] = Field(..., description="List of available pipeline IDs")
