@@ -51,8 +51,6 @@ class ConfigureForModeBlock(ModularPipelineBlocks):
             mode = "text"
             state.set("_resolved_mode", mode)
 
-        logger.info(f"ConfigureForModeBlock: Using mode '{mode}'")
-
         return components, state
 
 
