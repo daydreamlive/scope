@@ -10,6 +10,7 @@ from av import VideoFrame
 
 from .frame_processor import FrameProcessor
 from .pipeline_manager import PipelineManager
+from .recording import RecordingManager
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,11 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused = False
         self._paused_lock = threading.Lock()
         self._last_frame = None
+
+        # Recording manager
+        self.recording_manager = RecordingManager(
+            video_track=self, is_paused=lambda: self._paused
+        )
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
@@ -130,6 +136,11 @@ class VideoProcessingTrack(MediaStreamTrack):
                     frame.pts = pts
                     frame.time_base = time_base
 
+                    # Start recording on first NEW frame if not already started and not paused
+                    # Only start recording when we have a new frame (not paused), not when returning last frame
+                    if not paused and not self.recording_manager.is_recording_started:
+                        await self.recording_manager.start_recording()
+
                     self._last_frame = frame
                     return frame
 
@@ -145,8 +156,13 @@ class VideoProcessingTrack(MediaStreamTrack):
     def pause(self, paused: bool):
         """Pause or resume the video track processing"""
         with self._paused_lock:
+            was_paused = self._paused
             self._paused = paused
+
         logger.info(f"Video track {'paused' if paused else 'resumed'}")
+
+        # Handle recording segmentation: finalize on pause, start new on resume
+        self.recording_manager.handle_pause_state_change(paused, was_paused)
 
     async def stop(self):
         self.input_task_running = False
@@ -160,5 +176,8 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         if self.frame_processor is not None:
             self.frame_processor.stop()
+
+        # Stop recording (async)
+        await self.recording_manager.stop_recording()
 
         await super().stop()

@@ -44,6 +44,7 @@ interface PromptInputWithTimelineProps {
   isDownloading?: boolean;
   transitionSteps?: number;
   temporalInterpolationMethod?: "linear" | "slerp";
+  onSaveGeneration?: () => void;
 }
 
 export function PromptInputWithTimeline({
@@ -77,6 +78,7 @@ export function PromptInputWithTimeline({
   isDownloading = false,
   transitionSteps,
   temporalInterpolationMethod,
+  onSaveGeneration,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -565,6 +567,7 @@ export function PromptInputWithTimeline({
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
         isStreaming={isStreaming}
         isDownloading={isDownloading}
+        onSaveGeneration={onSaveGeneration}
       />
     </div>
   );

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +31,11 @@ from .logs_config import (
 )
 from .models_config import ensure_models_dir, get_models_dir, models_are_downloaded
 from .pipeline_manager import PipelineManager
+from .recording import (
+    cleanup_recording_files,
+    cleanup_temp_file,
+    get_recording_for_download,
+)
 from .schema import (
     HardwareInfoResponse,
     HealthResponse,
@@ -190,6 +195,9 @@ async def lifespan(app: FastAPI):
         logger.error(error_msg)
         sys.exit(1)
 
+    # Clean up recording files from previous sessions (in case of crashes)
+    cleanup_recording_files()
+
     # Log logs directory
     logs_dir = get_logs_dir()
     logger.info(f"Logs directory: {logs_dir}")
@@ -328,6 +336,42 @@ async def handle_webrtc_offer(
 
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/recording/download")
+async def download_recording(
+    background_tasks: BackgroundTasks,
+    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+):
+    """Download the recording file for the active session.
+    This will finalize the current recording and create a copy for download,
+    then continue recording with a new file."""
+    try:
+        download_file = await get_recording_for_download(webrtc_manager)
+        if not download_file or not Path(download_file).exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Recording file not available",
+            )
+
+        # Schedule cleanup of the temp file after download
+        background_tasks.add_task(cleanup_temp_file, download_file)
+
+        # Generate filename with datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"recording-{timestamp}.mp4"
+
+        # Return the file for download
+        return FileResponse(
+            download_file,
+            media_type="video/mp4",
+            filename=filename,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading recording: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
