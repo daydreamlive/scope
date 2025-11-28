@@ -100,7 +100,7 @@ class PermanentMergeLoRAStrategy:
             FileNotFoundError: If the LoRA file does not exist
         """
         # Convert to PEFT format if needed (in-memory, no disk I/O)
-        converted_state = standardize_lora_for_peft(lora_path=lora_path, model=model)
+        converted_state = standardize_lora_for_peft(lora_path=lora_path)
 
         adapter_name = PermanentMergeLoRAStrategy._load_adapter_from_state_dict_or_path(
             model=model,
@@ -179,9 +179,7 @@ class PermanentMergeLoRAStrategy:
 
             try:
                 # Convert to PEFT format if needed (in-memory, no disk I/O)
-                converted_state = standardize_lora_for_peft(
-                    lora_path=lora_path, model=model
-                )
+                converted_state = standardize_lora_for_peft(lora_path=lora_path)
 
                 adapter_name = (
                     PermanentMergeLoRAStrategy._load_adapter_from_state_dict_or_path(
