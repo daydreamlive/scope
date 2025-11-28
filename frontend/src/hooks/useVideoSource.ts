@@ -302,6 +302,10 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       return;
     }
 
+    // When enabling the video source, always align mode with the initialized stream
+    // to avoid UI showing camera while a video file stream is active.
+    setMode("video");
+
     const initializeVideoMode = async () => {
       setIsInitializing(true);
       try {
