@@ -25,6 +25,7 @@ import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import type { InputMode } from "../constants/modes";
 import { LoRAManager } from "./LoRAManager";
 import {
   getPipelineModeCapabilities,
@@ -41,7 +42,7 @@ interface SettingsPanelProps {
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
-  inputMode?: "video" | "text";
+  inputMode?: InputMode;
   resolution?: {
     height: number;
     width: number;

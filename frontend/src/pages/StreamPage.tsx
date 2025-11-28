@@ -22,6 +22,7 @@ import {
   pipelineNeedsVideoSource,
 } from "../lib/pipelineModes";
 import { INPUT_MODE, VIDEO_SOURCE_MODE } from "../constants/modes";
+import type { InputMode } from "../constants/modes";
 import type {
   PipelineId,
   LoRAConfig,
@@ -182,7 +183,7 @@ export function StreamPage() {
     });
   };
 
-  const handleInputModeChange = (mode: "video" | "text") => {
+  const handleInputModeChange = (mode: InputMode) => {
     const pipelineId = settings.pipelineId;
     const caps = getPipelineModeCapabilities(pipelineId);
     const inputMode = mode;
@@ -742,7 +743,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
-        input_mode?: "video" | "text";
+        input_mode?: InputMode;
       } = {};
 
       // Common parameters for pipelines that support prompts

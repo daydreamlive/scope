@@ -2,8 +2,7 @@ import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { PipelineId } from "../types";
 import type { PipelineSchema } from "./api";
-
-type InputMode = "text" | "video";
+import type { InputMode } from "../constants/modes";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

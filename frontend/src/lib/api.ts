@@ -113,7 +113,7 @@ export interface PipelineSchema {
   name: string;
   description: string;
   version: string;
-  native_mode: "video" | "text";
+  native_mode: InputMode;
   supported_modes: string[];
   mode_configs: {
     text: ModeConfig;

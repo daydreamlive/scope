@@ -11,7 +11,7 @@ import { Badge } from "./ui/badge";
 import { Upload } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
-import type { PromptItem, PromptTransition } from "../lib/api";
+import type { PromptItem, PromptTransition, InputMode } from "../lib/api";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
@@ -24,8 +24,8 @@ interface InputAndControlsPanelProps {
   isInitializing: boolean;
   error: string | null;
   // Input mode for the pipeline (text-to-video vs video-to-video)
-  mode: "video" | "text";
-  onModeChange: (mode: "video" | "text") => void;
+  mode: InputMode;
+  onModeChange: (mode: InputMode) => void;
   // Underlying video source when in video input mode
   videoSourceMode: VideoSourceMode;
   onVideoSourceModeChange: (mode: VideoSourceMode) => void;
@@ -143,7 +143,7 @@ export function InputAndControlsPanel({
             value={mode}
             onValueChange={value => {
               if (value) {
-                onModeChange(value as "video" | "text");
+                onModeChange(value as InputMode);
               }
             }}
             disabled={isStreaming}

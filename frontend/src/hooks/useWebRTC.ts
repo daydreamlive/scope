@@ -3,6 +3,7 @@ import {
   sendWebRTCOffer,
   type PromptItem,
   type PromptTransition,
+  type InputMode,
 } from "../lib/api";
 import { toast } from "sonner";
 
@@ -15,7 +16,7 @@ interface InitialParameters {
   noise_controller?: boolean;
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
-  input_mode?: "video" | "text";
+  input_mode?: InputMode;
 }
 
 interface UseWebRTCOptions {
@@ -238,7 +239,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;
-      input_mode?: "video" | "text";
+      input_mode?: InputMode;
     }) => {
       if (
         dataChannelRef.current &&
