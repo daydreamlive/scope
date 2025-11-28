@@ -34,10 +34,6 @@ class WanVAEWrapper(torch.nn.Module):
 
         self.decoder = VAEDecoderWrapper()
         state_dict = torch.load(vae_path, map_location="cpu")
-        decoder_state_dict = {}
-        for key, value in state_dict.items():
-            if "decoder." in key or "conv2" in key:
-                decoder_state_dict[key] = value
         self.decoder.load_state_dict(state_dict, strict=False)
         self.decoder.eval()
         self.decoder.requires_grad_(False)
