@@ -4,6 +4,7 @@ import { PromptTimeline, type TimelinePrompt } from "./PromptTimeline";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
+import type { VideoSourceMode } from "../constants/modes";
 import { generateRandomColor } from "../utils/promptColors";
 import { submitTimelinePrompt } from "../utils/timelinePromptSubmission";
 
@@ -35,6 +36,8 @@ interface PromptInputWithTimelineProps {
   externalSelectedPromptId?: string | null;
   settings?: SettingsState;
   onSettingsImport?: (settings: Partial<SettingsState>) => void;
+  videoSourceMode?: VideoSourceMode;
+  onVideoSourceModeImport?: (mode: VideoSourceMode) => void;
   onPlayPauseRef?: React.RefObject<(() => Promise<void>) | null>;
   onVideoPlayingCallbackRef?: React.RefObject<(() => void) | null>;
   onResetCache?: () => void;
@@ -68,6 +71,8 @@ export function PromptInputWithTimeline({
   externalSelectedPromptId = null,
   settings,
   onSettingsImport,
+  videoSourceMode,
+  onVideoSourceModeImport,
   onPlayPauseRef,
   onVideoPlayingCallbackRef,
   onResetCache,
@@ -562,6 +567,8 @@ export function PromptInputWithTimeline({
         onCollapseToggle={onCollapseToggle}
         settings={settings}
         onSettingsImport={onSettingsImport}
+        videoSourceMode={videoSourceMode}
+        onVideoSourceModeImport={onVideoSourceModeImport}
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
         isStreaming={isStreaming}
         isDownloading={isDownloading}

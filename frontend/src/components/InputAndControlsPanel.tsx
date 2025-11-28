@@ -9,20 +9,26 @@ import {
 } from "./ui/select";
 import { Badge } from "./ui/badge";
 import { Upload } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
-import type { PromptItem, PromptTransition } from "../lib/api";
-import { PIPELINES } from "../data/pipelines";
+import type { PromptItem, PromptTransition, InputMode } from "../lib/api";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { getPipelineModeCapabilities } from "../lib/pipelineModes";
+import type { PipelineId } from "../types";
 
 interface InputAndControlsPanelProps {
   className?: string;
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
-  mode: VideoSourceMode;
-  onModeChange: (mode: VideoSourceMode) => void;
+  // Input mode for the pipeline (text-to-video vs video-to-video)
+  mode: InputMode;
+  onModeChange: (mode: InputMode) => void;
+  // Underlying video source when in video input mode
+  videoSourceMode: VideoSourceMode;
+  onVideoSourceModeChange: (mode: VideoSourceMode) => void;
   isStreaming: boolean;
   isConnecting: boolean;
   isPipelineLoading: boolean;
@@ -30,7 +36,7 @@ interface InputAndControlsPanelProps {
   onStartStream: () => void;
   onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
-  pipelineId: string;
+  pipelineId: PipelineId;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
   onPromptsSubmit: (prompts: PromptItem[]) => void;
@@ -58,6 +64,8 @@ export function InputAndControlsPanel({
   error,
   mode,
   onModeChange,
+  videoSourceMode,
+  onVideoSourceModeChange,
   isStreaming,
   isConnecting,
   isPipelineLoading: _isPipelineLoading,
@@ -97,8 +105,8 @@ export function InputAndControlsPanel({
   };
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Get pipeline category, deafault to video-input
-  const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
+  // Get pipeline capabilities
+  const pipelineCapabilities = getPipelineModeCapabilities(pipelineId);
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -132,10 +140,10 @@ export function InputAndControlsPanel({
         <div>
           <h3 className="text-sm font-medium mb-2">Mode</h3>
           <Select
-            value={pipelineCategory === "video-input" ? mode : "text"}
+            value={mode}
             onValueChange={value => {
-              if (pipelineCategory === "video-input" && value) {
-                onModeChange(value as VideoSourceMode);
+              if (value) {
+                onModeChange(value as InputMode);
               }
             }}
             disabled={isStreaming}
@@ -144,32 +152,57 @@ export function InputAndControlsPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {pipelineCategory === "video-input" ? (
+              {pipelineCapabilities.hasInputModeControl ? (
                 <>
+                  <SelectItem value="text">Text</SelectItem>
                   <SelectItem value="video">Video</SelectItem>
-                  <SelectItem value="camera">Camera</SelectItem>
                 </>
               ) : (
-                <SelectItem value="text">Text</SelectItem>
+                <SelectItem value={pipelineCapabilities.nativeMode}>
+                  {pipelineCapabilities.nativeMode === "text"
+                    ? "Text"
+                    : "Video"}
+                </SelectItem>
               )}
             </SelectContent>
           </Select>
         </div>
 
-        {pipelineCategory === "video-input" && (
+        {pipelineCapabilities.requiresVideoInVideoMode && mode === "video" && (
           <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">Input Source</h3>
+            </div>
+            <ToggleGroup
+              type="single"
+              value={videoSourceMode}
+              onValueChange={value => {
+                if (value && (value === "video" || value === "camera")) {
+                  onVideoSourceModeChange(value as VideoSourceMode);
+                }
+              }}
+              disabled={isStreaming || isConnecting}
+              className="w-full mb-2"
+            >
+              <ToggleGroupItem value="video" className="flex-1">
+                Video File
+              </ToggleGroupItem>
+              <ToggleGroupItem value="camera" className="flex-1">
+                Camera
+              </ToggleGroupItem>
+            </ToggleGroup>
             <h3 className="text-sm font-medium mb-2">Input</h3>
             <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
               {isInitializing ? (
                 <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera"
+                  {videoSourceMode === "camera"
                     ? "Requesting camera access..."
                     : "Initializing video..."}
                 </div>
               ) : error ? (
                 <div className="text-center text-red-500 text-sm p-4">
                   <p>
-                    {mode === "camera"
+                    {videoSourceMode === "camera"
                       ? "Camera access failed:"
                       : "Video error:"}
                   </p>
@@ -185,12 +218,14 @@ export function InputAndControlsPanel({
                 />
               ) : (
                 <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera" ? "Camera Preview" : "Video Preview"}
+                  {videoSourceMode === "camera"
+                    ? "Camera Preview"
+                    : "Video Preview"}
                 </div>
               )}
 
               {/* Upload button - only show in video mode */}
-              {mode === "video" && onVideoFileUpload && (
+              {videoSourceMode === "video" && onVideoFileUpload && (
                 <>
                   <input
                     type="file"

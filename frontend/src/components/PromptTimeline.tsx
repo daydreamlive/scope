@@ -23,6 +23,7 @@ import {
 
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
+import type { VideoSourceMode } from "../constants/modes";
 import { generateRandomColor } from "../utils/promptColors";
 
 // Timeline constants
@@ -156,6 +157,8 @@ interface PromptTimelineProps {
   onCollapseToggle?: (collapsed: boolean) => void;
   settings?: SettingsState;
   onSettingsImport?: (settings: Partial<SettingsState>) => void;
+  videoSourceMode?: VideoSourceMode;
+  onVideoSourceModeImport?: (mode: VideoSourceMode) => void;
   onScrollToTime?: (scrollFn: (time: number) => void) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
@@ -182,6 +185,8 @@ export function PromptTimeline({
   onCollapseToggle,
   settings,
   onSettingsImport,
+  videoSourceMode,
+  onVideoSourceModeImport,
   onScrollToTime,
   isStreaming = false,
   isDownloading = false,
@@ -408,6 +413,7 @@ export function PromptTimeline({
       settings: settings
         ? {
             pipelineId: settings.pipelineId,
+            inputMode: settings.inputMode,
             resolution: settings.resolution,
             seed: settings.seed,
             denoisingSteps: settings.denoisingSteps,
@@ -421,6 +427,7 @@ export function PromptTimeline({
             // Exclude paused state as it's runtime-specific
           }
         : undefined,
+      videoSourceMode: videoSourceMode,
       version: "2.0", // Updated version to indicate settings inclusion
       exportedAt: new Date().toISOString(),
     };
@@ -436,7 +443,7 @@ export function PromptTimeline({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [prompts, settings]);
+  }, [prompts, settings, videoSourceMode]);
 
   const handleImport = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -485,7 +492,15 @@ export function PromptTimeline({
               setVisibleEndTime(newVisibleEndTime);
             }
 
+            // Import video source mode FIRST if available, before settings
+            // This ensures the mode is set before the video source is enabled,
+            // preventing the enabled effect from overriding the imported mode
+            if (timelineData.videoSourceMode && onVideoSourceModeImport) {
+              onVideoSourceModeImport(timelineData.videoSourceMode);
+            }
+
             // Import settings if available and callback is provided
+            // This may enable the video source, but the mode is already set above
             if (timelineData.settings && onSettingsImport) {
               onSettingsImport(timelineData.settings);
             }
@@ -514,6 +529,7 @@ export function PromptTimeline({
     [
       onPromptsChange,
       onSettingsImport,
+      onVideoSourceModeImport,
       resetTimelineUI,
       onTimeChange,
       _onPromptSubmit,

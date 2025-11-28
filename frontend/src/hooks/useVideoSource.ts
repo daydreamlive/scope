@@ -18,7 +18,9 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<VideoSourceMode>("video");
+  // undefined = not set yet (use default "video"), explicit value = user/import preference
+  // Follows codebase convention: undefined means "not loaded yet / not set by user"
+  const [mode, setMode] = useState<VideoSourceMode | undefined>(undefined);
   const [selectedVideoFile, setSelectedVideoFile] = useState<string | File>(
     "/assets/test.mp4"
   );
@@ -152,7 +154,12 @@ export function useVideoSource(props?: UseVideoSourceProps) {
 
   const switchMode = useCallback(
     async (newMode: VideoSourceMode) => {
-      // Don't switch modes if not enabled
+      // Always set the mode, even if not enabled
+      // This allows timeline imports to set the mode before the video source is enabled
+      setMode(newMode);
+      setError(null);
+
+      // Don't create stream if not enabled
       if (!props?.enabled) {
         return;
       }
@@ -161,9 +168,6 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       if (props?.onStopStream) {
         props.onStopStream();
       }
-
-      setMode(newMode);
-      setError(null);
 
       let newStream: MediaStream | null = null;
 
@@ -299,17 +303,30 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         videoElementRef.current.pause();
         videoElementRef.current = null;
       }
+      // Don't reset mode when disabled - it may have been set by import before enabling
+      // This allows the imported mode preference to survive until the source is enabled
       return;
     }
+
+    // Determine target mode: use explicit mode if set, otherwise default to "video"
+    // Follows codebase convention: undefined = use default
+    const targetMode = mode ?? "video";
 
     const initializeVideoMode = async () => {
       setIsInitializing(true);
       try {
-        const stream = await createVideoFileStream(FPS);
+        const stream =
+          targetMode === "camera"
+            ? await requestCameraAccess()
+            : await createVideoFileStream(FPS);
         setLocalStream(stream);
       } catch (error) {
-        console.error("Failed to create initial video file stream:", error);
-        setError("Failed to load test video");
+        console.error("Failed to create initial video source stream:", error);
+        setError(
+          targetMode === "camera"
+            ? "Failed to access camera"
+            : "Failed to load test video"
+        );
       } finally {
         setIsInitializing(false);
       }
@@ -326,7 +343,8 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         videoElementRef.current.pause();
       }
     };
-  }, [props?.enabled, createVideoFileStream]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props?.enabled, createVideoFileStream, mode, requestCameraAccess]);
 
   // Handle reinitialization when shouldReinitialize changes
   useEffect(() => {
@@ -339,7 +357,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     localStream,
     isInitializing,
     error,
-    mode,
+    mode: mode ?? "video", // Return effective mode, never undefined externally
     videoResolution,
     switchMode,
     stopVideo,
