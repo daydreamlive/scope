@@ -111,15 +111,21 @@ export function getModeConfig(
     }
   }
 
-  // Ensure required fields have defaults (in case they weren't in modeConfig or had null defaults)
+  // Validate required fields - schema must provide these
   if (!extracted.resolution) {
-    extracted.resolution = { height: 512, width: 512 };
+    throw new Error(
+      `getModeConfig: Missing resolution in ${pipelineId} ${resolvedMode} config. Backend schema must define resolution.`
+    );
   }
   if (extracted.manage_cache === undefined) {
-    extracted.manage_cache = true;
+    throw new Error(
+      `getModeConfig: Missing manage_cache in ${pipelineId} ${resolvedMode} config. Backend schema must define manage_cache.`
+    );
   }
   if (extracted.base_seed === undefined) {
-    extracted.base_seed = 42;
+    throw new Error(
+      `getModeConfig: Missing base_seed in ${pipelineId} ${resolvedMode} config. Backend schema must define base_seed.`
+    );
   }
 
   return extracted;
