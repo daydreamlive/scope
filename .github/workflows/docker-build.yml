@@ -8,6 +8,9 @@ on:
         required: true
         type: string
         default: 'latest'
+  push:
+    branches:
+      - main
 
 jobs:
   build-and-push:
@@ -40,14 +43,27 @@ jobs:
           username: daydreamlive
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      - name: Set image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.version }}"
+            TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
+          else
+            TAG="main"
+            TAGS="daydreamlive/scope:main"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: daydreamlive/scope
           tags: |
-            type=raw,value=${{ github.event.inputs.version }}
-            type=raw,value=latest
+            type=raw,value=${{ steps.tag.outputs.tag }}
+            ${{ github.event_name == 'workflow_dispatch' && 'type=raw,value=latest' || '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -55,6 +71,6 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest
+          tags: ${{ steps.tag.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
