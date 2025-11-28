@@ -12,6 +12,11 @@ def is_hopper_gpu():
     device_name = torch.cuda.get_device_name(0).lower()
     return "h100" in device_name or "hopper" in device_name
 
+def is_b200_gpu():
+    if not torch.cuda.is_available():
+        return False
+    device_name = torch.cuda.get_device_name(0).lower()
+    return "b200" in device_name
 
 FLASH_ATTN_3_AVAILABLE = False
 
@@ -45,7 +50,9 @@ sageattn_func = None
 SAGEATTN_AVAILABLE = False
 # Do not try to load SageAttention on Hopper GPUs because at the moment
 # loading SageAttention 2.2.0 in the sage module causes static on a H100
-if not is_hopper_gpu():
+# Do not try to load SageAttention on B200 GPUs because at the moment
+# SageAttention 2.2.0 is not supported on B200 GPUs
+if not is_hopper_gpu() and not is_b200_gpu():
     from .sage import SAGEATTN_AVAILABLE, sageattn_func
 
 import warnings
