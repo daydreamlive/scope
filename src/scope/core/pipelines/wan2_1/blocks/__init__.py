@@ -1,3 +1,4 @@
+from .auto_prepare_latents import AutoPrepareLatentsBlock, AutoPreprocessVideoBlock
 from .clean_kv_cache import CleanKVCacheBlock
 from .decode import DecodeBlock
 from .denoise import DenoiseBlock
@@ -12,6 +13,8 @@ from .setup_caches import SetupCachesBlock
 from .text_conditioning import TextConditioningBlock
 
 __all__ = [
+    "AutoPrepareLatentsBlock",
+    "AutoPreprocessVideoBlock",
     "CleanKVCacheBlock",
     "DecodeBlock",
     "DenoiseBlock",

@@ -1,6 +1,7 @@
 """Base interface for all pipelines."""
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import torch
 from pydantic import BaseModel
@@ -13,7 +14,64 @@ class Requirements(BaseModel):
 
 
 class Pipeline(ABC):
-    """Abstract base class for all pipelines."""
+    """Abstract base class for all pipelines.
+
+    Pipelines must implement get_schema() to return their metadata and configuration.
+    This metadata is used for:
+    - Dynamic UI generation
+    - API introspection
+    - Parameter validation
+    - Mode-specific configuration
+
+    See helpers.py and schema.py for utilities to simplify schema creation.
+    For multi-mode pipeline support (text/video), use multi_mode.MultiModePipeline
+    as the base class which provides declarative mode configuration.
+    """
+
+    @classmethod
+    def get_schema(cls) -> dict[str, Any]:
+        """Return complete pipeline schema with metadata and mode configurations.
+
+        The schema should be a dictionary compatible with JSON Schema and OpenAPI
+        conventions, containing:
+        - id: Unique pipeline identifier
+        - name: Human-readable pipeline name
+        - description: Pipeline capabilities description
+        - version: Pipeline version string
+        - native_mode: Native input mode ("text" or "video")
+        - supported_modes: List of supported input modes
+        - mode_configs: Dict mapping mode names to their parameter configurations
+
+        Returns:
+            Complete pipeline schema dictionary
+
+        Note:
+            Subclasses should override this method to provide their schema.
+            The default implementation returns an empty dict for backward
+            compatibility with pipelines that haven't migrated yet.
+
+        Example:
+            from .helpers import build_pipeline_schema
+            from .defaults import INPUT_MODE_VIDEO
+
+            return build_pipeline_schema(
+                pipeline_id="my-pipeline",
+                name="My Pipeline",
+                description="Description of capabilities",
+                native_mode=INPUT_MODE_VIDEO,
+                shared={"manage_cache": True, "base_seed": 42},
+                text_overrides={
+                    "resolution": {"height": 512, "width": 512},
+                    "denoising_steps": [1000, 750],
+                },
+                video_overrides={
+                    "resolution": {"height": 512, "width": 512},
+                    "denoising_steps": [750, 250],
+                    "noise_scale": 0.7,
+                },
+            )
+        """
+        return {}
 
     @abstractmethod
     def __call__(
