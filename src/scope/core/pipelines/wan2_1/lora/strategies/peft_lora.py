@@ -396,7 +396,7 @@ class PeftLoRAStrategy:
         logger.debug(f"load_adapter: Sample LoRA keys from file: {sample_lora_keys}")
 
         # Standardize LoRA format if needed (handles lora_up/lora_down, missing diffusion_model prefix, etc.)
-        converted_state = standardize_lora_for_peft(lora_path=lora_path, model=model)
+        converted_state = standardize_lora_for_peft(lora_path=lora_path)
         if converted_state is not None:
             logger.debug(
                 f"load_adapter: Converted LoRA to PEFT format ({len(converted_state)} keys)"

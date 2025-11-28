@@ -152,7 +152,7 @@ def find_lora_pair(
 
 
 def standardize_lora_for_peft(
-    lora_path: str, model: torch.nn.Module
+    lora_path: str,
 ) -> dict[str, torch.Tensor] | None:
     """
     Standardize LoRA formats to PEFT-compatible format.
@@ -164,7 +164,6 @@ def standardize_lora_for_peft(
 
     Args:
         lora_path: Path to original LoRA file
-        model: Model to check for key compatibility
 
     Returns:
         Converted state dict, or None if no conversion needed
