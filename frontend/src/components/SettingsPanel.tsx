@@ -30,7 +30,7 @@ import {
   getPipelineModeCapabilities,
   getEffectiveMode,
 } from "../lib/pipelineModes";
-import { getModeConfig } from "../lib/utils";
+import { getModeConfig, getCachedPipelineSchema } from "../lib/utils";
 
 const MIN_DIMENSION = 16;
 
@@ -224,6 +224,8 @@ export function SettingsPanel({
   };
 
   const currentPipeline = PIPELINES[pipelineId];
+  const cachedSchema = getCachedPipelineSchema(pipelineId);
+  const pipelineName = cachedSchema?.name ?? pipelineId;
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
@@ -255,9 +257,7 @@ export function SettingsPanel({
           <Card>
             <CardContent className="p-4 space-y-2">
               <div>
-                <h4 className="text-sm font-semibold">
-                  {currentPipeline.name}
-                </h4>
+                <h4 className="text-sm font-semibold">{pipelineName}</h4>
               </div>
 
               <div>

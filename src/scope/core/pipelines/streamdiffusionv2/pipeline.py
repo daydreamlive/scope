@@ -39,17 +39,21 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 512, "width": 512},
                 "manage_cache": True,
                 "base_seed": 42,
+                "default_temporal_interpolation_method": "slerp",
+                "default_temporal_interpolation_steps": 0,
             },
             text_overrides={
                 "denoising_steps": TEXT_DENOISING_STEP_LIST,
                 "noise_scale": None,
                 "noise_controller": None,
+                "default_prompt": "A dog is sitting center frame, looking at the camera",
             },
             video_overrides={
                 "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "noise_scale": 0.7,
                 "noise_controller": True,
                 "input_size": calculate_input_size(__file__),
+                "default_prompt": "A dog in the grass looking around, photorealistic",
             },
         )
 

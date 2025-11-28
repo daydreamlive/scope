@@ -25,6 +25,9 @@ class PassthroughPipeline(Pipeline):
                 "base_seed": 42,
                 "noise_scale": None,
                 "noise_controller": None,
+                "default_prompt": "",
+                "default_temporal_interpolation_method": "slerp",
+                "default_temporal_interpolation_steps": 0,
             },
         )
 

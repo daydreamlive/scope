@@ -65,6 +65,9 @@ export interface ExtractedModeConfig {
   kv_cache_attention_bias?: number | null;
   input_size?: number | null;
   vae_strategy?: string | null;
+  default_prompt?: string | null;
+  default_temporal_interpolation_method?: "linear" | "slerp" | null;
+  default_temporal_interpolation_steps?: number | null;
   [key: string]:
     | number
     | boolean

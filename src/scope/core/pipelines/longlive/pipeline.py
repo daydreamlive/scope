@@ -44,12 +44,15 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             shared={
                 "manage_cache": True,
                 "base_seed": 42,
+                "default_temporal_interpolation_method": "slerp",
+                "default_temporal_interpolation_steps": 0,
             },
             text_overrides={
                 "denoising_steps": DEFAULT_DENOISING_STEP_LIST,
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
                 "noise_controller": None,
+                "default_prompt": "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
             },
             video_overrides={
                 "denoising_steps": [1000, 750],
@@ -58,6 +61,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "noise_controller": True,
                 "input_size": calculate_input_size(__file__),
                 "vae_strategy": "streamdiffusionv2_longlive_scaled",
+                "default_prompt": "A 3D animated scene. A **panda** is sitting at a desk.",
             },
         )
 

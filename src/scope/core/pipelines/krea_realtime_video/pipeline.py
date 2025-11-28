@@ -42,17 +42,21 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "manage_cache": True,
                 "base_seed": 42,
                 "kv_cache_attention_bias": 0.30,
+                "default_temporal_interpolation_method": "linear",
+                "default_temporal_interpolation_steps": 4,
             },
             text_overrides={
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
                 "noise_controller": None,
+                "default_prompt": "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
             },
             video_overrides={
                 "resolution": {"height": 320, "width": 320},
                 "noise_scale": 0.35,
                 "noise_controller": True,
                 "input_size": calculate_input_size(__file__),
+                "default_prompt": "A 3D animated scene. A **panda** is sitting at a desk.",
             },
         )
 

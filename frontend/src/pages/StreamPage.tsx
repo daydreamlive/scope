@@ -46,10 +46,11 @@ export function StreamPage() {
   // Use the stream state hook for settings management
   const { settings, updateSettings, isLoadingSchema } = useStreamState();
 
-  // Prompt state
+  // Prompt state - initialized empty, default prompt set once schema loads
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
-    { text: PIPELINES[settings.pipelineId]?.defaultPrompt || "", weight: 100 },
+    { text: "", weight: 100 },
   ]);
+  const [hasInitializedPrompt, setHasInitializedPrompt] = useState(false);
   const [interpolationMethod, setInterpolationMethod] = useState<
     "linear" | "slerp"
   >("linear");
@@ -177,6 +178,17 @@ export function StreamPage() {
     updates.noiseScale = modeConfig.noise_scale ?? undefined;
     updates.noiseController = modeConfig.noise_controller ?? undefined;
 
+    // Update prompt to mode-specific default
+    const modeDefaultPrompt = modeConfig.default_prompt ?? "";
+    setPromptItems([{ text: modeDefaultPrompt, weight: 100 }]);
+
+    // Reset timeline when switching modes
+    if (timelineRef.current) {
+      timelineRef.current.resetTimelineCompletely();
+    }
+    setSelectedTimelinePrompt(null);
+    setExternalSelectedPromptId(null);
+
     // Mode-specific resolution handling
     if (inputMode === INPUT_MODE.TEXT) {
       updates.resolution =
@@ -236,8 +248,9 @@ export function StreamPage() {
       setTimeout(() => setShouldReinitializeVideo(false), 100);
     }
 
-    // Update the prompt to the new pipeline's default
-    const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
+    // Update the prompt to the new pipeline's default (from backend schema)
+    const modeConfig = getModeConfig(pipelineId);
+    const newDefaultPrompt = modeConfig.default_prompt ?? "";
     setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
 
     // Reset timeline completely but preserve collapse state
@@ -276,7 +289,8 @@ export function StreamPage() {
 
             // Now update the pipeline since download is complete
             const pipelineId = pipelineNeedsModels as PipelineId;
-            const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
+            const downloadedModeConfig = getModeConfig(pipelineId);
+            const newDefaultPrompt = downloadedModeConfig.default_prompt ?? "";
             setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
 
             if (timelineRef.current) {
@@ -478,18 +492,37 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
+  // Initialize prompt with default from backend schema once loaded
+  useEffect(() => {
+    if (!isLoadingSchema && !hasInitializedPrompt) {
+      try {
+        const initialModeConfig = getModeConfig(settings.pipelineId);
+        const defaultPrompt = initialModeConfig.default_prompt ?? "";
+        if (defaultPrompt) {
+          setPromptItems([{ text: defaultPrompt, weight: 100 }]);
+        }
+      } catch {
+        // Schema not yet loaded, will retry on next effect run
+      }
+      setHasInitializedPrompt(true);
+    }
+  }, [isLoadingSchema, hasInitializedPrompt, settings.pipelineId]);
+
   // Update temporal interpolation defaults when pipeline changes
   useEffect(() => {
-    const pipeline = PIPELINES[settings.pipelineId];
-    if (pipeline) {
+    if (isLoadingSchema) return;
+    try {
+      const modeConfig = getModeConfig(settings.pipelineId);
       const defaultMethod =
-        pipeline.defaultTemporalInterpolationMethod || "slerp";
-      const defaultSteps = pipeline.defaultTemporalInterpolationSteps ?? 4;
+        modeConfig.default_temporal_interpolation_method ?? "slerp";
+      const defaultSteps = modeConfig.default_temporal_interpolation_steps ?? 4;
 
       setTemporalInterpolationMethod(defaultMethod);
       setTransitionSteps(defaultSteps);
+    } catch {
+      // Schema not loaded yet
     }
-  }, [settings.pipelineId]);
+  }, [settings.pipelineId, isLoadingSchema]);
 
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;

@@ -85,9 +85,9 @@ export function getPipelineModeCapabilities(
 
   // Get schema from cache - this drives all capabilities
   const cachedSchema = getCachedPipelineSchema(id);
+  // Native mode comes from backend schema, with category-based fallback
   const nativeMode: InputMode =
     cachedSchema?.native_mode ??
-    info?.nativeInputMode ??
     (category === "video-input" ? INPUT_MODE.VIDEO : INPUT_MODE.TEXT);
 
   const textConfig = cachedSchema?.mode_configs?.text;
