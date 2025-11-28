@@ -62,18 +62,6 @@ class PipelineRegistry:
         """
         return list(cls._pipelines.keys())
 
-    @classmethod
-    def get_all_schemas(cls) -> dict[str, dict[str, Any]]:
-        """Get schemas for all registered pipelines.
-
-        Returns:
-            Dictionary mapping pipeline IDs to their schemas
-        """
-        return {
-            pipeline_id: pipeline_class.get_schema()
-            for pipeline_id, pipeline_class in cls._pipelines.items()
-        }
-
 
 # Register all available pipelines
 def _register_pipelines():

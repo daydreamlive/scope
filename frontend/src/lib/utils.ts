@@ -37,22 +37,6 @@ export function getCachedPipelineSchema(
 }
 
 /**
- * Invalidate cached schema for a pipeline.
- * Useful when pipeline is reloaded or updated.
- */
-export function invalidatePipelineSchema(pipelineId: PipelineId): void {
-  pipelineSchemaCache.delete(pipelineId);
-}
-
-/**
- * Clear all cached schemas.
- * Useful for development or when schemas might have changed.
- */
-export function clearSchemaCache(): void {
-  pipelineSchemaCache.clear();
-}
-
-/**
  * Extracted mode config with plain values (defaults extracted from JSON Schema)
  */
 export interface ExtractedModeConfig {
