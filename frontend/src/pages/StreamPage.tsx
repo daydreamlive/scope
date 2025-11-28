@@ -145,6 +145,25 @@ export function StreamPage() {
     enabled: shouldEnableVideoSource,
   });
 
+  // Determine if stream can be started based on pipeline mode and video availability
+  const canStartStream = useMemo(() => {
+    const caps = getPipelineModeCapabilities(settings.pipelineId);
+    const effectiveMode = getEffectiveMode(settings.inputMode, caps);
+    const needsVideoInput = pipelineNeedsVideoSource(caps, effectiveMode);
+
+    if (!needsVideoInput) {
+      return !isInitializing && !isLoadingSchema;
+    }
+
+    return !!localStream && !isInitializing && !isLoadingSchema;
+  }, [
+    settings.pipelineId,
+    settings.inputMode,
+    isInitializing,
+    isLoadingSchema,
+    localStream,
+  ]);
+
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
   };
@@ -809,20 +828,7 @@ export function StreamPage() {
             isStreaming={isStreaming}
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
-            canStartStream={(() => {
-              const caps = getPipelineModeCapabilities(settings.pipelineId);
-              const effectiveMode = getEffectiveMode(settings.inputMode, caps);
-              const needsVideoInput = pipelineNeedsVideoSource(
-                caps,
-                effectiveMode
-              );
-
-              if (!needsVideoInput) {
-                return !isInitializing && !isLoadingSchema;
-              }
-
-              return !!localStream && !isInitializing && !isLoadingSchema;
-            })()}
+            canStartStream={canStartStream}
             onStartStream={handleStartStream}
             onStopStream={stopStream}
             onVideoFileUpload={handleVideoFileUpload}
