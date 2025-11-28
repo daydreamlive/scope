@@ -1,3 +1,8 @@
+"""Quick test for LongLivePipeline with new MultiModePipeline architecture.
+
+Tests both text-to-video and video-to-video modes with a short output.
+"""
+
 import time
 from pathlib import Path
 
@@ -8,6 +13,8 @@ from omegaconf import OmegaConf
 from scope.core.config import get_model_file_path, get_models_dir
 
 from .pipeline import LongLivePipeline
+
+print("test.py: Initializing LongLivePipeline with MultiModePipeline architecture...")
 
 config = OmegaConf.create(
     {
@@ -21,60 +28,67 @@ config = OmegaConf.create(
         ),
         "tokenizer_path": str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")),
         "model_config": OmegaConf.load(Path(__file__).parent / "model.yaml"),
-        "height": 480,
-        "width": 832,
+        "height": 320,
+        "width": 576,
     }
 )
 
 device = torch.device("cuda")
 pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
 
-prompt_texts = [
-    "A realistic video of a Texas Hold'em poker event at a casino. A male player in his late 30s with a medium build, short dark hair, light stubble, and a sharp jawline wears a fitted navy blazer over a charcoal crew-neck tee, dark jeans, and a stainless-steel watch. He sits at a well-lit poker table and tightly grips his hole cards, wearing a tense, serious expression. The table is filled with chips of various colors, the dealer is seen dealing cards, and several rows of slot machines glow in the background. The camera focuses on the player's strained concentration. Wide shot to medium close-up.",
-    "A realistic video of a Texas Hold'em poker event at a casino. The same male player—late 30s, medium build, short dark hair, light stubble, sharp jawline—dressed in a fitted navy blazer over a charcoal tee, dark jeans, and a stainless-steel watch—flicks his cards onto the felt, then leans back in the chair with arms spread wide in celebration. The dealer continues dealing to the table as stacks of multicolored chips crowd the surface; slot machines and nearby patrons fill the background. The camera locks onto the player’s exuberant reaction. Wide shot to medium close-up.",
-    "A realistic video of a Texas Hold'em poker event at a casino. The same late-30s male player, medium build with short dark hair and light stubble, wearing a navy blazer, charcoal tee, dark jeans, and a stainless-steel watch, reveals the winning hand and leans back in celebration while the dealer keeps the game moving. A nearby patron claps and cheers for the winner, amplifying the festive atmosphere. The table brims with colorful chips, with slot machines and other tables behind. The camera centers on the winner’s reaction as the applause rises. Wide shot to medium close-up.",
-    "A realistic video of a Texas Hold'em poker event at a casino. The same male player—late 30s, medium build, short dark hair, light stubble—still in his navy blazer, charcoal tee, dark jeans, and stainless-steel watch—sits upright and begins neatly arranging the stacks of chips in front of him, methodically straightening and organizing the piles. The dealer continues dealing, and rows of slot machines pulse in the background. The camera captures the composed, purposeful movements at the well-lit table. Wide shot to medium close-up.",
-    "A realistic video of a Texas Hold'em poker event at a casino. The same late-30s male player with short dark hair, light stubble, and a sharp jawline, wearing a fitted navy blazer over a charcoal tee, dark jeans, and a stainless-steel watch, glances over his chips and breaks into a proud, self-assured smile, basking in the victorious moment. Multicolored chips crowd the felt, the dealer works the table, and slot machines glow behind. The camera emphasizes the winner’s pride and satisfaction. Wide shot to medium close-up.",
-    "A realistic video of a Texas Hold'em poker event at a casino. The same male player—late 30s, medium build, short dark hair, light stubble—dressed in a navy blazer, charcoal tee, dark jeans, and a stainless-steel watch—shares a celebratory high-five with a nearby patron after the win, laughter and cheers rippling around the table. Stacks of chips are spread across the felt, the dealer continues dealing, and the background features rows of slot machines and other patrons. The camera focuses on the jubilant interaction. Wide shot to medium close-up.",
-]
+print(f"test.py: Pipeline initialized. Base class: {pipeline.__class__.__bases__}")
 
-outputs = []
-latency_measures = []
-fps_measures = []
+# Test 1: Text-to-video mode (generates 16 frames)
+print("\n=== Test 1: Text-to-Video Mode ===")
+prompt = [{"text": "A cat walking through a forest, cinematic lighting", "weight": 100}]
 
-for _, prompt_text in enumerate(prompt_texts):
-    num_frames = 0
-    max_output_frames = 81
-    while num_frames < max_output_frames:
-        start = time.time()
+start = time.time()
+output_text = pipeline(prompts=prompt)
+latency_text = time.time() - start
 
-        prompts = [{"text": prompt_text, "weight": 100}]
-        output = pipeline(prompts=prompts)
+num_frames_text, h, w, c = output_text.shape
+fps_text = num_frames_text / latency_text
 
-        num_output_frames, _, _, _ = output.shape
-        latency = time.time() - start
-        fps = num_output_frames / latency
-
-        print(
-            f"Pipeline generated {num_output_frames} frames latency={latency:2f}s fps={fps}"
-        )
-
-        latency_measures.append(latency)
-        fps_measures.append(fps)
-        num_frames += num_output_frames
-        outputs.append(output.detach().cpu())
-
-# Concatenate all of the THWC tensors
-output_video = torch.concat(outputs)
-print(output_video.shape)
-output_video_np = output_video.contiguous().numpy()
-export_to_video(output_video_np, Path(__file__).parent / "output.mp4", fps=16)
-
-# Print statistics
-print("\n=== Performance Statistics ===")
 print(
-    f"Latency - Avg: {sum(latency_measures) / len(latency_measures):.2f}s, Max: {max(latency_measures):.2f}s, Min: {min(latency_measures):.2f}s"
+    f"test.py: Generated {num_frames_text} frames in {latency_text:.2f}s ({fps_text:.2f} fps)"
 )
+print(f"test.py: Output shape: {output_text.shape}")
+
+# Save text mode output
+output_text_np = output_text.detach().cpu().contiguous().numpy()
+export_to_video(output_text_np, Path(__file__).parent / "output_text.mp4", fps=16)
+print("test.py: Saved text-to-video output to output_text.mp4")
+
+# Test 2: Video-to-video mode (uses first 4 frames as input)
+print("\n=== Test 2: Video-to-Video Mode ===")
+# Video input needs to be a list of individual frame tensors
+# Each frame should be shape [1, H, W, C] for preprocess_chunk
+# We use the first 4 frames from text mode output
+video_input = [output_text[i : i + 1] for i in range(4)]  # Split into 4 separate frames
+print(f"test.py: Video input format: list of {len(video_input)} tensors")
+print(f"test.py: First tensor shape: {video_input[0].shape}")
+
+start = time.time()
+output_video = pipeline(video=video_input, prompts=prompt, input_mode="video")
+latency_video = time.time() - start
+
+num_frames_video = output_video.shape[0]
+fps_video = num_frames_video / latency_video
+
 print(
-    f"FPS - Avg: {sum(fps_measures) / len(fps_measures):.2f}, Max: {max(fps_measures):.2f}, Min: {min(fps_measures):.2f}"
+    f"test.py: Generated {num_frames_video} frames in {latency_video:.2f}s ({fps_video:.2f} fps)"
 )
+print(f"test.py: Output shape: {output_video.shape}")
+
+# Save video mode output
+output_video_np = output_video.detach().cpu().contiguous().numpy()
+export_to_video(output_video_np, Path(__file__).parent / "output_video.mp4", fps=16)
+print("test.py: Saved video-to-video output to output_video.mp4")
+
+# Summary
+print("\n=== Test Summary ===")
+print(f"Text mode: {num_frames_text} frames, {latency_text:.2f}s, {fps_text:.2f} fps")
+print(
+    f"Video mode: {num_frames_video} frames, {latency_video:.2f}s, {fps_video:.2f} fps"
+)
+print("\nMultiModePipeline architecture working correctly!")

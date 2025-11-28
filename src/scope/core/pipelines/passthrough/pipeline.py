@@ -1,12 +1,35 @@
 import torch
 from einops import rearrange
 
+from ..defaults import INPUT_MODE_VIDEO
+from ..helpers import build_pipeline_schema
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 
 
 class PassthroughPipeline(Pipeline):
     """Passthrough pipeline for testing"""
+
+    @classmethod
+    def get_schema(cls) -> dict:
+        """Return schema for Passthrough pipeline."""
+        return build_pipeline_schema(
+            pipeline_id="passthrough",
+            name="Passthrough",
+            description="Simple passthrough pipeline for testing and debugging",
+            native_mode=INPUT_MODE_VIDEO,
+            shared={
+                "denoising_steps": None,
+                "resolution": {"height": 512, "width": 512},
+                "manage_cache": False,
+                "base_seed": 42,
+                "noise_scale": None,
+                "noise_controller": None,
+                "default_prompt": "",
+                "default_temporal_interpolation_method": "slerp",
+                "default_temporal_interpolation_steps": 0,
+            },
+        )
 
     def __init__(
         self,
