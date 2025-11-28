@@ -19,6 +19,10 @@ def __getattr__(name):
         from .passthrough.pipeline import PassthroughPipeline
 
         return PassthroughPipeline
+    elif name == "MultiModePipeline":
+        from .multi_mode import MultiModePipeline
+
+        return MultiModePipeline
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -27,4 +31,5 @@ __all__ = [
     "KreaRealtimeVideoPipeline",
     "StreamDiffusionV2Pipeline",
     "PassthroughPipeline",
+    "MultiModePipeline",
 ]

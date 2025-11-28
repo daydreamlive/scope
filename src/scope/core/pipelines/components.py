@@ -36,5 +36,12 @@ class DictAccessor:
     def __getitem__(self, key):
         return self._data[key]
 
+    def __contains__(self, key):
+        return key in self._data
+
+    def get(self, key, default=None):
+        """Get value with optional default like dict.get()."""
+        return self._data.get(key, default)
+
     def __repr__(self):
         return repr(self._data)
