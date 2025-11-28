@@ -521,7 +521,13 @@ export function StreamPage() {
           setPromptItems([{ text: defaultPrompt, weight: 100 }]);
         }
       } catch {
-        // Schema not yet loaded, will retry on next effect run
+        // Schema not loaded yet - this is expected during initial render
+        // Will be populated once useStreamState finishes fetching
+        if (import.meta.env.DEV) {
+          console.debug(
+            `StreamPage: Schema not yet loaded for ${settings.pipelineId}, will retry after fetch completes`
+          );
+        }
       }
       setHasInitializedPrompt(true);
     }
@@ -539,7 +545,13 @@ export function StreamPage() {
       setTemporalInterpolationMethod(defaultMethod);
       setTransitionSteps(defaultSteps);
     } catch {
-      // Schema not loaded yet
+      // Schema not loaded yet - this is expected during initial render
+      // Will be populated once useStreamState finishes fetching
+      if (import.meta.env.DEV) {
+        console.debug(
+          `StreamPage: Schema not yet loaded for ${settings.pipelineId}, will retry after fetch completes`
+        );
+      }
     }
   }, [settings.pipelineId, isLoadingSchema]);
 

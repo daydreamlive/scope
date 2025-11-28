@@ -93,23 +93,20 @@ export function useStreamState() {
 
   // Fetch and apply pipeline schema when pipeline changes
   useEffect(() => {
+    const abortController = new AbortController();
+
     const fetchSchema = async () => {
-      const targetPipelineId = settings.pipelineId; // Capture current pipelineId
       setIsLoadingSchema(true);
       try {
-        const schemaResponse = await getPipelineSchema(targetPipelineId);
+        const schemaResponse = await getPipelineSchema(settings.pipelineId);
 
-        // Check if pipeline hasn't changed while we were fetching
-        // (avoids race condition if user quickly switches pipelines)
-        if (targetPipelineId !== settings.pipelineId) {
-          console.log(
-            `useStreamState: Ignoring stale schema for ${targetPipelineId}`
-          );
-          return;
+        // Check if request was cancelled (pipeline changed during fetch)
+        if (abortController.signal.aborted) {
+          return; // Request was cancelled, new one is in flight
         }
 
         // Cache schema for use by other components
-        cachePipelineSchema(targetPipelineId, schemaResponse);
+        cachePipelineSchema(settings.pipelineId, schemaResponse);
 
         // Get native mode and its config
         const nativeMode = schemaResponse.native_mode;
@@ -117,14 +114,6 @@ export function useStreamState() {
 
         if (nativeModeConfig) {
           setSettings(prev => {
-            // Double-check we're still on the same pipeline
-            if (prev.pipelineId !== targetPipelineId) {
-              console.log(
-                `useStreamState: Pipeline changed during schema fetch, skipping settings update`
-              );
-              return prev;
-            }
-
             // Use native mode when inputMode is undefined (pipeline just changed)
             // Otherwise preserve current mode (user explicitly selected a mode)
             const currentMode = prev.inputMode ?? nativeMode;
@@ -165,6 +154,10 @@ export function useStreamState() {
         }
         setIsLoadingSchema(false);
       } catch (error) {
+        // Ignore errors from cancelled requests
+        if (abortController.signal.aborted) {
+          return;
+        }
         console.error(
           "useStreamState: Failed to fetch pipeline schema:",
           error
@@ -176,6 +169,10 @@ export function useStreamState() {
     };
 
     fetchSchema();
+
+    return () => {
+      abortController.abort();
+    };
   }, [settings.pipelineId]);
 
   // Set recommended quantization when krea-realtime-video is selected
