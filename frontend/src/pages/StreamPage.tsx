@@ -963,6 +963,7 @@ export function StreamPage() {
           <SettingsPanel
             className="h-full"
             pipelineId={settings.pipelineId}
+            isLoadingSchema={isLoadingSchema}
             onPipelineIdChange={handlePipelineIdChange}
             inputMode={settings.inputMode}
             isStreaming={isStreaming}

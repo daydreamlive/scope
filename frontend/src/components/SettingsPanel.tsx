@@ -30,12 +30,14 @@ import {
   getPipelineModeCapabilities,
   getEffectiveMode,
 } from "../lib/pipelineModes";
+import { getModeConfig } from "../lib/utils";
 
 const MIN_DIMENSION = 16;
 
 interface SettingsPanelProps {
   className?: string;
   pipelineId: PipelineId;
+  isLoadingSchema?: boolean;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
@@ -69,6 +71,7 @@ interface SettingsPanelProps {
 export function SettingsPanel({
   className = "",
   pipelineId,
+  isLoadingSchema = false,
   onPipelineIdChange,
   isStreaming = false,
   isDownloading = false,
@@ -97,6 +100,9 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const modeCapabilities = getPipelineModeCapabilities(pipelineId);
   const effectiveInputMode = getEffectiveMode(inputMode, modeCapabilities);
+  const modeConfig = !isLoadingSchema
+    ? getModeConfig(pipelineId, effectiveInputMode)
+    : null;
 
   // Local slider state management hooks
   // No hardcoded defaults - values come from backend pipeline schema
@@ -613,6 +619,7 @@ export function SettingsPanel({
           <DenoisingStepsSlider
             value={denoisingSteps || []}
             onChange={onDenoisingStepsChange || (() => {})}
+            defaultValues={modeConfig?.denoising_steps ?? undefined}
             tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
           />
         )}
