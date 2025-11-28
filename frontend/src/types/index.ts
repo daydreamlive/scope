@@ -44,6 +44,12 @@ export interface LoRAConfig {
  * Convention for optional fields:
  * - undefined = not loaded yet / not set by user (waiting for schema)
  * - null = explicitly not applicable / disabled for current mode
+ *
+ * Fields with | null union: noiseScale, noiseController, quantization
+ * (These can be disabled/not applicable depending on mode)
+ *
+ * Fields without | null: inputMode, resolution, seed, denoisingSteps, etc.
+ * (These are always applicable, just may not be loaded yet)
  */
 export interface SettingsState {
   pipelineId: PipelineId;
@@ -54,12 +60,9 @@ export interface SettingsState {
   };
   seed?: number;
   denoisingSteps?: number[];
-  // noiseScale and noiseController are undefined when not loaded,
-  // null when not applicable (e.g., in text-to-video mode)
   noiseScale?: number | null;
   noiseController?: boolean | null;
   manageCache?: boolean;
-  // quantization is null when not used/disabled
   quantization?: "fp8_e4m3fn" | null;
   kvCacheAttentionBias?: number;
   paused?: boolean;
