@@ -28,6 +28,7 @@ export interface LoRAConfig {
   id: string;
   path: string;
   scale: number;
+  mergeMode?: LoraMergeStrategy;
 }
 
 export interface SettingsState {

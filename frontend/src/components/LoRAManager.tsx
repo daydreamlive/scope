@@ -1,13 +1,16 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Plus, X, RefreshCw } from "lucide-react";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "./ui/tooltip";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import { Plus, X, RefreshCw } from "lucide-react";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
+import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { LoRAConfig, LoraMergeStrategy } from "../types";
 import { listLoRAFiles, type LoRAFileInfo } from "../lib/api";
 import { FilePicker } from "./ui/file-picker";
@@ -61,6 +64,7 @@ export function LoRAManager({
       id: crypto.randomUUID(),
       path: "",
       scale: 1.0,
+      mergeMode: loraMergeStrategy,
     };
     onLorasChange([...loras, newLora]);
   };
@@ -81,6 +85,18 @@ export function LoRAManager({
 
   const handleScaleCommit = (id: string, scale: number) => {
     handleLoraChange(id, { scale });
+  };
+
+  const getScaleAdjustmentInfo = (lora: LoRAConfig) => {
+    const effectiveMergeMode = lora.mergeMode || loraMergeStrategy;
+    const isPermanentMerge = effectiveMergeMode === "permanent_merge";
+    const isDisabled = disabled || (isStreaming && isPermanentMerge);
+    const tooltipText =
+      isStreaming && isPermanentMerge
+        ? PARAMETER_METADATA.loraScaleDisabledDuringStream.tooltip
+        : PARAMETER_METADATA.loraScale.tooltip;
+
+    return { isDisabled, tooltipText };
   };
 
   return (
@@ -155,42 +171,56 @@ export function LoRAManager({
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-12">Scale:</span>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="flex-1 min-w-0">
-                      <SliderWithInput
-                        value={localScales[lora.id] ?? lora.scale}
-                        onValueChange={value => {
-                          handleLocalScaleChange(lora.id, value);
-                        }}
-                        onValueCommit={value => {
-                          handleScaleCommit(lora.id, value);
-                        }}
-                        min={-10}
-                        max={10}
-                        step={0.1}
-                        incrementAmount={0.1}
-                        disabled={
-                          disabled ||
-                          (isStreaming &&
-                            loraMergeStrategy === "permanent_merge")
-                        }
-                        className="flex-1"
-                        valueFormatter={v => Math.round(v * 10) / 10}
-                      />
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="text-xs">
-                      {isStreaming && loraMergeStrategy === "permanent_merge"
-                        ? "Runtime adjustment is disabled with Permanent Merge strategy. LoRA scales are fixed at load time."
-                        : "Adjust LoRA strength. Updates automatically when you release the slider or use +/- buttons. 0.0 = no effect, 1.0 = full strength"}
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <LabelWithTooltip
+                label="Strategy:"
+                tooltip={PARAMETER_METADATA.loraMergeStrategy.tooltip}
+                className="text-xs text-muted-foreground w-16"
+              />
+              <Select
+                value={lora.mergeMode || loraMergeStrategy}
+                onValueChange={value => {
+                  handleLoraChange(lora.id, {
+                    mergeMode: value as LoraMergeStrategy,
+                  });
+                }}
+                disabled={disabled || isStreaming}
+              >
+                <SelectTrigger className="h-7 flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="permanent_merge">
+                    Permanent Merge
+                  </SelectItem>
+                  <SelectItem value="runtime_peft">Runtime PEFT</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <LabelWithTooltip
+                label="Scale:"
+                tooltip={getScaleAdjustmentInfo(lora).tooltipText}
+                className="text-xs text-muted-foreground w-16"
+              />
+              <div className="flex-1 min-w-0">
+                <SliderWithInput
+                  value={localScales[lora.id] ?? lora.scale}
+                  onValueChange={value => {
+                    handleLocalScaleChange(lora.id, value);
+                  }}
+                  onValueCommit={value => {
+                    handleScaleCommit(lora.id, value);
+                  }}
+                  min={-10}
+                  max={10}
+                  step={0.1}
+                  incrementAmount={0.1}
+                  disabled={getScaleAdjustmentInfo(lora).isDisabled}
+                  className="flex-1"
+                  valueFormatter={v => Math.round(v * 10) / 10}
+                />
+              </div>
             </div>
           </div>
         ))}
