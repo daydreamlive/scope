@@ -55,7 +55,7 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   quantization: {
     label: "Quantization:",
     tooltip:
-      "Quantization method for the diffusion model. fp8_e4m3fn reduces memory usage and improves performance, but might affect quality. None uses full precision and uses more meory, but does not affect quality.",
+      "Quantization method for the diffusion model. fp8_e4m3fn (Dynamic) reduces memory usage, but might affect performance and quality. None uses full precision and uses more memory, but does not affect performance and quality.",
   },
   kvCacheAttentionBias: {
     label: "Cache Bias:",
