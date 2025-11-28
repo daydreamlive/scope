@@ -255,7 +255,7 @@ export function PromptInputWithTimeline({
       }
       return false;
     }
-    return isStreaming; // Already streaming
+    return true; // Already streaming
   }, [isStreaming, onStartStream]);
 
   // Check if at end of timeline
@@ -289,8 +289,10 @@ export function PromptInputWithTimeline({
       setIsLive(true);
       onLiveStateChange?.(true);
 
+      console.log("[PromptInputWithTimeline] handleStartPlayback", prompts.length);
       // Only create a new live prompt if there are no prompts at all in the timeline
       if (prompts.length === 0) {
+        console.log("[PromptInputWithTimeline] Creating new live prompt ", prompts);
         const streamStartedAgain = await initializeStream();
         if (streamStartedAgain) {
           const livePrompt = buildLivePromptFromCurrent(

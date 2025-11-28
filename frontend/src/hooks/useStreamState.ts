@@ -33,6 +33,7 @@ export function useStreamState() {
     quantization: null,
     kvCacheAttentionBias: 0.3, // Default cache bias
     paused: false, // Default to not paused (generating)
+    cloudMode: false,
     loraMergeStrategy: "permanent_merge", // Default LoRA merge strategy
   });
 
@@ -53,6 +54,7 @@ export function useStreamState() {
         const info = await getHardwareInfo();
         setHardwareInfo(info);
       } catch (error) {
+        // TODO disable local gpu mode if this fails and only allow cloud?
         console.error("Failed to fetch hardware info:", error);
       }
     };

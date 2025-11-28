@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { WhepClient } from "@/lib/WhepClient";
 
 interface WebRTCStats {
   fps: number;
@@ -8,11 +9,13 @@ interface WebRTCStats {
 interface UseWebRTCStatsProps {
   peerConnectionRef: React.MutableRefObject<RTCPeerConnection | null>;
   isStreaming: boolean;
+  whepClientRef?: React.MutableRefObject<WhepClient | null>;
 }
 
 export function useWebRTCStats({
   peerConnectionRef,
   isStreaming,
+  whepClientRef,
 }: UseWebRTCStatsProps) {
   const [stats, setStats] = useState<WebRTCStats>({
     fps: 0,
@@ -30,7 +33,10 @@ export function useWebRTCStats({
   const bitrateHistoryRef = useRef<number[]>([]);
 
   const calculateStats = useCallback(async () => {
-    const peerConnection = peerConnectionRef.current;
+    // Try to get peer connection from whepClientRef first (cloud mode), then fall back to local
+    const cloudPeerConnection = whepClientRef?.current?.getPeerConnection();
+    const localPeerConnection = peerConnectionRef.current;
+    const peerConnection = cloudPeerConnection || localPeerConnection;
 
     if (!peerConnection || !isStreaming) {
       setStats(prev => ({ ...prev, fps: 0, bitrate: 0 }));
@@ -116,11 +122,15 @@ export function useWebRTCStats({
     } catch (error) {
       console.error("Error getting WebRTC stats:", error);
     }
-  }, [peerConnectionRef, isStreaming]);
+  }, [peerConnectionRef, isStreaming, whepClientRef]);
 
   // Start/stop stats collection based on streaming state
   useEffect(() => {
-    const peerConnection = peerConnectionRef.current;
+    // Check for peer connection from either source
+    const cloudPeerConnection = whepClientRef?.current?.getPeerConnection();
+    const localPeerConnection = peerConnectionRef.current;
+    const peerConnection = cloudPeerConnection || localPeerConnection;
+
     if (isStreaming && peerConnection) {
       // Start collecting stats immediately
       calculateStats();
@@ -150,7 +160,7 @@ export function useWebRTCStats({
         statsIntervalRef.current = null;
       }
     };
-  }, [isStreaming, peerConnectionRef, calculateStats]);
+  }, [isStreaming, peerConnectionRef, whepClientRef, calculateStats]);
 
   return stats;
 }

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, type RefObject } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
+import { WhepClient } from "@/lib/WhepClient";
 
 interface VideoOutputProps {
   className?: string;
@@ -14,6 +16,7 @@ interface VideoOutputProps {
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
   onVideoPlaying?: () => void;
+  whepClientRef?: React.MutableRefObject<WhepClient | null>;
 }
 
 export function VideoOutput({
@@ -27,8 +30,11 @@ export function VideoOutput({
   onPlayPauseToggle,
   onStartStream,
   onVideoPlaying,
+  whepClientRef,
 }: VideoOutputProps) {
+  const { playbackUrl } = usePlaybackUrl();
   const videoRef = useRef<HTMLVideoElement>(null);
+
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
@@ -39,10 +45,31 @@ export function VideoOutput({
     }
   }, [remoteStream]);
 
+  // Sync video element play/pause state with isPlaying prop
+  useEffect(() => {
+    const video = videoRef.current;
+    // playbackUrl indicates a cloud stream is playing
+    if (!video || !playbackUrl) return;
+
+    // Check if video state is out of sync with prop
+    const shouldBePlaying = isPlaying;
+    const isActuallyPlaying = !video.paused;
+
+    if (shouldBePlaying !== isActuallyPlaying) {
+      if (shouldBePlaying) {
+        video.play().catch((err) => {
+          console.error("[VideoOutput] Error playing video:", err);
+        });
+      } else {
+        video.pause();
+      }
+    }
+  }, [isPlaying, remoteStream, playbackUrl]);
+
   // Listen for video playing event to notify parent
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !remoteStream) return;
+    if (!video || !(remoteStream || playbackUrl)) return;
 
     const handlePlaying = () => {
       onVideoPlaying?.();
@@ -59,10 +86,11 @@ export function VideoOutput({
     return () => {
       video.removeEventListener("playing", handlePlaying);
     };
-  }, [onVideoPlaying, remoteStream]);
+  }, [onVideoPlaying, remoteStream, playbackUrl]);
 
   const triggerPlayPause = useCallback(() => {
-    if (onPlayPauseToggle && remoteStream) {
+    // Allow play/pause when we have either a direct MediaStream or a cloud playback URL
+    if (onPlayPauseToggle && (remoteStream || playbackUrl)) {
       onPlayPauseToggle();
 
       // Show overlay and immediately start fade out animation
@@ -84,7 +112,7 @@ export function VideoOutput({
         setIsFadingOut(false);
       }, 400);
     }
-  }, [onPlayPauseToggle, remoteStream]);
+  }, [onPlayPauseToggle, remoteStream, playbackUrl]);
 
   const handleVideoClick = () => {
     triggerPlayPause();
@@ -94,7 +122,7 @@ export function VideoOutput({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only trigger if spacebar is pressed and stream is active
-      if (e.code === "Space" && remoteStream) {
+      if (e.code === "Space" && (remoteStream || playbackUrl)) {
         // Don't trigger if user is typing in an input/textarea/select or any contenteditable element
         const target = e.target as HTMLElement;
         const isInputFocused =
@@ -115,7 +143,7 @@ export function VideoOutput({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [remoteStream, triggerPlayPause]);
+  }, [remoteStream, playbackUrl, triggerPlayPause]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -126,13 +154,22 @@ export function VideoOutput({
     };
   }, []);
 
+  // Callback to sync whepClientRef when the client is created
+  const handleClientCreated = useCallback((client: WhepClient | null) => {
+    if (whepClientRef) {
+      whepClientRef.current = client;
+    }
+  }, [whepClientRef]);
+
+  useWhepConnection(playbackUrl, videoRef, handleClientCreated);
+
   return (
     <Card className={`h-full flex flex-col ${className}`}>
       <CardHeader className="flex-shrink-0">
         <CardTitle className="text-base font-medium">Video Output</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
-        {remoteStream ? (
+        {remoteStream || playbackUrl ? (
           <div
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
@@ -189,3 +226,37 @@ export function VideoOutput({
     </Card>
   );
 }
+
+export const useWhepConnection = (
+  playbackUrl: string | null | undefined,
+  videoRef: RefObject<HTMLVideoElement | null>,
+  onClientCreated?: (client: WhepClient | null) => void,
+  depsKey?: number,
+) => {
+  const clientRef = useRef<WhepClient | null>(null);
+
+  useEffect(() => {
+    if (!playbackUrl) {
+      if (clientRef.current) {
+        void clientRef.current.stop();
+        clientRef.current = null;
+      }
+      onClientCreated?.(null);
+      return;
+    }
+
+    const client = new WhepClient(playbackUrl, () => videoRef.current);
+    clientRef.current = client;
+    client.start();
+    onClientCreated?.(client);
+
+    return () => {
+      if (clientRef.current) {
+        void clientRef.current.stop();
+        clientRef.current = null;
+      }
+    };
+  }, [playbackUrl, videoRef, depsKey]);
+
+  return clientRef;
+};
