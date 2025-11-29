@@ -60,7 +60,6 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "noise_scale": 0.7,
                 "noise_controller": True,
                 "input_size": calculate_input_size(__file__),
-                "vae_strategy": "streamdiffusionv2_longlive_scaled",
                 "default_prompt": "A 3D animated scene. A **panda** is sitting at a desk.",
             },
         )
@@ -84,7 +83,7 @@ class LongLivePipeline(MultiModePipeline, LoRAEnabledPipeline):
             "text_encoder": WanTextEncoderWrapper,
             "vae": {
                 "text": {"strategy": "longlive"},
-                "video": {"strategy": "streamdiffusionv2_longlive_scaled"},
+                "video": {"strategy": "streaming_lightvae_longlive_scaled"},
             },
         }
 

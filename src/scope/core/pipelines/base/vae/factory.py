@@ -21,6 +21,14 @@ _VAE_REGISTRY: dict[str, tuple[str, str] | type] = {
         "scope.core.pipelines.base.vae.lightvae",
         "LightVAEWrapper",
     ),
+    "streaming_lightvae": (
+        "scope.core.pipelines.base.vae.lightvae",
+        "StreamingLightVAEWrapper",
+    ),
+    "streaming_lightvae_longlive_scaled": (
+        "scope.core.pipelines.base.vae.lightvae",
+        "StreamingLightVAEWrapperWithLongLiveScaling",
+    ),
 }
 
 # Default strategy for each pipeline

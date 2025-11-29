@@ -401,8 +401,6 @@ class Decoder3d(nn.Module):
 
         if feat_idx is None:
             feat_idx = [0]
-        else:
-            feat_idx[0] = 0
 
         if feat_cache is not None:
             idx = feat_idx[0]
@@ -570,6 +568,7 @@ class LightVAE_(nn.Module):
         iter_ = z.shape[2]
         x = self.conv2(z)
         for i in range(iter_):
+            self._conv_idx = [0]
             result = self.decoder(
                 x[:, :, i : i + 1, :, :],
                 feat_cache=self._feat_map,
@@ -601,6 +600,7 @@ class LightVAE_(nn.Module):
         outs = []
 
         for i in range(iter_):
+            self._conv_idx = [0]
             result = self.decoder(
                 x[:, :, i : i + 1, :, :],
                 feat_cache=self._feat_map,
@@ -712,6 +712,7 @@ class LightVAE_(nn.Module):
         else:
             out = []
             for i in range(t):
+                self._conv_idx = [0]
                 result = self.decoder(
                     x[:, :, i : (i + 1), :, :],
                     feat_cache=self._feat_map,
@@ -901,3 +902,93 @@ class LightVAEWrapper(torch.nn.Module):
     def clear_cache(self):
         """Clear cached state for streaming decode."""
         self.model.clear_cache()
+
+
+class StreamingLightVAEWrapper(LightVAEWrapper):
+    """Streaming-enabled LightVAE wrapper based on StreamDiffusionV2 streaming patterns.
+
+    This subclass of LightVAEWrapper uses stream_encode and stream_decode methods
+    for optimized real-time video processing with minimal memory overhead, similar
+    to StreamDiffusionV2VAE but using the LightVAE model (75% pruned WanVAE).
+
+    The streaming methods handle first_batch initialization and cache management
+    automatically for efficient frame-by-frame processing.
+    """
+
+    def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
+        """Encode video pixels to latents with streaming-friendly processing.
+
+        Args:
+            pixel: Input video tensor [batch, channels, frames, height, width]
+
+        Returns:
+            Latent tensor [batch, frames, channels, height, width]
+        """
+        latent = self.model.stream_encode(pixel)
+        return latent.permute(0, 2, 1, 3, 4)
+
+    def decode_to_pixel(
+        self, latent: torch.Tensor, use_cache: bool = True
+    ) -> torch.Tensor:
+        """Decode latents to video pixels with streaming-friendly processing.
+
+        Args:
+            latent: Latent tensor [batch, frames, channels, height, width]
+            use_cache: Whether to use decoder cache (always True for streaming)
+
+        Returns:
+            Video tensor [batch, frames, channels, height, width] in range [-1, 1]
+        """
+        zs = latent.permute(0, 2, 1, 3, 4)
+        zs = zs.to(torch.bfloat16).to("cuda")
+        device, dtype = latent.device, latent.dtype
+        scale = [
+            self.mean.to(device=device, dtype=dtype),
+            1.0 / self.std.to(device=device, dtype=dtype),
+        ]
+        output = self.model.stream_decode(zs, scale).float().clamp_(-1, 1)
+        output = output.permute(0, 2, 1, 3, 4)
+        return output
+
+    def clear_cache(self):
+        """Clear decoder cache for next sequence."""
+        self.model.first_batch = True
+
+
+class StreamingLightVAEWrapperWithLongLiveScaling(StreamingLightVAEWrapper):
+    """StreamingLightVAE wrapper with LongLive-style latent scaling for cross-pipeline use.
+
+    This subclass applies the same latent normalization as LongLiveVAE, making it
+    suitable for use in the LongLive pipeline's video-to-video mode where streaming
+    efficiency is needed but latent distributions must match LongLive expectations.
+
+    Note: This implementation uses subclassing for scaling. A future enhancement could
+    parameterize scaling behavior in the base StreamingLightVAEWrapper class to avoid
+    the need for separate classes.
+    """
+
+    def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
+        """Encode video pixels with LongLive-style scaling applied.
+
+        Args:
+            pixel: Input video tensor [batch, channels, frames, height, width]
+
+        Returns:
+            Latent tensor [batch, frames, channels, height, width] with scaling
+        """
+        latent = self.model.stream_encode(pixel)
+
+        device, dtype = pixel.device, pixel.dtype
+        scale = [
+            self.mean.to(device=device, dtype=dtype),
+            1.0 / self.std.to(device=device, dtype=dtype),
+        ]
+
+        if isinstance(scale[0], torch.Tensor):
+            latent = (latent - scale[0].view(1, latent.shape[1], 1, 1, 1)) * scale[
+                1
+            ].view(1, latent.shape[1], 1, 1, 1)
+        else:
+            latent = (latent - scale[0]) * scale[1]
+
+        return latent.permute(0, 2, 1, 3, 4)

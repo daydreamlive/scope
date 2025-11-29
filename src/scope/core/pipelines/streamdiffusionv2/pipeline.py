@@ -75,7 +75,7 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
             "generator": WanDiffusionWrapper,
             "text_encoder": WanTextEncoderWrapper,
             "vae": {
-                "text": {"strategy": "streamdiffusionv2"},
+                "text": {"strategy": "longlive"},
                 "video": {"strategy": "streamdiffusionv2"},
             },
         }
