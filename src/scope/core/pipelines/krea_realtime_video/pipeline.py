@@ -3,7 +3,7 @@ import time
 
 import torch
 
-from ..defaults import INPUT_MODE_TEXT
+from ..defaults import INPUT_MODE_TEXT, INPUT_MODE_VIDEO
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
 from ..utils import Quantization, calculate_input_size, load_model_config
@@ -32,6 +32,9 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
     @classmethod
     def get_schema(cls) -> dict:
         """Return schema for Krea Realtime Video pipeline."""
+        components = cls.get_components()
+        vae_components = components.get("vae", {})
+
         return build_pipeline_schema(
             pipeline_id="krea-realtime-video",
             name="Krea Realtime Video",
@@ -49,6 +52,7 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "resolution": {"height": 320, "width": 576},
                 "noise_scale": None,
                 "noise_controller": None,
+                "vae_strategy": vae_components.get(INPUT_MODE_TEXT, {}).get("strategy"),
                 "default_prompt": "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
             },
             video_overrides={
@@ -56,6 +60,9 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "noise_scale": 0.35,
                 "noise_controller": True,
                 "input_size": calculate_input_size(__file__),
+                "vae_strategy": vae_components.get(INPUT_MODE_VIDEO, {}).get(
+                    "strategy"
+                ),
                 "default_prompt": "A 3D animated scene. A **panda** is sitting at a desk.",
             },
         )

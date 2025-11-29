@@ -19,7 +19,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from scope.core.pipelines.base.vae.factory import get_available_strategies
 
 # Import PipelineRegistry at module level to ensure it's initialized during server startup
 # This prevents lazy import overhead in schema endpoints and ensures SageAttention
@@ -497,6 +499,25 @@ async def get_hardware_info():
         return HardwareInfoResponse(vram_gb=vram_gb)
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class VAEStrategiesResponse(BaseModel):
+    """Response containing list of available VAE strategies."""
+
+    strategies: list[str] = Field(
+        ..., description="List of available VAE strategy names"
+    )
+
+
+@app.get("/api/v1/vae/strategies", response_model=VAEStrategiesResponse)
+async def get_vae_strategies():
+    """Get list of available VAE strategies."""
+    try:
+        strategies = get_available_strategies()
+        return VAEStrategiesResponse(strategies=strategies)
+    except Exception as e:
+        logger.error(f"get_vae_strategies: Error getting VAE strategies: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

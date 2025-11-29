@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -32,6 +32,7 @@ import {
   getEffectiveMode,
 } from "../lib/pipelineModes";
 import { getModeConfig, getCachedPipelineSchema } from "../lib/utils";
+import { getVAEStrategies } from "../lib/api";
 
 const MIN_DIMENSION = 16;
 
@@ -67,6 +68,8 @@ interface SettingsPanelProps {
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
   onLoraMergeStrategyChange?: (strategy: LoraMergeStrategy) => void;
+  vaeStrategy?: string;
+  onVaeStrategyChange?: (strategy: string) => void;
 }
 
 export function SettingsPanel({
@@ -98,6 +101,8 @@ export function SettingsPanel({
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
   onLoraMergeStrategyChange,
+  vaeStrategy,
+  onVaeStrategyChange,
 }: SettingsPanelProps) {
   const modeCapabilities = getPipelineModeCapabilities(pipelineId);
   const effectiveInputMode = getEffectiveMode(inputMode, modeCapabilities);
@@ -122,6 +127,22 @@ export function SettingsPanel({
   const [heightError, setHeightError] = useState<string | null>(null);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+
+  // VAE strategies state
+  const [vaeStrategies, setVaeStrategies] = useState<string[]>([]);
+
+  // Fetch available VAE strategies on mount
+  useEffect(() => {
+    const fetchVAEStrategies = async () => {
+      try {
+        const response = await getVAEStrategies();
+        setVaeStrategies(response.strategies);
+      } catch (error) {
+        console.error("SettingsPanel: Failed to fetch VAE strategies:", error);
+      }
+    };
+    fetchVAEStrategies();
+  }, []);
 
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -253,6 +274,30 @@ export function SettingsPanel({
             </SelectContent>
           </Select>
         </div>
+
+        {modeConfig?.vae_strategy && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">VAE Strategy</h3>
+            <Select
+              value={vaeStrategy ?? modeConfig.vae_strategy ?? ""}
+              onValueChange={value => {
+                onVaeStrategyChange?.(value);
+              }}
+              disabled={isStreaming || isDownloading}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a VAE strategy" />
+              </SelectTrigger>
+              <SelectContent>
+                {vaeStrategies.map(strategy => (
+                  <SelectItem key={strategy} value={strategy}>
+                    {strategy}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {currentPipeline && (
           <Card>

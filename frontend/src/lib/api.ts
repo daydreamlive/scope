@@ -46,6 +46,7 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   seed?: number;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  vae_strategy?: string;
 }
 
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
@@ -55,6 +56,7 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  vae_strategy?: string;
 }
 
 export interface PipelineLoadRequest {
@@ -354,6 +356,27 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
     const errorText = await response.text();
     throw new Error(
       `List LoRA files failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export interface VAEStrategiesResponse {
+  strategies: string[];
+}
+
+export const getVAEStrategies = async (): Promise<VAEStrategiesResponse> => {
+  const response = await fetch("/api/v1/vae/strategies", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get VAE strategies failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 

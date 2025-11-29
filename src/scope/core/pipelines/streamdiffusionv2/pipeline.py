@@ -3,7 +3,7 @@ import time
 
 import torch
 
-from ..defaults import INPUT_MODE_VIDEO
+from ..defaults import INPUT_MODE_TEXT, INPUT_MODE_VIDEO
 from ..helpers import build_pipeline_schema
 from ..multi_mode import MultiModePipeline
 from ..utils import calculate_input_size, load_model_config
@@ -30,6 +30,9 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
     @classmethod
     def get_schema(cls) -> dict:
         """Return schema for StreamDiffusionV2 pipeline."""
+        components = cls.get_components()
+        vae_components = components.get("vae", {})
+
         return build_pipeline_schema(
             pipeline_id="streamdiffusionv2",
             name="StreamDiffusion V2",
@@ -46,6 +49,7 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "denoising_steps": TEXT_DENOISING_STEP_LIST,
                 "noise_scale": None,
                 "noise_controller": None,
+                "vae_strategy": vae_components.get(INPUT_MODE_TEXT, {}).get("strategy"),
                 "default_prompt": "A dog is sitting center frame, looking at the camera",
             },
             video_overrides={
@@ -53,6 +57,9 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "noise_scale": 0.7,
                 "noise_controller": True,
                 "input_size": calculate_input_size(__file__),
+                "vae_strategy": vae_components.get(INPUT_MODE_VIDEO, {}).get(
+                    "strategy"
+                ),
                 "default_prompt": "A dog in the grass looking around, photorealistic",
             },
         )
@@ -75,7 +82,7 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
             "generator": WanDiffusionWrapper,
             "text_encoder": WanTextEncoderWrapper,
             "vae": {
-                "text": {"strategy": "longlive"},
+                "text": {"strategy": "lightvae"},
                 "video": {"strategy": "streamdiffusionv2"},
             },
         }

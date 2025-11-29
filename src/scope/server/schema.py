@@ -212,6 +212,10 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
     height: int = Field(default=512, description="Target video height", ge=64, le=2048)
     width: int = Field(default=512, description="Target video width", ge=64, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    vae_strategy: str | None = Field(
+        default=None,
+        description="VAE strategy override (uses pipeline default if None)",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -226,6 +230,10 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     height: int = Field(default=320, description="Target video height", ge=16, le=2048)
     width: int = Field(default=576, description="Target video width", ge=16, le=2048)
     seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    vae_strategy: str | None = Field(
+        default=None,
+        description="VAE strategy override (uses pipeline default if None)",
+    )
 
 
 class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
@@ -237,6 +245,10 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    vae_strategy: str | None = Field(
+        default=None,
+        description="VAE strategy override (uses pipeline default if None)",
     )
 
 

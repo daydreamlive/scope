@@ -137,8 +137,16 @@ class LoadComponentsBlock(ModularPipelineBlocks):
         """
         from .base.vae import create_vae
 
-        mode_spec = vae_spec.get(mode, {})
-        strategy = mode_spec.get("strategy")
+        # Check for VAE strategy override from config (user-selected VAE)
+        vae_strategy_override = components.config.get("vae_strategy_override")
+
+        if vae_strategy_override:
+            # Use override strategy for all modes
+            strategy = vae_strategy_override
+        else:
+            # Use default strategy from pipeline's get_components()
+            mode_spec = vae_spec.get(mode, {})
+            strategy = mode_spec.get("strategy")
 
         if not strategy:
             logger.warning(

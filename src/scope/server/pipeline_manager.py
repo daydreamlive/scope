@@ -235,6 +235,10 @@ class PipelineManager:
         # Pass merge_mode directly to mixin, not via config
         config["_lora_merge_mode"] = lora_merge_mode
 
+        # Store VAE strategy override if provided
+        if load_params and "vae_strategy" in load_params:
+            config["vae_strategy"] = load_params.get("vae_strategy")
+
     def _unload_pipeline_unsafe(self):
         """Unload the current pipeline. Must be called with lock held."""
         if self._pipeline:

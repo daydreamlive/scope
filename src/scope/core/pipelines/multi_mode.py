@@ -142,6 +142,12 @@ class MultiModePipeline(Pipeline):
         components_config["pipeline_name"] = self.__class__.get_schema()["id"]
         components_config["vae_init_kwargs"] = vae_init_kwargs or {}
 
+        # Store VAE strategy override from config if provided
+        # Support both dict-style and attribute-style access (OmegaConf)
+        vae_strategy = getattr(config, "vae_strategy", None)
+        if vae_strategy is not None:
+            components_config["vae_strategy_override"] = vae_strategy
+
         self.components = ComponentsManager(components_config)
         self.components.add("generator", generator)
         self.components.add("scheduler", generator.get_scheduler())

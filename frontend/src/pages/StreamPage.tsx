@@ -194,9 +194,11 @@ export function StreamPage() {
     const modeConfig = getModeConfig(pipelineId, inputMode);
 
     // Common mode-specific defaults (from schema, already mode-aware)
+    // getModeConfig returns ExtractedModeConfig with plain values (defaults already extracted)
     updates.denoisingSteps = modeConfig.denoising_steps ?? undefined;
     updates.noiseScale = modeConfig.noise_scale ?? undefined;
     updates.noiseController = modeConfig.noise_controller ?? undefined;
+    updates.vaeStrategy = modeConfig.vae_strategy ?? undefined;
 
     // Update prompt to mode-specific default
     const modeDefaultPrompt = modeConfig.default_prompt ?? "";
@@ -674,10 +676,11 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed,
+          vae_strategy: settings.vaeStrategy,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, vae_strategy: ${loadParams.vae_strategy}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -692,10 +695,11 @@ export function StreamPage() {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed,
+          vae_strategy: settings.vaeStrategy,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, vae_strategy: ${loadParams.vae_strategy}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -703,10 +707,11 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed,
           quantization: settings.quantization,
+          vae_strategy: settings.vaeStrategy,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, vae_strategy: ${loadParams.vae_strategy}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       }
 
@@ -1041,6 +1046,10 @@ export function StreamPage() {
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy}
             onLoraMergeStrategyChange={handleLoraMergeStrategyChange}
+            vaeStrategy={settings.vaeStrategy}
+            onVaeStrategyChange={vaeStrategy => {
+              updateSettings({ vaeStrategy });
+            }}
           />
         </div>
       </div>
