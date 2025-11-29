@@ -8,6 +8,10 @@ _VAE_REGISTRY: dict[str, tuple[str, str] | type] = {
         "scope.core.pipelines.base.vae.krea_realtime_video",
         "KreaRealtimeVideoVAE",
     ),
+    "krea_streaming": (
+        "scope.core.pipelines.base.vae.krea_streaming",
+        "KreaStreamingVAE",
+    ),
     "longlive": ("scope.core.pipelines.base.vae.longlive", "LongLiveVAE"),
     "streamdiffusionv2": (
         "scope.core.pipelines.base.vae.streamdiffusionv2",

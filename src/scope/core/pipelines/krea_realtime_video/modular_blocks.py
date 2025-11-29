@@ -14,7 +14,11 @@ from ..wan2_1.blocks import (
     SetupCachesBlock,
     TextConditioningBlock,
 )
-from .blocks import PrepareContextFramesBlock, RecomputeKVCacheBlock
+from .blocks import (
+    AutoSetTransformerBlocksLocalAttnSizeBlock,
+    PrepareContextFramesBlock,
+    RecomputeKVCacheBlock,
+)
 
 
 class KreaRealtimeVideoWorkflow(SequentialPipelineBlocks):
@@ -40,6 +44,8 @@ class KreaRealtimeVideoWorkflow(SequentialPipelineBlocks):
         AutoPreprocessVideoBlock,
         # Setup (shared)
         SetupCachesBlock,
+        # Local attention size (AUTO-ROUTED: V2V only)
+        AutoSetTransformerBlocksLocalAttnSizeBlock,
         # Latent preparation (AUTO-ROUTED: T2V vs V2V, after cache setup)
         AutoPrepareLatentsBlock,
         # KV cache management (shared)
@@ -61,6 +67,7 @@ class KreaRealtimeVideoWorkflow(SequentialPipelineBlocks):
         "set_timesteps",
         "auto_preprocess_video",
         "setup_caches",
+        "set_transformer_blocks_local_attn_size",
         "auto_prepare_latents",
         "recompute_kv_cache",
         "denoise",

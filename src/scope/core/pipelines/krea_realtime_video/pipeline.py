@@ -86,7 +86,7 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
             "text_encoder": WanTextEncoderWrapper,
             "vae": {
                 "text": {"strategy": "krea_realtime_video"},
-                "video": {"strategy": "krea_realtime_video"},
+                "video": {"strategy": "krea_streaming"},
             },
         }
 
