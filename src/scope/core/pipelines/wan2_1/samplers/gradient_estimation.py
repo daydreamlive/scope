@@ -11,11 +11,15 @@ class GradientEstimationSampler(Sampler):
 
     Based on the technique from: https://openreview.net/pdf?id=o2ND9v0CeK
 
-    This sampler adds a momentum-like correction term based on the difference
-    between current and previous derivatives, which can improve convergence
-    especially when paired with CFG distillation LoRAs.
+    This sampler uses the CFG_PP-style formulation which directly reconstructs
+    the flow matching interpolation formula rather than using Euler steps.
+    This approach is more appropriate for flow matching models.
 
-    This is a stateful sampler - it maintains the previous derivative between steps.
+    For flow matching where x_t = (1 - sigma) * x0 + sigma * noise:
+    - velocity v = (x - x0_pred) / sigma = noise - x0 (approximation)
+    - x_next = x0_pred + v * sigma_next reconstructs the interpolation
+
+    This is a stateful sampler - it maintains the previous velocity between steps.
 
     Args:
         gamma: Gradient estimation strength. Default 2.0.
@@ -24,12 +28,12 @@ class GradientEstimationSampler(Sampler):
 
     def __init__(self, gamma: float = 2.0):
         self.gamma = gamma
-        self._old_d: torch.Tensor | None = None
+        self._old_velocity: torch.Tensor | None = None
         self._step_index: int = 0
 
     def reset(self) -> None:
         """Reset internal state for a new generation sequence."""
-        self._old_d = None
+        self._old_velocity = None
         self._step_index = 0
 
     def _get_sigma_for_timestep(
@@ -49,15 +53,15 @@ class GradientEstimationSampler(Sampler):
         )
         return scheduler.sigmas[timestep_id]
 
-    def _to_derivative(
+    def _compute_velocity(
         self,
         x: torch.Tensor,
         denoised: torch.Tensor,
         sigma: torch.Tensor,
     ) -> torch.Tensor:
-        """Convert (x, denoised, sigma) to derivative d = (x - denoised) / sigma.
+        """Compute the velocity v = (x - x0_pred) / sigma.
 
-        This is the Karras ODE derivative used in gradient estimation.
+        In flow matching, this approximates the velocity field v = noise - x0.
         """
         return (x - denoised) / sigma.clamp(min=1e-8)
 
@@ -73,10 +77,13 @@ class GradientEstimationSampler(Sampler):
         """
         Perform one denoising step with gradient estimation correction.
 
-        Algorithm:
-        1. Compute derivative d = (x - denoised) / sigma
-        2. Basic Euler step: x_next = x + d * dt
-        3. If not first step, add gradient estimation: x_next += (gamma - 1) * (d - old_d) * dt
+        Uses CFG_PP-style formulation for flow matching:
+        1. Compute velocity v = (x - denoised) / sigma
+        2. Reconstruct at next sigma: x_next = denoised + v * sigma_next
+        3. If not first step, apply gradient estimation correction
+
+        This directly reconstructs the flow matching interpolation formula:
+        x_next = (1 - sigma_next) * x0 + sigma_next * noise
 
         Args:
             x: Current noisy sample [B, F, C, H, W]
@@ -111,22 +118,24 @@ class GradientEstimationSampler(Sampler):
         sigma = sigma.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
         sigma_next = sigma_next.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
 
-        # Compute derivative d = (x - denoised) / sigma
-        d = self._to_derivative(x, denoised, sigma)
+        # Compute velocity v = (x - denoised) / sigma
+        # This is the estimated flow velocity field
+        velocity = self._compute_velocity(x, denoised, sigma)
 
-        # Compute dt (change in sigma)
-        dt = sigma_next - sigma
-
-        # Basic Euler step
-        x_next = x + d * dt
+        # CFG_PP-style step: directly reconstruct at next sigma level
+        # x_next = x0_pred + velocity * sigma_next
+        # This equals: (1 - sigma_next) * x0 + sigma_next * noise (flow matching formula)
+        x_next = denoised + velocity * sigma_next
 
         # Gradient estimation correction (skip on first step)
-        if self._step_index >= 1 and self._old_d is not None:
-            d_bar = (self.gamma - 1) * (d - self._old_d)
-            x_next = x_next + d_bar * dt
+        if self._step_index >= 1 and self._old_velocity is not None:
+            # Compute dt for the correction term
+            dt = sigma_next - sigma
+            velocity_correction = (self.gamma - 1) * (velocity - self._old_velocity)
+            x_next = x_next + velocity_correction * dt
 
-        # Store derivative for next step
-        self._old_d = d.detach().clone()
+        # Store velocity for next step
+        self._old_velocity = velocity.detach().clone()
         self._step_index += 1
 
         return x_next
