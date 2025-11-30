@@ -41,6 +41,8 @@ class StreamDiffusionV2Pipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "base_seed": 42,
                 "default_temporal_interpolation_method": "slerp",
                 "default_temporal_interpolation_steps": 0,
+                "sampler_type": "add_noise",
+                "sampler_options": ["add_noise", "gradient_estimation"],
             },
             text_overrides={
                 "denoising_steps": TEXT_DENOISING_STEP_LIST,

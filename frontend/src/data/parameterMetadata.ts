@@ -67,4 +67,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "LoRA merge strategy affects performance and update capabilities. Permanent Merge: Maximum performance, no runtime updates. Runtime PEFT: Lower performance, instant runtime updates.",
   },
+  samplerType: {
+    label: "Sampler:",
+    tooltip:
+      "Sampling strategy for the denoising process. 'Add Noise' is the original approach. 'Gradient Estimation' uses momentum-based correction for improved convergence, particularly effective with CFG distillation LoRAs.",
+  },
 };

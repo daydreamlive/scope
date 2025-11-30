@@ -12,6 +12,8 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
+from ..samplers import SamplerType, create_sampler
+
 
 class DenoiseBlock(ModularPipelineBlocks):
     @property
@@ -106,6 +108,18 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float | None,
                 description="Amount of noise added to video",
             ),
+            InputParam(
+                "sampler_type",
+                default=SamplerType.ADD_NOISE.value,
+                type_hint=str,
+                description="Sampling strategy: 'add_noise' (original) or 'gradient_estimation'",
+            ),
+            InputParam(
+                "sampler_config",
+                default=None,
+                type_hint=dict | None,
+                description="Sampler-specific configuration (e.g., {'gamma': 2.0} for gradient_estimation)",
+            ),
         ]
 
     @property
@@ -148,6 +162,14 @@ class DenoiseBlock(ModularPipelineBlocks):
             # Lower noise scale -> less denoising steps, less intense changes to input
             denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
 
+        # Create sampler from config
+        sampler_type = block_state.sampler_type
+        if sampler_type is None:
+            sampler_type = SamplerType.ADD_NOISE.value
+        sampler_config = block_state.sampler_config or {}
+        sampler = create_sampler(sampler_type, **sampler_config)
+        sampler.reset()
+
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
             timestep = (
@@ -159,49 +181,33 @@ class DenoiseBlock(ModularPipelineBlocks):
                 * current_timestep
             )
 
-            if index < len(denoising_step_list) - 1:
-                _, denoised_pred = components.generator(
-                    noisy_image_or_video=noise,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=block_state.kv_cache,
-                    crossattn_cache=block_state.crossattn_cache,
-                    current_start=start_frame * frame_seq_length,
-                    current_end=end_frame * frame_seq_length,
-                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
-                )
-                next_timestep = denoising_step_list[index + 1]
-                # Create noise with same shape and properties as denoised_pred
-                flattened_pred = denoised_pred.flatten(0, 1)
-                random_noise = torch.randn(
-                    flattened_pred.shape,
-                    device=flattened_pred.device,
-                    dtype=flattened_pred.dtype,
-                    generator=block_state.generator,
-                )
-                noise = components.scheduler.add_noise(
-                    flattened_pred,
-                    random_noise,
-                    next_timestep
-                    * torch.ones(
-                        [batch_size * num_frames],
-                        device=noise.device,
-                        dtype=torch.long,
-                    ),
-                ).unflatten(0, denoised_pred.shape[:2])
-            else:
-                _, denoised_pred = components.generator(
-                    noisy_image_or_video=noise,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=block_state.kv_cache,
-                    crossattn_cache=block_state.crossattn_cache,
-                    current_start=start_frame * frame_seq_length,
-                    current_end=end_frame * frame_seq_length,
-                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
-                )
+            # Get model prediction
+            _, denoised_pred = components.generator(
+                noisy_image_or_video=noise,
+                conditional_dict=conditional_dict,
+                timestep=timestep,
+                kv_cache=block_state.kv_cache,
+                crossattn_cache=block_state.crossattn_cache,
+                current_start=start_frame * frame_seq_length,
+                current_end=end_frame * frame_seq_length,
+                kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+            )
 
-        block_state.latents = denoised_pred
+            # Determine next timestep (None if final step)
+            is_last_step = index == len(denoising_step_list) - 1
+            next_timestep = None if is_last_step else denoising_step_list[index + 1]
+
+            # Sampler step
+            noise = sampler.step(
+                x=noise,
+                denoised=denoised_pred,
+                timestep=timestep,
+                next_timestep=next_timestep,
+                scheduler=components.scheduler,
+                generator=block_state.generator,
+            )
+
+        block_state.latents = noise
 
         self.set_block_state(state, block_state)
         return components, state

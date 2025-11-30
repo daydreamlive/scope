@@ -240,6 +240,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       kv_cache_attention_bias?: number;
       paused?: boolean;
       input_mode?: InputMode;
+      sampler_type?: string;
     }) => {
       if (
         dataChannelRef.current &&

@@ -28,6 +28,7 @@ import type {
   LoRAConfig,
   LoraMergeStrategy,
   SettingsState,
+  SamplerType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -448,6 +449,14 @@ export function StreamPage() {
   ) => {
     updateSettings({ loraMergeStrategy });
     // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
+  const handleSamplerTypeChange = (samplerType: SamplerType) => {
+    updateSettings({ samplerType });
+    // Send sampler type update to backend
+    sendParameterUpdate({
+      sampler_type: samplerType,
+    });
   };
 
   const handleResetCache = () => {
@@ -1053,6 +1062,8 @@ export function StreamPage() {
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy}
             onLoraMergeStrategyChange={handleLoraMergeStrategyChange}
+            samplerType={settings.samplerType}
+            onSamplerTypeChange={handleSamplerTypeChange}
           />
         </div>
       </div>

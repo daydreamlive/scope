@@ -106,6 +106,7 @@ export interface PipelineCapabilities {
   showNoiseControlsInVideo: boolean;
   hasCacheManagement: boolean;
   requiresVideoInVideoMode: boolean;
+  hasSamplerControl: boolean;
 }
 
 export interface PipelineSchema {

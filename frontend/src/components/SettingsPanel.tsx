@@ -24,7 +24,12 @@ import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import type {
+  PipelineId,
+  LoRAConfig,
+  LoraMergeStrategy,
+  SamplerType,
+} from "../types";
 import type { InputMode } from "../constants/modes";
 import { LoRAManager } from "./LoRAManager";
 import {
@@ -67,6 +72,8 @@ interface SettingsPanelProps {
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
   onLoraMergeStrategyChange?: (strategy: LoraMergeStrategy) => void;
+  samplerType?: SamplerType;
+  onSamplerTypeChange?: (samplerType: SamplerType) => void;
 }
 
 export function SettingsPanel({
@@ -98,6 +105,8 @@ export function SettingsPanel({
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
   onLoraMergeStrategyChange,
+  samplerType,
+  onSamplerTypeChange,
 }: SettingsPanelProps) {
   const modeCapabilities = getPipelineModeCapabilities(pipelineId);
   const effectiveInputMode = getEffectiveMode(inputMode, modeCapabilities);
@@ -609,6 +618,36 @@ export function SettingsPanel({
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {modeCapabilities.hasSamplerControl && samplerType !== undefined && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.samplerType.label}
+                  tooltip={PARAMETER_METADATA.samplerType.tooltip}
+                  className="text-sm text-foreground"
+                />
+                <Select
+                  value={samplerType}
+                  onValueChange={value => {
+                    onSamplerTypeChange?.(value as SamplerType);
+                  }}
+                >
+                  <SelectTrigger className="w-[180px] h-7">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="add_noise">Add Noise</SelectItem>
+                    <SelectItem value="gradient_estimation">
+                      Gradient Estimation
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>

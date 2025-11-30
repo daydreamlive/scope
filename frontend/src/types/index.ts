@@ -32,6 +32,8 @@ export interface PromptData {
 
 export type LoraMergeStrategy = "permanent_merge" | "runtime_peft";
 
+export type SamplerType = "add_noise" | "gradient_estimation";
+
 export interface LoRAConfig {
   id: string;
   path: string;
@@ -68,4 +70,5 @@ export interface SettingsState {
   paused?: boolean;
   loras?: LoRAConfig[];
   loraMergeStrategy?: LoraMergeStrategy;
+  samplerType?: SamplerType;
 }
