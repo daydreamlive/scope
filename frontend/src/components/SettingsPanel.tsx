@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -24,12 +24,7 @@ import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type {
-  PipelineId,
-  LoRAConfig,
-  LoraMergeStrategy,
-  SamplerType,
-} from "../types";
+import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { InputMode } from "../constants/modes";
 import { LoRAManager } from "./LoRAManager";
 import {
@@ -37,6 +32,7 @@ import {
   getEffectiveMode,
 } from "../lib/pipelineModes";
 import { getModeConfig, getCachedPipelineSchema } from "../lib/utils";
+import { getSamplerTypes } from "../lib/api";
 
 const MIN_DIMENSION = 16;
 
@@ -72,8 +68,8 @@ interface SettingsPanelProps {
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
   onLoraMergeStrategyChange?: (strategy: LoraMergeStrategy) => void;
-  samplerType?: SamplerType;
-  onSamplerTypeChange?: (samplerType: SamplerType) => void;
+  samplerType?: string;
+  onSamplerTypeChange?: (samplerType: string) => void;
 }
 
 export function SettingsPanel({
@@ -131,6 +127,22 @@ export function SettingsPanel({
   const [heightError, setHeightError] = useState<string | null>(null);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+
+  // Sampler types state - fetched dynamically from backend
+  const [samplerTypes, setSamplerTypes] = useState<string[]>([]);
+
+  // Fetch available sampler types on mount
+  useEffect(() => {
+    const fetchSamplerTypes = async () => {
+      try {
+        const response = await getSamplerTypes();
+        setSamplerTypes(response.samplers);
+      } catch (error) {
+        console.error("SettingsPanel: Failed to fetch sampler types:", error);
+      }
+    };
+    fetchSamplerTypes();
+  }, []);
 
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -635,17 +647,18 @@ export function SettingsPanel({
                 <Select
                   value={samplerType}
                   onValueChange={value => {
-                    onSamplerTypeChange?.(value as SamplerType);
+                    onSamplerTypeChange?.(value);
                   }}
                 >
                   <SelectTrigger className="w-[180px] h-7">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="add_noise">Add Noise</SelectItem>
-                    <SelectItem value="gradient_estimation">
-                      Gradient Estimation
-                    </SelectItem>
+                    {samplerTypes.map(sampler => (
+                      <SelectItem key={sampler} value={sampler}>
+                        {sampler}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

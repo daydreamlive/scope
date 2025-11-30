@@ -4,7 +4,6 @@ import type {
   StreamStatus,
   SettingsState,
   PromptData,
-  SamplerType,
 } from "../types";
 import {
   getHardwareInfo,
@@ -133,7 +132,7 @@ export function useStreamState() {
                 prev.kvCacheAttentionBias ??
                 undefined,
               samplerType:
-                (modeConfig.sampler_type?.default as SamplerType | undefined) ??
+                (modeConfig.sampler_type?.default as string | undefined) ??
                 prev.samplerType ??
                 undefined,
             };

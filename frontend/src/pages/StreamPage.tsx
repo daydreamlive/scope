@@ -28,7 +28,6 @@ import type {
   LoRAConfig,
   LoraMergeStrategy,
   SettingsState,
-  SamplerType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -451,7 +450,7 @@ export function StreamPage() {
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
-  const handleSamplerTypeChange = (samplerType: SamplerType) => {
+  const handleSamplerTypeChange = (samplerType: string) => {
     updateSettings({ samplerType });
     // Send sampler type update to backend
     sendParameterUpdate({

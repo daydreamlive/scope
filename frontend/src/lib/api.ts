@@ -335,6 +335,27 @@ export const fetchCurrentLogs = async (): Promise<string> => {
   return logsText;
 };
 
+export interface SamplerTypesResponse {
+  samplers: string[];
+}
+
+export const getSamplerTypes = async (): Promise<SamplerTypesResponse> => {
+  const response = await fetch("/api/v1/samplers", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get sampler types failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
 export interface LoRAFileInfo {
   name: string;
   path: string;
