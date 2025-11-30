@@ -23,19 +23,26 @@ import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import type { InputMode } from "../constants/modes";
 import { LoRAManager } from "./LoRAManager";
+import {
+  getPipelineModeCapabilities,
+  getEffectiveMode,
+} from "../lib/pipelineModes";
+import { getModeConfig, getCachedPipelineSchema } from "../lib/utils";
 
 const MIN_DIMENSION = 16;
 
 interface SettingsPanelProps {
   className?: string;
   pipelineId: PipelineId;
+  isLoadingSchema?: boolean;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
+  inputMode?: InputMode;
   resolution?: {
     height: number;
     width: number;
@@ -45,9 +52,9 @@ interface SettingsPanelProps {
   onSeedChange?: (seed: number) => void;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
-  noiseScale?: number;
+  noiseScale?: number | null;
   onNoiseScaleChange?: (noiseScale: number) => void;
-  noiseController?: boolean;
+  noiseController?: boolean | null;
   onNoiseControllerChange?: (enabled: boolean) => void;
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
@@ -65,24 +72,26 @@ interface SettingsPanelProps {
 export function SettingsPanel({
   className = "",
   pipelineId,
+  isLoadingSchema = false,
   onPipelineIdChange,
   isStreaming = false,
   isDownloading = false,
+  inputMode,
   resolution,
   onResolutionChange,
-  seed = 42,
+  seed,
   onSeedChange,
-  denoisingSteps = [700, 500],
+  denoisingSteps,
   onDenoisingStepsChange,
-  noiseScale = 0.7,
+  noiseScale,
   onNoiseScaleChange,
-  noiseController = true,
+  noiseController,
   onNoiseControllerChange,
-  manageCache = true,
+  manageCache,
   onManageCacheChange,
-  quantization = "fp8_e4m3fn",
+  quantization,
   onQuantizationChange,
-  kvCacheAttentionBias = 0.3,
+  kvCacheAttentionBias,
   onKvCacheAttentionBiasChange,
   onResetCache,
   loras = [],
@@ -90,14 +99,23 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   onLoraMergeStrategyChange,
 }: SettingsPanelProps) {
-  // Use pipeline-specific default if resolution is not provided
-  const effectiveResolution = resolution || getDefaultResolution(pipelineId);
+  const modeCapabilities = getPipelineModeCapabilities(pipelineId);
+  const effectiveInputMode = getEffectiveMode(inputMode, modeCapabilities);
+  const modeConfig = !isLoadingSchema
+    ? getModeConfig(pipelineId, effectiveInputMode)
+    : null;
 
   // Local slider state management hooks
-  const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
+  // No hardcoded defaults - values come from backend pipeline schema
+  const noiseScaleSlider = useLocalSliderValue(
+    noiseScale,
+    onNoiseScaleChange,
+    2
+  );
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
-    onKvCacheAttentionBiasChange
+    onKvCacheAttentionBiasChange,
+    2
   );
 
   // Validation error states
@@ -146,26 +164,32 @@ export function SettingsPanel({
     }
 
     // Always update the value (even if invalid)
+    if (!resolution) return;
+
     onResolutionChange?.({
-      ...effectiveResolution,
+      ...resolution,
       [dimension]: value,
     });
   };
 
   const incrementResolution = (dimension: "height" | "width") => {
+    if (!resolution) return;
+
     const maxValue = 2048;
-    const newValue = Math.min(maxValue, effectiveResolution[dimension] + 1);
+    const newValue = Math.min(maxValue, resolution[dimension] + 1);
     handleResolutionChange(dimension, newValue);
   };
 
   const decrementResolution = (dimension: "height" | "width") => {
+    if (!resolution) return;
+
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
       pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
-    const newValue = Math.max(minValue, effectiveResolution[dimension] - 1);
+    const newValue = Math.max(minValue, resolution[dimension] - 1);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -187,18 +211,22 @@ export function SettingsPanel({
   };
 
   const incrementSeed = () => {
+    if (seed == null) return;
     const maxValue = 2147483647;
     const newValue = Math.min(maxValue, seed + 1);
     handleSeedChange(newValue);
   };
 
   const decrementSeed = () => {
+    if (seed == null) return;
     const minValue = 0;
     const newValue = Math.max(minValue, seed - 1);
     handleSeedChange(newValue);
   };
 
   const currentPipeline = PIPELINES[pipelineId];
+  const cachedSchema = getCachedPipelineSchema(pipelineId);
+  const pipelineName = cachedSchema?.name ?? pipelineId;
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
@@ -230,9 +258,7 @@ export function SettingsPanel({
           <Card>
             <CardContent className="p-4 space-y-2">
               <div>
-                <h4 className="text-sm font-semibold">
-                  {currentPipeline.name}
-                </h4>
+                <h4 className="text-sm font-semibold">{pipelineName}</h4>
               </div>
 
               <div>
@@ -390,20 +416,21 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => decrementResolution("height")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.height}
+                        value={resolution?.height ?? ""}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
                             handleResolutionChange("height", value);
                           }
                         }}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
+                        placeholder={!resolution ? "Loading..." : undefined}
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
@@ -413,7 +440,7 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => incrementResolution("height")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>
@@ -439,20 +466,21 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => decrementResolution("width")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.width}
+                        value={resolution?.width ?? ""}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
                             handleResolutionChange("width", value);
                           }
                         }}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
+                        placeholder={!resolution ? "Loading..." : undefined}
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
@@ -462,7 +490,7 @@ export function SettingsPanel({
                         size="icon"
                         className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                         onClick={() => incrementResolution("width")}
-                        disabled={isStreaming}
+                        disabled={isStreaming || !resolution}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>
@@ -494,7 +522,7 @@ export function SettingsPanel({
                       </Button>
                       <Input
                         type="number"
-                        value={seed}
+                        value={seed ?? ""}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
@@ -526,9 +554,7 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+        {modeCapabilities.hasCacheManagement && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -592,54 +618,58 @@ export function SettingsPanel({
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video") && (
           <DenoisingStepsSlider
-            value={denoisingSteps}
+            value={denoisingSteps || []}
             onChange={onDenoisingStepsChange || (() => {})}
-            defaultValues={getDefaultDenoisingSteps(pipelineId)}
+            defaultValues={modeConfig?.denoising_steps ?? undefined}
             tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
           />
         )}
 
-        {pipelineId === "streamdiffusionv2" && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="space-y-2 pt-2">
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.noiseController.label}
-                    tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                    className="text-sm text-foreground"
-                  />
-                  <Toggle
-                    pressed={noiseController}
-                    onPressedChange={onNoiseControllerChange || (() => {})}
-                    disabled={isStreaming}
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                  >
-                    {noiseController ? "ON" : "OFF"}
-                  </Toggle>
+        {modeCapabilities &&
+          ((effectiveInputMode === "text" &&
+            modeCapabilities.showNoiseControlsInText) ||
+            (effectiveInputMode === "video" &&
+              modeCapabilities.showNoiseControlsInVideo)) && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <LabelWithTooltip
+                      label={PARAMETER_METADATA.noiseController.label}
+                      tooltip={PARAMETER_METADATA.noiseController.tooltip}
+                      className="text-sm text-foreground"
+                    />
+                    <Toggle
+                      pressed={noiseController ?? false}
+                      onPressedChange={onNoiseControllerChange || (() => {})}
+                      disabled={isStreaming || noiseController === undefined}
+                      variant="outline"
+                      size="sm"
+                      className="h-7"
+                    >
+                      {noiseController ? "ON" : "OFF"}
+                    </Toggle>
+                  </div>
                 </div>
-              </div>
 
-              <SliderWithInput
-                label={PARAMETER_METADATA.noiseScale.label}
-                tooltip={PARAMETER_METADATA.noiseScale.tooltip}
-                value={noiseScaleSlider.localValue}
-                onValueChange={noiseScaleSlider.handleValueChange}
-                onValueCommit={noiseScaleSlider.handleValueCommit}
-                min={0.0}
-                max={1.0}
-                step={0.01}
-                incrementAmount={0.01}
-                disabled={noiseController}
-                labelClassName="text-sm text-foreground w-20"
-                valueFormatter={noiseScaleSlider.formatValue}
-                inputParser={v => parseFloat(v) || 0.0}
-              />
+                <SliderWithInput
+                  label={PARAMETER_METADATA.noiseScale.label}
+                  tooltip={PARAMETER_METADATA.noiseScale.tooltip}
+                  value={noiseScaleSlider.localValue}
+                  onValueChange={noiseScaleSlider.handleValueChange}
+                  onValueCommit={noiseScaleSlider.handleValueCommit}
+                  min={0.0}
+                  max={1.0}
+                  step={0.01}
+                  incrementAmount={0.01}
+                  disabled={!noiseController}
+                  labelClassName="text-sm text-foreground w-20"
+                  valueFormatter={noiseScaleSlider.formatValue}
+                  inputParser={v => parseFloat(v) || 0.0}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {pipelineId === "krea-realtime-video" && (
           <div className="space-y-4">

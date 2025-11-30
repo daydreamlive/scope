@@ -5,16 +5,17 @@ import { useState, useEffect, useCallback } from "react";
  * Syncs with external prop value and provides handlers for SliderWithInput component.
  */
 export function useLocalSliderValue(
-  value: number,
+  value: number | null | undefined,
   onChange?: (value: number) => void,
-  decimalPlaces: number = 2
+  decimalPlaces: number = 2,
+  defaultValue: number = 0
 ) {
-  const [localValue, setLocalValue] = useState<number>(value);
+  const [localValue, setLocalValue] = useState<number>(value ?? defaultValue);
 
   // Sync with external value changes
   useEffect(() => {
-    setLocalValue(value);
-  }, [value]);
+    setLocalValue(value ?? defaultValue);
+  }, [value, defaultValue]);
 
   const handleValueChange = useCallback((newValue: number) => {
     setLocalValue(newValue);
