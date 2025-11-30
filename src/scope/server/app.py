@@ -19,12 +19,13 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Import PipelineRegistry at module level to ensure it's initialized during server startup
 # This prevents lazy import overhead in schema endpoints and ensures SageAttention
 # loads during startup rather than blocking the first schema API call
 from scope.core.pipelines.registry import PipelineRegistry
+from scope.core.pipelines.wan2_1.samplers import get_available_samplers
 
 from .download_models import download_models
 from .logs_config import (
@@ -497,6 +498,23 @@ async def get_hardware_info():
         return HardwareInfoResponse(vram_gb=vram_gb)
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class SamplerTypesResponse(BaseModel):
+    """Response containing list of available sampler types."""
+
+    samplers: list[str] = Field(..., description="List of available sampler type names")
+
+
+@app.get("/api/v1/samplers", response_model=SamplerTypesResponse)
+async def get_sampler_types():
+    """Get list of available sampler types."""
+    try:
+        samplers = get_available_samplers()
+        return SamplerTypesResponse(samplers=samplers)
+    except Exception as e:
+        logger.error(f"get_sampler_types: Error getting sampler types: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

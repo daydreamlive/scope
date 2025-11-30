@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -32,6 +32,7 @@ import {
   getEffectiveMode,
 } from "../lib/pipelineModes";
 import { getModeConfig, getCachedPipelineSchema } from "../lib/utils";
+import { getSamplerTypes } from "../lib/api";
 
 const MIN_DIMENSION = 16;
 
@@ -67,6 +68,8 @@ interface SettingsPanelProps {
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
   onLoraMergeStrategyChange?: (strategy: LoraMergeStrategy) => void;
+  samplerType?: string;
+  onSamplerTypeChange?: (samplerType: string) => void;
 }
 
 export function SettingsPanel({
@@ -98,6 +101,8 @@ export function SettingsPanel({
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
   onLoraMergeStrategyChange,
+  samplerType,
+  onSamplerTypeChange,
 }: SettingsPanelProps) {
   const modeCapabilities = getPipelineModeCapabilities(pipelineId);
   const effectiveInputMode = getEffectiveMode(inputMode, modeCapabilities);
@@ -122,6 +127,22 @@ export function SettingsPanel({
   const [heightError, setHeightError] = useState<string | null>(null);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+
+  // Sampler types state - fetched dynamically from backend
+  const [samplerTypes, setSamplerTypes] = useState<string[]>([]);
+
+  // Fetch available sampler types on mount
+  useEffect(() => {
+    const fetchSamplerTypes = async () => {
+      try {
+        const response = await getSamplerTypes();
+        setSamplerTypes(response.samplers);
+      } catch (error) {
+        console.error("SettingsPanel: Failed to fetch sampler types:", error);
+      }
+    };
+    fetchSamplerTypes();
+  }, []);
 
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -609,6 +630,37 @@ export function SettingsPanel({
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {modeCapabilities.hasSamplerControl && samplerType !== undefined && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.samplerType.label}
+                  tooltip={PARAMETER_METADATA.samplerType.tooltip}
+                  className="text-sm text-foreground"
+                />
+                <Select
+                  value={samplerType}
+                  onValueChange={value => {
+                    onSamplerTypeChange?.(value);
+                  }}
+                >
+                  <SelectTrigger className="w-[180px] h-7">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {samplerTypes.map(sampler => (
+                      <SelectItem key={sampler} value={sampler}>
+                        {sampler}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>

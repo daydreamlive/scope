@@ -68,4 +68,5 @@ export interface SettingsState {
   paused?: boolean;
   loras?: LoRAConfig[];
   loraMergeStrategy?: LoraMergeStrategy;
+  samplerType?: string;
 }

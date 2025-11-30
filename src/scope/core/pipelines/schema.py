@@ -60,6 +60,8 @@ def create_mode_config(
     base_seed: int = 42,
     noise_scale: float | None = None,
     noise_controller: bool | None = None,
+    sampler_type: str | None = None,
+    sampler_options: list[str] | None = None,
     **extra_params: Any,
 ) -> dict[str, Any]:
     """Create a mode-specific configuration dictionary with JSON Schema format.
@@ -74,6 +76,8 @@ def create_mode_config(
         base_seed: Default random seed
         noise_scale: Noise scale value (None if not applicable)
         noise_controller: Noise controller setting (None if not applicable)
+        sampler_type: Default sampler type (None if not applicable)
+        sampler_options: List of available sampler types (None if not applicable)
         **extra_params: Additional pipeline-specific parameters
 
     Returns:
@@ -119,6 +123,13 @@ def create_mode_config(
             param_type="boolean",
             default=noise_controller,
             description="Enable dynamic noise control during generation",
+        )
+    if sampler_type is not None:
+        config["sampler_type"] = create_parameter_schema(
+            param_type="string",
+            default=sampler_type,
+            description="Sampling strategy for denoising",
+            enum=sampler_options or ["add_noise", "gradient_estimation"],
         )
 
     # Wrap extra parameters in JSON Schema format
@@ -213,6 +224,12 @@ def compute_capabilities(
     # Video mode requires video input if it has input_size specified
     requires_video_in_video_mode = video_config.get("input_size") is not None
 
+    # Check if sampler control is available in any mode
+    has_sampler_control = (
+        text_config.get("sampler_type") is not None
+        or video_config.get("sampler_type") is not None
+    )
+
     return {
         "hasInputModeControl": has_input_mode_control,
         "hasNoiseControls": has_noise_controls,
@@ -220,6 +237,7 @@ def compute_capabilities(
         "showNoiseControlsInVideo": show_noise_controls_in_video,
         "hasCacheManagement": has_cache_management,
         "requiresVideoInVideoMode": requires_video_in_video_mode,
+        "hasSamplerControl": has_sampler_control,
     }
 
 

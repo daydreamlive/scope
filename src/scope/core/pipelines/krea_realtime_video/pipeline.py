@@ -44,6 +44,8 @@ class KreaRealtimeVideoPipeline(MultiModePipeline, LoRAEnabledPipeline):
                 "kv_cache_attention_bias": 0.30,
                 "default_temporal_interpolation_method": "linear",
                 "default_temporal_interpolation_steps": 4,
+                "sampler_type": "add_noise",
+                "sampler_options": ["add_noise", "gradient_estimation"],
             },
             text_overrides={
                 "resolution": {"height": 320, "width": 576},

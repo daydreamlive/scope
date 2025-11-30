@@ -450,6 +450,14 @@ export function StreamPage() {
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
+  const handleSamplerTypeChange = (samplerType: string) => {
+    updateSettings({ samplerType });
+    // Send sampler type update to backend
+    sendParameterUpdate({
+      sampler_type: samplerType,
+    });
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -1053,6 +1061,8 @@ export function StreamPage() {
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy}
             onLoraMergeStrategyChange={handleLoraMergeStrategyChange}
+            samplerType={settings.samplerType}
+            onSamplerTypeChange={handleSamplerTypeChange}
           />
         </div>
       </div>

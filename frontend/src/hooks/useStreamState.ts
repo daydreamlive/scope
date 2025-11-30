@@ -41,6 +41,7 @@ export function useStreamState() {
     kvCacheAttentionBias: undefined,
     paused: false,
     loraMergeStrategy: "permanent_merge",
+    samplerType: undefined,
   });
 
   const [promptData, setPromptData] = useState<PromptData>({
@@ -129,6 +130,10 @@ export function useStreamState() {
               kvCacheAttentionBias:
                 modeConfig.kv_cache_attention_bias?.default ??
                 prev.kvCacheAttentionBias ??
+                undefined,
+              samplerType:
+                (modeConfig.sampler_type?.default as string | undefined) ??
+                prev.samplerType ??
                 undefined,
             };
           });

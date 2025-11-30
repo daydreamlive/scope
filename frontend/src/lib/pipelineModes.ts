@@ -33,6 +33,10 @@ export interface PipelineModeCapabilities {
    * when inputMode is set to video.
    */
   requiresVideoInVideoMode: boolean;
+  /**
+   * Whether this pipeline exposes a sampler selection control.
+   */
+  hasSamplerControl: boolean;
 }
 
 /**
@@ -111,5 +115,6 @@ export function getPipelineModeCapabilities(
     hasCacheManagement: capabilities?.hasCacheManagement ?? false,
     requiresVideoInVideoMode:
       capabilities?.requiresVideoInVideoMode ?? category === "video-input",
+    hasSamplerControl: capabilities?.hasSamplerControl ?? false,
   };
 }

@@ -13,6 +13,9 @@ from scope.core.pipelines.utils import Quantization
 # INPUT_MODE_VIDEO = "video", INPUT_MODE_TEXT = "text"
 InputModeType = Literal["video", "text"]
 
+# Sampler types - matches SamplerType enum in samplers module
+SamplerTypeType = Literal["add_noise", "gradient_estimation"]
+
 
 class HealthResponse(BaseModel):
     """Health check response schema."""
@@ -100,6 +103,17 @@ class Parameters(BaseModel):
         f"Use '{INPUT_MODE_VIDEO}' for video input consumption, '{INPUT_MODE_TEXT}' for pure text-to-video. "
         f"When set to '{INPUT_MODE_VIDEO}', the pipeline will consume input video frames. "
         f"When set to '{INPUT_MODE_TEXT}', the pipeline will operate in pure text-to-video mode without consuming video input.",
+    )
+    sampler_type: SamplerTypeType | None = Field(
+        default=None,
+        description="Sampling strategy for denoising. Options: 'add_noise' (original, default) "
+        "or 'gradient_estimation' (improved convergence with CFG distillation LoRAs, "
+        "based on https://openreview.net/pdf?id=o2ND9v0CeK).",
+    )
+    sampler_config: dict | None = Field(
+        default=None,
+        description="Sampler-specific configuration. For 'gradient_estimation': "
+        "{'gamma': 2.0} (1.0-5.0, higher = stronger momentum). Ignored for 'add_noise'.",
     )
 
 
@@ -295,6 +309,9 @@ class PipelineCapabilities(BaseModel):
     )
     requiresVideoInVideoMode: bool = Field(
         ..., description="Whether video mode requires video input"
+    )
+    hasSamplerControl: bool = Field(
+        default=False, description="Whether pipeline supports sampler selection"
     )
 
 
