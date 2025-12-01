@@ -20,7 +20,8 @@ def sinusoidal_embedding_1d(dim, position):
     position = position.type(torch.float64)
 
     # calculation
-    sinusoid = torch.outer(position, torch.pow(10000, -torch.arange(half, device=torch.cuda.current_device(), dtype=torch.float64).div(half)))
+    device = torch.cuda.current_device() if torch.cuda.is_available() else torch.device("cpu")
+    sinusoid = torch.outer(position, torch.pow(10000, -torch.arange(half, device=device, dtype=torch.float64).div(half)))
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x
 

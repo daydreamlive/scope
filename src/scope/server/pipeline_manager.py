@@ -14,6 +14,11 @@ from omegaconf import OmegaConf
 logger = logging.getLogger(__name__)
 
 
+def get_device() -> torch.device:
+    """Get the appropriate device (CUDA if available, CPU otherwise)."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 class PipelineNotAvailableException(Exception):
     """Exception raised when pipeline is not available for processing."""
 
@@ -309,7 +314,7 @@ class PipelineManager:
             pipeline = StreamDiffusionV2Pipeline(
                 config,
                 quantization=quantization,
-                device=torch.device("cuda"),
+                device=get_device(),
                 dtype=torch.bfloat16,
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
@@ -328,7 +333,7 @@ class PipelineManager:
             pipeline = PassthroughPipeline(
                 height=height,
                 width=width,
-                device=torch.device("cuda"),
+                device=get_device(),
                 dtype=torch.bfloat16,
             )
             logger.info("Passthrough pipeline initialized")
@@ -375,7 +380,7 @@ class PipelineManager:
             pipeline = LongLivePipeline(
                 config,
                 quantization=quantization,
-                device=torch.device("cuda"),
+                device=get_device(),
                 dtype=torch.bfloat16,
             )
             logger.info("LongLive pipeline initialized")
@@ -427,11 +432,12 @@ class PipelineManager:
                 config,
                 quantization=quantization,
                 # Only compile diffusion model for hopper right now
-                compile=any(
+                compile=torch.cuda.is_available()
+                and any(
                     x in torch.cuda.get_device_name(0).lower()
                     for x in ("h100", "hopper")
                 ),
-                device=torch.device("cuda"),
+                device=get_device(),
                 dtype=torch.bfloat16,
             )
             logger.info("krea-realtime-video pipeline initialized")
