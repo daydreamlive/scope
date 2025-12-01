@@ -32,30 +32,61 @@ function init(electronApp, electronDialog) {
 function commandExists(command) {
   return new Promise((resolve) => {
     const checkCommand = os.platform() === 'win32' ? 'where' : 'which';
-    const process = spawn(checkCommand, [command]);
+    const childProcess = spawn(checkCommand, [command]);
 
-    process.on('close', (code) => {
+    childProcess.on('close', (code) => {
       resolve(code === 0);
     });
 
-    process.on('error', () => {
+    childProcess.on('error', () => {
       resolve(false);
     });
   });
 }
 
 /**
- * Check if uv is installed
+ * Get the path to uv binary (bundled or system)
  */
-async function checkUvInstalled() {
-  return await commandExists('uv');
+function getUvPath() {
+  if (!isDev && process.resourcesPath) {
+    // Try to find bundled uv
+    const platform = os.platform();
+    const arch = os.arch();
+
+    let bundledUvPath;
+    if (platform === 'win32') {
+      bundledUvPath = path.join(process.resourcesPath, 'uv-binaries', 'x86_64-pc-windows-msvc', 'uv.exe');
+    } else if (platform === 'darwin') {
+      if (arch === 'arm64') {
+        bundledUvPath = path.join(process.resourcesPath, 'uv-binaries', 'aarch64-apple-darwin', 'uv');
+      } else {
+        bundledUvPath = path.join(process.resourcesPath, 'uv-binaries', 'x86_64-apple-darwin', 'uv');
+      }
+    } else if (platform === 'linux') {
+      bundledUvPath = path.join(process.resourcesPath, 'uv-binaries', 'x86_64-unknown-linux-gnu', 'uv');
+    }
+
+    if (bundledUvPath && fs.existsSync(bundledUvPath)) {
+      console.log(`Using bundled uv at: ${bundledUvPath}`);
+      return bundledUvPath;
+    }
+  }
+
+  // Fall back to system uv
+  return 'uv';
 }
 
 /**
- * Check if Python is installed
+ * Check if uv is available (bundled or system)
  */
-async function checkPythonInstalled() {
-  return await commandExists('python3') || await commandExists('python');
+async function checkUvInstalled() {
+  const uvPath = getUvPath();
+  if (uvPath !== 'uv') {
+    // Bundled uv exists
+    return true;
+  }
+  // Check if system uv exists
+  return await commandExists('uv');
 }
 
 /**
@@ -69,12 +100,12 @@ async function installUv() {
       ? 'powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 | iex"'
       : 'curl -LsSf https://astral.sh/uv/install.sh | sh';
 
-    const process = spawn('sh', ['-c', installScript], {
+    const childProcess = spawn('sh', ['-c', installScript], {
       shell: true,
       stdio: 'inherit'
     });
 
-    process.on('close', (code) => {
+    childProcess.on('close', (code) => {
       if (code === 0) {
         console.log('uv installed successfully');
         resolve();
@@ -83,7 +114,7 @@ async function installUv() {
       }
     });
 
-    process.on('error', (error) => {
+    childProcess.on('error', (error) => {
       reject(error);
     });
   });
@@ -109,18 +140,48 @@ async function installPythonDependencies() {
       ? path.join(appPath, '..')
       : path.join(process.resourcesPath, 'app');
 
+    // Verify required files exist (for debugging)
+    const readmePath = path.join(projectDir, 'README.md');
+    if (!fs.existsSync(readmePath)) {
+      console.warn(`Warning: README.md not found at: ${readmePath}`);
+      console.warn(`Project directory: ${projectDir}`);
+      console.warn(`Files in project directory:`, fs.readdirSync(projectDir).join(', '));
+    } else {
+      console.log(`Verified README.md exists at: ${readmePath}`);
+    }
+
+    // Check if lockfile exists
+    const lockfilePath = isDev
+      ? path.join(appPath, '..', 'uv.lock')
+      : path.join(process.resourcesPath, 'app', 'uv.lock');
+
+    const hasLockfile = fs.existsSync(lockfilePath);
+
     // Use uv to sync dependencies
-    const process = spawn('uv', ['sync', '--frozen'], {
+    // In production, don't use --frozen to avoid path resolution issues with file:// URLs
+    // In development, use --frozen if lockfile exists for faster, reproducible installs
+    const useFrozen = isDev && hasLockfile;
+    const uvArgs = useFrozen ? ['sync', '--frozen'] : ['sync'];
+
+    const uvPath = getUvPath();
+    console.log(`Using uv sync${useFrozen ? ' --frozen' : ''} (lockfile ${hasLockfile ? 'found' : 'not found'}, mode: ${isDev ? 'dev' : 'production'})`);
+    console.log(`uv path: ${uvPath}`);
+
+    // uv will automatically download Python if needed
+    // Set UV_PYTHON to let uv manage Python installation
+    const env = {
+      ...process.env,
+      // Let uv download and manage Python automatically
+      // UV_PYTHON can be set to a specific version like "3.12" or left unset for auto-detection
+    };
+
+    const childProcess = spawn(uvPath, uvArgs, {
       cwd: projectDir,
       stdio: 'inherit',
-      env: {
-        ...process.env,
-        // Ensure uv uses the correct Python version
-        UV_PYTHON: 'python3'
-      }
+      env: env
     });
 
-    process.on('close', (code) => {
+    childProcess.on('close', (code) => {
       if (code === 0) {
         console.log('Python dependencies installed successfully');
         resolve();
@@ -129,10 +190,33 @@ async function installPythonDependencies() {
       }
     });
 
-    process.on('error', (error) => {
+    childProcess.on('error', (error) => {
       reject(error);
     });
   });
+}
+
+/**
+ * Check if bundled Python environment exists
+ */
+function checkBundledPython() {
+  if (isDev) {
+    return false; // Always install in dev mode
+  }
+
+  if (!process.resourcesPath) {
+    return false;
+  }
+
+  const platform = process.platform;
+  let pythonPath;
+  if (platform === 'win32') {
+    pythonPath = path.join(process.resourcesPath, 'python-env', '.venv', 'Scripts', 'python.exe');
+  } else {
+    pythonPath = path.join(process.resourcesPath, 'python-env', '.venv', 'bin', 'python');
+  }
+
+  return fs.existsSync(pythonPath);
 }
 
 /**
@@ -140,42 +224,39 @@ async function installPythonDependencies() {
  */
 async function ensurePythonDependencies() {
   try {
-    // Check for Python
-    const pythonInstalled = await checkPythonInstalled();
-    if (!pythonInstalled) {
-      const result = await dialog.showMessageBox({
-        type: 'error',
-        title: 'Python Not Found',
-        message: 'Python is required to run Daydream Scope',
-        detail: 'Please install Python 3.10 or later and try again.\n\nYou can download Python from https://www.python.org/downloads/',
-        buttons: ['OK', 'Open Python Website']
-      });
-
-      if (result.response === 1 && app) {
-        require('electron').shell.openExternal('https://www.python.org/downloads/');
-      }
-      throw new Error('Python not installed');
+    // In production, check if Python environment is already bundled
+    if (!isDev && checkBundledPython()) {
+      console.log('Bundled Python environment found - skipping installation');
+      return true;
     }
 
-    // Check for uv
+    // In development or if bundled environment not found, install dependencies
+    // Check for uv (bundled or system)
     const uvInstalled = await checkUvInstalled();
     if (!uvInstalled) {
-      const result = await dialog.showMessageBox({
-        type: 'question',
-        title: 'uv Not Found',
-        message: 'uv package manager is required',
-        detail: 'uv is needed to manage Python dependencies. Would you like to install it automatically?',
-        buttons: ['Cancel', 'Install']
-      });
+      // If we have bundled uv, we should always have it
+      // If not, try to install system uv
+      if (isDev) {
+        const result = await dialog.showMessageBox({
+          type: 'question',
+          title: 'uv Not Found',
+          message: 'uv package manager is required',
+          detail: 'uv is needed to manage Python dependencies. Would you like to install it automatically?',
+          buttons: ['Cancel', 'Install']
+        });
 
-      if (result.response === 0) {
-        throw new Error('uv not installed and user declined installation');
+        if (result.response === 0) {
+          throw new Error('uv not installed and user declined installation');
+        }
+
+        await installUv();
+      } else {
+        throw new Error('uv not found. Please ensure the app is properly installed.');
       }
-
-      await installUv();
     }
 
     // Install Python dependencies
+    // uv will automatically download Python if needed
     await installPythonDependencies();
 
     return true;
@@ -190,7 +271,7 @@ async function ensurePythonDependencies() {
 }
 
 module.exports = {
+  init,
   ensurePythonDependencies,
-  checkUvInstalled,
-  checkPythonInstalled
+  checkUvInstalled
 };

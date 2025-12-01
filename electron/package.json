@@ -42,6 +42,7 @@
       "main.js",
       "preload.js",
       "install-python-deps.js",
+      "assets/**/*",
       "../frontend/dist/**/*",
       "!../frontend/dist/**/node_modules/**/*"
     ],
@@ -54,6 +55,45 @@
       {
         "from": "../pyproject.toml",
         "to": "app/pyproject.toml"
+      },
+      {
+        "from": "../uv.lock",
+        "to": "app/uv.lock"
+      },
+      {
+        "from": "../README.md",
+        "to": "app/README.md"
+      },
+      {
+        "from": "../LICENSE.md",
+        "to": "app/LICENSE.md"
+      },
+      {
+        "from": "../.python-version",
+        "to": "app/.python-version"
+      },
+      {
+        "from": "uv-binaries",
+        "to": "uv-binaries",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "python-env/.venv",
+        "to": "python-env/.venv",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "python-env/src",
+        "to": "python-env/src",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "python-env/pyproject.toml",
+        "to": "python-env/pyproject.toml"
+      },
+      {
+        "from": "python-env/uv.lock",
+        "to": "python-env/uv.lock"
       }
     ],
     "win": {

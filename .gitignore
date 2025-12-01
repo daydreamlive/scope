@@ -18,3 +18,5 @@ notes/
 .cursorrules
 .cursorignore
 .cursorindexingignore
+electron/uv-binaries/
+electron/python-env/

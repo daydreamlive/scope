@@ -22,12 +22,39 @@ const SERVER_HOST = '127.0.0.1';
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const appPath = app.getAppPath();
 const userDataPath = app.getPath('userData');
-const pythonPath = isDev
-  ? path.join(appPath, '..', '.venv', 'bin', 'python')
-  : path.join(process.resourcesPath, 'python', 'bin', 'python');
+
+// Python path - use bundled Python environment if available
+function getPythonPath() {
+  if (isDev) {
+    // Development: use project .venv
+    const devPythonPath = path.join(appPath, '..', '.venv', 'bin', 'python');
+    if (fs.existsSync(devPythonPath)) {
+      return devPythonPath;
+    }
+    // Fallback to system Python
+    return 'python3';
+  } else {
+    // Production: use bundled Python environment
+    const platform = process.platform;
+    let bundledPythonPath;
+    if (platform === 'win32') {
+      bundledPythonPath = path.join(process.resourcesPath, 'python-env', '.venv', 'Scripts', 'python.exe');
+    } else {
+      bundledPythonPath = path.join(process.resourcesPath, 'python-env', '.venv', 'bin', 'python');
+    }
+
+    if (fs.existsSync(bundledPythonPath)) {
+      return bundledPythonPath;
+    }
+    // Fallback to system Python (shouldn't happen if build was successful)
+    return 'python3';
+  }
+}
+
+const pythonPath = getPythonPath();
 const serverScriptPath = isDev
   ? path.join(appPath, '..', 'src', 'scope', 'server', 'app.py')
-  : path.join(process.resourcesPath, 'app', 'src', 'scope', 'server', 'app.py');
+  : path.join(process.resourcesPath, 'python-env', 'src', 'scope', 'server', 'app.py');
 
 // Logs directory (matches Python server's default)
 const logsDir = path.join(os.homedir(), '.daydream-scope', 'logs');
@@ -66,11 +93,11 @@ function startPythonServer() {
   console.log('Server script:', serverScriptPath);
 
   // Check if Python executable exists
-  if (!fs.existsSync(pythonPath)) {
+  if (pythonPath !== 'python3' && !fs.existsSync(pythonPath)) {
     console.error('Python executable not found at:', pythonPath);
     dialog.showErrorBox(
       'Python Not Found',
-      `Python executable not found at: ${pythonPath}\n\nPlease ensure Python dependencies are installed.`
+      `Python executable not found at: ${pythonPath}\n\nPlease rebuild the app to include the Python environment.`
     );
     return;
   }
@@ -85,63 +112,45 @@ function startPythonServer() {
     return;
   }
 
-  // Determine the correct Python command and path
-  // Try to use uv run first (works in both dev and prod), fallback to direct Python
+  // Use the bundled Python environment directly
+  // All dependencies are pre-installed, so we just run Python directly
   let pythonCommand, pythonArgs;
 
-  // Check if uv is available
-  const uvAvailable = fs.existsSync('/usr/local/bin/uv') ||
-                       fs.existsSync(path.join(os.homedir(), '.cargo', 'bin', 'uv')) ||
-                       process.env.PATH?.includes('uv');
-
-  if (isDev) {
-    // Development: prefer uv run, fallback to venv Python
-    if (uvAvailable) {
-      pythonCommand = 'uv';
-      pythonArgs = [
-        'run', 'daydream-scope',
-        '--host', SERVER_HOST,
-        '--port', SERVER_PORT.toString(),
-        '--no-browser'
-      ];
-    } else if (fs.existsSync(pythonPath)) {
-      pythonCommand = pythonPath;
-      pythonArgs = [
-        '-m', 'scope.server.app',
-        '--host', SERVER_HOST,
-        '--port', SERVER_PORT.toString(),
-        '--no-browser'
-      ];
-    } else {
-      // Try system Python
-      pythonCommand = 'python3';
-      pythonArgs = [
-        '-m', 'scope.server.app',
-        '--host', SERVER_HOST,
-        '--port', SERVER_PORT.toString(),
-        '--no-browser'
-      ];
-    }
-  } else {
-    // Production: use uv run (should be bundled or in PATH)
-    pythonCommand = 'uv';
+  if (pythonPath !== 'python3' && fs.existsSync(pythonPath)) {
+    // Use bundled Python
+    pythonCommand = pythonPath;
     pythonArgs = [
-      'run', 'daydream-scope',
+      '-m', 'scope.server.app',
       '--host', SERVER_HOST,
       '--port', SERVER_PORT.toString(),
       '--no-browser'
     ];
+    console.log(`Using bundled Python at: ${pythonPath}`);
+  } else {
+    // Fallback to system Python (shouldn't happen in production)
+    pythonCommand = 'python3';
+    pythonArgs = [
+      '-m', 'scope.server.app',
+      '--host', SERVER_HOST,
+      '--port', SERVER_PORT.toString(),
+      '--no-browser'
+    ];
+    console.warn('Using system Python (bundled Python not found)');
   }
 
   // Start Python server
+  const projectDir = isDev
+    ? path.join(appPath, '..')
+    : path.join(process.resourcesPath, 'python-env');
+
   pythonProcess = spawn(pythonCommand, pythonArgs, {
-    cwd: isDev ? path.join(appPath, '..') : path.join(process.resourcesPath, 'app'),
+    cwd: projectDir,
     env: {
       ...process.env,
       // Ensure Python can find the scope package
       PYTHONPATH: isDev
         ? path.join(appPath, '..', 'src')
-        : path.join(process.resourcesPath, 'app', 'src')
+        : path.join(process.resourcesPath, 'python-env', 'src')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -162,14 +171,26 @@ function startPythonServer() {
   pythonProcess.stderr.on('data', (data) => {
     const output = data.toString();
     console.error('[Python Server Error]', output);
+    // In production, also show critical errors to user
+    if (!isDev && output.includes('Error') || output.includes('Traceback')) {
+      // Only show dialog for critical errors, not warnings
+      if (output.includes('ModuleNotFoundError') || output.includes('ImportError') ||
+          output.includes('FileNotFoundError') || output.includes('PermissionError')) {
+        dialog.showErrorBox(
+          'Python Server Error',
+          `Python server encountered an error:\n\n${output.substring(0, 500)}`
+        );
+      }
+    }
   });
 
   pythonProcess.on('error', (error) => {
     console.error('Failed to start Python server:', error);
-    dialog.showErrorBox(
-      'Server Start Error',
-      `Failed to start Python server: ${error.message}`
-    );
+    const errorMsg = `Failed to start Python server: ${error.message}\n\n` +
+      `Command: ${pythonCommand} ${pythonArgs.join(' ')}\n` +
+      `Working directory: ${isDev ? path.join(appPath, '..') : path.join(process.resourcesPath, 'app')}\n\n` +
+      `Please ensure Python 3.10+ and uv are installed and available in PATH.`;
+    dialog.showErrorBox('Server Start Error', errorMsg);
     pythonProcess = null;
   });
 
@@ -231,31 +252,28 @@ function createWindow() {
     show: false // Don't show until ready
   });
 
-  // Load the app
-  if (isDev) {
-    // In development, load from Vite dev server
-    mainWindow.loadURL('http://localhost:5173');
-    // Open DevTools in development
-    mainWindow.webContents.openDevTools();
-  } else {
-    // In production, load from built frontend
-    const frontendPath = path.join(__dirname, '..', 'frontend', 'dist', 'index.html');
-    if (fs.existsSync(frontendPath)) {
-      mainWindow.loadFile(frontendPath);
-    } else {
-      // Fallback: try loading from resources
-      const resourcePath = path.join(process.resourcesPath, 'app', 'frontend', 'dist', 'index.html');
-      if (fs.existsSync(resourcePath)) {
-        mainWindow.loadFile(resourcePath);
-      } else {
-        console.error('Frontend dist not found');
+  // Load the app - always load from Python server (which serves the frontend)
+  // The Python server will serve the frontend from frontend/dist if it exists
+  const serverURL = `http://${SERVER_HOST}:${SERVER_PORT}`;
+  mainWindow.loadURL(serverURL);
+
+  // Handle page load failures
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    if (errorCode === -106 || errorCode === -105) { // ERR_CONNECTION_REFUSED or ERR_NAME_NOT_RESOLVED
+      console.error('Failed to load page:', errorCode, errorDescription);
+      if (!isDev) {
         dialog.showErrorBox(
-          'Frontend Not Found',
-          'The frontend build was not found. Please rebuild the application.'
+          'Connection Error',
+          `Failed to connect to the Python server at ${serverURL}.\n\n` +
+          `Error: ${errorDescription}\n\n` +
+          `Please check:\n` +
+          `1. The Python server is starting correctly\n` +
+          `2. Port ${SERVER_PORT} is not in use by another application\n` +
+          `3. Check the logs in ${logsDir}`
         );
       }
     }
-  }
+  });
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
@@ -298,15 +316,31 @@ function createWindow() {
  * Create system tray icon and menu
  */
 function createTray() {
-  // Use a placeholder icon for now (will be replaced with actual icon)
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  try {
+    // Use a placeholder icon for now (will be replaced with actual icon)
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    const fallbackIconPath = path.join(__dirname, 'assets', 'icon.png');
 
-  // Fallback to a default icon if custom icon doesn't exist
-  const trayIcon = fs.existsSync(iconPath)
-    ? iconPath
-    : path.join(__dirname, 'assets', 'icon.png');
+    // Fallback to a default icon if custom icon doesn't exist
+    let trayIcon;
+    if (fs.existsSync(iconPath)) {
+      trayIcon = iconPath;
+    } else if (fs.existsSync(fallbackIconPath)) {
+      trayIcon = fallbackIconPath;
+    } else {
+      // If no icon exists, log a warning and skip tray creation
+      console.warn('Tray icon not found. Skipping tray creation.');
+      console.warn('Expected paths:', iconPath, 'or', fallbackIconPath);
+      return;
+    }
 
-  tray = new Tray(trayIcon);
+    tray = new Tray(trayIcon);
+  } catch (error) {
+    console.error('Failed to create tray:', error);
+    console.error('Icon path attempted:', error.path || 'unknown');
+    // Don't throw - allow app to continue without tray
+    return;
+  }
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -391,6 +425,10 @@ app.whenReady().then(async () => {
   const depsReady = await ensurePythonDependencies();
   if (depsReady) {
     startPythonServer();
+    // Create window after starting server (give it a moment to initialize)
+    setTimeout(() => {
+      createWindow();
+    }, 1000);
   } else {
     // Show error and quit if dependencies can't be installed
     dialog.showErrorBox(
