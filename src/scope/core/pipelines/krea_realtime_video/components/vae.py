@@ -43,7 +43,9 @@ class WanVAEWrapper(torch.nn.Module):
         self.decoder.requires_grad_(False)
         self.decoder_cache = [None] * 55
 
-    def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
+    def encode_to_latent(
+        self, pixel: torch.Tensor, use_cache: bool = True
+    ) -> torch.Tensor:
         encoder_cache = [None] * 55
         output, _ = self.encoder(pixel, encoder_cache)
         # from [batch_size, num_channels, num_frames, height, width]

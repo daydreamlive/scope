@@ -8,10 +8,15 @@ from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
 from ..interface import Pipeline
 from ..process import postprocess_chunk
+from ..streamdiffusionv2.components import WanVAEWrapper
 from ..utils import Quantization, load_model_config
-from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
+from ..wan2_1.components import (
+    WanDiffusionWrapper,
+    WanTextEncoderWrapper,
+)
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .components import WanVAEWrapper
+
+# from .components import WanVAEWrapper
 from .modular_blocks import KreaRealtimeVideoBlocks
 from .modules.causal_model import CausalWanModel
 

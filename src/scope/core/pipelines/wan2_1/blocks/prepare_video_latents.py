@@ -104,8 +104,6 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
 
         # Encode frames to latents using VAE
         latents = components.vae.encode_to_latent(input_video)
-        # Transpose latents
-        latents = latents.transpose(2, 1)
 
         # The default param for InputParam does not work right now
         # The workaround is to set the default values here

@@ -7,10 +7,21 @@ from ..modules.vae import _video_vae
 
 
 class WanVAEWrapper(torch.nn.Module):
-    def __init__(self, model_dir: str | None = None):
+    def __init__(
+        self,
+        model_name: str = "Wan2.1-T2V-1.3B",
+        model_dir: str | None = None,
+        vae_path: str | None = None,
+    ):
         super().__init__()
 
+        # Determine paths with priority: specific paths > model_dir > default
         model_dir = model_dir if model_dir is not None else "wan_models"
+        if vae_path is None:
+            model_dir = model_dir if model_dir is not None else "wan_models"
+            model_path = os.path.join(model_dir, model_name)
+            vae_path = os.path.join(model_path, "Wan2.1_VAE.pth")
+
         mean = [
             -0.7571,
             -0.7089,
@@ -53,9 +64,7 @@ class WanVAEWrapper(torch.nn.Module):
         # init model
         self.model = (
             _video_vae(
-                pretrained_path=os.path.join(
-                    model_dir, "Wan2.1-T2V-1.3B/Wan2.1_VAE.pth"
-                ),
+                pretrained_path=vae_path,
                 z_dim=16,
             )
             .eval()
@@ -63,8 +72,18 @@ class WanVAEWrapper(torch.nn.Module):
         )
 
     # Streaming friendly
-    def encode_to_latent(self, pixel: torch.Tensor) -> torch.Tensor:
-        return self.model.stream_encode(pixel)
+    def encode_to_latent(
+        self, pixel: torch.Tensor, use_cache: bool = True
+    ) -> torch.Tensor:
+        device, dtype = pixel.device, pixel.dtype
+        scale = [
+            self.mean.to(device=device, dtype=dtype),
+            1.0 / self.std.to(device=device, dtype=dtype),
+        ]
+        if use_cache:
+            return self.model.stream_encode(pixel, scale).transpose(2, 1)
+        else:
+            return self.model.encode(pixel, scale, [None] * 55).transpose(2, 1)
 
     # Streaming friendly
     def decode_to_pixel(

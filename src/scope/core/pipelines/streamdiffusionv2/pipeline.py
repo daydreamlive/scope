@@ -9,7 +9,10 @@ from ..components import ComponentsManager
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..utils import Quantization, load_model_config
-from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
+from ..wan2_1.components import (
+    WanDiffusionWrapper,
+    WanTextEncoderWrapper,
+)
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from .components import WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks

@@ -582,8 +582,9 @@ class WanVAE_(nn.Module):
         x_recon = self.decode(z)
         return x_recon, mu, log_var
 
-    def encode(self, x, scale):
-        self.clear_cache()
+    def encode(self, x, scale, feat_cache: list[torch.Tensor] = None):
+        if feat_cache is None:
+            self.clear_cache()
         # cache
         t = x.shape[2]
         iter_ = 1 + (t - 1) // 4
@@ -593,13 +594,13 @@ class WanVAE_(nn.Module):
             if i == 0:
                 out = self.encoder(
                     x[:, :, :1, :, :],
-                    feat_cache=self._enc_feat_map,
+                    feat_cache=self._enc_feat_map if feat_cache is None else feat_cache,
                     feat_idx=self._enc_conv_idx,
                 )
             else:
                 out_ = self.encoder(
                     x[:, :, 1 + 4 * (i - 1) : 1 + 4 * i, :, :],
-                    feat_cache=self._enc_feat_map,
+                    feat_cache=self._enc_feat_map if feat_cache is None else feat_cache,
                     feat_idx=self._enc_conv_idx,
                 )
                 out = torch.cat([out, out_], 2)
@@ -610,10 +611,11 @@ class WanVAE_(nn.Module):
             )
         else:
             mu = (mu - scale[0]) * scale[1]
-        self.clear_cache()
+        if feat_cache is None:
+            self.clear_cache()
         return mu
 
-    def stream_encode(self, x):
+    def stream_encode(self, x, scale):
         # cache
         t = x.shape[2]
         if self.first_batch:
@@ -644,6 +646,12 @@ class WanVAE_(nn.Module):
                 )
             out = torch.cat(out, 2)
         mu, log_var = self.conv1(out).chunk(2, dim=1)
+        if isinstance(scale[0], torch.Tensor):
+            mu = (mu - scale[0].view(1, self.z_dim, 1, 1, 1)) * scale[1].view(
+                1, self.z_dim, 1, 1, 1
+            )
+        else:
+            mu = (mu - scale[0]) * scale[1]
         # self.clear_cache()
         return mu
 
