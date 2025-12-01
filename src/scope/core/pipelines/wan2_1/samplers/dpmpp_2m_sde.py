@@ -9,23 +9,20 @@ class DPMPP2MSDESampler(Sampler):
     """
     DPM-Solver++(2M) SDE (Stochastic Differential Equation) sampler.
 
-    Based on ComfyUI's sample_dpmpp_2m_sde implementation, adapted for flow matching.
-    This is the stochastic variant of DPM-Solver++(2M) that adds controlled noise
-    between steps for better sample diversity.
+    Based on ComfyUI's sample_dpmpp_2m_sde implementation, adapted for Rectified Flow.
+
+    For flow matching models:
+    - x_t = (1 - sigma) * x0 + sigma * noise
+    - alpha = 1 - sigma
+    - sigma goes from 1.0 (pure noise) to 0.0 (clean image)
+    - lambda (half-logSNR) = log(alpha/sigma) = log((1-sigma)/sigma)
 
     Key formulas:
-    - lambda_fn(sigma) = -log(sigma) for standard models
-    - For flow matching: lambda_fn(sigma) = log((1-sigma)/sigma) = -logit(sigma)
-    - h = lambda_t - lambda_s
+    - h = lambda_t - lambda_s (positive, since lambda increases as sigma decreases)
     - h_eta = h * (eta + 1)
-    - x = (sigma_next/sigma) * exp(-h*eta) * x + alpha_t * (-h_eta).expm1().neg() * denoised
-
-    Multi-step correction (midpoint solver):
-    - r = h_last / h
-    - x = x + 0.5 * alpha_t * (-h_eta).expm1().neg() * (1/r) * (denoised - old_denoised)
-
-    Noise addition:
-    - x = x + noise * sigma_next * sqrt(-expm1(-2*h*eta)) * s_noise
+    - First-order: x = (sigma_next/sigma) * exp(-h*eta) * x + alpha_t * (-h_eta).expm1().neg() * denoised
+    - Second-order correction with midpoint/heun method
+    - Noise: x = x + sigma_next * sqrt(-expm1(-2*h*eta)) * s_noise * noise
 
     This is a stateful stochastic sampler.
 
@@ -70,18 +67,6 @@ class DPMPP2MSDESampler(Sampler):
             (scheduler.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
         )
         return scheduler.sigmas[timestep_id]
-
-    def _sigma_to_lambda(self, sigma: torch.Tensor) -> torch.Tensor:
-        """Convert sigma to half-logSNR lambda.
-
-        For flow matching (CONST): lambda = log((1-sigma)/sigma) = -logit(sigma)
-        For standard models: lambda = -log(sigma)
-
-        We use the flow matching version.
-        """
-        # For flow matching: lambda = log((1-sigma)/sigma)
-        sigma_clamped = sigma.clamp(min=1e-8, max=1 - 1e-8)
-        return ((1 - sigma_clamped) / sigma_clamped).log()
 
     def step(
         self,
@@ -128,40 +113,58 @@ class DPMPP2MSDESampler(Sampler):
         sigma = sigma.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
         sigma_next = sigma_next.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
 
-        # Convert to lambda (half-logSNR)
-        lambda_s = self._sigma_to_lambda(sigma)
-        lambda_t = self._sigma_to_lambda(sigma_next)
+        # Clamp sigma values to avoid numerical issues with lambda calculation
+        # For flow matching: lambda = log((1-sigma)/sigma)
+        # At sigma=1: lambda=-inf, at sigma=0: lambda=+inf
+        # We clamp to keep lambda in a reasonable range ~[-9, 9]
+        sigma_clamped = sigma.clamp(min=1e-4, max=1 - 1e-4)
+        sigma_next_clamped = sigma_next.clamp(min=1e-4, max=1 - 1e-4)
+
+        # Compute lambda (half-logSNR) for flow matching
+        # lambda = log(alpha/sigma) = log((1-sigma)/sigma)
+        lambda_s = ((1 - sigma_clamped) / sigma_clamped).log()
+        lambda_t = ((1 - sigma_next_clamped) / sigma_next_clamped).log()
+
+        # Step size in lambda space (positive since lambda increases as sigma decreases)
         h = lambda_t - lambda_s
         h_eta = h * (self.eta + 1)
 
-        # Compute alpha_t for flow matching: alpha = 1 - sigma
-        alpha_t = 1 - sigma_next
+        # Compute alpha_t from lambda_t for consistency (ComfyUI style)
+        # alpha_t = sigma_next * exp(lambda_t) = sigma_next * (1-sigma_next)/sigma_next = 1-sigma_next
+        # Using lambda_t.exp() ensures consistency with the lambda-based formulas
+        alpha_t = sigma_next_clamped * lambda_t.exp()
 
         # DPM-Solver++(2M) SDE first-order term
+        # x = (sigma_next/sigma) * exp(-h*eta) * x + alpha_t * (-h_eta).expm1().neg() * denoised
+        exp_neg_h_eta = (-h * self.eta).exp()
+        expm1_neg_h_eta = (-h_eta).expm1().neg()  # = 1 - exp(-h_eta)
+
         x_next = (
-            sigma_next / sigma.clamp(min=1e-8) * (-h * self.eta).exp() * x
-            + alpha_t * (-h_eta).expm1().neg() * denoised
+            sigma_next_clamped / sigma_clamped * exp_neg_h_eta * x
+            + alpha_t * expm1_neg_h_eta * denoised
         )
 
         # Multi-step correction if we have history
         if self._old_denoised is not None and self._h_last is not None:
-            r = self._h_last / h.clamp(min=1e-8)
+            r = self._h_last / h
 
             if self.solver_type == "heun":
                 # Heun's correction
+                # correction = alpha_t * (expm1(-h_eta) / (-h_eta) + 1) * (1/r) * (denoised - old_denoised)
                 correction = (
                     alpha_t
-                    * ((-h_eta).expm1().neg() / (-h_eta).clamp(min=1e-8) + 1)
-                    * (1 / r.clamp(min=1e-8))
+                    * (expm1_neg_h_eta / h_eta.clamp(min=1e-8) + 1)
+                    * (1 / r)
                     * (denoised - self._old_denoised)
                 )
             else:
                 # Midpoint correction
+                # correction = 0.5 * alpha_t * expm1(-h_eta) * (1/r) * (denoised - old_denoised)
                 correction = (
                     0.5
                     * alpha_t
-                    * (-h_eta).expm1().neg()
-                    * (1 / r.clamp(min=1e-8))
+                    * expm1_neg_h_eta
+                    * (1 / r)
                     * (denoised - self._old_denoised)
                 )
 
@@ -176,8 +179,8 @@ class DPMPP2MSDESampler(Sampler):
                 generator=generator,
             )
             # SDE noise term: sigma_next * sqrt(-expm1(-2*h*eta)) * s_noise
-            noise_scale = (-2 * h * self.eta).expm1().neg().sqrt()
-            x_next = x_next + noise * sigma_next * noise_scale * self.s_noise
+            noise_scale = (-2 * h * self.eta).expm1().neg().clamp(min=0).sqrt()
+            x_next = x_next + noise * sigma_next_clamped * noise_scale * self.s_noise
 
         # Store state for next iteration
         self._old_denoised = denoised.detach().clone()

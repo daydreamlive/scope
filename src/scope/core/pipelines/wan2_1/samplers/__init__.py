@@ -13,7 +13,6 @@ from .euler_ancestral_rf import EulerAncestralRFSampler
 from .gradient_estimation import GradientEstimationSampler
 from .ipndm import IPNDMSampler
 from .lcm import LCMSampler
-from .res_multistep import ResMultistepSampler
 
 
 class SamplerType(str, Enum):
@@ -31,7 +30,6 @@ class SamplerType(str, Enum):
     DPMPP_2M = "dpmpp_2m"
     DPMPP_2M_SDE = "dpmpp_2m_sde"
     DPMPP_3M_SDE = "dpmpp_3m_sde"
-    RES_MULTISTEP = "res_multistep"
 
     # Special samplers
     GRADIENT_ESTIMATION = "gradient_estimation"
@@ -60,7 +58,6 @@ def create_sampler(sampler_type: SamplerType | str, **kwargs) -> Sampler:
             - DPMPP_2M_SDE: eta (float, default 1.0), s_noise (float, default 1.0),
                            solver_type (str, 'midpoint' or 'heun', default 'midpoint')
             - DPMPP_3M_SDE: eta (float, default 1.0), s_noise (float, default 1.0)
-            - RES_MULTISTEP: eta (float, default 0.0), s_noise (float, default 1.0)
 
             Special Samplers:
             - GRADIENT_ESTIMATION: gamma (float, default 2.0)
@@ -117,11 +114,6 @@ def create_sampler(sampler_type: SamplerType | str, **kwargs) -> Sampler:
         s_noise = kwargs.get("s_noise", 1.0)
         return DPMPP3MSDESampler(eta=eta, s_noise=s_noise)
 
-    if sampler_type == SamplerType.RES_MULTISTEP:
-        eta = kwargs.get("eta", 0.0)
-        s_noise = kwargs.get("s_noise", 1.0)
-        return ResMultistepSampler(eta=eta, s_noise=s_noise)
-
     # Special samplers
     if sampler_type == SamplerType.GRADIENT_ESTIMATION:
         gamma = kwargs.get("gamma", 2.0)
@@ -167,7 +159,6 @@ __all__ = [
     "DPMPP2MSampler",
     "DPMPP2MSDESampler",
     "DPMPP3MSDESampler",
-    "ResMultistepSampler",
     # Special samplers
     "GradientEstimationSampler",
     "DDPMSampler",

@@ -9,12 +9,18 @@ class DPMPP3MSDESampler(Sampler):
     """
     DPM-Solver++(3M) SDE (Stochastic Differential Equation) sampler.
 
-    Based on ComfyUI's sample_dpmpp_3m_sde implementation, adapted for flow matching.
+    Based on ComfyUI's sample_dpmpp_3m_sde implementation, adapted for Rectified Flow.
+
+    For flow matching models:
+    - x_t = (1 - sigma) * x0 + sigma * noise
+    - alpha = 1 - sigma
+    - sigma goes from 1.0 (pure noise) to 0.0 (clean image)
+    - lambda (half-logSNR) = log(alpha/sigma) = log((1-sigma)/sigma)
+
     This is a third-order variant of DPM-Solver++ SDE that uses two previous
     denoised predictions for higher-order accuracy.
 
     Key formulas:
-    - lambda_fn(sigma) = log((1-sigma)/sigma) for flow matching
     - h = lambda_t - lambda_s
     - h_eta = h * (eta + 1)
 
@@ -70,14 +76,6 @@ class DPMPP3MSDESampler(Sampler):
         )
         return scheduler.sigmas[timestep_id]
 
-    def _sigma_to_lambda(self, sigma: torch.Tensor) -> torch.Tensor:
-        """Convert sigma to half-logSNR lambda.
-
-        For flow matching (CONST): lambda = log((1-sigma)/sigma) = -logit(sigma)
-        """
-        sigma_clamped = sigma.clamp(min=1e-8, max=1 - 1e-8)
-        return ((1 - sigma_clamped) / sigma_clamped).log()
-
     def step(
         self,
         x: torch.Tensor,
@@ -126,43 +124,58 @@ class DPMPP3MSDESampler(Sampler):
         sigma = sigma.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
         sigma_next = sigma_next.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
 
-        # Convert to lambda (half-logSNR)
-        lambda_s = self._sigma_to_lambda(sigma)
-        lambda_t = self._sigma_to_lambda(sigma_next)
+        # Clamp sigma values to avoid numerical issues with lambda calculation
+        # For flow matching: lambda = log((1-sigma)/sigma)
+        # At sigma=1: lambda=-inf, at sigma=0: lambda=+inf
+        # We clamp to keep lambda in a reasonable range ~[-9, 9]
+        sigma_clamped = sigma.clamp(min=1e-4, max=1 - 1e-4)
+        sigma_next_clamped = sigma_next.clamp(min=1e-4, max=1 - 1e-4)
+
+        # Compute lambda (half-logSNR) for flow matching
+        # lambda = log(alpha/sigma) = log((1-sigma)/sigma)
+        lambda_s = ((1 - sigma_clamped) / sigma_clamped).log()
+        lambda_t = ((1 - sigma_next_clamped) / sigma_next_clamped).log()
+
+        # Step size in lambda space (positive since lambda increases as sigma decreases)
         h = lambda_t - lambda_s
         h_eta = h * (self.eta + 1)
 
-        # Compute alpha_t for flow matching: alpha = 1 - sigma
-        alpha_t = 1 - sigma_next
+        # Compute alpha_t from lambda_t for consistency (ComfyUI style)
+        # alpha_t = sigma_next * exp(lambda_t) = sigma_next * (1-sigma_next)/sigma_next = 1-sigma_next
+        alpha_t = sigma_next_clamped * lambda_t.exp()
 
         # First-order base term
+        exp_neg_h_eta = (-h * self.eta).exp()
+        expm1_neg_h_eta = (-h_eta).expm1().neg()  # = 1 - exp(-h_eta)
+
         x_next = (
-            sigma_next / sigma.clamp(min=1e-8) * (-h * self.eta).exp() * x
-            + alpha_t * (-h_eta).expm1().neg() * denoised
+            sigma_next_clamped / sigma_clamped * exp_neg_h_eta * x
+            + alpha_t * expm1_neg_h_eta * denoised
         )
 
         # Higher-order corrections
         if self._h_2 is not None and self._denoised_2 is not None:
             # DPM-Solver++(3M) SDE - use two history points
-            r0 = self._h_1 / h.clamp(min=1e-8)
-            r1 = self._h_2 / h.clamp(min=1e-8)
+            r0 = self._h_1 / h
+            r1 = self._h_2 / h
 
-            d1_0 = (denoised - self._denoised_1) / r0.clamp(min=1e-8)
-            d1_1 = (self._denoised_1 - self._denoised_2) / r1.clamp(min=1e-8)
-            d1 = d1_0 + (d1_0 - d1_1) * r0 / (r0 + r1).clamp(min=1e-8)
-            d2 = (d1_0 - d1_1) / (r0 + r1).clamp(min=1e-8)
+            d1_0 = (denoised - self._denoised_1) / r0
+            d1_1 = (self._denoised_1 - self._denoised_2) / r1
+            d1 = d1_0 + (d1_0 - d1_1) * r0 / (r0 + r1)
+            d2 = (d1_0 - d1_1) / (r0 + r1)
 
-            phi_2 = h_eta.neg().expm1() / h_eta.clamp(min=1e-8) + 1
-            phi_3 = phi_2 / h_eta.clamp(min=1e-8) - 0.5
+            # phi_2 = expm1(-h_eta) / h_eta + 1 = (exp(-h_eta) - 1) / h_eta + 1
+            phi_2 = h_eta.neg().expm1() / h_eta + 1
+            phi_3 = phi_2 / h_eta - 0.5
 
             x_next = x_next + (alpha_t * phi_2) * d1 - (alpha_t * phi_3) * d2
 
         elif self._h_1 is not None and self._denoised_1 is not None:
             # DPM-Solver++(2M) SDE - use one history point
-            r = self._h_1 / h.clamp(min=1e-8)
-            d = (denoised - self._denoised_1) / r.clamp(min=1e-8)
-            phi_2 = h_eta.neg().expm1() / h_eta.clamp(min=1e-8) + 1
+            r = self._h_1 / h
+            d = (denoised - self._denoised_1) / r
 
+            phi_2 = h_eta.neg().expm1() / h_eta + 1
             x_next = x_next + (alpha_t * phi_2) * d
 
         # Add SDE noise if eta > 0
@@ -174,8 +187,8 @@ class DPMPP3MSDESampler(Sampler):
                 generator=generator,
             )
             # SDE noise term: sigma_next * sqrt(-expm1(-2*h*eta)) * s_noise
-            noise_scale = (-2 * h * self.eta).expm1().neg().sqrt()
-            x_next = x_next + noise * sigma_next * noise_scale * self.s_noise
+            noise_scale = (-2 * h * self.eta).expm1().neg().clamp(min=0).sqrt()
+            x_next = x_next + noise * sigma_next_clamped * noise_scale * self.s_noise
 
         # Update history - shift older values
         self._denoised_2 = self._denoised_1

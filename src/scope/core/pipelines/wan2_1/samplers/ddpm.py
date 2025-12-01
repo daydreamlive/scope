@@ -9,14 +9,15 @@ class DDPMSampler(Sampler):
     """
     DDPM (Denoising Diffusion Probabilistic Models) sampler adapted for flow matching.
 
-    Based on ComfyUI's sample_ddpm/DDPMSampler_step implementation.
-    This sampler uses the DDPM update rule with proper alpha_cumprod scaling.
+    Based on ComfyUI's DDPMSampler_step, adapted for Rectified Flow (flow matching).
 
-    For flow matching models, the relationship between sigma and alpha_cumprod is:
-    - alpha_cumprod = 1 / (sigma^2 + 1)
-    - The model predicts noise, which we convert to denoised prediction
+    For flow matching models:
+    - x_t = (1 - sigma) * x0 + sigma * noise
+    - alpha = 1 - sigma (NOT alpha_cumprod = 1/(sigma^2+1) which is for Karras/EDM)
+    - sigma goes from 1.0 (pure noise) to 0.0 (clean image)
 
-    This is a stateless stochastic sampler.
+    This sampler performs stochastic resampling at each step, using the denoised
+    prediction as x0 and adding fresh noise scaled to the next sigma level.
 
     Args:
         s_noise: Noise scale multiplier. Default 1.0.
@@ -56,17 +57,13 @@ class DDPMSampler(Sampler):
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """
-        Perform one denoising step using DDPM.
+        Perform one denoising step using DDPM for flow matching.
 
-        The DDPM step formula (adapted for sigma parameterization):
-        - alpha_cumprod = 1 / (sigma^2 + 1)
-        - alpha_cumprod_prev = 1 / (sigma_prev^2 + 1)
-        - alpha = alpha_cumprod / alpha_cumprod_prev
-        - noise = (x - denoised) / sigma  (the predicted noise)
-        - mu = (1/sqrt(alpha)) * (x - (1-alpha) * noise / sqrt(1-alpha_cumprod))
-        - If sigma_prev > 0: mu += sqrt((1-alpha)(1-alpha_cumprod_prev)/(1-alpha_cumprod)) * noise_sample
+        For flow matching, the DDPM step uses the interpolation formula:
+        - x_next = (1 - sigma_next) * denoised + sigma_next * noise_component
 
-        For flow matching, we scale x appropriately.
+        Where noise_component blends the implicit noise from the current sample
+        with fresh noise for stochasticity.
 
         Args:
             x: Current noisy sample [B, F, C, H, W]
@@ -88,55 +85,55 @@ class DDPMSampler(Sampler):
         # Get current sigma
         sigma = self._get_sigma_for_timestep(scheduler, timestep.flatten(0, 1))
 
-        # Get next sigma (sigma_prev in DDPM notation, going backward in diffusion)
+        # Get next sigma
         next_timestep_tensor = next_timestep * torch.ones(
             [batch_size * num_frames],
             device=x.device,
             dtype=torch.long,
         )
-        sigma_prev = self._get_sigma_for_timestep(scheduler, next_timestep_tensor)
+        sigma_next = self._get_sigma_for_timestep(scheduler, next_timestep_tensor)
 
         # Reshape for broadcasting [B, F, 1, 1, 1]
         sigma = sigma.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
-        sigma_prev = sigma_prev.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
+        sigma_next = sigma_next.reshape(batch_size, num_frames, 1, 1, 1).to(x.dtype)
 
-        # Compute alpha_cumprod values
-        # For EDM/Karras parameterization: alpha_cumprod = 1 / (sigma^2 + 1)
-        alpha_cumprod = 1 / (sigma**2 + 1)
-        alpha_cumprod_prev = 1 / (sigma_prev**2 + 1)
-        alpha = alpha_cumprod / alpha_cumprod_prev.clamp(min=1e-8)
+        # DDPM posterior for flow matching:
+        # We want to sample x_{t-1} given x_t and x0_pred (denoised)
+        #
+        # The posterior mean in flow matching can be written as an interpolation:
+        # mu = (sigma_next / sigma) * x + (alpha_next - alpha * sigma_next / sigma) * denoised
+        #
+        # Simplifying with alpha = 1 - sigma:
+        # mu = (sigma_next / sigma) * x + ((1 - sigma_next) - (1 - sigma) * sigma_next / sigma) * denoised
+        # mu = (sigma_next / sigma) * x + (1 - sigma_next / sigma) * denoised
+        #
+        # This is just linear interpolation, same as Euler!
+        sigma_ratio = sigma_next / sigma.clamp(min=1e-8)
+        mu = sigma_ratio * x + (1 - sigma_ratio) * denoised
 
-        # Compute noise from model prediction
-        # noise = (x - denoised) / sigma
-        noise_pred = (x - denoised) / sigma.clamp(min=1e-8)
-
-        # DDPM mean computation
-        # mu = (1/sqrt(alpha)) * (x - (1-alpha) * noise / sqrt(1-alpha_cumprod))
-        # Simplified: mu = (1/sqrt(alpha)) * (x - (1-alpha) / sqrt(1-alpha_cumprod) * noise)
-        one_minus_alpha_cumprod = (1 - alpha_cumprod).clamp(min=1e-8)
-        mu = (1.0 / alpha.sqrt().clamp(min=1e-8)) * (
-            x - (1 - alpha) * noise_pred / one_minus_alpha_cumprod.sqrt()
-        )
-
-        # Add noise if not at final sigma
-        if (sigma_prev > 1e-8).any():
-            # Posterior variance: (1-alpha) * (1-alpha_cumprod_prev) / (1-alpha_cumprod)
-            one_minus_alpha_cumprod_prev = (1 - alpha_cumprod_prev).clamp(min=1e-8)
-            posterior_var = (
-                (1 - alpha) * one_minus_alpha_cumprod_prev / one_minus_alpha_cumprod
-            )
-
-            # Sample noise
-            noise = torch.randn(
+        # Add stochastic noise if not at final sigma
+        if (sigma_next > 1e-8).any():
+            # Sample fresh noise
+            noise_fresh = torch.randn(
                 x.shape,
                 device=x.device,
                 dtype=x.dtype,
                 generator=generator,
             )
 
-            # Add noise scaled by posterior standard deviation
-            # Only add noise where sigma_prev > 0
-            noise_mask = (sigma_prev > 1e-8).to(x.dtype)
-            mu = mu + noise_mask * posterior_var.sqrt() * noise * self.s_noise
+            # DDPM adds noise with variance related to the posterior
+            # For flow matching, a simple approach is to perturb towards fresh noise
+            # with magnitude proportional to the step size
+            #
+            # Posterior variance for flow matching:
+            # var = sigma_next * (1 - sigma_next/sigma) when sigma > sigma_next
+            #
+            # This ensures we add more noise for larger steps
+            step_ratio = (sigma - sigma_next) / sigma.clamp(min=1e-8)
+            posterior_std = (sigma_next * step_ratio).clamp(min=0).sqrt()
+
+            # Only add noise where sigma_next > 0
+            noise_mask = (sigma_next > 1e-8).to(x.dtype)
+            mu = mu + noise_mask * posterior_std * noise_fresh * self.s_noise
 
         return mu
