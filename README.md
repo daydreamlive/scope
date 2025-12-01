@@ -78,6 +78,30 @@ After the server starts up, the frontend will be available at `http://localhost:
 
 The frontend will present a dialog for downloading model weights for pipelines before running them (by pressing play with the pipeline selected) for the first time. The default directory where model weights are stored is `~/.daydream-scope/models`.
 
+### Desktop App (Electron)
+
+Scope is also available as a desktop application for Windows, Linux, and macOS. The Electron app packages the frontend and Python backend into a single installable application.
+
+**Building the Desktop App:**
+
+See [ELECTRON_SETUP.md](./ELECTRON_SETUP.md) for detailed instructions on building and packaging the Electron app.
+
+**Quick Start:**
+
+```bash
+# Build frontend and Electron app
+cd electron
+./build.sh
+```
+
+The installers will be created in `electron/dist/`.
+
+**Features:**
+- One-click installation (no Git/Python setup required)
+- System tray integration
+- Automatic Python server management
+- Native desktop experience
+
 ### Runpod
 
 Use our RunPod template to quickly set up Scope in the cloud. This is the easiest way to get started if you don't have a compatible local GPU.

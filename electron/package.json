@@ -1,0 +1,99 @@
+{
+  "name": "daydream-scope",
+  "productName": "Daydream Scope",
+  "version": "0.1.0a7",
+  "description": "A tool for running and customizing real-time, interactive generative AI pipelines and models",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build:mac": "electron-builder --mac",
+    "dist": "npm run build",
+    "pack": "electron-builder --dir"
+  },
+  "keywords": [
+    "ai",
+    "video",
+    "streaming",
+    "webrtc",
+    "diffusion",
+    "real-time"
+  ],
+  "author": {
+    "name": "Daydream",
+    "email": "yondon@livepeer.org"
+  },
+  "license": "CC-BY-NC-SA-4.0",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.daydream.scope",
+    "productName": "Daydream Scope",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "install-python-deps.js",
+      "../frontend/dist/**/*",
+      "!../frontend/dist/**/node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../src",
+        "to": "app/src",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../pyproject.toml",
+        "to": "app/pyproject.toml"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Graphics"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.graphics-design"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
