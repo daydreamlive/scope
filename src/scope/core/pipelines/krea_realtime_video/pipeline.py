@@ -16,7 +16,7 @@ from ..defaults import (
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..schema import KreaRealtimeVideoConfig
-from ..utils import Quantization, load_model_config
+from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
@@ -49,6 +49,14 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        # Validate resolution requirements
+        # VAE downsample (8) * patch embedding downsample (2) = 16
+        validate_resolution(
+            height=config.height,
+            width=config.width,
+            scale_factor=16,
+        )
+
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)

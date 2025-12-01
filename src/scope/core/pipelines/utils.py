@@ -48,3 +48,30 @@ def load_model_config(config, pipeline_file_path: str | Path) -> OmegaConf:
         model_yaml_path = Path(pipeline_file_path).parent / "model.yaml"
         model_config = OmegaConf.load(model_yaml_path)
     return model_config
+
+
+def validate_resolution(
+    height: int,
+    width: int,
+    scale_factor: int,
+) -> None:
+    """
+    Validate that resolution dimensions are divisible by the required scale factor.
+
+    Args:
+        height: Height of the resolution
+        width: Width of the resolution
+        scale_factor: The factor that both dimensions must be divisible by
+
+    Raises:
+        ValueError: If height or width is not divisible by scale_factor
+    """
+    if height % scale_factor != 0 or width % scale_factor != 0:
+        adjusted_width = (width // scale_factor) * scale_factor
+        adjusted_height = (height // scale_factor) * scale_factor
+        raise ValueError(
+            f"Invalid resolution {width}×{height}. "
+            f"Both width and height must be divisible by {scale_factor} "
+            f"(VAE downsample factor 8 × patch embedding downsample factor 2 = {scale_factor}). "
+            f"Please adjust to a valid resolution, e.g., {adjusted_width}×{adjusted_height}."
+        )
