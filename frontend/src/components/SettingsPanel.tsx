@@ -27,6 +27,10 @@ import {
 } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
+import {
+  getResolutionScaleFactor,
+  adjustResolutionForPipeline,
+} from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type {
   PipelineId,
@@ -139,6 +143,15 @@ export function SettingsPanel({
   const [heightError, setHeightError] = useState<string | null>(null);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+
+  // Check if resolution needs adjustment
+  const scaleFactor = getResolutionScaleFactor(pipelineId);
+  const resolutionWarning =
+    scaleFactor &&
+    (resolution.height % scaleFactor !== 0 ||
+      resolution.width % scaleFactor !== 0)
+      ? `Resolution will be adjusted to ${adjustResolutionForPipeline(pipelineId, resolution).resolution.width}×${adjustResolutionForPipeline(pipelineId, resolution).resolution.height} when starting the stream (must be divisible by ${scaleFactor})`
+      : null;
 
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
@@ -500,55 +513,63 @@ export function SettingsPanel({
                     <p className="text-xs text-red-500 ml-16">{widthError}</p>
                   )}
                 </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <LabelWithTooltip
-                      label={PARAMETER_METADATA.seed.label}
-                      tooltip={PARAMETER_METADATA.seed.tooltip}
-                      className="text-sm text-foreground w-14"
-                    />
-                    <div
-                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${seedError ? "border-red-500" : ""}`}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={decrementSeed}
-                        disabled={isStreaming}
-                      >
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                      <Input
-                        type="number"
-                        value={seed}
-                        onChange={e => {
-                          const value = parseInt(e.target.value);
-                          if (!isNaN(value)) {
-                            handleSeedChange(value);
-                          }
-                        }}
-                        disabled={isStreaming}
-                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        min={0}
-                        max={2147483647}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={incrementSeed}
-                        disabled={isStreaming}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                {resolutionWarning && (
+                  <div className="flex items-start gap-1">
+                    <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
+                    <p className="text-xs text-amber-600 dark:text-amber-500">
+                      {resolutionWarning}
+                    </p>
                   </div>
-                  {seedError && (
-                    <p className="text-xs text-red-500 ml-16">{seedError}</p>
-                  )}
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.seed.label}
+                    tooltip={PARAMETER_METADATA.seed.tooltip}
+                    className="text-sm text-foreground w-14"
+                  />
+                  <div
+                    className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${seedError ? "border-red-500" : ""}`}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={decrementSeed}
+                      disabled={isStreaming}
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </Button>
+                    <Input
+                      type="number"
+                      value={seed}
+                      onChange={e => {
+                        const value = parseInt(e.target.value);
+                        if (!isNaN(value)) {
+                          handleSeedChange(value);
+                        }
+                      }}
+                      disabled={isStreaming}
+                      className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      min={0}
+                      max={2147483647}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                      onClick={incrementSeed}
+                      disabled={isStreaming}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
+                {seedError && (
+                  <p className="text-xs text-red-500 ml-16">{seedError}</p>
+                )}
               </div>
             </div>
           </div>

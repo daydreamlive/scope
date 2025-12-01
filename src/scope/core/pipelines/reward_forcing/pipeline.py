@@ -16,7 +16,7 @@ from ..defaults import (
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..schema import RewardForcingConfig
-from ..utils import Quantization, load_model_config
+from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vace.mixin import VACEEnabledPipeline
@@ -50,6 +50,13 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         tokenizer_path = getattr(config, "tokenizer_path", None)
 
         model_config = load_model_config(config, __file__)
+
+        validate_resolution(
+            height=config.height,
+            width=config.width,
+            scale_factor=16,
+        )
+
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
 

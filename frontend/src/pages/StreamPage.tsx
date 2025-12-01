@@ -18,6 +18,7 @@ import {
   getDefaultPromptForMode,
   pipelineSupportsVACE,
 } from "../data/pipelines";
+import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
   InputMode,
   PipelineId,
@@ -688,7 +689,19 @@ export function StreamPage() {
       let loadParams = null;
 
       // Use settings.resolution if available, otherwise fall back to videoResolution
-      const resolution = settings.resolution || videoResolution;
+      let resolution = settings.resolution || videoResolution;
+
+      // Adjust resolution to be divisible by required scale factor for the pipeline
+      if (resolution) {
+        const { resolution: adjustedResolution, wasAdjusted } =
+          adjustResolutionForPipeline(pipelineIdToUse, resolution);
+
+        if (wasAdjusted) {
+          // Update settings with adjusted resolution
+          updateSettings({ resolution: adjustedResolution });
+          resolution = adjustedResolution;
+        }
+      }
 
       // Compute VACE enabled state once - enabled by default for text mode on VACE-supporting pipelines
       const vaceEnabled =
