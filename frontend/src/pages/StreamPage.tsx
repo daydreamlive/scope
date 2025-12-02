@@ -355,6 +355,30 @@ export function StreamPage() {
     });
   };
 
+  const handleSpoutOutputChange = (
+    spoutOutput: { enabled: boolean; senderName: string } | undefined
+  ) => {
+    updateSettings({ spoutOutput });
+    // Send Spout output settings to backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        spout_output: spoutOutput,
+      });
+    }
+  };
+
+  const handleSpoutInputChange = (
+    spoutInput: { enabled: boolean; senderName: string } | undefined
+  ) => {
+    updateSettings({ spoutInput });
+    // Send Spout input settings to backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        spout_input: spoutInput,
+      });
+    }
+  };
+
   const handleLivePromptSubmit = (prompts: PromptItem[]) => {
     // Use the timeline ref to submit the prompt
     if (timelineRef.current) {
@@ -575,6 +599,8 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        spout_output?: { enabled: boolean; senderName: string };
+        spout_input?: { enabled: boolean; senderName: string };
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -604,6 +630,14 @@ export function StreamPage() {
       if (pipelineIdToUse === "streamdiffusionv2") {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
+      }
+
+      // Spout settings - send if enabled
+      if (settings.spoutOutput?.enabled) {
+        initialParameters.spout_output = settings.spoutOutput;
+      }
+      if (settings.spoutInput?.enabled) {
+        initialParameters.spout_input = settings.spoutInput;
       }
 
       // Reset paused state when starting a fresh stream
@@ -841,6 +875,10 @@ export function StreamPage() {
             loras={settings.loras || []}
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
+            spoutOutput={settings.spoutOutput}
+            onSpoutOutputChange={handleSpoutOutputChange}
+            spoutInput={settings.spoutInput}
+            onSpoutInputChange={handleSpoutInputChange}
           />
         </div>
       </div>

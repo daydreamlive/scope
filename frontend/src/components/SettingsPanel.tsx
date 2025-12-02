@@ -25,7 +25,12 @@ import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import type {
+  PipelineId,
+  LoRAConfig,
+  LoraMergeStrategy,
+  SettingsState,
+} from "../types";
 import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
@@ -59,6 +64,11 @@ interface SettingsPanelProps {
   loras?: LoRAConfig[];
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
+  // Spout settings
+  spoutOutput?: SettingsState["spoutOutput"];
+  onSpoutOutputChange?: (spoutOutput: SettingsState["spoutOutput"]) => void;
+  spoutInput?: SettingsState["spoutInput"];
+  onSpoutInputChange?: (spoutInput: SettingsState["spoutInput"]) => void;
 }
 
 export function SettingsPanel({
@@ -87,6 +97,10 @@ export function SettingsPanel({
   loras = [],
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
+  spoutOutput,
+  onSpoutOutputChange,
+  spoutInput,
+  onSpoutInputChange,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
@@ -617,6 +631,111 @@ export function SettingsPanel({
             </div>
           </div>
         )}
+
+        {/* Spout I/O Settings (Windows only) */}
+        <div className="space-y-4">
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium">Spout I/O (Windows)</h3>
+            <p className="text-xs text-muted-foreground">
+              Share video with external apps like TouchDesigner, Resolume, OBS.
+            </p>
+
+            {/* Spout Output */}
+            <div className="space-y-2 p-2 border rounded-md">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label="Send Output"
+                  tooltip="Send processed frames to Spout receivers"
+                  className="text-sm text-foreground font-medium"
+                />
+                <Toggle
+                  pressed={spoutOutput?.enabled ?? false}
+                  onPressedChange={enabled => {
+                    onSpoutOutputChange?.({
+                      enabled,
+                      senderName: spoutOutput?.senderName ?? "Scope_Out",
+                    });
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                >
+                  {spoutOutput?.enabled ? "ON" : "OFF"}
+                </Toggle>
+              </div>
+
+              {spoutOutput?.enabled && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-16">
+                    Name:
+                  </span>
+                  <Input
+                    type="text"
+                    value={spoutOutput?.senderName ?? "Scope_Out"}
+                    onChange={e => {
+                      onSpoutOutputChange?.({
+                        enabled: spoutOutput?.enabled ?? false,
+                        senderName: e.target.value,
+                      });
+                    }}
+                    disabled={isStreaming}
+                    className="h-6 text-xs flex-1"
+                    placeholder="Scope_Out"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Spout Input - only for video-input pipelines */}
+            {currentPipeline?.category === "video-input" && (
+              <div className="space-y-2 p-2 border rounded-md">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label="Receive Input"
+                    tooltip="Receive video input from a Spout sender instead of camera/file"
+                    className="text-sm text-foreground font-medium"
+                  />
+                  <Toggle
+                    pressed={spoutInput?.enabled ?? false}
+                    onPressedChange={enabled => {
+                      onSpoutInputChange?.({
+                        enabled,
+                        senderName: spoutInput?.senderName ?? "",
+                      });
+                    }}
+                    disabled={isStreaming}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                  >
+                    {spoutInput?.enabled ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
+
+                {spoutInput?.enabled && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-16">
+                      From:
+                    </span>
+                    <Input
+                      type="text"
+                      value={spoutInput?.senderName ?? ""}
+                      onChange={e => {
+                        onSpoutInputChange?.({
+                          enabled: spoutInput?.enabled ?? false,
+                          senderName: e.target.value,
+                        });
+                      }}
+                      disabled={isStreaming}
+                      className="h-6 text-xs flex-1"
+                      placeholder="(any sender)"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
