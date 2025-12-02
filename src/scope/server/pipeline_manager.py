@@ -14,6 +14,11 @@ from omegaconf import OmegaConf
 logger = logging.getLogger(__name__)
 
 
+def get_device() -> torch.device:
+    """Get the appropriate device (CUDA if available, CPU otherwise)."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 class PipelineNotAvailableException(Exception):
     """Exception raised when pipeline is not available for processing."""
 
@@ -328,7 +333,7 @@ class PipelineManager:
             pipeline = PassthroughPipeline(
                 height=height,
                 width=width,
-                device=torch.device("cuda"),
+                device=get_device(),
                 dtype=torch.bfloat16,
             )
             logger.info("Passthrough pipeline initialized")
