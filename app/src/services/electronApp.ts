@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, nativeTheme } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { AppState } from '../types/services';
@@ -15,6 +15,9 @@ export class ScopeElectronAppService {
   }
 
   createMainWindow(): BrowserWindow {
+    // Force dark mode for native UI elements (title bar, scrollbars, etc.)
+    nativeTheme.themeSource = 'dark';
+
     const paths = getPaths();
 
     // Determine preload path
@@ -39,7 +42,13 @@ export class ScopeElectronAppService {
       title: 'Daydream Scope',
       icon: windowIcon,
       backgroundColor: '#0f0f0f', // Dark background to match theme
-      titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default', // Dark title bar on macOS
+      titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden', // Hidden title bar with overlay on Windows
+      titleBarOverlay: process.platform === 'win32' ? {
+        color: '#0f0f0f',
+        symbolColor: '#ffffff',
+        height: 32,
+      } : undefined,
+      autoHideMenuBar: true, // Hide menu bar (can still access with Alt key)
       webPreferences: {
         preload: preloadPath,
         nodeIntegration: false,
