@@ -13,7 +13,11 @@ import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { PIPELINES } from "../data/pipelines";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
+import {
+  getDefaultDenoisingSteps,
+  getDefaultResolution,
+  adjustResolutionForPipeline,
+} from "../lib/utils";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -495,7 +499,19 @@ export function StreamPage() {
       let loadParams = null;
 
       // Use settings.resolution if available, otherwise fall back to videoResolution
-      const resolution = settings.resolution || videoResolution;
+      let resolution = settings.resolution || videoResolution;
+
+      // Adjust resolution to be divisible by required scale factor for the pipeline
+      if (resolution) {
+        const { resolution: adjustedResolution, wasAdjusted } =
+          adjustResolutionForPipeline(pipelineIdToUse, resolution);
+
+        if (wasAdjusted) {
+          // Update settings with adjusted resolution
+          updateSettings({ resolution: adjustedResolution });
+          resolution = adjustedResolution;
+        }
+      }
 
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
         loadParams = {
