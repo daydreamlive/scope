@@ -2,19 +2,23 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+// https://vitejs.dev/config
 export default defineConfig({
   plugins: [react()],
   root: path.resolve(__dirname),
+  base: './',
   build: {
-    outDir: path.resolve(__dirname, '.vite/build/renderer/main_window'),
-    emptyOutDir: true,
+    outDir: path.resolve(__dirname, '.vite/build/renderer'),
+    emptyOutDir: false,
     rollupOptions: {
-      input: path.resolve(__dirname, 'index.html'),
+      input: {
+        main_window: path.resolve(__dirname, 'index.html'),
+      },
     },
   },
   server: {
     port: 5173,
-    strictPort: false, // Allow fallback to next available port if 5173 is busy
+    strictPort: false,
   },
   resolve: {
     alias: {

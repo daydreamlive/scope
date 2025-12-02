@@ -1,6 +1,7 @@
-import { app, ipcMain, nativeImage } from 'electron';
+import { app, ipcMain, nativeImage, dialog } from 'electron';
 import path from 'path';
-import started from 'electron-squirrel-startup';
+import { autoUpdater } from 'electron-updater';
+import log from 'electron-log';
 import { AppState } from './types/services';
 import { IPC_CHANNELS, SETUP_STATUS } from './types/ipc';
 import { ScopeSetupService } from './services/setup';
@@ -9,10 +10,72 @@ import { ScopeElectronAppService } from './services/electronApp';
 import { logger } from './utils/logger';
 import { SERVER_CONFIG } from './utils/config';
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling
-if (started) {
-  app.quit();
-}
+// Configure electron-log for auto-updater
+log.transports.file.level = 'info';
+autoUpdater.logger = log;
+
+// Configure auto-updater
+autoUpdater.autoDownload = false; // Don't download automatically, ask user first
+autoUpdater.autoInstallOnAppQuit = true; // Install updates when app quits
+
+// Auto-updater event handlers
+let updateDownloaded = false;
+
+autoUpdater.on('checking-for-update', () => {
+  logger.info('Checking for updates...');
+});
+
+autoUpdater.on('update-available', (info) => {
+  logger.info('Update available:', info);
+
+  // Notify user about available update
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Update Available',
+    message: `A new version ${info.version} is available!`,
+    detail: 'Would you like to download it now? The app will restart after the update is installed.',
+    buttons: ['Download', 'Later'],
+    defaultId: 0,
+    cancelId: 1
+  }).then(result => {
+    if (result.response === 0) {
+      autoUpdater.downloadUpdate();
+    }
+  });
+});
+
+autoUpdater.on('update-not-available', (info) => {
+  logger.info('Update not available:', info);
+});
+
+autoUpdater.on('error', (err) => {
+  logger.error('Auto-updater error:', err);
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  logger.info(`Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}%`);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  logger.info('Update downloaded:', info);
+  updateDownloaded = true;
+
+  // Notify user that update is ready
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Update Ready',
+    message: 'Update has been downloaded.',
+    detail: 'The update will be installed when you quit the application. You can also restart now to install it.',
+    buttons: ['Restart Now', 'Later'],
+    defaultId: 0,
+    cancelId: 1
+  }).then(result => {
+    if (result.response === 0) {
+      // Quit and install
+      autoUpdater.quitAndInstall(false, true);
+    }
+  });
+});
 
 // Setup logging early
 logger.info('Application starting...');
@@ -231,6 +294,23 @@ async function startServer(): Promise<void> {
  * Application ready handler
  */
 app.on('ready', async () => {
+  // Check for updates (only in production)
+  if (app.isPackaged) {
+    // Check for updates after 3 seconds to let app initialize first
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch(err => {
+        logger.error('Failed to check for updates:', err);
+      });
+    }, 3000);
+
+    // Check for updates every 4 hours
+    setInterval(() => {
+      autoUpdater.checkForUpdates().catch(err => {
+        logger.error('Failed to check for updates:', err);
+      });
+    }, 4 * 60 * 60 * 1000);
+  }
+
   // Set app icon (especially important for macOS dock icon in development)
   if (process.platform === 'darwin') {
     let iconPath: string;

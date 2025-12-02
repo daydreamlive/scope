@@ -92,7 +92,7 @@ export class ScopeElectronAppService {
     // The main process will check server status and load frontend if needed
     if (app.isPackaged) {
       // In production, load from the built renderer
-      const indexPath = path.join(process.resourcesPath, 'app', 'index.html');
+      const indexPath = path.join(process.resourcesPath, 'app', '.vite', 'build', 'renderer', 'index.html');
       logger.info(`Loading from file: ${indexPath}`);
       mainWindow.loadFile(indexPath);
     } else {
