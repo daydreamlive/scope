@@ -17,7 +17,11 @@ class PassthroughPipeline(Pipeline):
     ):
         self.height = height
         self.width = width
-        self.device = device if device is not None else torch.device("cuda")
+        self.device = (
+            device
+            if device is not None
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
         self.dtype = dtype
         self.prompts = None
 
