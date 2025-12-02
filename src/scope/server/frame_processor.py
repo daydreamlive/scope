@@ -369,7 +369,7 @@ class FrameProcessor:
             - Removes frames 0-6 from buffer (7 frames total)
 
         Returns:
-            List of processed tensor frames, or empty list if insufficient buffer
+            List of tensor frames, each (1, H, W, C) for downstream preprocess_chunk
         """
         # Calculate uniform sampling step
         step = len(self.frame_buffer) / chunk_size
@@ -386,7 +386,8 @@ class FrameProcessor:
         # Convert VideoFrames to tensors
         tensor_frames = []
         for video_frame in video_frames:
-            # Convert VideoFrame into THWC tensor on cpu
+            # Convert VideoFrame into (1, H, W, C) tensor on cpu
+            # The T=1 dimension is expected by preprocess_chunk which rearranges T H W C -> T C H W
             tensor = (
                 torch.from_numpy(video_frame.to_ndarray(format="rgb24"))
                 .float()

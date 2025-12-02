@@ -93,11 +93,18 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
         block_seed = base_seed + block_state.current_start_frame
         rng = torch.Generator(device=generator_param.device).manual_seed(block_seed)
 
+        # Determine number of latent frames to generate
+        num_latent_frames = components.config.num_frame_per_block
+        # VAE stream_decode requires at least 2 latent frames on first batch
+        # because it splits into x[:,:,:1,:,:] and x[:,:,1:,:,:] (second part must be non-empty)
+        if block_state.current_start_frame == 0 and num_latent_frames < 2:
+            num_latent_frames = 2
+
         # Generate empty latents (noise)
         latents = torch.randn(
             [
                 1,  # batch_size
-                components.config.num_frame_per_block,
+                num_latent_frames,
                 16,
                 latent_height,
                 latent_width,

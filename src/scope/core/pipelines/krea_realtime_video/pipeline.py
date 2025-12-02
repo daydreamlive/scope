@@ -7,13 +7,19 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline
+from ..defaults import (
+    apply_mode_defaults_to_state,
+    handle_mode_transition,
+    prepare_for_mode,
+    resolve_input_mode,
+)
+from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..schema import KreaRealtimeVideoConfig
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .components import WanVAEWrapper
+from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import KreaRealtimeVideoBlocks
 from .modules.causal_model import CausalWanModel
 
@@ -175,15 +181,16 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
 
         self.first_call = True
+        self.last_mode = None  # Track mode for transition detection
+
+    def prepare(self, **kwargs) -> Requirements | None:
+        """Return input requirements based on current mode."""
+        return prepare_for_mode(self.__class__, self.components.config, kwargs)
 
     def __call__(self, **kwargs) -> torch.Tensor:
-        if self.first_call:
-            self.state.set("init_cache", True)
-            self.first_call = False
-        else:
-            # This will be overriden if the init_cache is passed in kwargs
-            self.state.set("init_cache", False)
-
+        self.first_call, self.last_mode = handle_mode_transition(
+            self.state, self.components.vae, self.first_call, self.last_mode, kwargs
+        )
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
@@ -206,6 +213,10 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
+
+        # Apply mode-specific defaults (noise_scale, noise_controller)
+        mode = resolve_input_mode(kwargs)
+        apply_mode_defaults_to_state(self.state, self.__class__, mode, kwargs)
 
         _, self.state = self.blocks(self.components, self.state)
         return postprocess_chunk(self.state.values["output_video"])
