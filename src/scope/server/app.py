@@ -181,15 +181,14 @@ async def lifespan(app: FastAPI):
     # Startup
     global webrtc_manager, pipeline_manager
 
-    # Check CUDA availability before proceeding
+    # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
-        error_msg = (
+        warning_msg = (
             "CUDA is not available on this system. "
-            "This application currently requires a CUDA-compatible GPU and "
-            "other hardware will be supported in the future."
+            "Some pipelines may not work without a CUDA-compatible GPU. "
+            "The application will start, but pipeline functionality may be limited."
         )
-        logger.error(error_msg)
-        sys.exit(1)
+        logger.warning(warning_msg)
 
     # Log logs directory
     logs_dir = get_logs_dir()
