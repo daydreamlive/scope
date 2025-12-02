@@ -7,13 +7,19 @@ from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
+from ..defaults import (
+    apply_mode_defaults_to_state,
+    handle_mode_transition,
+    prepare_for_mode,
+    resolve_input_mode,
+)
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
 from ..schema import StreamDiffusionV2Config
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .components import WanVAEWrapper
+from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modules.causal_model import CausalWanModel
 
@@ -24,8 +30,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
 
-# Chunk size for streamdiffusionv2
-CHUNK_SIZE = 4
+# Default chunk size for video mode
+DEFAULT_VIDEO_CHUNK_SIZE = 4
 
 
 class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
@@ -103,9 +109,9 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE
+        # Load VAE using unified WanVAEWrapper
         start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
+        vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
         print(f"Loaded VAE in {time.time() - start:.3f}s")
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
@@ -144,21 +150,21 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("base_seed", getattr(config, "seed", 42))
 
         self.first_call = True
+        self.last_mode = None  # Track mode for transition detection
 
-    def prepare(self, should_prepare: bool = False, **kwargs) -> Requirements:
-        return Requirements(input_size=CHUNK_SIZE)
+    def prepare(self, **kwargs) -> Requirements | None:
+        """Return input requirements based on current mode."""
+        return prepare_for_mode(
+            self.__class__,
+            self.components.config,
+            kwargs,
+            video_input_size=DEFAULT_VIDEO_CHUNK_SIZE,
+        )
 
-    def __call__(
-        self,
-        **kwargs,
-    ) -> torch.Tensor:
-        if self.first_call:
-            self.state.set("init_cache", True)
-            self.first_call = False
-        else:
-            # This will be overriden if the init_cache is passed in kwargs
-            self.state.set("init_cache", False)
-
+    def __call__(self, **kwargs) -> torch.Tensor:
+        self.first_call, self.last_mode = handle_mode_transition(
+            self.state, self.components.vae, self.first_call, self.last_mode, kwargs
+        )
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
@@ -181,6 +187,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
+
+        # Apply mode-specific defaults (noise_scale, noise_controller)
+        mode = resolve_input_mode(kwargs)
+        apply_mode_defaults_to_state(self.state, self.__class__, mode, kwargs)
 
         _, self.state = self.blocks(self.components, self.state)
         return postprocess_chunk(self.state.values["output_video"])

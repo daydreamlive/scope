@@ -118,6 +118,11 @@ class LongLiveConfig(BasePipelineConfig):
         default=[1000, 750, 500, 250],
         description="Denoising step schedule for progressive generation",
     )
+    # Video mode default (previously hardcoded in pipeline)
+    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
+        default=0.7,
+        description="Amount of noise to add during video generation (video mode only)",
+    )
 
 
 class StreamDiffusionV2Config(BasePipelineConfig):
@@ -165,6 +170,11 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     denoising_steps: list[int] | None = Field(
         default=[1000, 750, 500, 250],
         description="Denoising step schedule for progressive generation",
+    )
+    # Video mode default (previously hardcoded in pipeline)
+    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
+        default=0.7,
+        description="Amount of noise to add during video generation (video mode only)",
     )
 
 

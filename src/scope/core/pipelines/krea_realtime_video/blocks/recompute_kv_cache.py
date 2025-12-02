@@ -262,7 +262,7 @@ def get_context_frames(components, state: BlockState) -> torch.Tensor:
         vae_device = next(components.vae.parameters()).device
         decoded_first_frame = state.decoded_frame_buffer[:, :1].to(vae_device)
         reencoded_latent = components.vae.encode_to_latent(
-            rearrange(decoded_first_frame, "B T C H W -> B C T H W")
+            rearrange(decoded_first_frame, "B T C H W -> B C T H W"), use_cache=False
         )
         return torch.cat(
             [reencoded_latent, state.context_frame_buffer.to(generator_device)],
