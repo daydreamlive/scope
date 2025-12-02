@@ -220,8 +220,9 @@ async function checkServerRunning(): Promise<boolean> {
 
 /**
  * Wait for server to be available on port 8000
+ * Default timeout is 10 minutes (600 attempts × 1 second) to allow for first-run dependency downloads
  */
-async function waitForServer(maxAttempts: number = 60, intervalMs: number = 1000): Promise<boolean> {
+async function waitForServer(maxAttempts: number = 600, intervalMs: number = 1000): Promise<boolean> {
   const http = await import('http');
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {

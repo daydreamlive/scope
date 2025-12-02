@@ -29,6 +29,7 @@ exports.default = async function afterPack(context) {
     { src: path.join(projectRoot, 'src'), dest: path.join(resourcesPath, 'src') },
     { src: path.join(projectRoot, 'pyproject.toml'), dest: path.join(resourcesPath, 'pyproject.toml') },
     { src: path.join(projectRoot, 'uv.lock'), dest: path.join(resourcesPath, 'uv.lock') },
+    { src: path.join(projectRoot, '.python-version'), dest: path.join(resourcesPath, '.python-version') },
     { src: path.join(projectRoot, 'README.md'), dest: path.join(resourcesPath, 'README.md') },
     { src: path.join(projectRoot, 'LICENSE.md'), dest: path.join(resourcesPath, 'LICENSE.md') },
     { src: path.join(projectRoot, 'frontend', 'dist'), dest: path.join(resourcesPath, 'frontend', 'dist') },

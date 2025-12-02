@@ -70,19 +70,25 @@ export class ScopeSetupService implements SetupService {
     // Extract and install
     if (platform === 'win32') {
       await this.extractZip(archivePath, uvDir);
-      // On Windows, uv.exe is in the extracted directory
-      const extractedUv = path.join(uvDir, 'uv.exe');
-      if (fs.existsSync(extractedUv)) {
+      // On Windows, uv.exe might be in a subdirectory (e.g., uv-x86_64-pc-windows-msvc/uv.exe)
+      const extractedUv = this.findFile(uvDir, 'uv.exe');
+      if (extractedUv) {
+        logger.info(`Found uv.exe at: ${extractedUv}`);
         fs.renameSync(extractedUv, paths.uvBin);
+      } else {
+        throw new Error('Could not find uv.exe in extracted archive');
       }
     } else {
       await this.extractTarGz(archivePath, uvDir);
-      // On Unix, uv binary is in the extracted directory
-      const extractedUv = path.join(uvDir, 'uv');
-      if (fs.existsSync(extractedUv)) {
+      // On Unix, uv binary might be in a subdirectory
+      const extractedUv = this.findFile(uvDir, 'uv');
+      if (extractedUv) {
+        logger.info(`Found uv at: ${extractedUv}`);
         fs.renameSync(extractedUv, paths.uvBin);
         // Make executable
         fs.chmodSync(paths.uvBin, 0o755);
+      } else {
+        throw new Error('Could not find uv in extracted archive');
       }
     }
 
@@ -140,37 +146,75 @@ export class ScopeSetupService implements SetupService {
     });
   }
 
-  private async downloadFile(url: string, dest: string): Promise<void> {
+  private async downloadFile(url: string, dest: string, maxRedirects: number = 10): Promise<void> {
     return new Promise((resolve, reject) => {
       const file = fs.createWriteStream(dest);
-      https.get(url, (response) => {
-        if (response.statusCode === 301 || response.statusCode === 302) {
-          // Handle redirect
-          https.get(response.headers.location!, (redirectResponse) => {
-            if (redirectResponse.statusCode !== 200) {
-              reject(new Error(`Failed to download ${url} (${redirectResponse.statusCode})`));
+      let redirectCount = 0;
+
+      const followRedirect = (currentUrl: string) => {
+        https.get(currentUrl, (response) => {
+          if (response.statusCode === 301 || response.statusCode === 302) {
+            redirectCount++;
+            if (redirectCount > maxRedirects) {
+              file.close();
+              reject(new Error(`Too many redirects for ${url}`));
               return;
             }
-            redirectResponse.pipe(file);
-            file.on('finish', () => file.close(() => resolve()));
-          }).on('error', reject);
-          return;
-        }
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to download ${url} (${response.statusCode})`));
-          return;
-        }
-        response.pipe(file);
-        file.on('finish', () => file.close(() => resolve()));
-      }).on('error', (err) => {
-        try {
-          fs.unlinkSync(dest);
-        } catch {
-          // ignore
-        }
-        reject(err);
-      });
+            const redirectUrl = response.headers.location;
+            if (!redirectUrl) {
+              file.close();
+              reject(new Error(`Redirect with no location header for ${url}`));
+              return;
+            }
+            // Follow the redirect
+            logger.info(`Following redirect ${redirectCount}: ${redirectUrl}`);
+            followRedirect(redirectUrl);
+            return;
+          }
+          if (response.statusCode !== 200) {
+            file.close();
+            reject(new Error(`Failed to download ${url} (${response.statusCode})`));
+            return;
+          }
+          response.pipe(file);
+          file.on('finish', () => file.close(() => resolve()));
+        }).on('error', (err) => {
+          file.close();
+          try {
+            fs.unlinkSync(dest);
+          } catch {
+            // ignore
+          }
+          reject(err);
+        });
+      };
+
+      followRedirect(url);
     });
+  }
+
+  /**
+   * Find a file by name in a directory (searches recursively, max 2 levels deep)
+   */
+  private findFile(dir: string, filename: string, depth: number = 0): string | null {
+    if (depth > 2) return null;
+
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isFile() && entry.name === filename) {
+          return fullPath;
+        }
+        if (entry.isDirectory()) {
+          const found = this.findFile(fullPath, filename, depth + 1);
+          if (found) return found;
+        }
+      }
+    } catch {
+      // ignore errors
+    }
+    return null;
   }
 
   private async extractTarGz(archivePath: string, destDir: string): Promise<void> {
@@ -186,12 +230,26 @@ export class ScopeSetupService implements SetupService {
 
   private async extractZip(archivePath: string, destDir: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const unzip = spawn('unzip', ['-q', archivePath, '-d', destDir]);
-      unzip.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`unzip exited with code ${code}`));
+      // Use PowerShell's Expand-Archive on Windows
+      const powershellCmd = `Expand-Archive -Path "${archivePath}" -DestinationPath "${destDir}" -Force`;
+      const proc = spawn('powershell', ['-NoProfile', '-Command', powershellCmd], {
+        shell: false,
+        stdio: 'pipe',
       });
-      unzip.on('error', reject);
+
+      proc.stdout?.on('data', (data) => {
+        logger.info('[EXTRACT]', data.toString().trim());
+      });
+
+      proc.stderr?.on('data', (data) => {
+        logger.warn('[EXTRACT]', data.toString().trim());
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`PowerShell Expand-Archive exited with code ${code}`));
+      });
+      proc.on('error', reject);
     });
   }
 }

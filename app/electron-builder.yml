@@ -69,7 +69,7 @@ dmg:
 
 # Windows configuration - NSIS installer (best practice)
 win:
-  icon: assets/icon.png
+  icon: assets/icon.ico
   target:
     - target: nsis
       arch:
@@ -85,10 +85,8 @@ nsis:
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: Daydream Scope
-  installerIcon: assets/icon.png
-  uninstallerIcon: assets/icon.png
-  installerHeader: assets/icon.png
-  installerHeaderIcon: assets/icon.png
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
   deleteAppDataOnUninstall: false # Ask user about data deletion
   allowElevation: true # Allow elevation if needed, but don't require it
   displayLanguageSelector: false
