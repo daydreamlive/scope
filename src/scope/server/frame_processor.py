@@ -65,6 +65,10 @@ class FrameProcessor:
 
         self.paused = False
 
+        # Input mode is signaled by the frontend at stream start.
+        # This determines whether we wait for video frames or generate immediately.
+        self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
+
     def start(self):
         if self.running:
             return
@@ -252,8 +256,13 @@ class FrameProcessor:
 
         requirements = None
         if hasattr(pipeline, "prepare"):
+            prepare_params = dict(self.parameters.items())
+            if self._video_mode:
+                # Signal to prepare() that video input is expected.
+                # This allows resolve_input_mode() to detect video mode correctly.
+                prepare_params["video"] = True  # Placeholder, actual data passed later
             requirements = pipeline.prepare(
-                **self.parameters,
+                **prepare_params,
             )
 
         video_input = None

@@ -244,3 +244,67 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   const result = await response.json();
   return result;
 };
+
+// Pipeline schema types - matches output of get_schema_with_metadata()
+export interface PipelineSchemaProperty {
+  type?: string;
+  default?: unknown;
+  description?: string;
+  // JSON Schema fields
+  minimum?: number;
+  maximum?: number;
+  items?: unknown;
+  anyOf?: unknown[];
+}
+
+export interface PipelineConfigSchema {
+  type: string;
+  properties: Record<string, PipelineSchemaProperty>;
+  required?: string[];
+  title?: string;
+}
+
+// Mode-specific default overrides
+export interface ModeDefaults {
+  height?: number;
+  width?: number;
+  denoising_steps?: number[];
+  noise_scale?: number | null;
+  noise_controller?: boolean | null;
+  input_size?: number | null;
+}
+
+export interface PipelineSchemaInfo {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  config_schema: PipelineConfigSchema;
+  // Mode support - comes from config class
+  supported_modes: ("text" | "video")[];
+  default_mode: "text" | "video";
+  // Mode-specific default overrides (optional)
+  mode_defaults?: Record<"text" | "video", ModeDefaults>;
+}
+
+export interface PipelineSchemasResponse {
+  pipelines: Record<string, PipelineSchemaInfo>;
+}
+
+export const getPipelineSchemas =
+  async (): Promise<PipelineSchemasResponse> => {
+    const response = await fetch("/api/v1/pipelines/schemas", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `Get pipeline schemas failed: ${response.status} ${response.statusText}: ${errorText}`
+      );
+    }
+
+    const result = await response.json();
+    return result;
+  };
