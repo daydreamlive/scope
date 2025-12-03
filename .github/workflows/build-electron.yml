@@ -13,6 +13,9 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write  # Required for creating releases and uploading assets
+
 jobs:
   build:
     name: Build for ${{ matrix.os }}
@@ -45,6 +48,16 @@ jobs:
       - name: Build application
         working-directory: ./app
         run: npm run compile
+
+      - name: Create GitHub Release (if tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Build Electron app (Linux)
         if: matrix.os == 'ubuntu-latest' && !startsWith(github.ref, 'refs/tags/v')
