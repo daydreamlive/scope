@@ -13,15 +13,15 @@
     "build:renderer": "vite build --config vite.renderer.config.ts",
     "compile": "npm run build:main && npm run build:preload && npm run build:renderer",
     "watch": "concurrently \"npm run build:main -- --watch\" \"npm run build:preload -- --watch\" \"npm run build:renderer -- --watch\"",
-    "dist": "npm run compile && electron-builder",
-    "dist:mac": "npm run compile && electron-builder --mac",
-    "dist:win": "npm run compile && electron-builder --win",
-    "dist:linux": "npm run compile && electron-builder --linux",
-    "dist:all": "npm run compile && electron-builder -mwl",
-    "publish:github": "npm run compile && electron-builder --publish always",
+    "dist": "npm run compile && npx electron-builder",
+    "dist:mac": "npm run compile && npx electron-builder --mac",
+    "dist:win": "npm run compile && npx electron-builder --win",
+    "dist:linux": "npm run compile && npx electron-builder --linux",
+    "dist:all": "npm run compile && npx electron-builder -mwl",
+    "publish:github": "npm run compile && npx electron-builder --publish always",
     "lint": "eslint --ext .ts,.tsx .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "npx electron-builder install-app-deps"
   },
   "keywords": ["ai", "video", "streaming", "webrtc", "diffusion", "real-time"],
   "author": {
