@@ -5,6 +5,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from scope.core.pipelines.schema import (
+    KreaRealtimeVideoConfig,
+    LongLiveConfig,
+    StreamDiffusionV2Config,
+)
 from scope.core.pipelines.utils import Quantization
 
 
@@ -49,6 +54,10 @@ class PromptTransition(BaseModel):
 class Parameters(BaseModel):
     """Parameters for WebRTC session."""
 
+    input_mode: Literal["text", "video"] | None = Field(
+        default=None,
+        description="Input mode for the stream: 'text' for text-to-video, 'video' for video-to-video",
+    )
     prompts: list[PromptItem] | None = Field(
         default=None,
         description="List of prompts with weights for spatial blending within a single frame",
@@ -203,11 +212,28 @@ class LoRAEnabledLoadParams(PipelineLoadParams):
 
 
 class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
-    """Load parameters for StreamDiffusion V2 pipeline."""
+    """Load parameters for StreamDiffusion V2 pipeline.
 
-    height: int = Field(default=512, description="Target video height", ge=64, le=2048)
-    width: int = Field(default=512, description="Target video width", ge=64, le=2048)
-    seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    Defaults are derived from StreamDiffusionV2Config to ensure consistency.
+    """
+
+    height: int = Field(
+        default=StreamDiffusionV2Config.model_fields["height"].default,
+        description="Target video height",
+        ge=64,
+        le=2048,
+    )
+    width: int = Field(
+        default=StreamDiffusionV2Config.model_fields["width"].default,
+        description="Target video width",
+        ge=64,
+        le=2048,
+    )
+    seed: int = Field(
+        default=StreamDiffusionV2Config.model_fields["base_seed"].default,
+        description="Random seed for generation",
+        ge=0,
+    )
     quantization: Quantization | None = Field(
         default=None,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
@@ -221,11 +247,28 @@ class PassthroughLoadParams(PipelineLoadParams):
 
 
 class LongLiveLoadParams(LoRAEnabledLoadParams):
-    """Load parameters for LongLive pipeline."""
+    """Load parameters for LongLive pipeline.
 
-    height: int = Field(default=320, description="Target video height", ge=16, le=2048)
-    width: int = Field(default=576, description="Target video width", ge=16, le=2048)
-    seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    Defaults are derived from LongLiveConfig to ensure consistency.
+    """
+
+    height: int = Field(
+        default=LongLiveConfig.model_fields["height"].default,
+        description="Target video height",
+        ge=16,
+        le=2048,
+    )
+    width: int = Field(
+        default=LongLiveConfig.model_fields["width"].default,
+        description="Target video width",
+        ge=16,
+        le=2048,
+    )
+    seed: int = Field(
+        default=LongLiveConfig.model_fields["base_seed"].default,
+        description="Random seed for generation",
+        ge=0,
+    )
     quantization: Quantization | None = Field(
         default=None,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
@@ -233,11 +276,28 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
 
 
 class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
-    """Load parameters for KreaRealtimeVideo pipeline."""
+    """Load parameters for KreaRealtimeVideo pipeline.
 
-    height: int = Field(default=512, description="Target video height", ge=64, le=2048)
-    width: int = Field(default=512, description="Target video width", ge=64, le=2048)
-    seed: int = Field(default=42, description="Random seed for generation", ge=0)
+    Defaults are derived from KreaRealtimeVideoConfig to ensure consistency.
+    """
+
+    height: int = Field(
+        default=KreaRealtimeVideoConfig.model_fields["height"].default,
+        description="Target video height",
+        ge=64,
+        le=2048,
+    )
+    width: int = Field(
+        default=KreaRealtimeVideoConfig.model_fields["width"].default,
+        description="Target video width",
+        ge=64,
+        le=2048,
+    )
+    seed: int = Field(
+        default=KreaRealtimeVideoConfig.model_fields["base_seed"].default,
+        description="Random seed for generation",
+        ge=0,
+    )
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
@@ -277,3 +337,13 @@ class PipelineStatusResponse(BaseModel):
     error: str | None = Field(
         default=None, description="Error message if status is error"
     )
+
+
+class PipelineSchemasResponse(BaseModel):
+    """Response containing schemas for all available pipelines.
+
+    Each pipeline entry contains the output of get_schema_with_metadata()
+    plus additional mode information.
+    """
+
+    pipelines: dict = Field(..., description="Pipeline schemas keyed by pipeline ID")

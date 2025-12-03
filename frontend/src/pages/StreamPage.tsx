@@ -12,12 +12,20 @@ import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
-import { PIPELINES } from "../data/pipelines";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
-import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import { PIPELINES, getPipelineDefaultMode } from "../data/pipelines";
+import type {
+  InputMode,
+  PipelineId,
+  LoRAConfig,
+  LoraMergeStrategy,
+} from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
+
+// Delay before resetting video reinitialization flag (ms)
+// This allows useVideoSource to detect the flag change and trigger reinitialization
+const VIDEO_REINITIALIZE_DELAY_MS = 100;
 
 function buildLoRAParams(
   loras?: LoRAConfig[],
@@ -38,7 +46,8 @@ function buildLoRAParams(
 
 export function StreamPage() {
   // Use the stream state hook for settings management
-  const { settings, updateSettings } = useStreamState();
+  const { settings, updateSettings, getDefaults, supportsNoiseControls } =
+    useStreamState();
 
   // Prompt state
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
@@ -116,6 +125,7 @@ export function StreamPage() {
   });
 
   // Video source for preview (camera or video)
+  // Enable based on input mode, not pipeline category
   const {
     localStream,
     isInitializing,
@@ -128,7 +138,7 @@ export function StreamPage() {
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
-    enabled: PIPELINES[settings.pipelineId]?.category === "video-input",
+    enabled: settings.inputMode === "video",
   });
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
@@ -149,25 +159,54 @@ export function StreamPage() {
     });
   };
 
+  // Handler for input mode changes (text vs video)
+  const handleInputModeChange = (newMode: InputMode) => {
+    // Stop stream if currently streaming
+    if (isStreaming) {
+      stopStream();
+    }
+
+    // Get mode-specific defaults from backend schema
+    const modeDefaults = getDefaults(settings.pipelineId, newMode);
+
+    // Update settings with new mode and ALL mode-specific defaults including resolution
+    updateSettings({
+      inputMode: newMode,
+      resolution: { height: modeDefaults.height, width: modeDefaults.width },
+      denoisingSteps: modeDefaults.denoisingSteps,
+      noiseScale: modeDefaults.noiseScale,
+      noiseController: modeDefaults.noiseController,
+    });
+
+    // Handle video source based on mode
+    if (newMode === "video") {
+      // Trigger video source reinitialization
+      setShouldReinitializeVideo(true);
+      setTimeout(
+        () => setShouldReinitializeVideo(false),
+        VIDEO_REINITIALIZE_DELAY_MS
+      );
+    }
+    // Note: useVideoSource hook will automatically stop when enabled becomes false
+  };
+
   const handlePipelineIdChange = (pipelineId: PipelineId) => {
     // Stop the stream if it's currently running
     if (isStreaming) {
       stopStream();
     }
 
-    // Check if we're switching from no-video-input to video-input pipeline
-    const currentPipelineCategory = PIPELINES[settings.pipelineId]?.category;
-    const newPipelineCategory = PIPELINES[pipelineId]?.category;
+    const newPipeline = PIPELINES[pipelineId];
+    const modeToUse = newPipeline?.defaultMode || "text";
+    const currentMode = settings.inputMode || "text";
 
-    if (
-      currentPipelineCategory === "no-video-input" &&
-      newPipelineCategory === "video-input"
-    ) {
-      // Trigger video source reinitialization
-      // Otherwise the camera or video file is not visible while switching the pipeline types
+    // Trigger video reinitialization if switching to video mode
+    if (modeToUse === "video" && currentMode !== "video") {
       setShouldReinitializeVideo(true);
-      // Reset the flag after a short delay to allow the effect to trigger
-      setTimeout(() => setShouldReinitializeVideo(false), 100);
+      setTimeout(
+        () => setShouldReinitializeVideo(false),
+        VIDEO_REINITIALIZE_DELAY_MS
+      );
     }
 
     // Update the prompt to the new pipeline's default
@@ -183,15 +222,17 @@ export function StreamPage() {
     setSelectedTimelinePrompt(null);
     setExternalSelectedPromptId(null);
 
-    // Update denoising steps and resolution based on pipeline
-    const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
-    const newResolution = getDefaultResolution(pipelineId);
+    // Get all defaults for the new pipeline + mode from backend schema
+    const defaults = getDefaults(pipelineId, modeToUse);
 
-    // Update the pipeline in settings
+    // Update the pipeline in settings with the appropriate mode and defaults
     updateSettings({
       pipelineId,
-      denoisingSteps: newDenoisingSteps,
-      resolution: newResolution,
+      inputMode: modeToUse,
+      denoisingSteps: defaults.denoisingSteps,
+      resolution: { height: defaults.height, width: defaults.width },
+      noiseScale: defaults.noiseScale,
+      noiseController: defaults.noiseController,
       loras: [], // Clear LoRA controls when switching pipelines
     });
   };
@@ -225,13 +266,18 @@ export function StreamPage() {
             setSelectedTimelinePrompt(null);
             setExternalSelectedPromptId(null);
 
-            const newDenoisingSteps = getDefaultDenoisingSteps(pipelineId);
-            const newResolution = getDefaultResolution(pipelineId);
+            // Get defaults for the pipeline's default mode
+            const newPipeline = PIPELINES[pipelineId];
+            const defaultMode = newPipeline?.defaultMode || "text";
+            const defaults = getDefaults(pipelineId, defaultMode);
 
             updateSettings({
               pipelineId,
-              denoisingSteps: newDenoisingSteps,
-              resolution: newResolution,
+              inputMode: defaultMode,
+              denoisingSteps: defaults.denoisingSteps,
+              resolution: { height: defaults.height, width: defaults.width },
+              noiseScale: defaults.noiseScale,
+              noiseController: defaults.noiseController,
             });
 
             // Automatically start the stream after download completes
@@ -443,21 +489,11 @@ export function StreamPage() {
 
   // Ref to store callback that should execute when video starts playing
   const onVideoPlayingCallbackRef = useRef<(() => void) | null>(null);
-  // Sync resolution with videoResolution when video source changes
-  // Only sync for video-input pipelines
-  useEffect(() => {
-    const pipelineCategory = PIPELINES[settings.pipelineId]?.category;
-    const isVideoInputPipeline = pipelineCategory === "video-input";
 
-    if (videoResolution && !isStreaming && isVideoInputPipeline) {
-      updateSettings({
-        resolution: {
-          height: videoResolution.height,
-          width: videoResolution.width,
-        },
-      });
-    }
-  }, [videoResolution, isStreaming, settings.pipelineId, updateSettings]);
+  // Note: We intentionally do NOT auto-sync videoResolution to settings.resolution.
+  // Mode defaults from the backend schema take precedence. Users can manually
+  // adjust resolution if needed. This prevents the video source resolution from
+  // overriding the carefully tuned per-mode defaults.
 
   const handleStartStream = async (
     overridePipelineId?: PipelineId
@@ -490,6 +526,10 @@ export function StreamPage() {
 
       // Always load pipeline with current parameters - backend will handle the rest
       console.log(`Loading ${pipelineIdToUse} pipeline...`);
+
+      // Determine current input mode
+      const currentMode =
+        settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
 
       // Prepare load parameters based on pipeline type
       let loadParams = null;
@@ -552,11 +592,8 @@ export function StreamPage() {
         return false;
       }
 
-      // Check if this pipeline needs video input
-      const pipelineCategory = PIPELINES[pipelineIdToUse]?.category;
-      const needsVideoInput = pipelineCategory === "video-input";
-
-      // Only send video stream for pipelines that need video input
+      // Check video requirements based on input mode
+      const needsVideoInput = currentMode === "video";
       const streamToSend = needsVideoInput
         ? localStream || undefined
         : undefined;
@@ -568,6 +605,7 @@ export function StreamPage() {
 
       // Build initial parameters based on pipeline type
       const initialParameters: {
+        input_mode?: "text" | "video";
         prompts?: PromptItem[];
         prompt_interpolation_method?: "linear" | "slerp";
         denoising_step_list?: number[];
@@ -575,7 +613,11 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
-      } = {};
+      } = {
+        // Signal the intended input mode to the backend so it doesn't
+        // briefly fall back to text mode before video frames arrive
+        input_mode: currentMode,
+      };
 
       // Common parameters for pipelines that support prompts
       if (pipelineIdToUse !== "passthrough") {
@@ -588,20 +630,20 @@ export function StreamPage() {
 
       // Cache management for krea_realtime_video and longlive
       if (
-        settings.pipelineId === "krea-realtime-video" ||
-        settings.pipelineId === "longlive"
+        pipelineIdToUse === "krea-realtime-video" ||
+        pipelineIdToUse === "longlive"
       ) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
       // Krea-realtime-video-specific parameters
-      if (settings.pipelineId === "krea-realtime-video") {
+      if (pipelineIdToUse === "krea-realtime-video") {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
       }
 
-      // StreamDiffusionV2-specific parameters
-      if (pipelineIdToUse === "streamdiffusionv2") {
+      // Video mode parameters - applies to all pipelines in video mode
+      if (currentMode === "video") {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
@@ -639,7 +681,7 @@ export function StreamPage() {
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={
-              PIPELINES[settings.pipelineId]?.category === "no-video-input"
+              settings.inputMode === "text"
                 ? !isInitializing
                 : !!localStream && !isInitializing
             }
@@ -665,6 +707,8 @@ export function StreamPage() {
             timelinePrompts={timelinePrompts}
             transitionSteps={transitionSteps}
             onTransitionStepsChange={setTransitionSteps}
+            inputMode={settings.inputMode || "video"}
+            onInputModeChange={handleInputModeChange}
           />
         </div>
 
@@ -816,13 +860,26 @@ export function StreamPage() {
             isStreaming={isStreaming}
             isDownloading={isDownloading}
             resolution={
-              settings.resolution || getDefaultResolution(settings.pipelineId)
+              settings.resolution || {
+                height: getDefaults(settings.pipelineId, settings.inputMode)
+                  .height,
+                width: getDefaults(settings.pipelineId, settings.inputMode)
+                  .width,
+              }
             }
             onResolutionChange={handleResolutionChange}
             seed={settings.seed ?? 42}
             onSeedChange={handleSeedChange}
-            denoisingSteps={settings.denoisingSteps || [700, 500]}
+            denoisingSteps={
+              settings.denoisingSteps ||
+              getDefaults(settings.pipelineId, settings.inputMode)
+                .denoisingSteps || [750, 250]
+            }
             onDenoisingStepsChange={handleDenoisingStepsChange}
+            defaultDenoisingSteps={
+              getDefaults(settings.pipelineId, settings.inputMode)
+                .denoisingSteps || [750, 250]
+            }
             noiseScale={settings.noiseScale ?? 0.7}
             onNoiseScaleChange={handleNoiseScaleChange}
             noiseController={settings.noiseController ?? true}
@@ -841,6 +898,8 @@ export function StreamPage() {
             loras={settings.loras || []}
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
+            inputMode={settings.inputMode}
+            supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
           />
         </div>
       </div>

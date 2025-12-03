@@ -7,11 +7,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Badge } from "./ui/badge";
 import { Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { PIPELINES } from "../data/pipelines";
+import type { InputMode } from "../types";
+import { pipelineIsMultiMode } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
@@ -49,6 +51,9 @@ interface InputAndControlsPanelProps {
   timelinePrompts?: TimelinePrompt[];
   transitionSteps: number;
   onTransitionStepsChange: (steps: number) => void;
+  // Input mode (text vs video) for multi-mode pipelines
+  inputMode: InputMode;
+  onInputModeChange: (mode: InputMode) => void;
 }
 
 export function InputAndControlsPanel({
@@ -84,6 +89,8 @@ export function InputAndControlsPanel({
   timelinePrompts: _timelinePrompts = [],
   transitionSteps,
   onTransitionStepsChange,
+  inputMode,
+  onInputModeChange,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -97,8 +104,8 @@ export function InputAndControlsPanel({
   };
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Get pipeline category, deafault to video-input
-  const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
+  // Check if this pipeline supports multiple input modes
+  const isMultiMode = pipelineIsMultiMode(pipelineId);
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -129,34 +136,57 @@ export function InputAndControlsPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
-        <div>
-          <h3 className="text-sm font-medium mb-2">Mode</h3>
-          <Select
-            value={pipelineCategory === "video-input" ? mode : "text"}
-            onValueChange={value => {
-              if (pipelineCategory === "video-input" && value) {
-                onModeChange(value as VideoSourceMode);
-              }
-            }}
-            disabled={isStreaming}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {pipelineCategory === "video-input" ? (
-                <>
-                  <SelectItem value="video">Video</SelectItem>
-                  <SelectItem value="camera">Camera</SelectItem>
-                </>
-              ) : (
+        {/* Input Mode selector - only show for multi-mode pipelines */}
+        {isMultiMode && (
+          <div>
+            <h3 className="text-sm font-medium mb-2">Input Mode</h3>
+            <Select
+              value={inputMode}
+              onValueChange={value => {
+                if (value) {
+                  onInputModeChange(value as InputMode);
+                }
+              }}
+              disabled={isStreaming}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                 <SelectItem value="text">Text</SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
+                <SelectItem value="video">Video</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-        {pipelineCategory === "video-input" && (
+        {/* Video Source toggle - only show when in video input mode */}
+        {inputMode === "video" && (
+          <div>
+            <h3 className="text-sm font-medium mb-2">Video Source</h3>
+            <ToggleGroup
+              type="single"
+              value={mode}
+              onValueChange={value => {
+                if (value) {
+                  onModeChange(value as VideoSourceMode);
+                }
+              }}
+              disabled={isStreaming}
+              className="justify-start"
+            >
+              <ToggleGroupItem value="video" aria-label="Video file">
+                Video File
+              </ToggleGroupItem>
+              <ToggleGroupItem value="camera" aria-label="Camera">
+                Camera
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        )}
+
+        {/* Video preview - only show when in video input mode */}
+        {inputMode === "video" && (
           <div>
             <h3 className="text-sm font-medium mb-2">Input</h3>
             <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">

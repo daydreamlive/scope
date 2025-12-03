@@ -149,11 +149,14 @@ def prepare_for_mode(
     This is the shared implementation for multi-mode pipeline prepare() methods.
     Returns video requirements when video mode is active, None for text mode.
 
+    Mode is determined by the presence of 'video' in kwargs (signaled by
+    FrameProcessor based on the frontend's input_mode selection).
+
     Args:
-        pipeline_class: The pipeline class (for accessing config defaults)
+        pipeline_class: The pipeline class (unused, kept for API compatibility)
         components_config: Dictionary with pipeline config (for calculating
             video_input_size if not provided)
-        kwargs: Call kwargs that may contain 'video' key
+        kwargs: Call kwargs - presence of 'video' key indicates video mode
         video_input_size: Override for video input size. If None, calculated
             from components_config.
 
@@ -162,19 +165,15 @@ def prepare_for_mode(
     """
     from .interface import Requirements
 
-    # Calculate video input size if not provided
-    if video_input_size is None:
-        video_input_size = calculate_video_input_size(components_config)
-
-    # If video is explicitly provided, use video mode
+    # Video mode is indicated by presence of 'video' in kwargs
+    # (FrameProcessor sets this based on frontend's input_mode)
     if kwargs.get("video") is not None:
+        # Calculate video input size if not provided
+        if video_input_size is None:
+            video_input_size = calculate_video_input_size(components_config)
         return Requirements(input_size=video_input_size)
 
-    # Fall back to schema's default mode
-    config = get_pipeline_config(pipeline_class)
-    if config.input_size is not None:
-        return Requirements(input_size=config.input_size)
-
+    # No video signal means text mode
     return None
 
 

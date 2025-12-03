@@ -4,6 +4,9 @@ export type PipelineId =
   | "longlive"
   | "krea-realtime-video";
 
+// Input mode for pipeline operation
+export type InputMode = "text" | "video";
+
 export interface SystemMetrics {
   cpu: number;
   gpu: number;
@@ -47,14 +50,24 @@ export interface SettingsState {
   paused?: boolean;
   loras?: LoRAConfig[];
   loraMergeStrategy?: LoraMergeStrategy;
+  // Track current input mode (text vs video)
+  inputMode?: InputMode;
 }
-
-export type PipelineCategory = "video-input" | "no-video-input";
 
 export interface PipelineInfo {
   name: string;
   about: string;
   projectUrl?: string;
+  docsUrl?: string;
   modified?: boolean;
-  category: PipelineCategory;
+  defaultPrompt?: string;
+  estimatedVram?: number;
+  requiresModels?: boolean;
+  defaultTemporalInterpolationMethod?: "linear" | "slerp";
+  defaultTemporalInterpolationSteps?: number;
+  supportsLoRA?: boolean;
+
+  // Multi-mode support
+  supportedModes: InputMode[];
+  defaultMode: InputMode;
 }

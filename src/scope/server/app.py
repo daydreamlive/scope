@@ -35,6 +35,7 @@ from .schema import (
     HardwareInfoResponse,
     HealthResponse,
     PipelineLoadRequest,
+    PipelineSchemasResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
@@ -306,6 +307,33 @@ async def get_pipeline_status(
     except Exception as e:
         logger.error(f"Error getting pipeline status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/pipelines/schemas", response_model=PipelineSchemasResponse)
+async def get_pipeline_schemas():
+    """Get configuration schemas and defaults for all available pipelines.
+
+    Returns the output of each pipeline's get_schema_with_metadata() method,
+    which includes:
+    - Pipeline metadata (id, name, description, version)
+    - supported_modes: List of supported input modes ("text", "video")
+    - default_mode: Default input mode for this pipeline
+    - mode_defaults: Mode-specific default overrides (if any)
+    - config_schema: Full JSON schema with defaults
+
+    The frontend should use this as the source of truth for parameter defaults.
+    """
+    from scope.core.pipelines.schema import PIPELINE_CONFIGS
+
+    pipelines: dict = {}
+
+    for pipeline_id, config_class in PIPELINE_CONFIGS.items():
+        # get_schema_with_metadata() now includes supported_modes, default_mode,
+        # and mode_defaults directly from the config class
+        schema_data = config_class.get_schema_with_metadata()
+        pipelines[pipeline_id] = schema_data
+
+    return PipelineSchemasResponse(pipelines=pipelines)
 
 
 @app.post("/api/v1/webrtc/offer", response_model=WebRTCOfferResponse)
