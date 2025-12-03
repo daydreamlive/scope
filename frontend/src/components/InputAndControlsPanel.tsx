@@ -8,7 +8,8 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Badge } from "./ui/badge";
-import { Upload } from "lucide-react";
+import { Input } from "./ui/input";
+import { Upload, Radio } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { PIPELINES } from "../data/pipelines";
@@ -49,6 +50,9 @@ interface InputAndControlsPanelProps {
   timelinePrompts?: TimelinePrompt[];
   transitionSteps: number;
   onTransitionStepsChange: (steps: number) => void;
+  // Spout input settings
+  spoutInputName?: string;
+  onSpoutInputNameChange?: (name: string) => void;
 }
 
 export function InputAndControlsPanel({
@@ -84,6 +88,8 @@ export function InputAndControlsPanel({
   timelinePrompts: _timelinePrompts = [],
   transitionSteps,
   onTransitionStepsChange,
+  spoutInputName = "",
+  onSpoutInputNameChange,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -148,6 +154,7 @@ export function InputAndControlsPanel({
                 <>
                   <SelectItem value="video">Video</SelectItem>
                   <SelectItem value="camera">Camera</SelectItem>
+                  <SelectItem value="spout">Spout</SelectItem>
                 </>
               ) : (
                 <SelectItem value="text">Text</SelectItem>
@@ -159,60 +166,88 @@ export function InputAndControlsPanel({
         {pipelineCategory === "video-input" && (
           <div>
             <h3 className="text-sm font-medium mb-2">Input</h3>
-            <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
-              {isInitializing ? (
-                <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera"
-                    ? "Requesting camera access..."
-                    : "Initializing video..."}
+            {mode === "spout" ? (
+              /* Spout Input Configuration */
+              <div className="space-y-3 p-3 rounded-lg bg-muted/10">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Radio className="h-4 w-4" />
+                  <span className="text-sm font-medium">Spout Receiver</span>
                 </div>
-              ) : error ? (
-                <div className="text-center text-red-500 text-sm p-4">
-                  <p>
-                    {mode === "camera"
-                      ? "Camera access failed:"
-                      : "Video error:"}
-                  </p>
-                  <p className="text-xs mt-1">{error}</p>
-                </div>
-              ) : localStream ? (
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  muted
-                  playsInline
-                />
-              ) : (
-                <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera" ? "Camera Preview" : "Video Preview"}
-                </div>
-              )}
-
-              {/* Upload button - only show in video mode */}
-              {mode === "video" && onVideoFileUpload && (
-                <>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    id="video-upload"
-                    disabled={isStreaming || isConnecting}
-                  />
-                  <label
-                    htmlFor="video-upload"
-                    className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                      isStreaming || isConnecting
-                        ? "opacity-50 cursor-not-allowed"
-                        : "hover:bg-black/70 cursor-pointer"
-                    }`}
-                  >
-                    <Upload className="h-4 w-4 text-white" />
+                <div className="space-y-2">
+                  <label className="text-xs text-muted-foreground">
+                    Sender Name (leave empty for any)
                   </label>
-                </>
-              )}
-            </div>
+                  <Input
+                    type="text"
+                    value={spoutInputName}
+                    onChange={e => onSpoutInputNameChange?.(e.target.value)}
+                    disabled={isStreaming}
+                    className="h-8 text-sm"
+                    placeholder="TouchDesigner, OBS, etc."
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Receive video from Spout-compatible apps like TouchDesigner,
+                  Resolume, OBS.
+                </p>
+              </div>
+            ) : (
+              /* Video/Camera Input Preview */
+              <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
+                {isInitializing ? (
+                  <div className="text-center text-muted-foreground text-sm">
+                    {mode === "camera"
+                      ? "Requesting camera access..."
+                      : "Initializing video..."}
+                  </div>
+                ) : error ? (
+                  <div className="text-center text-red-500 text-sm p-4">
+                    <p>
+                      {mode === "camera"
+                        ? "Camera access failed:"
+                        : "Video error:"}
+                    </p>
+                    <p className="text-xs mt-1">{error}</p>
+                  </div>
+                ) : localStream ? (
+                  <video
+                    ref={videoRef}
+                    className="w-full h-full object-cover"
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                ) : (
+                  <div className="text-center text-muted-foreground text-sm p-4">
+                    {mode === "camera" ? "Camera Preview" : "Video Preview"}
+                  </div>
+                )}
+
+                {/* Upload button - only show in video mode */}
+                {mode === "video" && onVideoFileUpload && (
+                  <>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="video-upload"
+                      disabled={isStreaming || isConnecting}
+                    />
+                    <label
+                      htmlFor="video-upload"
+                      className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                        isStreaming || isConnecting
+                          ? "opacity-50 cursor-not-allowed"
+                          : "hover:bg-black/70 cursor-pointer"
+                      }`}
+                    >
+                      <Upload className="h-4 w-4 text-white" />
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

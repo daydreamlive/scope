@@ -30,6 +30,17 @@ DEFAULT_FPS = 30.0  # Default FPS
 SLEEP_TIME = 0.01
 
 
+class _SpoutFrame:
+    """Lightweight wrapper for Spout frames to match VideoFrame interface."""
+    __slots__ = ['_data']
+
+    def __init__(self, data):
+        self._data = data
+
+    def to_ndarray(self, format="rgb24"):
+        return self._data
+
+
 class FrameProcessor:
     def __init__(
         self,
@@ -350,35 +361,43 @@ class FrameProcessor:
     def _spout_input_loop(self):
         """Background thread that receives frames from Spout and adds to buffer."""
         logger.info("Spout input thread started")
+
+        # Target frame rate for Spout input (match typical pipeline processing rate)
+        target_fps = 30.0
+        frame_interval = 1.0 / target_fps
+        last_frame_time = 0.0
+        frame_count = 0
+
         while self.running and self.spout_input_enabled and self.spout_receiver is not None:
             try:
-                frame = self.spout_receiver.receive()
-                if frame is not None:
-                    # Convert numpy array to VideoFrame-like object
-                    # Frame is (H, W, C) uint8 RGBA
-                    # Convert to RGB by dropping alpha channel
-                    rgb_frame = frame[:, :, :3]
+                current_time = time.time()
 
-                    # Create a simple object that has to_ndarray method
-                    class SpoutFrame:
-                        def __init__(self, data):
-                            self._data = data
+                # Frame rate limiting - don't receive faster than target FPS
+                time_since_last = current_time - last_frame_time
+                if time_since_last < frame_interval:
+                    time.sleep(frame_interval - time_since_last)
+                    continue
 
-                        def to_ndarray(self, format="rgb24"):
-                            return self._data
-
-                    spout_frame = SpoutFrame(rgb_frame)
+                # Receive directly as RGB (avoids extra copy from RGBA slice)
+                rgb_frame = self.spout_receiver.receive(as_rgb=True)
+                if rgb_frame is not None:
+                    last_frame_time = time.time()
+                    spout_frame = _SpoutFrame(rgb_frame)
 
                     with self.frame_buffer_lock:
                         self.frame_buffer.append(spout_frame)
+
+                    frame_count += 1
+                    if frame_count % 100 == 0:
+                        logger.debug(f"Spout input received {frame_count} frames")
                 else:
-                    time.sleep(0.001)  # Small sleep to prevent busy waiting
+                    time.sleep(0.001)  # Small sleep when no frame available
 
             except Exception as e:
                 logger.error(f"Error in Spout input loop: {e}")
                 time.sleep(0.01)
 
-        logger.info("Spout input thread stopped")
+        logger.info(f"Spout input thread stopped after {frame_count} frames")
 
     def worker_loop(self):
         logger.info("Worker thread started")
@@ -534,24 +553,24 @@ class FrameProcessor:
                         break
 
             for frame in output:
+                # Send to Spout first (independent of WebRTC queue)
+                if self.spout_output_enabled and self.spout_sender is not None:
+                    try:
+                        # Frame is (H, W, C) uint8 [0, 255]
+                        frame_np = frame.numpy()
+                        success = self.spout_sender.send(frame_np)
+                        if self._frame_spout_count % 100 == 0:
+                            logger.info(
+                                f"Spout sent frame {self._frame_spout_count}, "
+                                f"shape={frame_np.shape}, success={success}"
+                            )
+                        self._frame_spout_count += 1
+                    except Exception as e:
+                        logger.error(f"Spout send error: {e}")
+
+                # Then try to add to WebRTC output queue
                 try:
                     self.output_queue.put_nowait(frame)
-
-                    # Send to Spout if enabled
-                    if self.spout_output_enabled and self.spout_sender is not None:
-                        try:
-                            # Frame is (H, W, C) uint8 [0, 255]
-                            frame_np = frame.numpy()
-                            success = self.spout_sender.send(frame_np)
-                            if self._frame_spout_count % 100 == 0:
-                                logger.info(
-                                    f"Spout sent frame {self._frame_spout_count}, "
-                                    f"shape={frame_np.shape}, success={success}"
-                                )
-                            self._frame_spout_count += 1
-                        except Exception as e:
-                            logger.error(f"Spout send error: {e}")
-
                 except queue.Full:
                     logger.warning("Output queue full, dropping processed frame")
                     # Update FPS calculation based on processing time and frame count

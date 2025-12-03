@@ -104,9 +104,14 @@ class SpoutReceiver:
             logger.error(f"Failed to create SpoutReceiver: {e}")
             return False
 
-    def receive(self) -> Optional[np.ndarray]:
+    def receive(self, as_rgb: bool = False) -> Optional[np.ndarray]:
         """
         Receive a frame from the Spout sender.
+
+        Args:
+            as_rgb: If True, return RGB (3 channels) instead of RGBA (4 channels).
+                   This is more efficient when you only need RGB as it avoids
+                   an extra copy/slice operation.
 
         Returns:
             Frame as numpy array (H, W, C) in uint8 [0, 255] format,
@@ -116,7 +121,7 @@ class SpoutReceiver:
             return None
 
         try:
-            # Python SpoutGL API signature (from error message):
+            # Python SpoutGL API signature:
             # receiveImage(buffer: Optional[Buffer], GL_format: int, invert: bool, hostFBO: int) -> bool
             GL_RGBA = 0x1908  # OpenGL constant for RGBA format
 
@@ -135,7 +140,12 @@ class SpoutReceiver:
                     self._handle_size_update()
 
                 self._frame_count += 1
-                return self._buffer.copy()
+
+                if as_rgb:
+                    # Return RGB copy directly (more efficient than copy + slice)
+                    return np.ascontiguousarray(self._buffer[:, :, :3])
+                else:
+                    return self._buffer.copy()
 
             return None
 
