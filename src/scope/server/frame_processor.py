@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # Try to import Spout support (Windows only)
 try:
     from scope.spout import SpoutReceiver, SpoutSender
+
     SPOUT_AVAILABLE = True
 except ImportError:
     SPOUT_AVAILABLE = False
@@ -32,7 +33,8 @@ SLEEP_TIME = 0.01
 
 class _SpoutFrame:
     """Lightweight wrapper for Spout frames to match VideoFrame interface."""
-    __slots__ = ['_data']
+
+    __slots__ = ["_data"]
 
     def __init__(self, data):
         self._data = data
@@ -345,7 +347,10 @@ class FrameProcessor:
                     self.spout_input_enabled = True
                     self.spout_input_name = sender_name
                     # Restart receiving thread if not running
-                    if self.spout_input_thread is None or not self.spout_input_thread.is_alive():
+                    if (
+                        self.spout_input_thread is None
+                        or not self.spout_input_thread.is_alive()
+                    ):
                         self.spout_input_thread = threading.Thread(
                             target=self._spout_input_loop, daemon=True
                         )
@@ -368,7 +373,11 @@ class FrameProcessor:
         last_frame_time = 0.0
         frame_count = 0
 
-        while self.running and self.spout_input_enabled and self.spout_receiver is not None:
+        while (
+            self.running
+            and self.spout_input_enabled
+            and self.spout_receiver is not None
+        ):
             try:
                 current_time = time.time()
 

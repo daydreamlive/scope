@@ -24,9 +24,7 @@ try:
     logger.debug(f"SpoutGL sender methods: {dir(SpoutGL.SpoutSender())}")
 except ImportError:
     SPOUT_AVAILABLE = False
-    logger.warning(
-        "SpoutGL not available. Install with: pip install SpoutGL pyopengl"
-    )
+    logger.warning("SpoutGL not available. Install with: pip install SpoutGL pyopengl")
 
 
 class SpoutSender:
@@ -77,14 +75,14 @@ class SpoutSender:
             logger.info("SpoutSender object created")
 
             # Initialize OpenGL context (required!)
-            if hasattr(self.sender, 'createOpenGL'):
+            if hasattr(self.sender, "createOpenGL"):
                 result = self.sender.createOpenGL()
                 logger.info(f"OpenGL context created for sender: {result}")
             else:
                 logger.warning("createOpenGL not available on SpoutSender")
 
             # Set sender name
-            if hasattr(self.sender, 'setSenderName'):
+            if hasattr(self.sender, "setSenderName"):
                 self.sender.setSenderName(self.name)
                 logger.info(f"Sender name set to: {self.name}")
             else:
@@ -92,7 +90,9 @@ class SpoutSender:
 
             self._is_initialized = True
 
-            logger.info(f"SpoutSender '{self.name}' created ({self.width}x{self.height})")
+            logger.info(
+                f"SpoutSender '{self.name}' created ({self.width}x{self.height})"
+            )
             return True
 
         except Exception as e:
@@ -134,15 +134,14 @@ class SpoutSender:
             if c == 3:
                 # RGB -> RGBA (add alpha channel)
                 frame = np.concatenate(
-                    [frame, np.full((h, w, 1), 255, dtype=np.uint8)],
-                    axis=2
+                    [frame, np.full((h, w, 1), 255, dtype=np.uint8)], axis=2
                 )
             elif c != 4:
                 logger.error(f"Expected 3 or 4 channels, got {c}")
                 return False
 
             # Ensure contiguous array
-            if not frame.flags['C_CONTIGUOUS']:
+            if not frame.flags["C_CONTIGUOUS"]:
                 frame = np.ascontiguousarray(frame)
 
             # Update dimensions if changed
@@ -157,12 +156,12 @@ class SpoutSender:
             try:
                 # Try: sendImage(buffer, width, height, GL_format, invert, hostFBO)
                 result = self.sender.sendImage(
-                    frame,      # numpy array buffer
-                    w,          # width
-                    h,          # height
-                    GL_RGBA,    # GL format
-                    False,      # Don't invert
-                    0,          # Host FBO
+                    frame,  # numpy array buffer
+                    w,  # width
+                    h,  # height
+                    GL_RGBA,  # GL format
+                    False,  # Don't invert
+                    0,  # Host FBO
                 )
             except TypeError:
                 try:
@@ -221,9 +220,9 @@ class SpoutSender:
         """Release the Spout sender resources."""
         if self.sender is not None:
             try:
-                if hasattr(self.sender, 'releaseSender'):
+                if hasattr(self.sender, "releaseSender"):
                     self.sender.releaseSender()
-                if hasattr(self.sender, 'closeOpenGL'):
+                if hasattr(self.sender, "closeOpenGL"):
                     self.sender.closeOpenGL()
                 logger.info(f"SpoutSender '{self.name}' released")
             except Exception as e:

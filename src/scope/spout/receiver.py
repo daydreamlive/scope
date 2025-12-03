@@ -23,9 +23,7 @@ try:
     logger.debug(f"SpoutGL receiver methods: {dir(SpoutGL.SpoutReceiver())}")
 except ImportError:
     SPOUT_AVAILABLE = False
-    logger.warning(
-        "SpoutGL not available. Install with: pip install SpoutGL pyopengl"
-    )
+    logger.warning("SpoutGL not available. Install with: pip install SpoutGL pyopengl")
 
 
 class SpoutReceiver:
@@ -80,18 +78,16 @@ class SpoutReceiver:
             self.receiver = SpoutGL.SpoutReceiver()
 
             # Initialize OpenGL context (required!)
-            if hasattr(self.receiver, 'createOpenGL'):
+            if hasattr(self.receiver, "createOpenGL"):
                 self.receiver.createOpenGL()
                 logger.info("OpenGL context created for receiver")
 
             # Set receiver name if specified (connects to specific sender)
-            if self.sender_name and hasattr(self.receiver, 'setReceiverName'):
+            if self.sender_name and hasattr(self.receiver, "setReceiverName"):
                 self.receiver.setReceiverName(self.sender_name)
 
             # Allocate initial buffer (RGBA = 4 channels)
-            self._buffer = np.zeros(
-                (self.height, self.width, 4), dtype=np.uint8
-            )
+            self._buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
 
             logger.info(
                 f"SpoutReceiver created, looking for sender: "
@@ -125,17 +121,17 @@ class SpoutReceiver:
             GL_RGBA = 0x1908  # OpenGL constant for RGBA format
 
             result = self.receiver.receiveImage(
-                self._buffer,   # numpy array as buffer
-                GL_RGBA,        # GL format constant (int)
-                False,          # invert (bool)
-                0,              # hostFBO (int)
+                self._buffer,  # numpy array as buffer
+                GL_RGBA,  # GL format constant (int)
+                False,  # invert (bool)
+                0,  # hostFBO (int)
             )
 
             if result:
                 self._is_connected = True
 
                 # Check if we need to resize (sender may have different dimensions)
-                if hasattr(self.receiver, 'isUpdated') and self.receiver.isUpdated():
+                if hasattr(self.receiver, "isUpdated") and self.receiver.isUpdated():
                     self._handle_size_update()
 
                 self._frame_count += 1
@@ -158,20 +154,18 @@ class SpoutReceiver:
             new_width = self.width
             new_height = self.height
 
-            if hasattr(self.receiver, 'getSenderWidth'):
+            if hasattr(self.receiver, "getSenderWidth"):
                 new_width = self.receiver.getSenderWidth()
-            if hasattr(self.receiver, 'getSenderHeight'):
+            if hasattr(self.receiver, "getSenderHeight"):
                 new_height = self.receiver.getSenderHeight()
 
             if new_width != self.width or new_height != self.height:
                 self.width = new_width
                 self.height = new_height
-                self._buffer = np.zeros(
-                    (self.height, self.width, 4), dtype=np.uint8
-                )
+                self._buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
                 logger.info(f"Buffer resized to: {self.width}x{self.height}")
 
-            if hasattr(self.receiver, 'getSenderName'):
+            if hasattr(self.receiver, "getSenderName"):
                 self._connected_sender = self.receiver.getSenderName()
 
         except Exception as e:
@@ -188,7 +182,7 @@ class SpoutReceiver:
 
         if self.receiver is not None:
             try:
-                if hasattr(self.receiver, 'getSenderName'):
+                if hasattr(self.receiver, "getSenderName"):
                     return self.receiver.getSenderName()
             except Exception:
                 pass
@@ -206,9 +200,9 @@ class SpoutReceiver:
         """Release the Spout receiver resources."""
         if self.receiver is not None:
             try:
-                if hasattr(self.receiver, 'releaseReceiver'):
+                if hasattr(self.receiver, "releaseReceiver"):
                     self.receiver.releaseReceiver()
-                if hasattr(self.receiver, 'closeOpenGL'):
+                if hasattr(self.receiver, "closeOpenGL"):
                     self.receiver.closeOpenGL()
                 logger.info("SpoutReceiver released")
             except Exception as e:
@@ -242,27 +236,27 @@ def list_senders() -> list[str]:
         receiver = SpoutGL.SpoutReceiver()
 
         # Initialize OpenGL context
-        if hasattr(receiver, 'createOpenGL'):
+        if hasattr(receiver, "createOpenGL"):
             result = receiver.createOpenGL()
             logger.debug(f"createOpenGL result: {result}")
 
         # Get sender list
-        if hasattr(receiver, 'getSenderList'):
+        if hasattr(receiver, "getSenderList"):
             senders = receiver.getSenderList()
             logger.info(f"getSenderList returned: {senders}")
-            if hasattr(receiver, 'closeOpenGL'):
+            if hasattr(receiver, "closeOpenGL"):
                 receiver.closeOpenGL()
             return senders if senders else []
 
         # Fallback: try getActiveSender
-        if hasattr(receiver, 'getActiveSender'):
+        if hasattr(receiver, "getActiveSender"):
             active = receiver.getActiveSender()
             logger.info(f"getActiveSender returned: {active}")
-            if hasattr(receiver, 'closeOpenGL'):
+            if hasattr(receiver, "closeOpenGL"):
                 receiver.closeOpenGL()
             return [active] if active else []
 
-        if hasattr(receiver, 'closeOpenGL'):
+        if hasattr(receiver, "closeOpenGL"):
             receiver.closeOpenGL()
         return []
 
