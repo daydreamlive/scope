@@ -9,7 +9,6 @@ See: https://github.com/jlai/Python-SpoutGL
 """
 
 import logging
-from typing import Union
 
 import numpy as np
 import torch
@@ -75,7 +74,7 @@ class SpoutSender:
         """
         try:
             self.sender = SpoutGL.SpoutSender()
-            logger.info(f"SpoutSender object created")
+            logger.info("SpoutSender object created")
 
             # Initialize OpenGL context (required!)
             if hasattr(self.sender, 'createOpenGL'):
@@ -100,7 +99,7 @@ class SpoutSender:
             logger.error(f"Failed to create SpoutSender: {e}", exc_info=True)
             return False
 
-    def send(self, frame: Union[np.ndarray, torch.Tensor]) -> bool:
+    def send(self, frame: np.ndarray | torch.Tensor) -> bool:
         """
         Send a frame to Spout receivers.
 

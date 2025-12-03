@@ -9,7 +9,6 @@ See: https://github.com/jlai/Python-SpoutGL
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -104,7 +103,7 @@ class SpoutReceiver:
             logger.error(f"Failed to create SpoutReceiver: {e}")
             return False
 
-    def receive(self, as_rgb: bool = False) -> Optional[np.ndarray]:
+    def receive(self, as_rgb: bool = False) -> np.ndarray | None:
         """
         Receive a frame from the Spout sender.
 
