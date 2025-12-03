@@ -30,9 +30,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
 
-# Default chunk size for video mode
-DEFAULT_VIDEO_CHUNK_SIZE = 4
-
 
 class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
     @classmethod
@@ -154,12 +151,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
-        return prepare_for_mode(
-            self.__class__,
-            self.components.config,
-            kwargs,
-            video_input_size=DEFAULT_VIDEO_CHUNK_SIZE,
-        )
+        return prepare_for_mode(self.__class__, self.components.config, kwargs)
 
     def __call__(self, **kwargs) -> torch.Tensor:
         self.first_call, self.last_mode = handle_mode_transition(
