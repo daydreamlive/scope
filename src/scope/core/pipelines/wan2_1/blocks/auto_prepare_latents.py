@@ -8,8 +8,12 @@ workflows at two critical points:
 This split maintains the correct execution order from the original unified workflow.
 """
 
+from typing import Any
+
 from diffusers.modular_pipelines import (
     AutoPipelineBlocks,
+    ModularPipelineBlocks,
+    PipelineState,
     SequentialPipelineBlocks,
 )
 
@@ -17,6 +21,17 @@ from .noise_scale_controller import NoiseScaleControllerBlock
 from .prepare_latents import PrepareLatentsBlock
 from .prepare_video_latents import PrepareVideoLatentsBlock
 from .preprocess_video import PreprocessVideoBlock
+
+
+class NoOpBlock(ModularPipelineBlocks):
+    model_name = "Wan2.1"
+
+    @property
+    def description(self) -> str:
+        return "NoOpBlock is a block that does nothing"
+
+    def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
+        return components, state
 
 
 class VideoPreprocessingWorkflow(SequentialPipelineBlocks):
@@ -47,15 +62,15 @@ class AutoPreprocessVideoBlock(AutoPipelineBlocks):
 
     block_classes = [
         VideoPreprocessingWorkflow,
+        NoOpBlock,
     ]
 
     block_names = [
         "video_preprocessing",
+        "noop",
     ]
 
-    block_trigger_inputs = [
-        "video",
-    ]
+    block_trigger_inputs = ["video", None]
 
     @property
     def description(self):
