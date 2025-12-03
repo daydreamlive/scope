@@ -11,10 +11,10 @@ export function Header({ className = "" }: HeaderProps) {
   const [reportBugOpen, setReportBugOpen] = useState(false);
 
   return (
-    <header className={`w-full bg-background px-6 py-4 ${className}`}>
+    <header className={`w-full bg-background px-8 py-4 ${className}`} style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-medium text-foreground">Daydream Scope</h1>
-        <div className="flex items-center gap-3">
+        <h1 className="text-xl font-medium text-foreground pl-2">Daydream Scope</h1>
+        <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <Button
             variant="ghost"
             size="sm"
