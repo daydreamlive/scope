@@ -27,8 +27,8 @@ class Pipeline(ABC):
     - API introspection and automatic UI generation
 
     See schema.py for the BasePipelineConfig model and pipeline-specific configs.
-    For multi-mode pipeline support (text/video), use multi_mode.MultiModePipeline
-    as the base class which provides declarative mode configuration.
+    For multi-mode pipeline support (text/video), pipelines use helper functions
+    from defaults.py (resolve_input_mode, apply_mode_defaults_to_state, etc.).
     """
 
     @classmethod
