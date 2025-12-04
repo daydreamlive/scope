@@ -30,6 +30,7 @@ classifiers = [
 dependencies = [
     "aiortc>=1.13.0",
     "fastapi>=0.116.1",
+    "ffmpeg-python>=0.2.0",
     "httpx>=0.28.1",
     "twilio>=9.8.0",
     "uvicorn>=0.35.0",
