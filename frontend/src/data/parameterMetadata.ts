@@ -85,6 +85,6 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   vaeType: {
     label: "VAE:",
     tooltip:
-      "VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality.",
+      "VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality.",
   },
 };
