@@ -52,6 +52,7 @@ from .schema import (
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
+    VaeTypesResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
@@ -784,6 +785,14 @@ async def get_hardware_info():
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/vae/types", response_model=VaeTypesResponse)
+async def get_vae_types():
+    """Get available VAE types from the registry."""
+    from scope.core.pipelines.wan2_1.vae import list_vae_types
+
+    return VaeTypesResponse(vae_types=list_vae_types())
 
 
 @app.get("/api/v1/logs/current")

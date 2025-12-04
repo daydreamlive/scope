@@ -19,6 +19,12 @@ class HealthResponse(BaseModel):
     timestamp: str
 
 
+class VaeTypesResponse(BaseModel):
+    """Response containing available VAE types from the registry."""
+
+    vae_types: list[str]
+
+
 class PromptItem(BaseModel):
     """Individual prompt with weight for blending."""
 
