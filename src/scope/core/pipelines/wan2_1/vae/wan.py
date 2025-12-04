@@ -72,7 +72,6 @@ class WanVAEWrapper(torch.nn.Module):
         self,
         pixel: torch.Tensor,
         use_cache: bool = True,
-        feat_cache: list | None = None,
     ) -> torch.Tensor:
         """Encode video pixels to latents.
 
@@ -80,10 +79,6 @@ class WanVAEWrapper(torch.nn.Module):
             pixel: Input video tensor [batch, channels, frames, height, width]
             use_cache: If True, use streaming encode (maintains cache state).
                       If False, use batch encode with a temporary cache.
-            feat_cache: Optional external cache. If provided, this cache is used
-                       instead of the internal streaming cache, allowing one-time
-                       encodes without affecting the streaming state (e.g., for
-                       re-encoding the first frame in Krea pipeline).
 
         Returns:
             Latent tensor [batch, frames, channels, height, width]
@@ -91,18 +86,15 @@ class WanVAEWrapper(torch.nn.Module):
         device, dtype = pixel.device, pixel.dtype
         scale = self._get_scale(device, dtype)
 
-        if use_cache and feat_cache is None:
+        if use_cache:
             # Streaming encode - cache is maintained across calls
             latent = self.model.stream_encode(pixel)
             # Apply normalization (stream_encode returns unnormalized)
             latent = self._apply_encoding_normalization(latent, scale)
         else:
             # Batch encode with one-time cache (does not affect streaming state)
-            # Use provided cache or create a temporary one
-            cache = (
-                feat_cache if feat_cache is not None else self._create_encoder_cache()
-            )
-            latent = self._encode_with_cache(pixel, scale, cache)
+            # Create a temporary cache for the one-time encode
+            latent = self._encode_with_cache(pixel, scale, self._create_encoder_cache())
 
         # [batch, channels, frames, h, w] -> [batch, frames, channels, h, w]
         return latent.permute(0, 2, 1, 3, 4)
