@@ -10,6 +10,7 @@ import type {
 import {
   getHardwareInfo,
   getPipelineSchemas,
+  getVaeTypes,
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
@@ -167,14 +168,19 @@ export function useStreamState() {
     null
   );
 
-  // Fetch pipeline schemas and hardware info on mount
+  // Store available VAE types from registry
+  const [vaeTypes, setVaeTypes] = useState<string[]>(["wan"]);
+
+  // Fetch pipeline schemas, hardware info, and VAE types on mount
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const [schemasResult, hardwareResult] = await Promise.allSettled([
-          getPipelineSchemas(),
-          getHardwareInfo(),
-        ]);
+        const [schemasResult, hardwareResult, vaeTypesResult] =
+          await Promise.allSettled([
+            getPipelineSchemas(),
+            getHardwareInfo(),
+            getVaeTypes(),
+          ]);
 
         if (schemasResult.status === "fulfilled") {
           setPipelineSchemas(schemasResult.value);
@@ -191,6 +197,15 @@ export function useStreamState() {
           console.error(
             "useStreamState: Failed to fetch hardware info:",
             hardwareResult.reason
+          );
+        }
+
+        if (vaeTypesResult.status === "fulfilled") {
+          setVaeTypes(vaeTypesResult.value.vae_types);
+        } else {
+          console.error(
+            "useStreamState: Failed to fetch VAE types:",
+            vaeTypesResult.reason
           );
         }
       } catch (error) {
@@ -241,6 +256,7 @@ export function useStreamState() {
     promptData,
     hardwareInfo,
     pipelineSchemas,
+    vaeTypes,
     updateMetrics,
     updateStreamStatus,
     updateSettings,
