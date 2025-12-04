@@ -12,6 +12,15 @@ from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
+# Try to import Spout support (Windows only)
+try:
+    from scope.spout import SpoutReceiver, SpoutSender
+
+    SPOUT_AVAILABLE = True
+except ImportError:
+    SPOUT_AVAILABLE = False
+    logger.info("Spout not available (Windows only)")
+
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 
@@ -20,6 +29,18 @@ MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
 MAX_FPS = 60.0  # Maximum FPS cap
 DEFAULT_FPS = 30.0  # Default FPS
 SLEEP_TIME = 0.01
+
+
+class _SpoutFrame:
+    """Lightweight wrapper for Spout frames to match VideoFrame interface."""
+
+    __slots__ = ["_data"]
+
+    def __init__(self, data):
+        self._data = data
+
+    def to_ndarray(self, format="rgb24"):
+        return self._data
 
 
 class FrameProcessor:
@@ -65,12 +86,34 @@ class FrameProcessor:
 
         self.paused = False
 
+        # Spout integration
+        self.spout_sender = None
+        self.spout_output_enabled = False
+        self.spout_output_name = "Scope"
+        self._frame_spout_count = 0
+
+        # Spout input
+        self.spout_receiver = None
+        self.spout_input_enabled = False
+        self.spout_input_name = ""
+        self.spout_input_thread = None
+
     def start(self):
         if self.running:
             return
 
         self.running = True
         self.shutdown_event.clear()
+
+        # Process any Spout settings from initial parameters
+        if "spout_output" in self.parameters:
+            spout_config = self.parameters.pop("spout_output")
+            self._update_spout_output(spout_config)
+
+        if "spout_input" in self.parameters:
+            spout_config = self.parameters.pop("spout_input")
+            self._update_spout_input(spout_config)
+
         self.worker_thread = threading.Thread(target=self.worker_loop, daemon=True)
         self.worker_thread.start()
 
@@ -96,6 +139,23 @@ class FrameProcessor:
 
         with self.frame_buffer_lock:
             self.frame_buffer.clear()
+
+        # Clean up Spout sender
+        if self.spout_sender is not None:
+            try:
+                self.spout_sender.release()
+            except Exception as e:
+                logger.error(f"Error releasing Spout sender: {e}")
+            self.spout_sender = None
+
+        # Clean up Spout receiver
+        self.spout_input_enabled = False
+        if self.spout_receiver is not None:
+            try:
+                self.spout_receiver.release()
+            except Exception as e:
+                logger.error(f"Error releasing Spout receiver: {e}")
+            self.spout_receiver = None
 
         logger.info("FrameProcessor stopped")
 
@@ -167,6 +227,16 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
+        # Handle Spout output settings
+        if "spout_output" in parameters:
+            spout_config = parameters.pop("spout_output")
+            self._update_spout_output(spout_config)
+
+        # Handle Spout input settings
+        if "spout_input" in parameters:
+            spout_config = parameters.pop("spout_input")
+            self._update_spout_input(spout_config)
+
         # Put new parameters in queue (replace any pending update)
         try:
             # Add new update
@@ -174,6 +244,169 @@ class FrameProcessor:
         except queue.Full:
             logger.info("Parameter queue full, dropping parameter update")
             return False
+
+    def _update_spout_output(self, config: dict):
+        """Update Spout output configuration."""
+        logger.info(f"Spout output config received: {config}")
+
+        if not SPOUT_AVAILABLE:
+            logger.warning("Spout not available on this platform")
+            return
+
+        enabled = config.get("enabled", False)
+        sender_name = config.get("senderName", "Scope")
+
+        logger.info(f"Spout output: enabled={enabled}, name={sender_name}")
+
+        if enabled and not self.spout_output_enabled:
+            # Enable Spout output
+            try:
+                self.spout_sender = SpoutSender(sender_name, 512, 512)
+                if self.spout_sender.create():
+                    self.spout_output_enabled = True
+                    self.spout_output_name = sender_name
+                    logger.info(f"Spout output enabled: '{sender_name}'")
+                else:
+                    logger.error("Failed to create Spout sender")
+                    self.spout_sender = None
+            except Exception as e:
+                logger.error(f"Error creating Spout sender: {e}")
+                self.spout_sender = None
+
+        elif not enabled and self.spout_output_enabled:
+            # Disable Spout output
+            if self.spout_sender is not None:
+                self.spout_sender.release()
+                self.spout_sender = None
+            self.spout_output_enabled = False
+            logger.info("Spout output disabled")
+
+        elif enabled and sender_name != self.spout_output_name:
+            # Name changed, recreate sender
+            if self.spout_sender is not None:
+                self.spout_sender.release()
+            try:
+                self.spout_sender = SpoutSender(sender_name, 512, 512)
+                if self.spout_sender.create():
+                    self.spout_output_name = sender_name
+                    logger.info(f"Spout output renamed to: '{sender_name}'")
+                else:
+                    logger.error("Failed to recreate Spout sender")
+                    self.spout_sender = None
+                    self.spout_output_enabled = False
+            except Exception as e:
+                logger.error(f"Error recreating Spout sender: {e}")
+                self.spout_sender = None
+                self.spout_output_enabled = False
+
+    def _update_spout_input(self, config: dict):
+        """Update Spout input configuration."""
+        if not SPOUT_AVAILABLE:
+            logger.warning("Spout not available on this platform")
+            return
+
+        enabled = config.get("enabled", False)
+        sender_name = config.get("senderName", "")
+
+        if enabled and not self.spout_input_enabled:
+            # Enable Spout input
+            try:
+                self.spout_receiver = SpoutReceiver(sender_name, 512, 512)
+                if self.spout_receiver.create():
+                    self.spout_input_enabled = True
+                    self.spout_input_name = sender_name
+                    # Start receiving thread
+                    self.spout_input_thread = threading.Thread(
+                        target=self._spout_input_loop, daemon=True
+                    )
+                    self.spout_input_thread.start()
+                    logger.info(f"Spout input enabled: '{sender_name or 'any'}'")
+                else:
+                    logger.error("Failed to create Spout receiver")
+                    self.spout_receiver = None
+            except Exception as e:
+                logger.error(f"Error creating Spout receiver: {e}")
+                self.spout_receiver = None
+
+        elif not enabled and self.spout_input_enabled:
+            # Disable Spout input
+            self.spout_input_enabled = False
+            if self.spout_receiver is not None:
+                self.spout_receiver.release()
+                self.spout_receiver = None
+            logger.info("Spout input disabled")
+
+        elif enabled and sender_name != self.spout_input_name:
+            # Name changed, recreate receiver
+            self.spout_input_enabled = False
+            if self.spout_receiver is not None:
+                self.spout_receiver.release()
+            try:
+                self.spout_receiver = SpoutReceiver(sender_name, 512, 512)
+                if self.spout_receiver.create():
+                    self.spout_input_enabled = True
+                    self.spout_input_name = sender_name
+                    # Restart receiving thread if not running
+                    if (
+                        self.spout_input_thread is None
+                        or not self.spout_input_thread.is_alive()
+                    ):
+                        self.spout_input_thread = threading.Thread(
+                            target=self._spout_input_loop, daemon=True
+                        )
+                        self.spout_input_thread.start()
+                    logger.info(f"Spout input changed to: '{sender_name or 'any'}'")
+                else:
+                    logger.error("Failed to recreate Spout receiver")
+                    self.spout_receiver = None
+            except Exception as e:
+                logger.error(f"Error recreating Spout receiver: {e}")
+                self.spout_receiver = None
+
+    def _spout_input_loop(self):
+        """Background thread that receives frames from Spout and adds to buffer."""
+        logger.info("Spout input thread started")
+
+        # Target frame rate for Spout input (match typical pipeline processing rate)
+        target_fps = 30.0
+        frame_interval = 1.0 / target_fps
+        last_frame_time = 0.0
+        frame_count = 0
+
+        while (
+            self.running
+            and self.spout_input_enabled
+            and self.spout_receiver is not None
+        ):
+            try:
+                current_time = time.time()
+
+                # Frame rate limiting - don't receive faster than target FPS
+                time_since_last = current_time - last_frame_time
+                if time_since_last < frame_interval:
+                    time.sleep(frame_interval - time_since_last)
+                    continue
+
+                # Receive directly as RGB (avoids extra copy from RGBA slice)
+                rgb_frame = self.spout_receiver.receive(as_rgb=True)
+                if rgb_frame is not None:
+                    last_frame_time = time.time()
+                    spout_frame = _SpoutFrame(rgb_frame)
+
+                    with self.frame_buffer_lock:
+                        self.frame_buffer.append(spout_frame)
+
+                    frame_count += 1
+                    if frame_count % 100 == 0:
+                        logger.debug(f"Spout input received {frame_count} frames")
+                else:
+                    time.sleep(0.001)  # Small sleep when no frame available
+
+            except Exception as e:
+                logger.error(f"Error in Spout input loop: {e}")
+                time.sleep(0.01)
+
+        logger.info(f"Spout input thread stopped after {frame_count} frames")
 
     def worker_loop(self):
         logger.info("Worker thread started")
@@ -329,6 +562,22 @@ class FrameProcessor:
                         break
 
             for frame in output:
+                # Send to Spout first (independent of WebRTC queue)
+                if self.spout_output_enabled and self.spout_sender is not None:
+                    try:
+                        # Frame is (H, W, C) uint8 [0, 255]
+                        frame_np = frame.numpy()
+                        success = self.spout_sender.send(frame_np)
+                        if self._frame_spout_count % 100 == 0:
+                            logger.info(
+                                f"Spout sent frame {self._frame_spout_count}, "
+                                f"shape={frame_np.shape}, success={success}"
+                            )
+                        self._frame_spout_count += 1
+                    except Exception as e:
+                        logger.error(f"Spout send error: {e}")
+
+                # Then try to add to WebRTC output queue
                 try:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:

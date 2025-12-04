@@ -237,6 +237,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;
+      spout_output?: { enabled: boolean; senderName: string };
+      spout_input?: { enabled: boolean; senderName: string };
     }) => {
       if (
         dataChannelRef.current &&

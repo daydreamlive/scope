@@ -47,6 +47,15 @@ export interface SettingsState {
   paused?: boolean;
   loras?: LoRAConfig[];
   loraMergeStrategy?: LoraMergeStrategy;
+  // Spout settings
+  spoutInput?: {
+    enabled: boolean;
+    senderName: string;
+  };
+  spoutOutput?: {
+    enabled: boolean;
+    senderName: string;
+  };
 }
 
 export type PipelineCategory = "video-input" | "no-video-input";

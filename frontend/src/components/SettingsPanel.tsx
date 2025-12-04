@@ -25,7 +25,12 @@ import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import type {
+  PipelineId,
+  LoRAConfig,
+  LoraMergeStrategy,
+  SettingsState,
+} from "../types";
 import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
@@ -59,6 +64,9 @@ interface SettingsPanelProps {
   loras?: LoRAConfig[];
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
+  // Spout settings
+  spoutOutput?: SettingsState["spoutOutput"];
+  onSpoutOutputChange?: (spoutOutput: SettingsState["spoutOutput"]) => void;
 }
 
 export function SettingsPanel({
@@ -87,6 +95,8 @@ export function SettingsPanel({
   loras = [],
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
+  spoutOutput,
+  onSpoutOutputChange,
 }: SettingsPanelProps) {
   // Use pipeline-specific default if resolution is not provided
   const effectiveResolution = resolution || getDefaultResolution(pipelineId);
@@ -617,6 +627,62 @@ export function SettingsPanel({
             </div>
           </div>
         )}
+
+        {/* Spout Output Settings (Windows only) */}
+        <div className="space-y-4">
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium">Spout Output (Windows)</h3>
+            <p className="text-xs text-muted-foreground">
+              Send processed frames to external apps like TouchDesigner,
+              Resolume, OBS.
+            </p>
+
+            <div className="space-y-2 p-2 border rounded-md">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label="Enable"
+                  tooltip="Send processed frames to Spout receivers"
+                  className="text-sm text-foreground font-medium"
+                />
+                <Toggle
+                  pressed={spoutOutput?.enabled ?? false}
+                  onPressedChange={enabled => {
+                    onSpoutOutputChange?.({
+                      enabled,
+                      senderName: spoutOutput?.senderName ?? "Scope",
+                    });
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                >
+                  {spoutOutput?.enabled ? "ON" : "OFF"}
+                </Toggle>
+              </div>
+
+              {spoutOutput?.enabled && (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">
+                    Sender Name
+                  </label>
+                  <Input
+                    type="text"
+                    value={spoutOutput?.senderName ?? "Scope"}
+                    onChange={e => {
+                      onSpoutOutputChange?.({
+                        enabled: spoutOutput?.enabled ?? false,
+                        senderName: e.target.value,
+                      });
+                    }}
+                    disabled={isStreaming}
+                    className="h-7 text-sm"
+                    placeholder="Scope"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

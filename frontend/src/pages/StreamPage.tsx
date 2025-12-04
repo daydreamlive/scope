@@ -355,6 +355,50 @@ export function StreamPage() {
     });
   };
 
+  const handleSpoutOutputChange = (
+    spoutOutput: { enabled: boolean; senderName: string } | undefined
+  ) => {
+    updateSettings({ spoutOutput });
+    // Send Spout output settings to backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        spout_output: spoutOutput,
+      });
+    }
+  };
+
+  // Handle Spout input name change from InputAndControlsPanel
+  const handleSpoutInputNameChange = (name: string) => {
+    updateSettings({
+      spoutInput: {
+        enabled: mode === "spout",
+        senderName: name,
+      },
+    });
+  };
+
+  // Sync spoutInput.enabled with mode changes
+  const handleModeChange = (newMode: typeof mode) => {
+    // When switching to spout mode, enable spout input
+    if (newMode === "spout") {
+      updateSettings({
+        spoutInput: {
+          enabled: true,
+          senderName: settings.spoutInput?.senderName ?? "",
+        },
+      });
+    } else {
+      // When switching away from spout mode, disable spout input
+      updateSettings({
+        spoutInput: {
+          enabled: false,
+          senderName: settings.spoutInput?.senderName ?? "",
+        },
+      });
+    }
+    switchMode(newMode);
+  };
+
   const handleLivePromptSubmit = (prompts: PromptItem[]) => {
     // Use the timeline ref to submit the prompt
     if (timelineRef.current) {
@@ -555,13 +599,13 @@ export function StreamPage() {
       // Check if this pipeline needs video input
       const pipelineCategory = PIPELINES[pipelineIdToUse]?.category;
       const needsVideoInput = pipelineCategory === "video-input";
+      const isSpoutMode = mode === "spout" && settings.spoutInput?.enabled;
 
-      // Only send video stream for pipelines that need video input
-      const streamToSend = needsVideoInput
-        ? localStream || undefined
-        : undefined;
+      // Only send video stream for pipelines that need video input (not in Spout mode)
+      const streamToSend =
+        needsVideoInput && !isSpoutMode ? localStream || undefined : undefined;
 
-      if (needsVideoInput && !localStream) {
+      if (needsVideoInput && !isSpoutMode && !localStream) {
         console.error("Video input required but no local stream available");
         return false;
       }
@@ -575,6 +619,8 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        spout_output?: { enabled: boolean; senderName: string };
+        spout_input?: { enabled: boolean; senderName: string };
       } = {};
 
       // Common parameters for pipelines that support prompts
@@ -606,6 +652,14 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
+      // Spout settings - send if enabled
+      if (settings.spoutOutput?.enabled) {
+        initialParameters.spout_output = settings.spoutOutput;
+      }
+      if (settings.spoutInput?.enabled) {
+        initialParameters.spout_input = settings.spoutInput;
+      }
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
@@ -634,14 +688,16 @@ export function StreamPage() {
             isInitializing={isInitializing}
             error={videoSourceError}
             mode={mode}
-            onModeChange={switchMode}
+            onModeChange={handleModeChange}
             isStreaming={isStreaming}
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={
               PIPELINES[settings.pipelineId]?.category === "no-video-input"
                 ? !isInitializing
-                : !!localStream && !isInitializing
+                : mode === "spout"
+                  ? !isInitializing // Spout mode doesn't need local stream
+                  : !!localStream && !isInitializing
             }
             onStartStream={handleStartStream}
             onStopStream={stopStream}
@@ -665,6 +721,8 @@ export function StreamPage() {
             timelinePrompts={timelinePrompts}
             transitionSteps={transitionSteps}
             onTransitionStepsChange={setTransitionSteps}
+            spoutInputName={settings.spoutInput?.senderName ?? ""}
+            onSpoutInputNameChange={handleSpoutInputNameChange}
           />
         </div>
 
@@ -841,6 +899,8 @@ export function StreamPage() {
             loras={settings.loras || []}
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
+            spoutOutput={settings.spoutOutput}
+            onSpoutOutputChange={handleSpoutOutputChange}
           />
         </div>
       </div>
