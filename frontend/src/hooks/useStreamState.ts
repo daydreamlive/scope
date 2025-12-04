@@ -42,6 +42,7 @@ function getFallbackDefaults(pipelineId: PipelineId, mode?: InputMode) {
     seed: BASE_FALLBACK.seed,
     quantization: undefined as "fp8_e4m3fn" | undefined,
     inputSize: undefined,
+    defaultPrompts: undefined,
   };
 }
 
@@ -87,6 +88,7 @@ export function useStreamState() {
         // Apply mode-specific overrides if mode is specified and mode_defaults exist
         const effectiveMode = mode ?? schema.default_mode;
         const modeOverrides = schema.mode_defaults?.[effectiveMode];
+        let defaultPrompts: string[] | undefined = undefined;
         if (modeOverrides) {
           if (modeOverrides.height !== undefined) height = modeOverrides.height;
           if (modeOverrides.width !== undefined) width = modeOverrides.width;
@@ -98,6 +100,8 @@ export function useStreamState() {
             noiseController = modeOverrides.noise_controller ?? undefined;
           if (modeOverrides.input_size !== undefined)
             inputSize = modeOverrides.input_size ?? undefined;
+          if (modeOverrides.default_prompts !== undefined)
+            defaultPrompts = modeOverrides.default_prompts ?? undefined;
         }
 
         return {
@@ -110,6 +114,7 @@ export function useStreamState() {
           inputMode: effectiveMode,
           seed: (props.base_seed?.default as number) ?? 42,
           quantization: undefined as "fp8_e4m3fn" | undefined,
+          defaultPrompts,
         };
       }
       // Fallback to derived defaults if schemas not loaded

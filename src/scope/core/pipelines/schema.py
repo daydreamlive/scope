@@ -39,6 +39,9 @@ class ModeDefaults(BaseModel):
     noise_controller: bool | None = None
     input_size: int | None = None
 
+    # Default prompts for this mode (list of prompt text strings, will be converted to PromptItems with weight 1.0)
+    default_prompts: list[str] | None = None
+
 
 class BasePipelineConfig(BaseModel):
     """Base configuration for all pipelines.
@@ -228,6 +231,9 @@ class LongLiveConfig(BasePipelineConfig):
                 noise_scale=None,
                 noise_controller=None,
                 input_size=None,
+                default_prompts=[
+                    "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day."
+                ],
             ),
             "video": ModeDefaults(
                 # Video mode: requires input frames, noise controls active
@@ -237,6 +243,9 @@ class LongLiveConfig(BasePipelineConfig):
                 noise_controller=True,
                 input_size=4,
                 denoising_steps=[1000, 750],
+                default_prompts=[
+                    "A 3D animated scene. A **panda** sitting in the grass, looking around."
+                ],
             ),
         }
 
@@ -290,12 +299,14 @@ class StreamDiffusionV2Config(BasePipelineConfig):
                 noise_controller=None,
                 input_size=None,
                 denoising_steps=[1000, 750],
+                default_prompts=["A dog in the grass looking around, photorealistic"],
             ),
             "video": ModeDefaults(
                 # Video mode: requires input frames, noise controls active
                 noise_scale=0.7,
                 noise_controller=True,
                 input_size=4,
+                default_prompts=["A dog in the grass looking around, photorealistic"],
             ),
         }
 
@@ -339,6 +350,9 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
                 noise_scale=None,
                 noise_controller=None,
                 input_size=None,
+                default_prompts=[
+                    "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day."
+                ],
             ),
             "video": ModeDefaults(
                 # Video mode: requires input frames, noise controls active
@@ -348,6 +362,9 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
                 noise_controller=True,
                 input_size=4,
                 denoising_steps=[1000, 750],
+                default_prompts=[
+                    "A 3D animated scene. A **panda** sitting in the grass, looking around."
+                ],
             ),
         }
 
