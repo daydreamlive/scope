@@ -12,7 +12,11 @@ import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
-import { PIPELINES, getPipelineDefaultMode } from "../data/pipelines";
+import {
+  PIPELINES,
+  getPipelineDefaultMode,
+  getDefaultPromptForMode,
+} from "../data/pipelines";
 import type {
   InputMode,
   PipelineId,
@@ -49,9 +53,11 @@ export function StreamPage() {
   const { settings, updateSettings, getDefaults, supportsNoiseControls } =
     useStreamState();
 
-  // Prompt state
+  // Prompt state - use unified default prompts based on mode
+  const initialMode =
+    settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
-    { text: PIPELINES[settings.pipelineId]?.defaultPrompt || "", weight: 100 },
+    { text: getDefaultPromptForMode(initialMode), weight: 100 },
   ]);
   const [interpolationMethod, setInterpolationMethod] = useState<
     "linear" | "slerp"
@@ -62,6 +68,12 @@ export function StreamPage() {
 
   // Track when we need to reinitialize video source
   const [shouldReinitializeVideo, setShouldReinitializeVideo] = useState(false);
+
+  // Store custom video resolution from user uploads - persists across mode/pipeline changes
+  const [customVideoResolution, setCustomVideoResolution] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
 
   const [isLive, setIsLive] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
@@ -139,6 +151,14 @@ export function StreamPage() {
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
     enabled: settings.inputMode === "video",
+    // Sync output resolution when user uploads a custom video
+    // Store the custom resolution so it persists across mode/pipeline changes
+    onCustomVideoResolution: resolution => {
+      setCustomVideoResolution(resolution);
+      updateSettings({
+        resolution: { height: resolution.height, width: resolution.width },
+      });
+    },
   });
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
@@ -169,28 +189,24 @@ export function StreamPage() {
     // Get mode-specific defaults from backend schema
     const modeDefaults = getDefaults(settings.pipelineId, newMode);
 
+    // Use custom video resolution if switching to video mode and one exists
+    // This preserves the user's uploaded video resolution across mode switches
+    const resolution =
+      newMode === "video" && customVideoResolution
+        ? customVideoResolution
+        : { height: modeDefaults.height, width: modeDefaults.width };
+
     // Update settings with new mode and ALL mode-specific defaults including resolution
     updateSettings({
       inputMode: newMode,
-      resolution: { height: modeDefaults.height, width: modeDefaults.width },
+      resolution,
       denoisingSteps: modeDefaults.denoisingSteps,
       noiseScale: modeDefaults.noiseScale,
       noiseController: modeDefaults.noiseController,
     });
 
-    // Update prompts to mode-specific defaults if available
-    if (
-      "defaultPrompts" in modeDefaults &&
-      modeDefaults.defaultPrompts &&
-      modeDefaults.defaultPrompts.length > 0
-    ) {
-      setPromptItems(
-        modeDefaults.defaultPrompts.map((text: string) => ({
-          text,
-          weight: 100,
-        }))
-      );
-    }
+    // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
+    setPromptItems([{ text: getDefaultPromptForMode(newMode), weight: 100 }]);
 
     // Handle video source based on mode
     if (newMode === "video") {
@@ -235,26 +251,22 @@ export function StreamPage() {
     // Get all defaults for the new pipeline + mode from backend schema
     const defaults = getDefaults(pipelineId, modeToUse);
 
-    // Update prompts to mode-specific defaults if available, otherwise fallback to pipeline default
-    if (
-      "defaultPrompts" in defaults &&
-      defaults.defaultPrompts &&
-      defaults.defaultPrompts.length > 0
-    ) {
-      setPromptItems(
-        defaults.defaultPrompts.map((text: string) => ({ text, weight: 100 }))
-      );
-    } else {
-      const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
-      setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
-    }
+    // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
+    setPromptItems([{ text: getDefaultPromptForMode(modeToUse), weight: 100 }]);
+
+    // Use custom video resolution if mode is video and one exists
+    // This preserves the user's uploaded video resolution across pipeline switches
+    const resolution =
+      modeToUse === "video" && customVideoResolution
+        ? customVideoResolution
+        : { height: defaults.height, width: defaults.width };
 
     // Update the pipeline in settings with the appropriate mode and defaults
     updateSettings({
       pipelineId,
       inputMode: modeToUse,
       denoisingSteps: defaults.denoisingSteps,
-      resolution: { height: defaults.height, width: defaults.width },
+      resolution,
       noiseScale: defaults.noiseScale,
       noiseController: defaults.noiseController,
       loras: [], // Clear LoRA controls when switching pipelines
@@ -293,29 +305,22 @@ export function StreamPage() {
             const defaultMode = newPipeline?.defaultMode || "text";
             const defaults = getDefaults(pipelineId, defaultMode);
 
-            // Update prompts to mode-specific defaults if available, otherwise fallback to pipeline default
-            if (
-              "defaultPrompts" in defaults &&
-              defaults.defaultPrompts &&
-              defaults.defaultPrompts.length > 0
-            ) {
-              setPromptItems(
-                defaults.defaultPrompts.map((text: string) => ({
-                  text,
-                  weight: 100,
-                }))
-              );
-            } else {
-              const newDefaultPrompt =
-                PIPELINES[pipelineId]?.defaultPrompt || "";
-              setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
-            }
+            // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
+            setPromptItems([
+              { text: getDefaultPromptForMode(defaultMode), weight: 100 },
+            ]);
+
+            // Use custom video resolution if mode is video and one exists
+            const resolution =
+              defaultMode === "video" && customVideoResolution
+                ? customVideoResolution
+                : { height: defaults.height, width: defaults.width };
 
             updateSettings({
               pipelineId,
               inputMode: defaultMode,
               denoisingSteps: defaults.denoisingSteps,
-              resolution: { height: defaults.height, width: defaults.width },
+              resolution,
               noiseScale: defaults.noiseScale,
               noiseController: defaults.noiseController,
             });
