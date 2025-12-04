@@ -19,7 +19,7 @@ from ..schema import StreamDiffusionV2Config
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from ..wan2_1.vae import WanVAEWrapper
+from .components import StreamDiffusionV2WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modules.causal_model import CausalWanModel
 
@@ -108,7 +108,9 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
 
         # Load VAE using unified WanVAEWrapper
         start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
+        vae = StreamDiffusionV2WanVAEWrapper(
+            model_dir=model_dir, model_name=base_model_name
+        )
         print(f"Loaded VAE in {time.time() - start:.3f}s")
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
