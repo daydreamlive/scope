@@ -3,12 +3,12 @@ import fractions
 import logging
 import threading
 import time
+import uuid
 
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
 
-from .frame_processor import FrameProcessor
 from .pipeline_manager import PipelineManager
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.frame_ptime = 1.0 / fps
 
         self.frame_processor = None
+        self.frame_processor_id = str(uuid.uuid4())
         self.input_task = None
         self.input_task_running = False
         self._paused = False
@@ -86,10 +87,10 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     def initialize_output_processing(self):
         if not self.frame_processor:
-            self.frame_processor = FrameProcessor(
-                pipeline_manager=self.pipeline_manager,
+            # Create FrameProcessor in worker process via PipelineManager
+            self.frame_processor = self.pipeline_manager.create_frame_processor(
+                frame_processor_id=self.frame_processor_id,
                 initial_parameters=self.initial_parameters,
-                notification_callback=self.notification_callback,
             )
             self.frame_processor.start()
 
@@ -160,5 +161,6 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         if self.frame_processor is not None:
             self.frame_processor.stop()
+            self.frame_processor = None
 
         await super().stop()
