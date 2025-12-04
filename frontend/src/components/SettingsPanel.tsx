@@ -34,6 +34,7 @@ import type {
   SettingsState,
   InputMode,
   PipelineInfo,
+  VaeType,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
 
@@ -87,6 +88,11 @@ interface SettingsPanelProps {
   onVaceEnabledChange?: (enabled: boolean) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
+  // VAE type selection
+  vaeType?: VaeType;
+  onVaeTypeChange?: (vaeType: VaeType) => void;
+  // Available VAE types from backend registry
+  vaeTypes?: string[];
 }
 
 export function SettingsPanel({
@@ -126,6 +132,9 @@ export function SettingsPanel({
   onVaceEnabledChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
+  vaeType = "wan",
+  onVaeTypeChange,
+  vaeTypes = ["wan"],
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -714,6 +723,32 @@ export function SettingsPanel({
                       <SelectItem value="fp8_e4m3fn">
                         fp8_e4m3fn (Dynamic)
                       </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.vaeType.label}
+                    tooltip={PARAMETER_METADATA.vaeType.tooltip}
+                    className="text-sm text-foreground"
+                  />
+                  <Select
+                    value={vaeType}
+                    onValueChange={value => {
+                      onVaeTypeChange?.(value as VaeType);
+                    }}
+                    disabled={isStreaming}
+                  >
+                    <SelectTrigger className="w-[140px] h-7">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {vaeTypes.map(type => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

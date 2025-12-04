@@ -425,3 +425,24 @@ export const getPipelineSchemas =
     const result = await response.json();
     return result;
   };
+
+export interface VaeTypesResponse {
+  vae_types: string[];
+}
+
+export const getVaeTypes = async (): Promise<VaeTypesResponse> => {
+  const response = await fetch("/api/v1/vae/types", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get VAE types failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
