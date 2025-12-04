@@ -178,6 +178,20 @@ export function StreamPage() {
       noiseController: modeDefaults.noiseController,
     });
 
+    // Update prompts to mode-specific defaults if available
+    if (
+      "defaultPrompts" in modeDefaults &&
+      modeDefaults.defaultPrompts &&
+      modeDefaults.defaultPrompts.length > 0
+    ) {
+      setPromptItems(
+        modeDefaults.defaultPrompts.map((text: string) => ({
+          text,
+          weight: 100,
+        }))
+      );
+    }
+
     // Handle video source based on mode
     if (newMode === "video") {
       // Trigger video source reinitialization
@@ -209,10 +223,6 @@ export function StreamPage() {
       );
     }
 
-    // Update the prompt to the new pipeline's default
-    const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
-    setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
-
     // Reset timeline completely but preserve collapse state
     if (timelineRef.current) {
       timelineRef.current.resetTimelineCompletely();
@@ -224,6 +234,20 @@ export function StreamPage() {
 
     // Get all defaults for the new pipeline + mode from backend schema
     const defaults = getDefaults(pipelineId, modeToUse);
+
+    // Update prompts to mode-specific defaults if available, otherwise fallback to pipeline default
+    if (
+      "defaultPrompts" in defaults &&
+      defaults.defaultPrompts &&
+      defaults.defaultPrompts.length > 0
+    ) {
+      setPromptItems(
+        defaults.defaultPrompts.map((text: string) => ({ text, weight: 100 }))
+      );
+    } else {
+      const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
+      setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
+    }
 
     // Update the pipeline in settings with the appropriate mode and defaults
     updateSettings({
@@ -256,8 +280,6 @@ export function StreamPage() {
 
             // Now update the pipeline since download is complete
             const pipelineId = pipelineNeedsModels as PipelineId;
-            const newDefaultPrompt = PIPELINES[pipelineId]?.defaultPrompt || "";
-            setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
 
             if (timelineRef.current) {
               timelineRef.current.resetTimelineCompletely();
@@ -270,6 +292,24 @@ export function StreamPage() {
             const newPipeline = PIPELINES[pipelineId];
             const defaultMode = newPipeline?.defaultMode || "text";
             const defaults = getDefaults(pipelineId, defaultMode);
+
+            // Update prompts to mode-specific defaults if available, otherwise fallback to pipeline default
+            if (
+              "defaultPrompts" in defaults &&
+              defaults.defaultPrompts &&
+              defaults.defaultPrompts.length > 0
+            ) {
+              setPromptItems(
+                defaults.defaultPrompts.map((text: string) => ({
+                  text,
+                  weight: 100,
+                }))
+              );
+            } else {
+              const newDefaultPrompt =
+                PIPELINES[pipelineId]?.defaultPrompt || "";
+              setPromptItems([{ text: newDefaultPrompt, weight: 100 }]);
+            }
 
             updateSettings({
               pipelineId,

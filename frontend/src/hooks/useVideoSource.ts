@@ -157,11 +157,6 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         return;
       }
 
-      // Stop the stream if it's currently running when switching modes
-      if (props?.onStopStream) {
-        props.onStopStream();
-      }
-
       setMode(newMode);
       setError(null);
 
@@ -190,6 +185,13 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         let trackReplaced = false;
         if (props?.onStreamUpdate) {
           trackReplaced = await props.onStreamUpdate(newStream);
+        }
+
+        // If track replacement failed and we're streaming, stop the stream
+        // Otherwise, just switch locally
+        if (!trackReplaced && props?.onStreamUpdate && props?.onStopStream) {
+          // Track replacement failed - stop stream to allow clean switch
+          props.onStopStream();
         }
 
         // Stop current stream only after successful replacement or if not streaming
@@ -231,8 +233,21 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         setIsInitializing(true);
         const newStream = await createVideoFileStreamFromFile(file, FPS);
 
-        // Stop current stream
-        if (localStream) {
+        // Try to update WebRTC track if streaming, otherwise just switch locally
+        let trackReplaced = false;
+        if (props?.onStreamUpdate) {
+          trackReplaced = await props.onStreamUpdate(newStream);
+        }
+
+        // If track replacement failed and we're streaming, stop the stream
+        // Otherwise, just switch locally
+        if (!trackReplaced && props?.onStreamUpdate && props?.onStopStream) {
+          // Track replacement failed - stop stream to allow clean switch
+          props.onStopStream();
+        }
+
+        // Stop current stream only after successful replacement or if not streaming
+        if (localStream && (trackReplaced || !props?.onStreamUpdate)) {
           localStream.getTracks().forEach(track => track.stop());
         }
 
@@ -248,7 +263,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         return false;
       }
     },
-    [localStream, createVideoFileStreamFromFile]
+    [localStream, createVideoFileStreamFromFile, props]
   );
 
   const stopVideo = useCallback(() => {

@@ -172,7 +172,6 @@ export function InputAndControlsPanel({
                   onModeChange(value as VideoSourceMode);
                 }
               }}
-              disabled={isStreaming}
               className="justify-start"
             >
               <ToggleGroupItem value="video" aria-label="Video file">
@@ -228,12 +227,12 @@ export function InputAndControlsPanel({
                     onChange={handleFileUpload}
                     className="hidden"
                     id="video-upload"
-                    disabled={isStreaming || isConnecting}
+                    disabled={isConnecting}
                   />
                   <label
                     htmlFor="video-upload"
                     className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                      isStreaming || isConnecting
+                      isConnecting
                         ? "opacity-50 cursor-not-allowed"
                         : "hover:bg-black/70 cursor-pointer"
                     }`}
