@@ -1,4 +1,5 @@
 export type PipelineCategory = "video-input" | "no-video-input";
+export type PipelineCompatibility = "local" | "cloud" | "both";
 
 export interface PipelineInfo {
   name: string;
@@ -11,6 +12,8 @@ export interface PipelineInfo {
   requiresModels?: boolean; // Whether this pipeline requires models to be downloaded
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
+  pipelineCompatibility?: PipelineCompatibility;
+  cloudModelId?: string;
   supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
 }
 
@@ -61,6 +64,38 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
     supportsLoRA: true,
+  },
+  "sdxl-turbo": {
+    name: "SDXL Turbo",
+    docsUrl:
+      "",
+    about:
+      "",
+    modified: true,
+    category: "video-input",
+    defaultPrompt:
+      "A dog in the grass looking around, photorealistic",
+    requiresModels: false,
+    defaultTemporalInterpolationMethod: "linear",
+    defaultTemporalInterpolationSteps: 4,
+    pipelineCompatibility: "cloud",
+    cloudModelId: "stabilityai/sdxl-turbo",
+  },
+  "sd-turbo": {
+    name: "SDTurbo",
+    docsUrl:
+      "",
+    about:
+      "",
+    modified: true,
+    category: "video-input",
+    defaultPrompt:
+      "A dog in the grass looking around, photorealistic",
+    requiresModels: false,
+    defaultTemporalInterpolationMethod: "linear",
+    defaultTemporalInterpolationSteps: 4,
+    pipelineCompatibility: "cloud",
+    cloudModelId: "stabilityai/sd-turbo",
   },
   passthrough: {
     name: "Passthrough",

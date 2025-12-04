@@ -32,6 +32,7 @@ interface PromptInputProps {
   transitionSteps?: number;
   onTransitionStepsChange?: (steps: number) => void;
   timelinePrompts?: TimelinePrompt[];
+  cloudMode?: boolean;
 }
 
 export function PromptInput({
@@ -51,6 +52,7 @@ export function PromptInput({
   transitionSteps = 4,
   onTransitionStepsChange,
   timelinePrompts = [],
+  cloudMode = false,
 }: PromptInputProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
@@ -160,7 +162,8 @@ export function PromptInput({
           />
         </div>
 
-        <div className="space-y-2">
+      <div className="space-y-2">
+        {!cloudMode && (
           <TemporalTransitionControls
             transitionSteps={transitionSteps}
             onTransitionStepsChange={steps => onTransitionStepsChange?.(steps)}
@@ -171,42 +174,43 @@ export function PromptInput({
             disabled={disabled || !isStreaming || timelinePrompts.length === 0}
             className="space-y-2"
           />
+        )}
 
-          {/* Add/Submit buttons - Bottom row */}
-          <div className="flex items-center justify-end gap-2">
-            {managedPrompts.length < 4 && (
-              <Button
-                onMouseDown={e => {
-                  e.preventDefault();
-                  handleAddPrompt();
-                }}
-                disabled={disabled}
-                size="sm"
-                variant="ghost"
-                className="rounded-full w-8 h-8 p-0"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            )}
+        {/* Add/Submit buttons - Bottom row */}
+        <div className="flex items-center justify-end gap-2">
+          {managedPrompts.length < 4 && (
             <Button
               onMouseDown={e => {
                 e.preventDefault();
-                handleSubmit();
+                handleAddPrompt();
               }}
-              disabled={
-                disabled ||
-                !managedPrompts.some(p => p.text.trim()) ||
-                isProcessing
-              }
+              disabled={disabled}
               size="sm"
-              className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              variant="ghost"
+              className="rounded-full w-8 h-8 p-0"
             >
-              {isProcessing ? "..." : <ArrowUp className="h-4 w-4" />}
+              <Plus className="h-4 w-4" />
             </Button>
-          </div>
+          )}
+          <Button
+            onMouseDown={e => {
+              e.preventDefault();
+              handleSubmit();
+            }}
+            disabled={
+              disabled ||
+              !managedPrompts.some(p => p.text.trim()) ||
+              isProcessing
+            }
+            size="sm"
+            className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isProcessing ? "..." : <ArrowUp className="h-4 w-4" />}
+          </Button>
         </div>
       </div>
-    );
+    </div>
+  );
   }
 
   // Multiple prompts mode: show weights and controls
@@ -241,42 +245,46 @@ export function PromptInput({
       })}
 
       <div className="space-y-2">
-        {/* Spatial Blend - only for multiple prompts */}
-        {managedPrompts.length >= 2 && (
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">
-              Spatial Blend:
-            </span>
-            <Select
-              value={interpolationMethod}
-              onValueChange={value =>
-                onInterpolationMethodChange?.(value as "linear" | "slerp")
-              }
-              disabled={disabled}
-            >
-              <SelectTrigger className="w-24 h-6 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="linear">Linear</SelectItem>
-                <SelectItem value="slerp" disabled={managedPrompts.length > 2}>
-                  Slerp
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        {!cloudMode && (
+          <>
+            {/* Spatial Blend - only for multiple prompts */}
+            {managedPrompts.length >= 2 && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">
+                  Spatial Blend:
+                </span>
+                <Select
+                  value={interpolationMethod}
+                  onValueChange={value =>
+                    onInterpolationMethodChange?.(value as "linear" | "slerp")
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger className="w-24 h-6 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="linear">Linear</SelectItem>
+                    <SelectItem value="slerp" disabled={managedPrompts.length > 2}>
+                      Slerp
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-        <TemporalTransitionControls
-          transitionSteps={transitionSteps}
-          onTransitionStepsChange={steps => onTransitionStepsChange?.(steps)}
-          temporalInterpolationMethod={temporalInterpolationMethod}
-          onTemporalInterpolationMethodChange={method =>
-            onTemporalInterpolationMethodChange?.(method)
-          }
-          disabled={disabled || !isStreaming || timelinePrompts.length === 0}
-          className="space-y-2"
-        />
+            <TemporalTransitionControls
+              transitionSteps={transitionSteps}
+              onTransitionStepsChange={steps => onTransitionStepsChange?.(steps)}
+              temporalInterpolationMethod={temporalInterpolationMethod}
+              onTemporalInterpolationMethodChange={method =>
+                onTemporalInterpolationMethodChange?.(method)
+              }
+              disabled={disabled || !isStreaming || timelinePrompts.length === 0}
+              className="space-y-2"
+            />
+          </>
+        )}
 
         {/* Add/Submit buttons - Bottom row */}
         <div className="flex items-center justify-end gap-2">

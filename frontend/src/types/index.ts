@@ -2,7 +2,10 @@ export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"
   | "longlive"
-  | "krea-realtime-video";
+  | "krea-realtime-video"
+  | "sd-turbo"
+  | "sdxl-turbo"
+  | "sd15";
 
 export interface SystemMetrics {
   cpu: number;
@@ -45,6 +48,7 @@ export interface SettingsState {
   quantization?: "fp8_e4m3fn" | null;
   kvCacheAttentionBias?: number;
   paused?: boolean;
+  cloudMode?: boolean;
   loras?: LoRAConfig[];
   loraMergeStrategy?: LoraMergeStrategy;
 }

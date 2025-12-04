@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -36,6 +36,8 @@ interface SettingsPanelProps {
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
+  cloudMode?: boolean;
+  onCloudModeChange?: (enabled: boolean) => void;
   resolution?: {
     height: number;
     width: number;
@@ -67,6 +69,8 @@ export function SettingsPanel({
   onPipelineIdChange,
   isStreaming = false,
   isDownloading = false,
+  cloudMode = false,
+  onCloudModeChange,
   resolution,
   onResolutionChange,
   seed = 42,
@@ -103,6 +107,27 @@ export function SettingsPanel({
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
 
+  // Get filtered pipeline IDs based on cloudMode
+  const filteredPipelineIds = useMemo(() => {
+    return Object.keys(PIPELINES).filter(id => {
+      const pipeline = PIPELINES[id];
+      const compatibility = pipeline.pipelineCompatibility || "local";
+
+      if (cloudMode) {
+        return compatibility === "cloud" || compatibility === "both";
+      } else {
+        return compatibility === "local" || compatibility === "both";
+      }
+    });
+  }, [cloudMode]);
+
+  // Auto-select first available pipeline if current selection is no longer available
+  useEffect(() => {
+    if (filteredPipelineIds.length > 0 && !filteredPipelineIds.includes(pipelineId)) {
+      onPipelineIdChange?.(filteredPipelineIds[0] as PipelineId);
+    }
+  }, [cloudMode, filteredPipelineIds, pipelineId, onPipelineIdChange]);
+
   const handlePipelineIdChange = (value: string) => {
     if (value in PIPELINES) {
       onPipelineIdChange?.(value as PipelineId);
@@ -134,6 +159,13 @@ export function SettingsPanel({
       } else {
         setWidthError(`Must be at most ${maxValue}`);
       }
+    } else if (cloudMode && value % 64 !== 0) {
+      // In cloud mode, dimension must be a multiple of 64
+      if (dimension === "height") {
+        setHeightError(`Must be a multiple of 64 in cloud mode`);
+      } else {
+        setWidthError(`Must be a multiple of 64 in cloud mode`);
+      }
     } else {
       // Clear error if valid
       if (dimension === "height") {
@@ -152,7 +184,18 @@ export function SettingsPanel({
 
   const incrementResolution = (dimension: "height" | "width") => {
     const maxValue = 2048;
-    const newValue = Math.min(maxValue, effectiveResolution[dimension] + 1);
+    const currentValue = effectiveResolution[dimension];
+
+    let newValue: number;
+    if (cloudMode && currentValue % 64 !== 0) {
+      // Snap to next multiple of 64
+      newValue = Math.ceil(currentValue / 64) * 64;
+    } else {
+      const step = cloudMode ? 64 : 1;
+      newValue = currentValue + step;
+    }
+
+    newValue = Math.min(maxValue, newValue);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -163,7 +206,18 @@ export function SettingsPanel({
       pipelineId === "krea-realtime-video"
         ? MIN_DIMENSION
         : 1;
-    const newValue = Math.max(minValue, effectiveResolution[dimension] - 1);
+    const currentValue = effectiveResolution[dimension];
+
+    let newValue: number;
+    if (cloudMode && currentValue % 64 !== 0) {
+      // Snap to previous multiple of 64
+      newValue = Math.floor(currentValue / 64) * 64;
+    } else {
+      const step = cloudMode ? 64 : 1;
+      newValue = currentValue - step;
+    }
+
+    newValue = Math.max(minValue, newValue);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -204,6 +258,25 @@ export function SettingsPanel({
         <CardTitle className="text-base font-medium">Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+        {(import.meta as any).env?.VITE_DAYDREAM_API_KEY && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">Cloud mode</h3>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-foreground">Use Daydream (WebRTC)</span>
+              <Toggle
+                pressed={cloudMode}
+                onPressedChange={onCloudModeChange || (() => {})}
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={isStreaming || isDownloading}
+              >
+                {cloudMode ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Pipeline ID</h3>
           <Select
@@ -215,7 +288,7 @@ export function SettingsPanel({
               <SelectValue placeholder="Select a pipeline" />
             </SelectTrigger>
             <SelectContent>
-              {Object.keys(PIPELINES).map(id => (
+              {filteredPipelineIds.map(id => (
                 <SelectItem key={id} value={id}>
                   {id}
                 </SelectItem>
@@ -311,7 +384,9 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "sd-turbo" ||
+          pipelineId === "sdxl-turbo") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2">
@@ -347,6 +422,7 @@ export function SettingsPanel({
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
+                        step={cloudMode ? 64 : 1}
                       />
                       <Button
                         variant="ghost"
@@ -396,6 +472,7 @@ export function SettingsPanel({
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min={MIN_DIMENSION}
                         max={2048}
+                        step={cloudMode ? 64 : 1}
                       />
                       <Button
                         variant="ghost"
@@ -530,7 +607,9 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "sd-turbo" ||
+          pipelineId === "sdxl-turbo") && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
