@@ -9,6 +9,10 @@ from scope.core.pipelines.krea_realtime_video.schema import KreaRealtimeVideoCon
 from scope.core.pipelines.longlive.schema import LongLiveConfig
 from scope.core.pipelines.streamdiffusionv2.schema import StreamDiffusionV2Config
 from scope.core.pipelines.utils import Quantization
+from scope.core.pipelines.wan2_1.vae import DEFAULT_VAE_TYPE
+
+# VAE type literal based on available VAE types
+VaeType = Literal["wan", "lightvae"]
 
 
 class HealthResponse(BaseModel):
@@ -16,6 +20,12 @@ class HealthResponse(BaseModel):
 
     status: str = Field(default="healthy")
     timestamp: str
+
+
+class VaeTypesResponse(BaseModel):
+    """Response containing available VAE types from the registry."""
+
+    vae_types: list[str]
 
 
 class PromptItem(BaseModel):
@@ -306,6 +316,10 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
         default=True,
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
     )
+    vae_type: VaeType = Field(
+        default=DEFAULT_VAE_TYPE,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -345,6 +359,10 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
         default=True,
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
     )
+    vae_type: VaeType = Field(
+        default=DEFAULT_VAE_TYPE,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+    )
 
 
 class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
@@ -373,6 +391,10 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    vae_type: VaeType = Field(
+        default=DEFAULT_VAE_TYPE,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
     )
 
 

@@ -21,6 +21,7 @@ import type {
   LoRAConfig,
   LoraMergeStrategy,
   DownloadProgress,
+  VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -78,6 +79,7 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    vaeTypes,
   } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
@@ -453,6 +455,11 @@ export function StreamPage() {
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
+  const handleVaeTypeChange = (vaeType: VaeType) => {
+    updateSettings({ vaeType });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
   const handleKvCacheAttentionBiasChange = (bias: number) => {
     updateSettings({ kvCacheAttentionBias: bias });
     // Send KV cache attention bias update to backend
@@ -725,6 +732,7 @@ export function StreamPage() {
         if (currentPipeline?.supportsQuantization) {
           loadParams.seed = settings.seed ?? 42;
           loadParams.quantization = settings.quantization ?? null;
+          loadParams.vae_type = settings.vaeType ?? "wan";
         }
 
         // Add LoRA parameters if pipeline supports LoRA
@@ -1117,6 +1125,9 @@ export function StreamPage() {
             onVaceEnabledChange={handleVaceEnabledChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
+            vaeType={settings.vaeType ?? "wan"}
+            onVaeTypeChange={handleVaeTypeChange}
+            vaeTypes={vaeTypes}
           />
         </div>
       </div>

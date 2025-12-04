@@ -305,6 +305,7 @@ class Encoder3d(nn.Module):
         attn_scales=[],
         temperal_downsample=[True, True, False],
         dropout=0.0,
+        pruning_rate=0.0,
     ):
         super().__init__()
         self.dim = dim
@@ -314,8 +315,9 @@ class Encoder3d(nn.Module):
         self.attn_scales = attn_scales
         self.temperal_downsample = temperal_downsample
 
-        # dimensions
+        # dimensions (apply pruning to reduce channel dimensions)
         dims = [dim * u for u in [1] + dim_mult]
+        dims = [int(d * (1 - pruning_rate)) for d in dims]
         scale = 1.0
 
         # init block
@@ -419,6 +421,7 @@ class Decoder3d(nn.Module):
         attn_scales=[],
         temperal_upsample=[False, True, True],
         dropout=0.0,
+        pruning_rate=0.0,
     ):
         super().__init__()
         self.dim = dim
@@ -428,8 +431,9 @@ class Decoder3d(nn.Module):
         self.attn_scales = attn_scales
         self.temperal_upsample = temperal_upsample
 
-        # dimensions
+        # dimensions (apply pruning to reduce channel dimensions)
         dims = [dim * u for u in [dim_mult[-1]] + dim_mult[::-1]]
+        dims = [int(d * (1 - pruning_rate)) for d in dims]
         scale = 1.0 / 2 ** (len(dim_mult) - 2)
 
         # init block
@@ -544,6 +548,7 @@ class WanVAE_(nn.Module):
         attn_scales=[],
         temperal_downsample=[True, True, False],
         dropout=0.0,
+        pruning_rate=0.0,
     ):
         super().__init__()
         self.dim = dim
@@ -563,6 +568,7 @@ class WanVAE_(nn.Module):
             attn_scales,
             self.temperal_downsample,
             dropout,
+            pruning_rate,
         )
         self.conv1 = CausalConv3d(z_dim * 2, z_dim * 2, 1)
         self.conv2 = CausalConv3d(z_dim, z_dim, 1)
@@ -574,6 +580,7 @@ class WanVAE_(nn.Module):
             attn_scales,
             self.temperal_upsample,
             dropout,
+            pruning_rate,
         )
         self.first_batch = True
 
@@ -750,9 +757,16 @@ class WanVAE_(nn.Module):
         self._enc_feat_map = [None] * self._enc_conv_num
 
 
-def _video_vae(pretrained_path=None, z_dim=None, device="cpu", **kwargs):
+def _video_vae(pretrained_path=None, z_dim=None, device="cpu", pruning_rate=0.0, **kwargs):
     """
     Autoencoder3d adapted from Stable Diffusion 1.x, 2.x and XL.
+
+    Args:
+        pretrained_path: Path to checkpoint file (.pth or .safetensors)
+        z_dim: Latent dimension
+        device: Target device
+        pruning_rate: Channel pruning rate (0.0 = full VAE, 0.75 = LightVAE)
+        **kwargs: Additional model configuration
     """
     # params
     cfg = dict(
@@ -763,6 +777,7 @@ def _video_vae(pretrained_path=None, z_dim=None, device="cpu", **kwargs):
         attn_scales=[],
         temperal_downsample=[False, True, True],
         dropout=0.0,
+        pruning_rate=pruning_rate,
     )
     cfg.update(**kwargs)
 
@@ -770,9 +785,15 @@ def _video_vae(pretrained_path=None, z_dim=None, device="cpu", **kwargs):
     with torch.device("meta"):
         model = WanVAE_(**cfg)
 
-    # load checkpoint
-    logging.info(f"loading {pretrained_path}")
-    model.load_state_dict(torch.load(pretrained_path, map_location=device), assign=True)
+    # load checkpoint (supports both .pth and .safetensors)
+    logging.info(f"_video_vae: loading {pretrained_path}")
+    if pretrained_path.endswith(".safetensors"):
+        from safetensors.torch import load_file
+
+        state_dict = load_file(pretrained_path, device=str(device))
+    else:
+        state_dict = torch.load(pretrained_path, map_location=device)
+    model.load_state_dict(state_dict, assign=True)
 
     return model
 
