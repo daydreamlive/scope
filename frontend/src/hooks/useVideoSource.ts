@@ -7,6 +7,11 @@ interface UseVideoSourceProps {
   onStopStream?: () => void;
   shouldReinitialize?: boolean;
   enabled?: boolean;
+  // Called when a custom video is uploaded with its detected resolution
+  onCustomVideoResolution?: (resolution: {
+    width: number;
+    height: number;
+  }) => void;
 }
 
 // Standardized FPS for both video and camera modes
@@ -50,7 +55,10 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     (videoSource: string | File, fps: number) => {
       const video = createVideoFromSource(videoSource);
 
-      return new Promise<MediaStream>((resolve, reject) => {
+      return new Promise<{
+        stream: MediaStream;
+        resolution: { width: number; height: number };
+      }>((resolve, reject) => {
         // Add timeout to prevent hanging promises
         const timeout = setTimeout(() => {
           reject(new Error("Video loading timeout"));
@@ -93,7 +101,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
                 // Capture stream from canvas at original resolution
                 const stream = canvas.captureStream(fps);
 
-                resolve(stream);
+                resolve({ stream, resolution: detectedResolution });
               })
               .catch(error => {
                 clearTimeout(timeout);
@@ -115,8 +123,12 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   );
 
   const createVideoFileStream = useCallback(
-    (fps: number) => {
-      return createVideoFileStreamFromFile(selectedVideoFile, fps);
+    async (fps: number) => {
+      const result = await createVideoFileStreamFromFile(
+        selectedVideoFile,
+        fps
+      );
+      return result.stream;
     },
     [createVideoFileStreamFromFile, selectedVideoFile]
   );
@@ -231,7 +243,8 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       // Create new stream directly with the uploaded file (avoid race condition)
       try {
         setIsInitializing(true);
-        const newStream = await createVideoFileStreamFromFile(file, FPS);
+        const { stream: newStream, resolution } =
+          await createVideoFileStreamFromFile(file, FPS);
 
         // Try to update WebRTC track if streaming, otherwise just switch locally
         let trackReplaced = false;
@@ -255,6 +268,10 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         setSelectedVideoFile(file);
         setLocalStream(newStream);
         setIsInitializing(false);
+
+        // Notify about custom video resolution so caller can sync output resolution
+        props?.onCustomVideoResolution?.(resolution);
+
         return true;
       } catch (error) {
         console.error("Failed to create stream from uploaded file:", error);

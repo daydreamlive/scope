@@ -37,10 +37,6 @@ class ModeDefaults(BaseModel):
     # Video mode parameters
     noise_scale: float | None = None
     noise_controller: bool | None = None
-    input_size: int | None = None
-
-    # Default prompts for this mode (list of prompt text strings, will be converted to PromptItems with weight 1.0)
-    default_prompts: list[str] | None = None
 
 
 class BasePipelineConfig(BaseModel):
@@ -230,10 +226,6 @@ class LongLiveConfig(BasePipelineConfig):
                 # Text mode: no video input, no noise controls
                 noise_scale=None,
                 noise_controller=None,
-                input_size=None,
-                default_prompts=[
-                    "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day."
-                ],
             ),
             "video": ModeDefaults(
                 # Video mode: requires input frames, noise controls active
@@ -241,11 +233,7 @@ class LongLiveConfig(BasePipelineConfig):
                 width=512,
                 noise_scale=0.7,
                 noise_controller=True,
-                input_size=4,
                 denoising_steps=[1000, 750],
-                default_prompts=[
-                    "A 3D animated scene. A **panda** sitting in the grass, looking around."
-                ],
             ),
         }
 
@@ -297,16 +285,12 @@ class StreamDiffusionV2Config(BasePipelineConfig):
                 width=512,
                 noise_scale=None,
                 noise_controller=None,
-                input_size=None,
                 denoising_steps=[1000, 750],
-                default_prompts=["A dog in the grass looking around, photorealistic"],
             ),
             "video": ModeDefaults(
                 # Video mode: requires input frames, noise controls active
                 noise_scale=0.7,
                 noise_controller=True,
-                input_size=4,
-                default_prompts=["A dog in the grass looking around, photorealistic"],
             ),
         }
 
@@ -349,10 +333,6 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
                 # Text mode: no video input, no noise controls
                 noise_scale=None,
                 noise_controller=None,
-                input_size=None,
-                default_prompts=[
-                    "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day."
-                ],
             ),
             "video": ModeDefaults(
                 # Video mode: requires input frames, noise controls active
@@ -360,11 +340,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
                 width=256,
                 noise_scale=0.7,
                 noise_controller=True,
-                input_size=4,
                 denoising_steps=[1000, 750],
-                default_prompts=[
-                    "A 3D animated scene. A **panda** sitting in the grass, looking around."
-                ],
             ),
         }
 
@@ -384,8 +360,8 @@ class PassthroughConfig(BasePipelineConfig):
     default_mode: ClassVar[InputMode] = "video"
 
     # Passthrough defaults - requires video input (distinct from StreamDiffusionV2)
-    height: int = Field(default=480, ge=1, description="Output height in pixels")
-    width: int = Field(default=480, ge=1, description="Output width in pixels")
+    height: int = Field(default=512, ge=1, description="Output height in pixels")
+    width: int = Field(default=512, ge=1, description="Output width in pixels")
     input_size: int | None = Field(
         default=4,
         description="Expected input video frame count",

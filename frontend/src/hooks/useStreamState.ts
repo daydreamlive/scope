@@ -41,8 +41,6 @@ function getFallbackDefaults(pipelineId: PipelineId, mode?: InputMode) {
     inputMode: effectiveMode,
     seed: BASE_FALLBACK.seed,
     quantization: undefined as "fp8_e4m3fn" | undefined,
-    inputSize: undefined,
-    defaultPrompts: undefined,
   };
 }
 
@@ -82,13 +80,10 @@ export function useStreamState() {
           (props.noise_scale?.default as number | null) ?? undefined;
         let noiseController: boolean | undefined =
           (props.noise_controller?.default as boolean | null) ?? undefined;
-        let inputSize: number | undefined =
-          (props.input_size?.default as number | null) ?? undefined;
 
         // Apply mode-specific overrides if mode is specified and mode_defaults exist
         const effectiveMode = mode ?? schema.default_mode;
         const modeOverrides = schema.mode_defaults?.[effectiveMode];
-        let defaultPrompts: string[] | undefined = undefined;
         if (modeOverrides) {
           if (modeOverrides.height !== undefined) height = modeOverrides.height;
           if (modeOverrides.width !== undefined) width = modeOverrides.width;
@@ -98,10 +93,6 @@ export function useStreamState() {
             noiseScale = modeOverrides.noise_scale ?? undefined;
           if (modeOverrides.noise_controller !== undefined)
             noiseController = modeOverrides.noise_controller ?? undefined;
-          if (modeOverrides.input_size !== undefined)
-            inputSize = modeOverrides.input_size ?? undefined;
-          if (modeOverrides.default_prompts !== undefined)
-            defaultPrompts = modeOverrides.default_prompts ?? undefined;
         }
 
         return {
@@ -110,11 +101,9 @@ export function useStreamState() {
           denoisingSteps,
           noiseScale,
           noiseController,
-          inputSize,
           inputMode: effectiveMode,
           seed: (props.base_seed?.default as number) ?? 42,
           quantization: undefined as "fp8_e4m3fn" | undefined,
-          defaultPrompts,
         };
       }
       // Fallback to derived defaults if schemas not loaded

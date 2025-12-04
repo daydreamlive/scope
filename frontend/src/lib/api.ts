@@ -271,8 +271,6 @@ export interface ModeDefaults {
   denoising_steps?: number[];
   noise_scale?: number | null;
   noise_controller?: boolean | null;
-  input_size?: number | null;
-  default_prompts?: string[] | null;
 }
 
 export interface PipelineSchemaInfo {
