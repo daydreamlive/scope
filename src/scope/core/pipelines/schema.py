@@ -345,6 +345,10 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         }
 
 
+class RewardForcingConfig(BasePipelineConfig):
+    pass
+
+
 class PassthroughConfig(BasePipelineConfig):
     """Configuration for Passthrough pipeline (testing).
 
