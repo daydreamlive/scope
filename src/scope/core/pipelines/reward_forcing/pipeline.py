@@ -66,10 +66,20 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
 
         model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
-        base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
+        base_model_kwargs = dict(getattr(model_config, "base_model_kwargs", {}))
         generator_model_name = getattr(
             model_config, "generator_model_name", "generator"
         )
+
+        # Override EMA sink parameters from config if provided (takes precedence over model.yaml)
+        if hasattr(config, "compression_alpha"):
+            base_model_kwargs["compression_alpha"] = config.compression_alpha
+            logger.info(
+                f"Using compression_alpha={config.compression_alpha} from load params"
+            )
+        if hasattr(config, "sink_size"):
+            base_model_kwargs["sink_size"] = config.sink_size
+            logger.info(f"Using sink_size={config.sink_size} from load params")
 
         # Load generator with EMA sink capable model
         start = time.time()
@@ -82,6 +92,10 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
             **base_model_kwargs,
         )
         print(f"Loaded Reward-Forcing diffusion model in {time.time() - start:.3f}s")
+        print(
+            f"  - compression_alpha: {base_model_kwargs.get('compression_alpha', 'default')}"
+        )
+        print(f"  - sink_size: {base_model_kwargs.get('sink_size', 'default')}")
 
         # Initialize any user-configured LoRA adapters via shared manager
         generator.model = self._init_loras(config, generator.model)

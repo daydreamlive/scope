@@ -359,6 +359,24 @@ class RewardForcingLoadParams(LoRAEnabledLoadParams):
         default=None,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
     )
+    compression_alpha: float = Field(
+        default=0.95,
+        description="EMA coefficient for sink token compression. "
+        "Higher values (0.999) = preserve original prompt context longer. "
+        "Lower values (0.9-0.95) = reduce error accumulation in long videos. "
+        "Typical values: 0.999 (default), 0.99 (balanced), 0.95 (anti-error).",
+        ge=0.0,
+        le=1.0,
+    )
+    sink_size: int = Field(
+        default=3,
+        description="Number of frames to keep as semantic anchor tokens. "
+        "These sink tokens accumulate historical context via EMA compression. "
+        "More sink tokens = stronger semantic preservation but more memory. "
+        "Typical values: 3 (default), 6 (stronger anchoring).",
+        ge=1,
+        le=12,
+    )
 
 
 class PipelineLoadRequest(BaseModel):

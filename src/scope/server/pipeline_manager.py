@@ -438,6 +438,13 @@ class PipelineManager:
 
             from .models_config import get_model_file_path, get_models_dir
 
+            # Get EMA sink parameters from load_params (with defaults)
+            compression_alpha = 0.999
+            sink_size = 3
+            if load_params:
+                compression_alpha = load_params.get("compression_alpha", 0.999)
+                sink_size = load_params.get("sink_size", 3)
+
             config = OmegaConf.create(
                 {
                     "model_dir": str(get_models_dir()),
@@ -452,6 +459,9 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
+                    # EMA sink parameters for long video generation
+                    "compression_alpha": compression_alpha,
+                    "sink_size": sink_size,
                 }
             )
 
@@ -474,7 +484,10 @@ class PipelineManager:
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
             )
-            logger.info("Reward-Forcing pipeline initialized")
+            logger.info(
+                f"Reward-Forcing pipeline initialized "
+                f"(compression_alpha={compression_alpha}, sink_size={sink_size})"
+            )
             return pipeline
 
         else:
