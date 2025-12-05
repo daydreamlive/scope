@@ -34,6 +34,8 @@ from .pipeline_manager import PipelineManager
 from .schema import (
     HardwareInfoResponse,
     HealthResponse,
+    IceServerConfig,
+    IceServersResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
@@ -334,6 +336,25 @@ async def get_pipeline_schemas():
         pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
+
+
+@app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
+async def get_ice_servers(
+    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+):
+    """Return ICE server configuration for frontend WebRTC connection."""
+    ice_servers = []
+
+    for server in webrtc_manager.rtc_config.iceServers:
+        ice_servers.append(
+            IceServerConfig(
+                urls=server.urls,
+                username=server.username if hasattr(server, "username") else None,
+                credential=server.credential if hasattr(server, "credential") else None,
+            )
+        )
+
+    return IceServersResponse(iceServers=ice_servers)
 
 
 @app.post("/api/v1/webrtc/offer", response_model=WebRTCOfferResponse)

@@ -7,6 +7,17 @@ export type PipelineId =
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";
 
+// WebRTC ICE server configuration
+export interface IceServerConfig {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export interface IceServersResponse {
+  iceServers: IceServerConfig[];
+}
+
 export interface SystemMetrics {
   cpu: number;
   gpu: number;

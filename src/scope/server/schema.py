@@ -116,6 +116,24 @@ class WebRTCOfferResponse(BaseModel):
     type: str = Field(..., description="SDP type (should be 'answer')")
 
 
+class IceServerConfig(BaseModel):
+    """ICE server configuration for WebRTC."""
+
+    urls: str | list[str] = Field(..., description="STUN/TURN server URL(s)")
+    username: str | None = Field(default=None, description="Username for TURN server")
+    credential: str | None = Field(
+        default=None, description="Credential for TURN server"
+    )
+
+
+class IceServersResponse(BaseModel):
+    """Response containing ICE server configuration."""
+
+    iceServers: list[IceServerConfig] = Field(
+        ..., description="List of ICE servers for WebRTC connection"
+    )
+
+
 class ErrorResponse(BaseModel):
     """Error response schema."""
 
