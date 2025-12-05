@@ -3,6 +3,7 @@ import fractions
 import logging
 import threading
 import time
+from collections import deque
 
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
@@ -12,6 +13,10 @@ from .frame_processor import FrameProcessor
 from .pipeline_manager import PipelineManager
 
 logger = logging.getLogger(__name__)
+
+# Input FPS measurement constants
+INPUT_FPS_SAMPLE_SIZE = 30  # Number of frame intervals to track
+INPUT_FPS_MIN_SAMPLES = 5  # Minimum samples needed before using input FPS
 
 
 class VideoProcessingTrack(MediaStreamTrack):
@@ -28,7 +33,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.pipeline_manager = pipeline_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
-        # FPS variables (will be updated from FrameProcessor)
+        # FPS variables (will be updated from FrameProcessor or input measurement)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
 
@@ -39,11 +44,19 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused_lock = threading.Lock()
         self._last_frame = None
 
+        # Input FPS measurement: track timestamps of incoming frames
+        self._input_frame_times = deque(maxlen=INPUT_FPS_SAMPLE_SIZE)
+        self._input_fps_lock = threading.Lock()
+
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
         while self.input_task_running:
             try:
                 input_frame = await self.track.recv()
+
+                # Track input frame timestamp for FPS measurement
+                with self._input_fps_lock:
+                    self._input_frame_times.append(time.time())
 
                 # Store raw VideoFrame for later processing
                 self.frame_processor.put(input_frame)
@@ -55,6 +68,30 @@ class VideoProcessingTrack(MediaStreamTrack):
                 logger.error(f"Error in input loop, stopping: {e}")
                 self.input_task_running = False
                 break
+
+    def _get_input_fps(self) -> float | None:
+        """Calculate input FPS from recent frame timestamps.
+
+        Returns the measured input FPS if enough samples are available,
+        otherwise returns None to indicate fallback should be used.
+        """
+        with self._input_fps_lock:
+            if len(self._input_frame_times) < INPUT_FPS_MIN_SAMPLES:
+                return None
+
+            # Calculate FPS from frame intervals
+            times = list(self._input_frame_times)
+            if len(times) < 2:
+                return None
+
+            # Time span from first to last frame
+            time_span = times[-1] - times[0]
+            if time_span <= 0:
+                return None
+
+            # FPS = (number of intervals) / time_span
+            num_intervals = len(times) - 1
+            return num_intervals / time_span
 
     # Copied from https://github.com/livepeer/fastworld/blob/e649ef788cd33d78af6d8e1da915cd933761535e/backend/track.py#L267
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
@@ -96,6 +133,9 @@ class VideoProcessingTrack(MediaStreamTrack):
     def initialize_input_processing(self, track: MediaStreamTrack):
         self.track = track
         self.input_task_running = True
+        # Clear input frame times for fresh FPS measurement
+        with self._input_fps_lock:
+            self._input_frame_times.clear()
         self.input_task = asyncio.create_task(self.input_loop())
 
     async def recv(self) -> VideoFrame:
@@ -104,10 +144,13 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.initialize_output_processing()
         while self.input_task_running:
             try:
-                # Update FPS from FrameProcessor
-                if self.frame_processor:
+                # Update FPS: prefer input FPS measurement, fall back to FrameProcessor
+                input_fps = self._get_input_fps()
+                if input_fps is not None:
+                    self.fps = input_fps
+                elif self.frame_processor:
                     self.fps = self.frame_processor.get_current_pipeline_fps()
-                    self.frame_ptime = 1.0 / self.fps
+                self.frame_ptime = 1.0 / self.fps
 
                 # If paused, wait for the appropriate frame interval before returning
                 with self._paused_lock:
@@ -160,5 +203,9 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         if self.frame_processor is not None:
             self.frame_processor.stop()
+
+        # Clear input frame times
+        with self._input_fps_lock:
+            self._input_frame_times.clear()
 
         await super().stop()
