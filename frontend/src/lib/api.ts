@@ -1,4 +1,5 @@
-import type { LoRAConfig } from "../types";
+import type { LoRAConfig, IceServersResponse } from "../types";
+
 export interface PromptItem {
   text: string;
   weight: number;
@@ -81,9 +82,32 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
+export const getIceServers = async (): Promise<IceServersResponse> => {
+  const response = await fetch("/api/v1/webrtc/ice-servers", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get ICE servers failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export interface WebRTCOfferResponse {
+  sdp: string;
+  type: string;
+  sessionId: string;
+}
+
 export const sendWebRTCOffer = async (
   data: WebRTCOfferRequest
-): Promise<RTCSessionDescriptionInit> => {
+): Promise<WebRTCOfferResponse> => {
   const response = await fetch("/api/v1/webrtc/offer", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -99,6 +123,34 @@ export const sendWebRTCOffer = async (
 
   const result = await response.json();
   return result;
+};
+
+export const sendIceCandidates = async (
+  sessionId: string,
+  candidates: RTCIceCandidate | RTCIceCandidate[]
+): Promise<void> => {
+  const candidateArray = Array.isArray(candidates) ? candidates : [candidates];
+
+  const response = await fetch(`/api/v1/webrtc/offer/${sessionId}`, {
+    method: "PATCH",
+    // TODO: Use Content-Type 'application/trickle-ice-sdpfrag'
+    // once backend supports it
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      candidates: candidateArray.map(c => ({
+        candidate: c.candidate,
+        sdpMid: c.sdpMid,
+        sdpMLineIndex: c.sdpMLineIndex,
+      })),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Send ICE candidate failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
 };
 
 export const loadPipeline = async (

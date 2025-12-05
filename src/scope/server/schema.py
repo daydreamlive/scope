@@ -114,6 +114,43 @@ class WebRTCOfferResponse(BaseModel):
 
     sdp: str = Field(..., description="Session Description Protocol answer")
     type: str = Field(..., description="SDP type (should be 'answer')")
+    sessionId: str = Field(..., description="Unique session ID for this connection")
+
+
+class IceServerConfig(BaseModel):
+    """ICE server configuration for WebRTC."""
+
+    urls: str | list[str] = Field(..., description="STUN/TURN server URL(s)")
+    username: str | None = Field(default=None, description="Username for TURN server")
+    credential: str | None = Field(
+        default=None, description="Credential for TURN server"
+    )
+
+
+class IceServersResponse(BaseModel):
+    """Response containing ICE server configuration."""
+
+    iceServers: list[IceServerConfig] = Field(
+        ..., description="List of ICE servers for WebRTC connection"
+    )
+
+
+class IceCandidateInit(BaseModel):
+    """Individual ICE candidate initialization data."""
+
+    candidate: str = Field(..., description="ICE candidate string")
+    sdpMid: str | None = Field(default=None, description="Media stream ID")
+    sdpMLineIndex: int | None = Field(
+        default=None, description="Media line index in SDP"
+    )
+
+
+class IceCandidateRequest(BaseModel):
+    """Request to add ICE candidate(s) to an existing session."""
+
+    candidates: list[IceCandidateInit] = Field(
+        ..., description="List of ICE candidates to add"
+    )
 
 
 class ErrorResponse(BaseModel):

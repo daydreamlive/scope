@@ -14,6 +14,7 @@ from aiortc import (
     RTCSessionDescription,
 )
 from aiortc.codecs import h264, vpx
+from aiortc.sdp import candidate_from_sdp
 
 from .credentials import get_turn_credentials
 from .pipeline_manager import PipelineManager
@@ -254,7 +255,11 @@ class WebRTCManager:
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
 
-            return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+            return {
+                "sdp": pc.localDescription.sdp,
+                "type": pc.localDescription.type,
+                "sessionId": session.id,
+            }
 
         except Exception as e:
             logger.error(f"Error handling WebRTC offer: {e}")
@@ -288,6 +293,45 @@ class WebRTCManager:
                 if s.pc.connectionState not in ["closed", "failed"]
             ]
         )
+
+    async def add_ice_candidate(
+        self,
+        session_id: str,
+        candidate: str,
+        sdp_mid: str | None,
+        sdp_mline_index: int | None,
+    ) -> None:
+        """Add an ICE candidate to an existing session.
+
+        Args:
+            session_id: ID of the session
+            candidate: ICE candidate string
+            sdp_mid: Media stream ID
+            sdp_mline_index: Media line index
+
+        Raises:
+            ValueError: If session not found or candidate invalid
+        """
+        session = self.sessions.get(session_id)
+        if not session:
+            raise ValueError(f"Session {session_id} not found")
+
+        if session.pc.connectionState in ["closed", "failed"]:
+            raise ValueError(f"Session {session_id} is closed or failed")
+
+        # Parse candidate string and create RTCIceCandidate
+        # aiortc expects the candidate object to be created from the SDP string
+
+        try:
+            ice_candidate = candidate_from_sdp(candidate)
+            ice_candidate.sdpMid = sdp_mid
+            ice_candidate.sdpMLineIndex = sdp_mline_index
+
+            await session.pc.addIceCandidate(ice_candidate)
+            logger.debug(f"Added ICE candidate to session {session_id}: {candidate}")
+        except Exception as e:
+            logger.error(f"Failed to add ICE candidate to session {session_id}: {e}")
+            raise ValueError(f"Invalid ICE candidate: {e}") from e
 
     async def stop(self):
         """Close and cleanup all sessions."""

@@ -34,6 +34,9 @@ from .pipeline_manager import PipelineManager
 from .schema import (
     HardwareInfoResponse,
     HealthResponse,
+    IceCandidateRequest,
+    IceServerConfig,
+    IceServersResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
@@ -336,6 +339,25 @@ async def get_pipeline_schemas():
     return PipelineSchemasResponse(pipelines=pipelines)
 
 
+@app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
+async def get_ice_servers(
+    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+):
+    """Return ICE server configuration for frontend WebRTC connection."""
+    ice_servers = []
+
+    for server in webrtc_manager.rtc_config.iceServers:
+        ice_servers.append(
+            IceServerConfig(
+                urls=server.urls,
+                username=server.username if hasattr(server, "username") else None,
+                credential=server.credential if hasattr(server, "credential") else None,
+            )
+        )
+
+    return IceServersResponse(iceServers=ice_servers)
+
+
 @app.post("/api/v1/webrtc/offer", response_model=WebRTCOfferResponse)
 async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
@@ -356,6 +378,45 @@ async def handle_webrtc_offer(
 
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.patch(
+    "/api/v1/webrtc/offer/{session_id}", status_code=204, response_class=Response
+)
+async def add_ice_candidate(
+    session_id: str,
+    candidate_request: IceCandidateRequest,
+    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+):
+    """Add ICE candidate(s) to an existing WebRTC session (Trickle ICE).
+
+    This endpoint follows the Trickle ICE pattern, allowing clients to send
+    ICE candidates as they are discovered.
+    """
+    # TODO: Validate that the Content-Type is 'application/trickle-ice-sdpfrag'
+    # At the moment FastAPI defaults to validating that it is 'application/json'
+    try:
+        for candidate_init in candidate_request.candidates:
+            await webrtc_manager.add_ice_candidate(
+                session_id=session_id,
+                candidate=candidate_init.candidate,
+                sdp_mid=candidate_init.sdpMid,
+                sdp_mline_index=candidate_init.sdpMLineIndex,
+            )
+
+            logger.debug(
+                f"Added {len(candidate_request.candidates)} ICE candidates to session {session_id}"
+            )
+
+        # Return 204 No Content on success
+        return Response(status_code=204)
+
+    except ValueError as e:
+        # Session not found or invalid candidate
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error adding ICE candidate to session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
