@@ -38,6 +38,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused = False
         self._paused_lock = threading.Lock()
         self._last_frame = None
+        self._closed = False
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
@@ -148,7 +149,45 @@ class VideoProcessingTrack(MediaStreamTrack):
             self._paused = paused
         logger.info(f"Video track {'paused' if paused else 'resumed'}")
 
-    async def stop(self):
+    def stop(self):
+        """
+        Synchronous stop for compatibility with aiortc.
+
+        aiortc calls track.stop() without awaiting, so keep this method
+        synchronous and schedule async cleanup separately when needed.
+        """
+        if self._closed:
+            return
+
+        self._closed = True
+        self.input_task_running = False
+
+        if self.input_task is not None:
+            self.input_task.cancel()
+
+        if self.frame_processor is not None:
+            self.frame_processor.stop()
+
+        # MediaStreamTrack.stop is synchronous; no await
+        try:
+            super().stop()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(f"Error stopping MediaStreamTrack: {exc}")
+
+    async def aclose(self):
+        """
+        Async helper to fully stop the track when we can await.
+
+        Ensures input task is cancelled/awaited and frame processor is stopped.
+        """
+        if self._closed:
+            if self.input_task and not self.input_task.done():
+                try:
+                    await self.input_task
+                except asyncio.CancelledError:
+                    pass
+            return
+
         self.input_task_running = False
 
         if self.input_task is not None:
@@ -161,4 +200,6 @@ class VideoProcessingTrack(MediaStreamTrack):
         if self.frame_processor is not None:
             self.frame_processor.stop()
 
-        await super().stop()
+        # Mark closed before calling parent stop to avoid double work
+        self._closed = True
+        super().stop()
