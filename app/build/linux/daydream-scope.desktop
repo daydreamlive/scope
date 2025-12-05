@@ -1,0 +1,17 @@
+[Desktop Entry]
+Name=Daydream Scope
+Comment=Real-time AI video generation and streaming
+GenericName=AI Video Generator
+Exec=daydream-scope %U
+Icon=daydream-scope
+Type=Application
+StartupNotify=true
+Categories=Utility;AudioVideo;
+MimeType=x-scheme-handler/daydream-scope;
+Keywords=AI;Video;Streaming;Generation;
+Actions=ShowLogs;
+
+[Desktop Action ShowLogs]
+Name=Show Logs
+Exec=daydream-scope --show-logs
+Icon=daydream-scope
