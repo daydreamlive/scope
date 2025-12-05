@@ -12,10 +12,7 @@ from pathlib import Path
 # This prevents errors when HF_HUB_ENABLE_HF_TRANSFER=1 is set but hf_transfer is not installed
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 
-from .models_config import (
-    ensure_models_dir,
-    models_are_downloaded,
-)
+from .models_config import ensure_models_dir, models_are_downloaded
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -26,9 +23,11 @@ try:
 except Exception:
     print(
         "Error: huggingface_hub is required. Install with: pip install huggingface_hub",
-                file=sys.stderr,
-            )
-        raise
+        file=sys.stderr,
+    )
+    raise ImportError(
+        "huggingface_hub is required. Install with: pip install huggingface_hub"
+    )
 
 
 def download_hf_repo_excluding(
