@@ -367,6 +367,15 @@ class DownloadModelsRequest(BaseModel):
     pipeline_id: str
 
 
+class VaeStatusResponse(BaseModel):
+    downloaded: bool
+
+
+class DownloadVaeRequest(BaseModel):
+    vae_type: str
+    model_name: str = "Wan2.1-T2V-1.3B"
+
+
 class LoRAFileInfo(BaseModel):
     """Metadata for an available LoRA file on disk."""
 
@@ -449,6 +458,46 @@ async def download_pipeline_models(request: DownloadModelsRequest):
         return {"message": f"Model download started for {request.pipeline_id}"}
     except Exception as e:
         logger.error(f"Error starting model download: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/vae/status", response_model=VaeStatusResponse)
+async def get_vae_status(vae_type: str, model_name: str = "Wan2.1-T2V-1.3B"):
+    """Check if a VAE file is downloaded."""
+    try:
+        from .models_config import vae_file_exists
+
+        downloaded = vae_file_exists(vae_type, model_name)
+        return VaeStatusResponse(downloaded=downloaded)
+    except Exception as e:
+        logger.error(f"Error checking VAE status: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/vae/download")
+async def download_vae(request: DownloadVaeRequest):
+    """Download a specific VAE file."""
+    try:
+        if not request.vae_type:
+            raise HTTPException(status_code=400, detail="vae_type is required")
+
+        # Download in a background thread to avoid blocking
+        import threading
+
+        from .download_models import download_vae as download_vae_func
+
+        def download_in_background():
+            download_vae_func(request.vae_type, request.model_name)
+
+        thread = threading.Thread(target=download_in_background)
+        thread.daemon = True
+        thread.start()
+
+        return {
+            "message": f"VAE download started for {request.vae_type} (model: {request.model_name})"
+        }
+    except Exception as e:
+        logger.error(f"Error starting VAE download: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

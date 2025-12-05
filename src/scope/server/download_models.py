@@ -65,6 +65,41 @@ def download_hf_single_file(repo_id: str, filename: str, local_dir: Path) -> Non
     print(f"[OK] Downloaded file '{filename}' from '{repo_id}' to: {out_path}")
 
 
+def download_vae(vae_type: str, model_name: str = "Wan2.1-T2V-1.3B") -> None:
+    """
+    Download VAE weights for a specific VAE type.
+
+    Args:
+        vae_type: VAE type (e.g., "wan", "lightvae", "tae")
+        model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
+    """
+    from scope.core.pipelines.wan2_1.vae import VAE_METADATA
+
+    metadata = VAE_METADATA.get(vae_type)
+    if metadata is None:
+        available = list(VAE_METADATA.keys())
+        raise ValueError(f"Unknown VAE type: {vae_type}. Available: {available}")
+
+    if metadata.download_repo is None:
+        # VAE is bundled with main model repo (e.g., "wan")
+        print(f"[INFO] {vae_type} VAE is bundled with {model_name} repo download")
+        return
+
+    models_root = ensure_models_dir()
+    download_hf_single_file(
+        metadata.download_repo, metadata.download_file, models_root / model_name
+    )
+
+
+def download_downloadable_vaes(model_name: str = "Wan2.1-T2V-1.3B") -> None:
+    """Download all VAEs that require separate downloads."""
+    from scope.core.pipelines.wan2_1.vae import VAE_METADATA
+
+    for vae_type, metadata in VAE_METADATA.items():
+        if metadata.download_repo is not None:
+            download_vae(vae_type, model_name)
+
+
 def download_required_models():
     """Download required models if they are not already present."""
     if models_are_downloaded():
@@ -111,6 +146,9 @@ def download_streamdiffusionv2_pipeline() -> None:
         allow_patterns=["wan_causal_dmd_v2v/model.pt"],
     )
 
+    # 4) Download additional VAE variants
+    download_downloadable_vaes()
+
 
 def download_longlive_pipeline() -> None:
     """Download models for the LongLive pipeline."""
@@ -138,6 +176,9 @@ def download_longlive_pipeline() -> None:
 
     # 3) HF repo download for LongLive-1.3B
     download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
+
+    # 4) Download additional VAE variants
+    download_downloadable_vaes()
 
 
 def download_krea_realtime_video_pipeline() -> None:
@@ -182,6 +223,9 @@ def download_krea_realtime_video_pipeline() -> None:
     download_hf_single_file(
         wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
     )
+
+    # 5) Download additional VAE variants
+    download_downloadable_vaes()
 
 
 def download_models(pipeline_id: str | None = None) -> None:
