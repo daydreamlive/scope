@@ -267,9 +267,7 @@ class PipelineManager:
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
         if pipeline_id == "streamdiffusionv2":
-            from scope.core.pipelines import (
-                StreamDiffusionV2Pipeline,
-            )
+            from scope.core.pipelines import StreamDiffusionV2Pipeline
 
             from .models_config import get_model_file_path, get_models_dir
 
@@ -382,9 +380,7 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "krea-realtime-video":
-            from scope.core.pipelines import (
-                KreaRealtimeVideoPipeline,
-            )
+            from scope.core.pipelines import KreaRealtimeVideoPipeline
 
             from .models_config import get_model_file_path, get_models_dir
 

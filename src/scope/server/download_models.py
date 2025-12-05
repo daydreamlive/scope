@@ -26,9 +26,9 @@ try:
 except Exception:
     print(
         "Error: huggingface_hub is required. Install with: pip install huggingface_hub",
-        file=sys.stderr,
-    )
-    raise
+                file=sys.stderr,
+            )
+        raise
 
 
 def download_hf_repo_excluding(
