@@ -69,6 +69,12 @@ class FrameProcessor:
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
+        # Timing stats
+        self._init_time = time.time()
+        self._first_pipeline_call_time: float | None = None
+        self._first_output_time: float | None = None
+        self._pipeline_call_count = 0
+
     def start(self):
         if self.running:
             return
@@ -84,14 +90,17 @@ class FrameProcessor:
         if not self.running:
             return
 
+        stop_start = time.time()
         self.running = False
         self.shutdown_event.set()
 
         if self.worker_thread and self.worker_thread.is_alive():
             # Don't join if we're calling stop() from within the worker thread
             if threading.current_thread() != self.worker_thread:
-                self.worker_thread.join(timeout=5.0)
+                # Use shorter timeout to avoid blocking
+                self.worker_thread.join(timeout=1.0)
 
+        # Clear queues quickly
         while not self.output_queue.empty():
             try:
                 self.output_queue.get_nowait()
@@ -101,7 +110,8 @@ class FrameProcessor:
         with self.frame_buffer_lock:
             self.frame_buffer.clear()
 
-        logger.info("FrameProcessor stopped")
+        stop_time = (time.time() - stop_start) * 1000
+        logger.info(f"FrameProcessor stopped in {stop_time:.1f}ms")
 
         # Notify callback that frame processor has stopped
         if self.notification_callback:
@@ -176,7 +186,7 @@ class FrameProcessor:
             # Add new update
             self.parameters_queue.put_nowait(parameters)
         except queue.Full:
-            logger.info("Parameter queue full, dropping parameter update")
+            logger.debug("Parameter queue full, dropping parameter update")
             return False
 
     def worker_loop(self):
@@ -291,6 +301,15 @@ class FrameProcessor:
             if video_input is not None:
                 call_params["video"] = video_input
 
+            # Track first pipeline call timing
+            self._pipeline_call_count += 1
+            if self._pipeline_call_count == 1:
+                self._first_pipeline_call_time = time.time()
+                logger.info(
+                    f"[TIMING] First pipeline call "
+                    f"({(self._first_pipeline_call_time - self._init_time) * 1000:.1f}ms since FP init)"
+                )
+
             output = pipeline(**call_params)
 
             # Clear transition when complete (blocks signal completion via _transition_active)
@@ -320,11 +339,20 @@ class FrameProcessor:
                 .cpu()
             )
 
+            # Track first output timing
+            if self._first_output_time is None:
+                self._first_output_time = time.time()
+                logger.info(
+                    f"[TIMING] First FP output "
+                    f"({(self._first_output_time - self._init_time) * 1000:.1f}ms since FP init)"
+                )
+
             # Resize output queue to meet target max size
             target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
             if self.output_queue.maxsize < target_output_queue_max_size:
-                logger.info(
-                    f"Increasing output queue size to {target_output_queue_max_size}, current size {self.output_queue.maxsize}, num_frames {num_frames}"
+                logger.debug(
+                    f"Increasing output queue size to {target_output_queue_max_size}, "
+                    f"current size {self.output_queue.maxsize}, num_frames {num_frames}"
                 )
 
                 # Transfer frames from old queue to new queue

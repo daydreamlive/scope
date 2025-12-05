@@ -39,23 +39,45 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused_lock = threading.Lock()
         self._last_frame = None
         self._closed = False
+        self._first_frame_time: float | None = None
+        self._first_output_time: float | None = None
+        self._init_time = time.time()
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
+        frame_count = 0
         while self.input_task_running:
             try:
                 input_frame = await self.track.recv()
+                frame_count += 1
+
+                # Log first frame timing
+                if frame_count == 1:
+                    self._first_frame_time = time.time()
+                    logger.info(
+                        f"[TIMING] First input frame received "
+                        f"({(self._first_frame_time - self._init_time) * 1000:.1f}ms since track init)"
+                    )
 
                 # Store raw VideoFrame for later processing
-                self.frame_processor.put(input_frame)
+                if self.frame_processor:
+                    self.frame_processor.put(input_frame)
 
             except asyncio.CancelledError:
+                logger.debug("Input loop cancelled")
+                break
+            except MediaStreamError:
+                # Expected when the remote track ends (e.g., tab closed or refresh)
+                logger.info("Media stream ended, stopping input loop")
+                self.input_task_running = False
                 break
             except Exception as e:
                 # Stop the input loop on connection errors to avoid spam
-                logger.error(f"Error in input loop, stopping: {e}")
+                logger.exception(f"Error in input loop, stopping: {e}")
                 self.input_task_running = False
                 break
+
+        logger.debug(f"Input loop stopped after {frame_count} frames")
 
     # Copied from https://github.com/livepeer/fastworld/blob/e649ef788cd33d78af6d8e1da915cd933761535e/backend/track.py#L267
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
@@ -87,22 +109,29 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     def initialize_output_processing(self):
         if not self.frame_processor:
+            init_start = time.time()
             self.frame_processor = FrameProcessor(
                 pipeline_manager=self.pipeline_manager,
                 initial_parameters=self.initial_parameters,
                 notification_callback=self.notification_callback,
             )
             self.frame_processor.start()
+            logger.debug(
+                f"[TIMING] FrameProcessor initialized in {(time.time() - init_start) * 1000:.1f}ms"
+            )
 
     def initialize_input_processing(self, track: MediaStreamTrack):
         self.track = track
         self.input_task_running = True
         self.input_task = asyncio.create_task(self.input_loop())
+        logger.debug("[TIMING] Input processing initialized")
 
     async def recv(self) -> VideoFrame:
         """Return the next available processed frame"""
         # Lazy initialization on first call
         self.initialize_output_processing()
+
+        output_frame_count = 0
         while self.input_task_running:
             try:
                 # Update FPS from FrameProcessor
@@ -125,6 +154,18 @@ class VideoProcessingTrack(MediaStreamTrack):
                         frame = VideoFrame.from_ndarray(
                             frame_tensor.numpy(), format="rgb24"
                         )
+                        output_frame_count += 1
+
+                        # Log first output frame timing
+                        if output_frame_count == 1:
+                            self._first_output_time = time.time()
+                            logger.info(
+                                f"[TIMING] First output frame "
+                                f"({(self._first_output_time - self._init_time) * 1000:.1f}ms since track init)"
+                            )
+                    elif self._last_frame is not None:
+                        # No new frame available, reuse last frame for smoother playback
+                        frame = self._last_frame
 
                 if frame is not None:
                     pts, time_base = await self.next_timestamp()

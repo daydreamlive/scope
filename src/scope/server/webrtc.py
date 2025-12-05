@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Any
 
@@ -36,6 +37,9 @@ vpx.DEFAULT_BITRATE = 7000000
 vpx.MIN_BITRATE = 5000000
 vpx.MAX_BITRATE = 10000000
 
+# Session removal debounce (seconds) - short to allow quick refresh recovery
+SESSION_REMOVAL_DEBOUNCE_SECONDS = 0.5
+
 
 class Session:
     """WebRTC Session containing peer connection and associated video track."""
@@ -50,22 +54,37 @@ class Session:
         self.pc = pc
         self.video_track = video_track
         self.data_channel = data_channel
+        self._removal_task: asyncio.Task | None = None
+        self._close_start_time: float | None = None
 
     async def close(self):
         """Close this session and cleanup resources."""
+        self._close_start_time = time.time()
         try:
+            # Cancel any pending removal task
+            if self._removal_task and not self._removal_task.done():
+                self._removal_task.cancel()
+
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
-                # Use async close helper to avoid un-awaited coroutine warnings
+                track_close_start = time.time()
                 if hasattr(self.video_track, "aclose"):
                     await self.video_track.aclose()
                 else:
                     self.video_track.stop()
+                logger.debug(
+                    f"[TIMING] Track close took {(time.time() - track_close_start) * 1000:.1f}ms"
+                )
 
             if self.pc.connectionState not in ["closed", "failed"]:
+                pc_close_start = time.time()
                 await self.pc.close()
+                logger.debug(
+                    f"[TIMING] PC close took {(time.time() - pc_close_start) * 1000:.1f}ms"
+                )
 
-            logger.info(f"Session {self.id} closed")
+            total_time = (time.time() - self._close_start_time) * 1000
+            logger.info(f"Session {self.id} closed in {total_time:.1f}ms")
         except Exception as e:
             logger.error(f"Error closing session {self.id}: {e}")
 
@@ -80,12 +99,12 @@ class NotificationSender:
 
     def __init__(self):
         self.data_channel = None
-        self.pending_notifications = []
+        self.pending_notifications: list[dict] = []
 
         # Store reference to the event loop for thread-safe notifications
         self.event_loop = asyncio.get_running_loop()
 
-    def set_data_channel(self, data_channel):
+    def set_data_channel(self, data_channel: RTCDataChannel):
         """Set the data channel and flush any pending notifications."""
         self.data_channel = data_channel
         self.flush_pending_notifications()
@@ -95,7 +114,7 @@ class NotificationSender:
         if self.data_channel and self.data_channel.readyState == "open":
             self._send_message_threadsafe(message)
         else:
-            logger.info(f"Data channel not ready, queuing message: {message}")
+            logger.debug(f"Data channel not ready, queuing message: {message}")
             self.pending_notifications.append(message)
 
     def _send_message_threadsafe(self, message: dict):
@@ -107,8 +126,9 @@ class NotificationSender:
                 # Schedule the send operation in the main event loop
                 def send_sync():
                     try:
-                        self.data_channel.send(message_str)
-                        logger.info(f"Sent notification to frontend: {message}")
+                        if self.data_channel and self.data_channel.readyState == "open":
+                            self.data_channel.send(message_str)
+                            logger.debug(f"Sent notification to frontend: {message}")
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
 
@@ -120,10 +140,11 @@ class NotificationSender:
     def flush_pending_notifications(self):
         """Send all pending notifications when data channel becomes available"""
         if not self.pending_notifications:
-            logger.info("No pending notifications to flush")
             return
 
-        logger.info(f"Flushing {len(self.pending_notifications)} pending notifications")
+        logger.debug(
+            f"Flushing {len(self.pending_notifications)} pending notifications"
+        )
         for message in self.pending_notifications:
             self._send_message_threadsafe(message)
         self.pending_notifications.clear()
@@ -137,7 +158,6 @@ class WebRTCManager:
     def __init__(self):
         self.sessions: dict[str, Session] = {}
         self.rtc_config = create_rtc_config()
-        self.is_first_track = True
 
     async def handle_offer(
         self, request: WebRTCOfferRequest, pipeline_manager: PipelineManager
@@ -152,6 +172,8 @@ class WebRTCManager:
         Returns:
             Dictionary containing SDP answer
         """
+        offer_start_time = time.time()
+
         try:
             # Extract initial parameters from offer
             initial_parameters = {}
@@ -160,15 +182,35 @@ class WebRTCManager:
                 initial_parameters = request.initialParameters.model_dump(
                     exclude_none=True
                 )
-            logger.info(f"Received initial parameters: {initial_parameters}")
+            logger.info(
+                f"[TIMING] Received offer, initial params: {list(initial_parameters.keys())}"
+            )
+
+            # Close any existing sessions to free resources quickly
+            # This helps with tab refresh scenarios
+            if self.sessions:
+                logger.info(
+                    f"[TIMING] Closing {len(self.sessions)} existing sessions before new offer"
+                )
+                close_start = time.time()
+                # Close sessions in background - don't wait
+                for session in list(self.sessions.values()):
+                    asyncio.create_task(self._close_session_background(session))
+                self.sessions.clear()
+                logger.debug(
+                    f"[TIMING] Session cleanup initiated in {(time.time() - close_start) * 1000:.1f}ms"
+                )
 
             # Create new RTCPeerConnection with configuration
+            pc_create_start = time.time()
             pc = RTCPeerConnection(self.rtc_config)
+            logger.debug(
+                f"[TIMING] PC created in {(time.time() - pc_create_start) * 1000:.1f}ms"
+            )
+
+            notification_sender = NotificationSender()
             session = Session(pc)
             self.sessions[session.id] = session
-
-            # Create NotificationSender for this session to send notifications to the frontend
-            notification_sender = NotificationSender()
 
             video_track = VideoProcessingTrack(
                 pipeline_manager,
@@ -182,46 +224,65 @@ class WebRTCManager:
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
-                logger.info(f"Track received: {track.kind} for session {session.id}")
+                track_recv_time = time.time()
+                logger.info(
+                    f"[TIMING] Track received: {track.kind} for session {session.id} "
+                    f"({(track_recv_time - offer_start_time) * 1000:.1f}ms since offer)"
+                )
                 if track.kind == "video":
                     video_track.initialize_input_processing(track)
 
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
+                state = pc.connectionState
                 logger.info(
-                    f"Connection state changed to: {pc.connectionState} for session {session.id}"
+                    f"Connection state changed to: {state} for session {session.id}"
                 )
-                if pc.connectionState in ["closed", "failed"]:
-                    await self.remove_session(session.id)
+                # Only remove on closed/failed, with short debounce for quick reconnects
+                if state in ["closed", "failed"]:
+                    await self._debounced_remove(
+                        session, delay_seconds=SESSION_REMOVAL_DEBOUNCE_SECONDS
+                    )
 
             @pc.on("iceconnectionstatechange")
             async def on_iceconnectionstatechange():
+                ice_state = pc.iceConnectionState
                 logger.info(
-                    f"ICE connection state changed to: {pc.iceConnectionState} for session {session.id}"
+                    f"ICE connection state: {ice_state} for session {session.id}"
                 )
+                # Log when ICE is connected - this is when media can flow
+                if ice_state == "connected":
+                    logger.info(
+                        f"[TIMING] ICE connected ({(time.time() - offer_start_time) * 1000:.1f}ms since offer)"
+                    )
 
             @pc.on("icegatheringstatechange")
             async def on_icegatheringstatechange():
-                logger.info(
-                    f"ICE gathering state changed to: {pc.iceGatheringState} for session {session.id}"
+                logger.debug(
+                    f"ICE gathering state: {pc.iceGatheringState} for session {session.id}"
                 )
 
             @pc.on("icecandidate")
             def on_icecandidate(candidate):
-                logger.debug(f"ICE candidate for session {session.id}: {candidate}")
+                if candidate:
+                    logger.debug(f"ICE candidate for session {session.id}")
 
             # Handle incoming data channel from frontend
             @pc.on("datachannel")
-            def on_data_channel(data_channel):
+            def on_data_channel(data_channel: RTCDataChannel):
+                dc_time = time.time()
                 logger.info(
-                    f"Data channel received: {data_channel.label} for session {session.id}"
+                    f"[TIMING] Data channel received: {data_channel.label} "
+                    f"({(dc_time - offer_start_time) * 1000:.1f}ms since offer)"
                 )
                 session.data_channel = data_channel
                 notification_sender.set_data_channel(data_channel)
 
                 @data_channel.on("open")
                 def on_data_channel_open():
-                    logger.info(f"Data channel opened for session {session.id}")
+                    logger.info(
+                        f"[TIMING] Data channel opened ({(time.time() - offer_start_time) * 1000:.1f}ms since offer)"
+                    )
                     notification_sender.flush_pending_notifications()
 
                 @data_channel.on("message")
@@ -229,7 +290,18 @@ class WebRTCManager:
                     try:
                         # Parse the JSON message
                         data = json.loads(message)
-                        logger.info(f"Received parameter update: {data}")
+                        # Only log non-ping messages at info level
+                        if data.get("type") != "ping":
+                            logger.info(f"Received parameter update: {data}")
+                        else:
+                            logger.debug("Received ping from frontend")
+
+                        # Respond to pings with pong (frontend keepalive)
+                        if data.get("type") == "ping":
+                            notification_sender.call(
+                                {"type": "pong", "ts": time.time()}
+                            )
+                            return
 
                         # Check for paused parameter and call pause() method on video track
                         if "paused" in data and session.video_track:
@@ -251,12 +323,28 @@ class WebRTCManager:
                         logger.error(f"Error handling parameter update: {e}")
 
             # Set remote description (the offer)
+            set_remote_start = time.time()
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
+            logger.debug(
+                f"[TIMING] setRemoteDescription took {(time.time() - set_remote_start) * 1000:.1f}ms"
+            )
 
             # Create answer
+            create_answer_start = time.time()
             answer = await pc.createAnswer()
+            logger.debug(
+                f"[TIMING] createAnswer took {(time.time() - create_answer_start) * 1000:.1f}ms"
+            )
+
+            set_local_start = time.time()
             await pc.setLocalDescription(answer)
+            logger.debug(
+                f"[TIMING] setLocalDescription took {(time.time() - set_local_start) * 1000:.1f}ms"
+            )
+
+            total_time = (time.time() - offer_start_time) * 1000
+            logger.info(f"[TIMING] Offer handling complete in {total_time:.1f}ms")
 
             return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
 
@@ -266,6 +354,13 @@ class WebRTCManager:
                 await self.remove_session(session.id)
             raise
 
+    async def _close_session_background(self, session: Session):
+        """Close a session in background without blocking."""
+        try:
+            await session.close()
+        except Exception as e:
+            logger.error(f"Error in background session close: {e}")
+
     async def remove_session(self, session_id: str):
         """Remove and cleanup a specific session."""
         if session_id in self.sessions:
@@ -273,7 +368,32 @@ class WebRTCManager:
             logger.info(f"Removing session: {session}")
             await session.close()
         else:
-            logger.warning(f"Attempted to remove non-existent session: {session_id}")
+            logger.debug(f"Attempted to remove non-existent session: {session_id}")
+
+    async def _debounced_remove(self, session: Session, delay_seconds: float = 0.5):
+        """
+        Debounce session removal to allow brief disconnects (e.g., tab refresh).
+
+        If the connection recovers before the delay, the removal task is cancelled.
+        """
+        # Cancel any pending removal for this session
+        if session._removal_task and not session._removal_task.done():
+            session._removal_task.cancel()
+
+        async def _remove_if_still_closed():
+            try:
+                await asyncio.sleep(delay_seconds)
+                # If session disappeared during wait, nothing to do
+                current = self.sessions.get(session.id)
+                if current is None:
+                    return
+                # Remove only if still closed/failed
+                if current.pc.connectionState in ["closed", "failed"]:
+                    await self.remove_session(session.id)
+            except asyncio.CancelledError:
+                return
+
+        session._removal_task = asyncio.create_task(_remove_if_still_closed())
 
     def get_session(self, session_id: str) -> Session | None:
         """Get a session by ID."""
