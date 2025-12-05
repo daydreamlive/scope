@@ -7,22 +7,13 @@ import torch
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
-from torch.nn.attention.flex_attention import (
-    BlockMask,
-    create_block_mask,
-    flex_attention,
-)
+from torch.nn.attention.flex_attention import (BlockMask, create_block_mask,
+                                               flex_attention)
 
-from scope.core.pipelines.wan2_1.modules.attention import attention
 from scope.core.pipelines.longlive.modules.model import (
-    WAN_CROSSATTENTION_CLASSES,
-    MLPProj,
-    WanLayerNorm,
-    WanRMSNorm,
-    rope_apply,
-    rope_params,
-    sinusoidal_embedding_1d,
-)
+    WAN_CROSSATTENTION_CLASSES, MLPProj, WanLayerNorm, WanRMSNorm, rope_apply,
+    rope_params, sinusoidal_embedding_1d)
+from scope.core.pipelines.wan2_1.modules.attention import attention
 
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254

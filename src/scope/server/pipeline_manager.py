@@ -446,7 +446,7 @@ class PipelineManager:
                 {
                     "model_dir": str(get_models_dir()),
                     "generator_path": str(
-                        get_model_file_path("Reward-Forcing-T2V-1.3B/model.safetensors")
+                        get_model_file_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")
                     ),
                     "text_encoder_path": str(
                         get_model_file_path(

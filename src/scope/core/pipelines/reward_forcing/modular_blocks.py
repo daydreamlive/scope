@@ -10,6 +10,11 @@ from diffusers.modular_pipelines import SequentialPipelineBlocks
 from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 from diffusers.utils import logging as diffusers_logging
 
+from ..longlive.blocks import (
+    PrepareRecacheFramesBlock,
+    RecacheFramesBlock,
+    SetTransformerBlocksLocalAttnSizeBlock,
+)
 from ..wan2_1.blocks import (
     AutoPrepareLatentsBlock,
     AutoPreprocessVideoBlock,
@@ -21,11 +26,6 @@ from ..wan2_1.blocks import (
     SetTimestepsBlock,
     SetupCachesBlock,
     TextConditioningBlock,
-)
-from ..longlive.blocks import (
-    PrepareRecacheFramesBlock,
-    RecacheFramesBlock,
-    SetTransformerBlocksLocalAttnSizeBlock,
 )
 
 logger = diffusers_logging.get_logger(__name__)
