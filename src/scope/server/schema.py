@@ -98,18 +98,22 @@ class Parameters(BaseModel):
         default=None,
         description="EMA coefficient for sink token compression (Reward-Forcing pipeline). "
         "Controls how much weight is given to historical context vs recent frames. "
-        "Higher values (0.999) = more stable, but prone to semantic drift in long videos. "
-        "Lower values (0.9-0.95) = adapts faster, reduces drift but may lose long-term consistency. "
-        "Typical values: 0.999 (default), 0.99 (balanced), 0.95 (aggressive anti-drift).",
+        "Higher values (0.999) = more stable, preserves original prompt context longer. "
+        "Lower values (0.9-0.95) = forgets faster, reduces error accumulation. "
+        "Typical values: 0.999 (default), 0.99 (balanced), 0.95 (less error accumulation). "
+        "Can be changed at runtime without reloading pipeline.",
         ge=0.0,
         le=1.0,
     )
-    semantic_refresh_interval: int | None = Field(
+    sink_size: int | None = Field(
         default=None,
-        description="Interval (in frames) at which to refresh the cross-attention cache to combat semantic drift. "
-        "When set, the text conditioning is periodically re-applied to prevent drift in long videos. "
-        "Set to 0 to disable (default). Recommended values: 100-500 for long videos.",
-        ge=0,
+        description="Number of frames to keep as semantic anchor tokens (Reward-Forcing pipeline). "
+        "These sink tokens accumulate historical context via EMA compression. "
+        "More sink tokens = stronger semantic preservation but more memory. "
+        "Typical values: 3 (default), 6 (stronger anchoring). "
+        "Changing this will trigger a cache reset but NOT require pipeline reload.",
+        ge=1,
+        le=12,
     )
     lora_scales: list["LoRAScaleUpdate"] | None = Field(
         default=None,

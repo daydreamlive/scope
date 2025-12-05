@@ -182,6 +182,19 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
             if self.state.get("manage_cache", True):
                 kwargs["init_cache"] = True
 
+        # Handle compression_alpha updates (no cache reset needed)
+        compression_alpha = kwargs.get("compression_alpha")
+        if compression_alpha is not None:
+            self._update_compression_alpha(compression_alpha)
+
+        # Handle sink_size updates (requires cache reset)
+        sink_size = kwargs.get("sink_size")
+        if sink_size is not None:
+            self._update_sink_size(sink_size)
+            # Trigger cache reset when sink_size changes
+            if self.state.get("manage_cache", True):
+                kwargs["init_cache"] = True
+
         for k, v in kwargs.items():
             self.state.set(k, v)
 
@@ -198,3 +211,43 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
 
         _, self.state = self.blocks(self.components, self.state)
         return postprocess_chunk(self.state.values["output_video"])
+
+    def _update_compression_alpha(self, alpha: float) -> None:
+        """Update compression_alpha on all self-attention layers.
+
+        This can be changed at runtime without reloading the pipeline.
+        Higher values (0.999) preserve original context longer.
+        Lower values (0.95) reduce error accumulation.
+
+        Args:
+            alpha: New compression alpha value (0.0 to 1.0)
+        """
+        model = self.components.generator.model
+        updated_count = 0
+        for module in model.modules():
+            if hasattr(module, "compression_alpha"):
+                module.compression_alpha = alpha
+                updated_count += 1
+        logger.info(f"Updated compression_alpha to {alpha} on {updated_count} layers")
+
+    def _update_sink_size(self, sink_size: int) -> None:
+        """Update sink_size on all self-attention layers.
+
+        This requires a cache reset but NOT a pipeline reload.
+        More sink tokens = stronger semantic preservation.
+
+        Args:
+            sink_size: Number of frames to keep as sink tokens (1-12)
+        """
+        model = self.components.generator.model
+        updated_count = 0
+        for module in model.modules():
+            if hasattr(module, "sink_size"):
+                module.sink_size = sink_size
+                updated_count += 1
+        # Also update config if it exists
+        if hasattr(self.components, "config") and hasattr(
+            self.components.config, "base_model_kwargs"
+        ):
+            self.components.config.base_model_kwargs["sink_size"] = sink_size
+        logger.info(f"Updated sink_size to {sink_size} on {updated_count} layers")
