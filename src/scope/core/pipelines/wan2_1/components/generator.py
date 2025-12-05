@@ -42,11 +42,13 @@ class WanDiffusionWrapper(torch.nn.Module):
             with open(config_path) as f:
                 config = json.load(f)
 
-            config.update({
-                "local_attn_size": local_attn_size,
-                "sink_size": sink_size,
-                "compression_alpha": compression_alpha,  # EMA coefficient for sink compression
-            })
+            config.update(
+                {
+                    "local_attn_size": local_attn_size,
+                    "sink_size": sink_size,
+                    "compression_alpha": compression_alpha,  # EMA coefficient for sink compression
+                }
+            )
 
             state_dict = load_state_dict(generator_path)
             # Handle case where the dict with required keys is nested under a specific key
