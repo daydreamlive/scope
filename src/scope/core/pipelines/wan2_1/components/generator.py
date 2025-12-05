@@ -51,7 +51,7 @@ class WanDiffusionWrapper(torch.nn.Module):
             state_dict = load_state_dict(generator_path)
             # Handle case where the dict with required keys is nested under a specific key
             # eg state_dict["generator"]
-            if generator_model_name is not None:
+            if generator_model_name is not None and generator_model_name in state_dict:
                 state_dict = state_dict[generator_model_name]
 
             # Remove 'model.' prefix if present (from wrapped models)
