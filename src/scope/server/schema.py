@@ -14,7 +14,7 @@ from scope.core.pipelines.utils import Quantization
 from scope.core.pipelines.wan2_1.vae import DEFAULT_VAE_TYPE
 
 # VAE type literal based on available VAE types
-VaeType = Literal["wan", "lightvae", "tae"]
+VaeType = Literal["wan", "lightvae", "tae", "lighttae"]
 
 
 class HealthResponse(BaseModel):
@@ -250,7 +250,7 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
     )
     vae_type: VaeType = Field(
         default=DEFAULT_VAE_TYPE,
-        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
 
@@ -289,7 +289,7 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     )
     vae_type: VaeType = Field(
         default=DEFAULT_VAE_TYPE,
-        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
 
@@ -322,7 +322,7 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
     vae_type: VaeType = Field(
         default=DEFAULT_VAE_TYPE,
-        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
 
