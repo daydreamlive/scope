@@ -12,11 +12,11 @@ __pycache__
 
 output.mp4
 
-src/scope/core/pipelines/**/*.mp4
-
 notes/
 
 # Cursor IDE files
 .cursorrules
 .cursorignore
 .cursorindexingignore
+
+Reward-Forcing/
