@@ -16,6 +16,10 @@ interface DownloadDialogProps {
   pipelineId: PipelineId;
   onClose: () => void;
   onDownload: () => void;
+  vaeNeedsDownload?: {
+    vaeType: string;
+    modelName: string;
+  } | null;
 }
 
 export function DownloadDialog({
@@ -23,6 +27,7 @@ export function DownloadDialog({
   pipelineId,
   onClose,
   onDownload,
+  vaeNeedsDownload,
 }: DownloadDialogProps) {
   const pipelineInfo = PIPELINES[pipelineId];
   if (!pipelineInfo) return null;
@@ -31,13 +36,22 @@ export function DownloadDialog({
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Download Models</DialogTitle>
+          <DialogTitle>
+            {vaeNeedsDownload ? "Download VAE Model" : "Download Models"}
+          </DialogTitle>
           <DialogDescription className="mt-3">
-            This pipeline requires model weights to be downloaded.
+            {vaeNeedsDownload ? (
+              <>
+                The selected VAE model ({vaeNeedsDownload.vaeType}) is missing
+                and needs to be downloaded.
+              </>
+            ) : (
+              <>This pipeline requires model weights to be downloaded.</>
+            )}
           </DialogDescription>
         </DialogHeader>
 
-        {pipelineInfo.estimatedVram && (
+        {!vaeNeedsDownload && pipelineInfo.estimatedVram && (
           <p className="text-sm text-muted-foreground mb-3">
             <span className="font-semibold">
               Estimated GPU VRAM Requirement:

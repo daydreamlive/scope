@@ -73,6 +73,42 @@ def get_model_file_path(relative_path: str) -> Path:
     return models_dir / relative_path
 
 
+def get_vae_file_path(vae_type: str, model_name: str = "Wan2.1-T2V-1.3B") -> Path:
+    """
+    Get the path to a VAE file based on VAE type.
+
+    Args:
+        vae_type: VAE type (e.g., "wan", "lightvae", "tae")
+        model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
+
+    Returns:
+        Path: Absolute path to the VAE file
+    """
+    from scope.core.pipelines.wan2_1.vae import VAE_METADATA
+
+    metadata = VAE_METADATA.get(vae_type)
+    if metadata is None:
+        available = list(VAE_METADATA.keys())
+        raise ValueError(f"Unknown VAE type: {vae_type}. Available: {available}")
+
+    return get_models_dir() / model_name / metadata.filename
+
+
+def vae_file_exists(vae_type: str, model_name: str = "Wan2.1-T2V-1.3B") -> bool:
+    """
+    Check if a VAE file exists.
+
+    Args:
+        vae_type: VAE type ("wan", "lightvae", or "tae")
+        model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
+
+    Returns:
+        bool: True if the VAE file exists, False otherwise
+    """
+    vae_path = get_vae_file_path(vae_type, model_name)
+    return vae_path.exists()
+
+
 def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     """
     Get the list of required model files that should exist for a given pipeline.
