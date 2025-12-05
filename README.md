@@ -107,6 +107,9 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 
 The template will configure everything needed and the frontend will present a dialog for downloading model weights for pipelines when running them (by pressing play with the pipeline selected) for the first time.
 
+> [!IMPORTANT]
+> The template will store model files under `/workspace/models` because Runpod mounts a volume disk at `/workspace` allowing any files there to be retained across pod restarts. 
+
 > [!NOTE]
 > If you want to use the version from the main branch, you need to use the `daydreamlive/scope:main` docker image. You can configure this in the RunPod template by editing the Docker image setting.
 
