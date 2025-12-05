@@ -425,3 +425,47 @@ export const getPipelineSchemas =
     const result = await response.json();
     return result;
   };
+
+export const checkVaeStatus = async (
+  vaeType: string,
+  modelName: string = "Wan2.1-T2V-1.3B"
+): Promise<{ downloaded: boolean }> => {
+  const response = await fetch(
+    `/api/v1/vae/status?vae_type=${encodeURIComponent(vaeType)}&model_name=${encodeURIComponent(modelName)}`,
+    {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `VAE status check failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export const downloadVae = async (
+  vaeType: string,
+  modelName: string = "Wan2.1-T2V-1.3B"
+): Promise<{ message: string }> => {
+  const response = await fetch("/api/v1/vae/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vae_type: vaeType, model_name: modelName }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `VAE download failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
