@@ -14,11 +14,15 @@
 base_model_name: Wan2.1-T2V-1.3B
 base_model_kwargs:
   timestep_shift: 5.0
+  # Sink size: number of frames to keep as semantic anchors
+  # More sink tokens = stronger semantic preservation, but uses more memory
+  # Original Reward-Forcing uses 3, increase to 6 for better anti-drift
   sink_size: 3
   # EMA coefficient for sink token compression
   # Higher values (e.g., 0.999) = slower update, more stable long-term context
   # Lower values (e.g., 0.9) = faster update, more recent context emphasis
-  compression_alpha: 0.999
+  # For long videos, use lower values (0.99-0.95) to reduce semantic drift
+  compression_alpha: 0.99
 
 generator_model_name: "generator"
 

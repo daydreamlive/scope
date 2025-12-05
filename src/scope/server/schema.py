@@ -94,6 +94,23 @@ class Parameters(BaseModel):
         ge=0.01,
         le=1.0,
     )
+    compression_alpha: float | None = Field(
+        default=None,
+        description="EMA coefficient for sink token compression (Reward-Forcing pipeline). "
+        "Controls how much weight is given to historical context vs recent frames. "
+        "Higher values (0.999) = more stable, but prone to semantic drift in long videos. "
+        "Lower values (0.9-0.95) = adapts faster, reduces drift but may lose long-term consistency. "
+        "Typical values: 0.999 (default), 0.99 (balanced), 0.95 (aggressive anti-drift).",
+        ge=0.0,
+        le=1.0,
+    )
+    semantic_refresh_interval: int | None = Field(
+        default=None,
+        description="Interval (in frames) at which to refresh the cross-attention cache to combat semantic drift. "
+        "When set, the text conditioning is periodically re-applied to prevent drift in long videos. "
+        "Set to 0 to disable (default). Recommended values: 100-500 for long videos.",
+        ge=0,
+    )
     lora_scales: list["LoRAScaleUpdate"] | None = Field(
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",

@@ -1,10 +1,7 @@
 from typing import Any
 
 import torch
-from diffusers.modular_pipelines import (
-    ModularPipelineBlocks,
-    PipelineState,
-)
+from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     ConfigSpec,
