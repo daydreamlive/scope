@@ -126,12 +126,20 @@ The `/api/v1/pipeline/status` endpoint returns:
 ### For Video-Input Pipelines (e.g., streamdiffusionv2)
 
 ```javascript
-// 1. Create peer connection
+// 1. Fetch ICE servers from backend (includes TURN servers for firewall traversal)
+const iceServersResponse = await fetch("http://localhost:8000/api/v1/webrtc/ice-servers");
+const { iceServers } = await iceServersResponse.json();
+
+// 2. Create peer connection
 const pc = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: iceServers,
 });
 
-// 2. Create data channel
+// Store session ID for sending ICE candidates
+let sessionId = null;
+const queuedCandidates = [];
+
+// 3. Create data channel
 const dataChannel = pc.createDataChannel("parameters", { ordered: true });
 
 dataChannel.onopen = () => {
@@ -146,14 +154,14 @@ dataChannel.onmessage = (event) => {
   }
 };
 
-// 3. Set up video element
+// 4. Set up video element
 const videoElement = document.createElement("video");
 videoElement.autoplay = true;
 videoElement.muted = true;
 videoElement.playsInline = true;
 document.body.appendChild(videoElement);
 
-// 4. Add local video track
+// 5. Add local video track
 const localStream = await navigator.mediaDevices.getUserMedia({
   video: { width: 512, height: 512 },
 });
@@ -164,7 +172,7 @@ localStream.getTracks().forEach((track) => {
   }
 });
 
-// 5. Set up event handlers
+// 6. Set up event handlers
 const onTrack = (event) => {
   if (event.streams && event.streams[0]) {
     videoElement.srcObject = event.streams[0];
@@ -176,30 +184,26 @@ const onConnectionStateChange = () => {
 };
 
 const onIceCandidate = async (event) => {
-  if (event.candidate === null) {
-    // ICE gathering complete
-    const sdpResponse = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sdp: pc.localDescription.sdp,
-        type: pc.localDescription.type,
-        initialParameters: {
-          prompts: [{ text: "A beautiful landscape", weight: 1.0 }],
-          prompt_interpolation_method: "linear",
-          denoising_step_list: [700, 500],
-        },
-      }),
-    });
-
-    const answer = {
-      type: "answer",
-      sdp: (await sdpResponse.json()).sdp,
-    };
-
-    await pc.setRemoteDescription(answer);
+  if (event.candidate) {
+    // Trickle ICE: Send candidates as they arrive
+    if (sessionId) {
+      await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidates: [{
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          }],
+        }),
+      });
+    } else {
+      // Queue candidates until session ID is available
+      queuedCandidates.push(event.candidate);
+    }
+  } else {
+    console.log("ICE gathering complete");
   }
 };
 
@@ -208,20 +212,66 @@ pc.ontrack = onTrack;
 pc.onconnectionstatechange = onConnectionStateChange;
 pc.onicecandidate = onIceCandidate;
 
-// 6. Create offer
+// 7. Create offer and send immediately (Trickle ICE)
 const offer = await pc.createOffer();
 await pc.setLocalDescription(offer);
+
+const sdpResponse = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    sdp: pc.localDescription.sdp,
+    type: pc.localDescription.type,
+    initialParameters: {
+      prompts: [{ text: "A beautiful landscape", weight: 1.0 }],
+      prompt_interpolation_method: "linear",
+      denoising_step_list: [700, 500],
+    },
+  }),
+});
+
+const answerData = await sdpResponse.json();
+sessionId = answerData.sessionId; // Store session ID
+
+await pc.setRemoteDescription({
+  type: answerData.type,
+  sdp: answerData.sdp,
+});
+
+// Flush queued candidates
+if (queuedCandidates.length > 0) {
+  await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      candidates: queuedCandidates.map(c => ({
+        candidate: c.candidate,
+        sdpMid: c.sdpMid,
+        sdpMLineIndex: c.sdpMLineIndex,
+      })),
+    }),
+  });
+  queuedCandidates.length = 0;
+}
 ```
 
 ### For No-Video-Input Pipelines (e.g., longlive, krea-realtime-video)
 
 ```javascript
-// 1. Create peer connection
+// 1. Fetch ICE servers from backend (includes TURN servers for firewall traversal)
+const iceServersResponse = await fetch("http://localhost:8000/api/v1/webrtc/ice-servers");
+const { iceServers } = await iceServersResponse.json();
+
+// 2. Create peer connection
 const pc = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: iceServers,
 });
 
-// 2. Create data channel
+// Store session ID for sending ICE candidates
+let sessionId = null;
+const queuedCandidates = [];
+
+// 3. Create data channel
 const dataChannel = pc.createDataChannel("parameters", { ordered: true });
 
 dataChannel.onopen = () => {
@@ -245,17 +295,17 @@ dataChannel.onmessage = (event) => {
   }
 };
 
-// 3. Add video transceiver (after data channel, before event handlers)
+// 4. Add video transceiver (after data channel, before event handlers)
 pc.addTransceiver("video");
 
-// 4. Set up video element
+// 5. Set up video element
 const videoElement = document.createElement("video");
 videoElement.autoplay = true;
 videoElement.muted = true;
 videoElement.playsInline = true;
 document.body.appendChild(videoElement);
 
-// 5. Set up event handlers
+// 6. Set up event handlers
 const onTrack = (event) => {
   if (event.streams && event.streams[0]) {
     videoElement.srcObject = event.streams[0];
@@ -272,35 +322,25 @@ const onIceConnectionStateChange = () => {
 
 const onIceCandidate = async (event) => {
   if (event.candidate) {
-    console.log("ICE candidate:", event.candidate);
+    // Trickle ICE: Send candidates as they arrive
+    if (sessionId) {
+      await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidates: [{
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          }],
+        }),
+      });
+    } else {
+      // Queue candidates until session ID is available
+      queuedCandidates.push(event.candidate);
+    }
   } else {
-    // ICE gathering complete
-    console.log("ICE gathering complete, sending offer to server");
-    const sdpResponse = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sdp: pc.localDescription.sdp,
-        type: pc.localDescription.type,
-        initialParameters: {
-          prompts: [{ text: "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.", weight: 100 }],
-          prompt_interpolation_method: "linear",
-          denoising_step_list: [1000, 750, 500, 250],
-          manage_cache: true,
-        },
-      }),
-    });
-
-    const answerData = await sdpResponse.json();
-    const answer = {
-      type: "answer",
-      sdp: answerData.sdp,
-    };
-
-    await pc.setRemoteDescription(answer);
-    console.log("WebRTC connection established");
+    console.log("ICE gathering complete");
   }
 };
 
@@ -310,9 +350,48 @@ pc.onconnectionstatechange = onConnectionStateChange;
 pc.oniceconnectionstatechange = onIceConnectionStateChange;
 pc.onicecandidate = onIceCandidate;
 
-// 6. Create offer
+// 7. Create offer and send immediately (Trickle ICE)
 const offer = await pc.createOffer();
 await pc.setLocalDescription(offer);
+
+const sdpResponse = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    sdp: pc.localDescription.sdp,
+    type: pc.localDescription.type,
+    initialParameters: {
+      prompts: [{ text: "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.", weight: 100 }],
+      prompt_interpolation_method: "linear",
+      denoising_step_list: [1000, 750, 500, 250],
+      manage_cache: true,
+    },
+  }),
+});
+
+const answerData = await sdpResponse.json();
+sessionId = answerData.sessionId; // Store session ID
+
+await pc.setRemoteDescription({
+  type: answerData.type,
+  sdp: answerData.sdp,
+});
+
+// Flush queued candidates
+if (queuedCandidates.length > 0) {
+  await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      candidates: queuedCandidates.map(c => ({
+        candidate: c.candidate,
+        sdpMid: c.sdpMid,
+        sdpMLineIndex: c.sdpMLineIndex,
+      })),
+    }),
+  });
+  queuedCandidates.length = 0;
+}
 ```
 
 - **Order:** Create data channel → Add transceiver/track → Set event handlers → Create offer
@@ -384,7 +463,9 @@ dataChannel.send(JSON.stringify({
 
 - `POST /api/v1/pipeline/load` - Load a pipeline
 - `GET /api/v1/pipeline/status` - Get pipeline status
-- `POST /api/v1/webrtc/offer` - Establish WebRTC connection
+- `GET /api/v1/webrtc/ice-servers` - Get ICE server configuration (includes TURN servers)
+- `POST /api/v1/webrtc/offer` - Establish WebRTC connection (returns `sessionId`)
+- `PATCH /api/v1/webrtc/offer/{session_id}` - Send ICE candidate(s) (Trickle ICE)
 - `GET /api/v1/models/status?pipeline_id=<ID>` - Check if models are downloaded
 - `POST /api/v1/models/download` - Download models for a pipeline
 - `GET /api/v1/hardware/info` - Get hardware information
