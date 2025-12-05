@@ -168,6 +168,11 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", 1.0)
 
+        # CRITICAL: Enable timestep warping (Reward-Forcing was trained with this!)
+        # This transforms [1000, 750, 500, 250] through scheduler's timestep table
+        warp_denoising_step = getattr(model_config, "warp_denoising_step", True)
+        self.state.set("warp_denoising_step", warp_denoising_step)
+
         self.state.set("height", config.height)
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))

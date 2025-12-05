@@ -360,11 +360,12 @@ class RewardForcingLoadParams(LoRAEnabledLoadParams):
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
     )
     compression_alpha: float = Field(
-        default=0.95,
+        default=0.999,
         description="EMA coefficient for sink token compression. "
         "Higher values (0.999) = preserve original prompt context longer. "
         "Lower values (0.9-0.95) = reduce error accumulation in long videos. "
-        "Typical values: 0.999 (default), 0.99 (balanced), 0.95 (anti-error).",
+        "IMPORTANT: Original Reward-Forcing was trained with 0.999. "
+        "Typical values: 0.999 (original), 0.99 (balanced), 0.95 (experimental).",
         ge=0.0,
         le=1.0,
     )

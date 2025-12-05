@@ -21,21 +21,24 @@ base_model_kwargs:
   # EMA coefficient for sink token compression
   # Higher values (e.g., 0.999) = slower update, more stable long-term context
   # Lower values (e.g., 0.9) = faster update, more recent context emphasis
-  # For long videos, use lower values (0.99-0.95) to reduce semantic drift
-  compression_alpha: 0.95
+  # IMPORTANT: Original Reward-Forcing was trained with implicit 0.999
+  compression_alpha: 0.999
 
 generator_model_name: "generator"
 
 # Frame and patch configuration
 num_frame_per_block: 3
-local_attn_size: 12
+# IMPORTANT: Original Reward-Forcing uses local_attn_size=9, not 12!
+local_attn_size: 9
 vae_spatial_downsample_factor: 8
 vae_temporal_downsample_factor: 4
 patch_embedding_spatial_downsample_factor: 2
 max_rope_freq_table_seq_len: 1024
 
 # Inference configuration (4-step denoising)
-# These timesteps are warped through the scheduler's timestep mapping
+# CRITICAL: warp_denoising_step must be true to match training!
+# This transforms [1000, 750, 500, 250] through scheduler's timestep table
+warp_denoising_step: true
 denoising_step_list:
   - 1000
   - 750
