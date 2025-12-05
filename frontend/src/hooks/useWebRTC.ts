@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   sendWebRTCOffer,
+  getIceServers,
   type PromptItem,
   type PromptTransition,
 } from "../lib/api";
@@ -48,10 +49,27 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       try {
         currentStreamRef.current = stream || null;
 
-        // Create peer connection
-        const config: RTCConfiguration = {
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        };
+        // Fetch ICE servers from backend
+        console.log("Fetching ICE servers from backend...");
+        let config: RTCConfiguration;
+        try {
+          const iceServersResponse = await getIceServers();
+          config = {
+            iceServers: iceServersResponse.iceServers,
+          };
+          console.log(
+            `Using ${iceServersResponse.iceServers.length} ICE servers from backend`
+          );
+        } catch (error) {
+          console.warn(
+            "Failed to fetch ICE servers from backend, using default STUN:",
+            error
+          );
+          // Fallback to default STUN server
+          config = {
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+          };
+        }
 
         const pc = new RTCPeerConnection(config);
         peerConnectionRef.current = pc;

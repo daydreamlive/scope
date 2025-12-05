@@ -1,4 +1,5 @@
-import type { LoRAConfig } from "../types";
+import type { LoRAConfig, IceServersResponse } from "../types";
+
 export interface PromptItem {
   text: string;
   weight: number;
@@ -80,6 +81,23 @@ export interface PipelineStatusResponse {
   loaded_lora_adapters?: { path: string; scale: number }[];
   error?: string;
 }
+
+export const getIceServers = async (): Promise<IceServersResponse> => {
+  const response = await fetch("/api/v1/webrtc/ice-servers", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get ICE servers failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
 
 export const sendWebRTCOffer = async (
   data: WebRTCOfferRequest
