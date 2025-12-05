@@ -14,6 +14,9 @@
 base_model_name: Wan2.1-T2V-1.3B
 base_model_kwargs:
   timestep_shift: 5.0
+  # CRITICAL: Original Reward-Forcing uses local_attn_size=9, not 12!
+  # This MUST be in base_model_kwargs to be passed to the model
+  local_attn_size: 9
   # Sink size: number of frames to keep as semantic anchors
   # More sink tokens = stronger semantic preservation, but uses more memory
   # Original Reward-Forcing uses 3, increase to 6 for better anti-drift
@@ -28,7 +31,7 @@ generator_model_name: "generator"
 
 # Frame and patch configuration
 num_frame_per_block: 3
-# IMPORTANT: Original Reward-Forcing uses local_attn_size=9, not 12!
+# Also set local_attn_size at top level for blocks that read from components.config
 local_attn_size: 9
 vae_spatial_downsample_factor: 8
 vae_temporal_downsample_factor: 4

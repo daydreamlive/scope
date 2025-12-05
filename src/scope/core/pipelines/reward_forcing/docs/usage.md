@@ -6,7 +6,8 @@ Reward-Forcing is a training methodology that enables high-quality video generat
 
 ## Key Features
 
-- **Fast Inference**: Only 4 denoising steps required (1000, 750, 500, 250)
+- **Fast Inference**: Only 4 denoising steps required
+- **Timestep Warping**: Input steps [1000, 750, 500, 250] → warped to [~1000, ~937, ~833, ~625]
 - **High Quality**: Maintains visual quality despite fewer steps
 - **EMA Sink Mechanism**: Enables real-time streaming with bounded memory
 - **Causal Architecture**: Custom causal model optimized for streaming
@@ -16,8 +17,8 @@ Reward-Forcing is a training methodology that enables high-quality video generat
 
 Reward-Forcing uses the Wan2.1-T2V-1.3B architecture with:
 - **Causal attention** with EMA sink tokens for bounded memory
-- **Local attention** (12 frames) for temporal coherence
-- **4-step denoising schedule** for fast generation
+- **Local attention** (9 frames) for temporal coherence
+- **4-step denoising schedule** with **timestep warping** for fast generation
 
 ### EMA Sink Mechanism
 
@@ -58,9 +59,10 @@ frames = pipeline(prompt="A panda walking in a park")
 
 The pipeline uses these default settings from `model.yaml`:
 
-- `denoising_step_list`: [1000, 750, 500, 250]
+- `denoising_step_list`: [1000, 750, 500, 250] (warped through scheduler)
+- `warp_denoising_step`: true (CRITICAL - matches training)
 - `num_frame_per_block`: 3
-- `local_attn_size`: 12
+- `local_attn_size`: 9 (original training value)
 - `sink_size`: 3
 - `compression_alpha`: 0.999
 

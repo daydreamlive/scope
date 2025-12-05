@@ -89,11 +89,16 @@ class SetTimestepsBlock(ModularPipelineBlocks):
             scheduler_timesteps = components.scheduler.timesteps.cpu()
             # Append 0 to handle the final step mapping
             timesteps_with_zero = torch.cat(
-                (scheduler_timesteps, torch.tensor([0], dtype=scheduler_timesteps.dtype))
+                (
+                    scheduler_timesteps,
+                    torch.tensor([0], dtype=scheduler_timesteps.dtype),
+                )
             )
             # Map: input [1000, 750, 500, 250] -> indices [0, 250, 500, 750]
             # Then look up actual timestep values from scheduler
-            indices = (1000 - denoising_step_list).clamp(0, len(timesteps_with_zero) - 1)
+            indices = (1000 - denoising_step_list).clamp(
+                0, len(timesteps_with_zero) - 1
+            )
             denoising_step_list = timesteps_with_zero[indices].long()
 
         if block_state.current_denoising_step_list is None or not torch.equal(
