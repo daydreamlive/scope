@@ -14,7 +14,7 @@ from scope.core.pipelines.utils import Quantization
 from scope.core.pipelines.wan2_1.vae import DEFAULT_VAE_TYPE
 
 # VAE type literal based on available VAE types
-VaeType = Literal["wan", "lightvae"]
+VaeType = Literal["wan", "lightvae", "tae"]
 
 
 class HealthResponse(BaseModel):
