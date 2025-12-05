@@ -1,0 +1,42 @@
+# Reward-Forcing Pipeline Configuration
+# Based on https://github.com/JaydenLu666/Reward-Forcing
+#
+# Reward-Forcing is a training method that enables few-step video generation
+# by learning from reward signals. The distilled model can generate high-quality
+# videos in just 4 denoising steps (vs. 50+ for standard diffusion).
+#
+# Key features:
+# - EMA sink mechanism for real-time streaming with bounded memory
+# - 4-step denoising schedule for fast inference
+# - Based on Wan2.1-T2V-1.3B architecture
+
+# Base model configuration
+base_model_name: Wan2.1-T2V-1.3B
+base_model_kwargs:
+  timestep_shift: 5.0
+  sink_size: 3
+  # EMA coefficient for sink token compression
+  # Higher values (e.g., 0.999) = slower update, more stable long-term context
+  # Lower values (e.g., 0.9) = faster update, more recent context emphasis
+  compression_alpha: 0.999
+
+generator_model_name: "generator"
+
+# Frame and patch configuration
+num_frame_per_block: 3
+local_attn_size: 12
+vae_spatial_downsample_factor: 8
+vae_temporal_downsample_factor: 4
+patch_embedding_spatial_downsample_factor: 2
+max_rope_freq_table_seq_len: 1024
+
+# Inference configuration (4-step denoising)
+# These timesteps are warped through the scheduler's timestep mapping
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+
+# Context noise: noise level for clean KV cache update (0 = no noise)
+context_noise: 0

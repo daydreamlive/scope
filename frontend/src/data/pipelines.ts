@@ -82,6 +82,22 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportedModes: ["video"],
     defaultMode: "video",
   },
+  "reward-forcing": {
+    name: "Reward-Forcing",
+    docsUrl:
+      "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/reward_forcing/docs/usage.md",
+    about:
+      "A fast video generation pipeline using reward-based distillation. Generates high-quality videos in just 4 denoising steps. Based on Wan2.1 T2V 1.3B.",
+    modified: true,
+    estimatedVram: 20,
+    requiresModels: true,
+    defaultTemporalInterpolationMethod: "slerp",
+    defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
+    // Multi-mode support
+    supportedModes: ["text", "video"],
+    defaultMode: "text",
+  },
 };
 
 export function pipelineSupportsLoRA(pipelineId: string): boolean {

@@ -437,6 +437,50 @@ class PipelineManager:
             logger.info("krea-realtime-video pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "reward-forcing":
+            from scope.core.pipelines import RewardForcingPipeline
+
+            from .models_config import get_model_file_path, get_models_dir
+
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path("Reward-Forcing-T2V-1.3B/model.safetensors")
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                }
+            )
+
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=480,
+                default_width=832,
+                default_seed=42,
+            )
+
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
+            pipeline = RewardForcingPipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("Reward-Forcing pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 

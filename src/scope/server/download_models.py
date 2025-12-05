@@ -184,6 +184,51 @@ def download_krea_realtime_video_pipeline() -> None:
     )
 
 
+def download_reward_forcing_pipeline() -> None:
+    """
+    Download models for the Reward-Forcing pipeline.
+
+    Reward-Forcing is a training method that enables few-step video generation
+    by learning from reward signals. This downloads the distilled model that
+    can generate high-quality videos in just 4 denoising steps.
+
+    Models downloaded:
+    - Wan2.1-T2V-1.3B: Base model with VAE and text encoder
+    - Reward-Forcing-T2V-1.3B: The distilled few-step generator
+    - UMT5 encoder (fp8 quantized)
+
+    Reference: https://github.com/JaydenLu666/Reward-Forcing
+    """
+    # HuggingFace repos
+    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
+    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
+    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
+    reward_forcing_repo = "JaydenLu666/Reward-Forcing-T2V-1.3B"
+
+    # Ensure models directory exists and get paths
+    models_root = ensure_models_dir()
+    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
+    wan_video_comfy_dst = models_root / "WanVideo_comfy"
+    reward_forcing_dst = models_root / "Reward-Forcing-T2V-1.3B"
+
+    # 1) HF repo download for Wan2.1-T2V-1.3B, excluding large text encoder file
+    # (we use the fp8 quantized version from WanVideo_comfy instead)
+    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    download_hf_repo_excluding(
+        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
+    )
+
+    # 2) HF single file download for UMT5 encoder (fp8 quantized)
+    download_hf_single_file(
+        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
+    )
+
+    # 3) HF repo download for Reward-Forcing distilled model
+    download_hf_repo_excluding(
+        reward_forcing_repo, reward_forcing_dst, ignore_patterns=[]
+    )
+
+
 def download_models(pipeline_id: str | None = None) -> None:
     """
     Download models. If pipeline_id is None, downloads all pipelines.
@@ -203,9 +248,12 @@ def download_models(pipeline_id: str | None = None) -> None:
         download_longlive_pipeline()
     elif pipeline_id == "krea-realtime-video":
         download_krea_realtime_video_pipeline()
+    elif pipeline_id == "reward-forcing":
+        download_reward_forcing_pipeline()
     else:
         raise ValueError(
-            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video"
+            f"Unknown pipeline: {pipeline_id}. Supported pipelines: "
+            "streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
         )
 
     print("\nAll downloads complete.")
@@ -232,7 +280,7 @@ Examples:
         "-p",
         type=str,
         default=None,
-        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive'). If not specified, downloads all pipelines.",
+        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing'). If not specified, downloads all pipelines.",
     )
 
     args = parser.parse_args()

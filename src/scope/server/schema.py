@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from scope.core.pipelines.schema import (
     KreaRealtimeVideoConfig,
     LongLiveConfig,
+    RewardForcingConfig,
     StreamDiffusionV2Config,
 )
 from scope.core.pipelines.utils import Quantization
@@ -304,6 +305,41 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
+class RewardForcingLoadParams(LoRAEnabledLoadParams):
+    """Load parameters for Reward-Forcing pipeline.
+
+    Reward-Forcing is a training method that enables few-step video generation
+    by learning from reward signals. The distilled model can generate high-quality
+    videos in just 4 denoising steps (vs. 50+ for standard diffusion).
+
+    Defaults are derived from RewardForcingConfig to ensure consistency.
+
+    Reference: https://github.com/JaydenLu666/Reward-Forcing
+    """
+
+    height: int = Field(
+        default=RewardForcingConfig.model_fields["height"].default,
+        description="Target video height",
+        ge=16,
+        le=2048,
+    )
+    width: int = Field(
+        default=RewardForcingConfig.model_fields["width"].default,
+        description="Target video width",
+        ge=16,
+        le=2048,
+    )
+    seed: int = Field(
+        default=RewardForcingConfig.model_fields["base_seed"].default,
+        description="Random seed for generation",
+        ge=0,
+    )
+    quantization: Quantization | None = Field(
+        default=None,
+        description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -315,6 +351,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | RewardForcingLoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 

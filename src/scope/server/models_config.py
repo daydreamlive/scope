@@ -116,6 +116,14 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
             models_dir / "Wan2.1-T2V-1.3B" / "config.json",
         ]
 
+    # reward-forcing pipeline
+    if pipeline_id == "reward-forcing":
+        return [
+            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
+            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
+            models_dir / "Reward-Forcing-T2V-1.3B" / "model.safetensors",
+        ]
+
     # Default: nothing is required
     return []
 
