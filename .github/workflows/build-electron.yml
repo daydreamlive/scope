@@ -1,0 +1,97 @@
+name: Build Electron App
+
+on:
+  # Trigger on version tags (e.g., v0.1.0, v1.2.3)
+  push:
+    tags:
+      - 'v*.*.*'
+  # Allow manual triggering from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.1.0-alpha.8)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for electron-builder to generate proper version info
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+          cache: 'npm'
+          cache-dependency-path: |
+            app/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Security audit - Frontend
+        working-directory: ./frontend
+        run: npm audit --audit-level=moderate
+        continue-on-error: true  # Don't fail build on audit issues, but report them
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Install app dependencies
+        working-directory: ./app
+        run: npm ci
+
+      - name: Security audit - Electron App
+        working-directory: ./app
+        run: npm audit --audit-level=moderate
+        continue-on-error: true  # Don't fail build on audit issues, but report them
+
+      - name: Run tests
+        working-directory: ./app
+        run: npm test
+
+      - name: Build application
+        working-directory: ./app
+        run: npm run compile
+
+      - name: Build Electron app (Windows)
+        if: matrix.os == 'windows-latest' && !startsWith(github.ref, 'refs/tags/v')
+        working-directory: ./app
+        run: npm run dist:win
+        env:
+          # Windows code signing (optional)
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Build and Publish Electron app (Windows)
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: ./app
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # Windows code signing (optional)
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets. _KEY_PASSWORD }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-artifacts
+          path: |
+            app/dist/**/*
+          retention-days: 30
+          if-no-files-found: error

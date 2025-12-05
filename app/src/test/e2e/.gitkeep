@@ -1,0 +1,6 @@
+# E2E tests will be added here
+#
+# Example test structure:
+# - app.spec.ts - Basic app launch and navigation tests
+# - setup.spec.ts - Setup wizard flow tests
+# - server.spec.ts - Server startup and health check tests
