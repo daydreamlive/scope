@@ -22,7 +22,7 @@ base_model_kwargs:
   # Higher values (e.g., 0.999) = slower update, more stable long-term context
   # Lower values (e.g., 0.9) = faster update, more recent context emphasis
   # For long videos, use lower values (0.99-0.95) to reduce semantic drift
-  compression_alpha: 0.99
+  compression_alpha: 0.95
 
 generator_model_name: "generator"
 
