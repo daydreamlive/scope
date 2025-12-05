@@ -83,7 +83,8 @@ class SetTimestepsBlock(ModularPipelineBlocks):
         # Apply timestep warping if enabled (Reward-Forcing requires this!)
         # This maps the raw step values [1000, 750, 500, 250] through the scheduler's
         # timestep table to get the actual sigma values used during training.
-        warp_denoising_step = state.get("warp_denoising_step", True)
+        # NOTE: Default is False - only Reward-Forcing sets this to True
+        warp_denoising_step = state.get("warp_denoising_step", False)
         if warp_denoising_step and hasattr(components.scheduler, "timesteps"):
             scheduler_timesteps = components.scheduler.timesteps.cpu()
             # Append 0 to handle the final step mapping
