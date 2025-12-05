@@ -42,6 +42,7 @@ export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  vae_type?: string;
 }
 
 export interface LongLiveLoadParams extends PipelineLoadParams {
@@ -51,6 +52,7 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  vae_type?: string;
 }
 
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
@@ -60,6 +62,7 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  vae_type?: string;
 }
 
 export interface PipelineLoadRequest {
@@ -307,3 +310,24 @@ export const getPipelineSchemas =
     const result = await response.json();
     return result;
   };
+
+export interface VaeTypesResponse {
+  vae_types: string[];
+}
+
+export const getVaeTypes = async (): Promise<VaeTypesResponse> => {
+  const response = await fetch("/api/v1/vae/types", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get VAE types failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};

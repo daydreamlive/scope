@@ -22,6 +22,7 @@ import type {
   PipelineId,
   LoRAConfig,
   LoraMergeStrategy,
+  VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -50,8 +51,13 @@ function buildLoRAParams(
 
 export function StreamPage() {
   // Use the stream state hook for settings management
-  const { settings, updateSettings, getDefaults, supportsNoiseControls } =
-    useStreamState();
+  const {
+    settings,
+    updateSettings,
+    getDefaults,
+    supportsNoiseControls,
+    vaeTypes,
+  } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -410,6 +416,11 @@ export function StreamPage() {
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
+  const handleVaeTypeChange = (vaeType: VaeType) => {
+    updateSettings({ vaeType });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
   const handleKvCacheAttentionBiasChange = (bias: number) => {
     updateSettings({ kvCacheAttentionBias: bias });
     // Send KV cache attention bias update to backend
@@ -588,10 +599,11 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vae_type: settings.vaeType ?? "wan",
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, vae_type: ${loadParams.vae_type}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -607,10 +619,11 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vae_type: settings.vaeType ?? "wan",
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, vae_type: ${loadParams.vae_type}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -621,10 +634,11 @@ export function StreamPage() {
             settings.quantization !== undefined
               ? settings.quantization
               : "fp8_e4m3fn",
+          vae_type: settings.vaeType ?? "wan",
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, vae_type: ${loadParams.vae_type}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
       }
 
@@ -945,6 +959,9 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
+            vaeType={settings.vaeType ?? "wan"}
+            onVaeTypeChange={handleVaeTypeChange}
+            vaeTypes={vaeTypes}
           />
         </div>
       </div>

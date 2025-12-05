@@ -77,4 +77,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Runtime adjustment is disabled with Permanent Merge strategy. LoRA scales are fixed at load time. Typical values: 0.0 = no effect, 1.0 = full strength. Full range -10.0 to 10.0 available depending on LoRA specifications.",
   },
+  vaeType: {
+    label: "VAE:",
+    tooltip:
+      "VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality.",
+  },
 };

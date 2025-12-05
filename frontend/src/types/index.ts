@@ -7,6 +7,9 @@ export type PipelineId =
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";
 
+// VAE type for model selection (dynamic from backend registry)
+export type VaeType = string;
+
 export interface SystemMetrics {
   cpu: number;
   gpu: number;
@@ -52,6 +55,8 @@ export interface SettingsState {
   loraMergeStrategy?: LoraMergeStrategy;
   // Track current input mode (text vs video)
   inputMode?: InputMode;
+  // VAE type selection
+  vaeType?: VaeType;
 }
 
 export interface PipelineInfo {
