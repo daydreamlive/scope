@@ -9,6 +9,9 @@ from .prepare_next import PrepareNextBlock
 from .prepare_video_latents import PrepareVideoLatentsBlock
 from .preprocess_video import PreprocessVideoBlock
 from .set_timesteps import SetTimestepsBlock
+from .set_transformer_blocks_local_attn_size import (
+    SetTransformerBlocksLocalAttnSizeBlock,
+)
 from .setup_caches import SetupCachesBlock
 from .text_conditioning import TextConditioningBlock
 
@@ -27,4 +30,5 @@ __all__ = [
     "SetTimestepsBlock",
     "SetupCachesBlock",
     "TextConditioningBlock",
+    "SetTransformerBlocksLocalAttnSizeBlock",
 ]
