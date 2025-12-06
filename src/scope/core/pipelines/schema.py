@@ -345,6 +345,56 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         }
 
 
+class RewardForcingConfig(BasePipelineConfig):
+    """Configuration for RewardForcing pipeline.
+
+    RewardForcing supports both text-to-video and video-to-video modes.
+    Default mode is text (T2V was the original training focus).
+    """
+
+    pipeline_id: ClassVar[str] = "reward-forcing"
+    pipeline_name: ClassVar[str] = "RewardForcing"
+    pipeline_description: ClassVar[str] = (
+        "Efficient streaming video generation with rewarded distribution matching distillation"
+    )
+
+    # Mode support
+    supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
+    default_mode: ClassVar[InputMode] = "text"
+
+    # LongLive defaults (text mode baseline)
+    height: int = Field(default=320, ge=1, description="Output height in pixels")
+    width: int = Field(default=576, ge=1, description="Output width in pixels")
+    denoising_steps: list[int] | None = Field(
+        default=[1000, 750, 500, 250],
+        description="Denoising step schedule for progressive generation",
+    )
+    # noise_scale is None by default (text mode), overridden in video mode
+    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
+        default=None,
+        description="Amount of noise to add during video generation (video mode only)",
+    )
+
+    @classmethod
+    def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
+        """RewardForcing mode-specific defaults."""
+        return {
+            "text": ModeDefaults(
+                # Text mode: no video input, no noise controls
+                noise_scale=None,
+                noise_controller=None,
+            ),
+            "video": ModeDefaults(
+                # Video mode: requires input frames, noise controls active
+                height=512,
+                width=512,
+                noise_scale=0.7,
+                noise_controller=True,
+                denoising_steps=[1000, 750],
+            ),
+        }
+
+
 class PassthroughConfig(BasePipelineConfig):
     """Configuration for Passthrough pipeline (testing).
 
@@ -373,6 +423,7 @@ PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "longlive": LongLiveConfig,
     "streamdiffusionv2": StreamDiffusionV2Config,
     "krea-realtime-video": KreaRealtimeVideoConfig,
+    "reward-forcing": RewardForcingConfig,
     "passthrough": PassthroughConfig,
 }
 

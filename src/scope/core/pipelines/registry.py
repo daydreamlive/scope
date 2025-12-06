@@ -71,6 +71,7 @@ def _register_pipelines():
     from .krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
     from .longlive.pipeline import LongLivePipeline
     from .passthrough.pipeline import PassthroughPipeline
+    from .reward_forcing.pipeline import RewardForcingPipeline
     from .streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
     # Register each pipeline with its ID from its config class
@@ -79,6 +80,7 @@ def _register_pipelines():
         KreaRealtimeVideoPipeline,
         StreamDiffusionV2Pipeline,
         PassthroughPipeline,
+        RewardForcingPipeline,
     ]:
         config_class = pipeline_class.get_config_class()
         PipelineRegistry.register(config_class.pipeline_id, pipeline_class)
