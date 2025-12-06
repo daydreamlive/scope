@@ -99,7 +99,7 @@ class SetTimestepsBlock(ModularPipelineBlocks):
             indices = (1000 - denoising_step_list).clamp(
                 0, len(timesteps_with_zero) - 1
             )
-            denoising_step_list = timesteps_with_zero[indices].long()
+            denoising_step_list = timesteps_with_zero[indices]
 
         if block_state.current_denoising_step_list is None or not torch.equal(
             block_state.current_denoising_step_list, denoising_step_list

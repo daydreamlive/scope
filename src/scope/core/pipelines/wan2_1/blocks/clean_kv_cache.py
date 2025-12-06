@@ -1,10 +1,7 @@
 from typing import Any
 
 import torch
-from diffusers.modular_pipelines import (
-    ModularPipelineBlocks,
-    PipelineState,
-)
+from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     ConfigSpec,
@@ -71,6 +68,12 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Conditioning embeddings to condition denoising",
             ),
+            InputParam(
+                "context_noise",
+                default=0,
+                type_hint=int,
+                description="Noise level for clean KV cache update (0 = no noise)",
+            ),
         ]
 
     @property
@@ -97,16 +100,14 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
         # This is defined to give us timestep = 0 while matching shape expected by the generator.
         # After denoising the KV cache will contain keys/values computed from the noisy input at the final timestep.
         # We want to update the generator with the key/values computed from the final "clean" latent (no noise) which
-        # corresponds with timestep = 0.
-        # The multiplication by 0 gives us timestep = 0 and is included to illustrate that we could also multiply by
-        # a different value (typically a context_noise param).
+        # corresponds with timestep = 0 (or context_noise if specified).
         context_timestep = (
             torch.ones(
                 [1, num_frames],
                 device=generator_param.device,
                 dtype=generator_param.dtype,
             )
-            * 0
+            * block_state.context_noise
         )
 
         # Run the generator with the clean latent at timestep = 0 to update the KV cache
