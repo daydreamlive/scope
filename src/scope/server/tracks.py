@@ -42,6 +42,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._first_frame_time: float | None = None
         self._first_output_time: float | None = None
         self._init_time = time.time()
+        self.output_frame_count = 0
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
@@ -131,7 +132,6 @@ class VideoProcessingTrack(MediaStreamTrack):
         # Lazy initialization on first call
         self.initialize_output_processing()
 
-        output_frame_count = 0
         while self.input_task_running:
             try:
                 # Update FPS from FrameProcessor
@@ -154,10 +154,10 @@ class VideoProcessingTrack(MediaStreamTrack):
                         frame = VideoFrame.from_ndarray(
                             frame_tensor.numpy(), format="rgb24"
                         )
-                        output_frame_count += 1
+                        self.output_frame_count += 1
 
                         # Log first output frame timing
-                        if output_frame_count == 1:
+                        if self.output_frame_count == 1:
                             self._first_output_time = time.time()
                             logger.info(
                                 f"[TIMING] First output frame "

@@ -44,8 +44,8 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
     """Pipeline for Reward-Forcing video generation.
 
     This pipeline generates videos using a distilled model that can produce
-    high-quality results in just 4 denoising steps. It shares the same
-    architecture as LongLive but uses differently trained weights.
+    high-quality results in just 4 denoising steps. It uses RewardForcingCausalModel
+    which supports EMA sink, but with RecacheFramesBlock ensuring context refresh.
     """
 
     @classmethod

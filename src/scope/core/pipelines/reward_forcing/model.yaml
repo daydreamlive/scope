@@ -14,9 +14,10 @@
 base_model_name: Wan2.1-T2V-1.3B
 base_model_kwargs:
   timestep_shift: 5.0
-  # CRITICAL: Original Reward-Forcing uses local_attn_size=9, not 12!
+  # CRITICAL: Original Reward-Forcing uses local_attn_size=9.
+  # CHANGED: Using 12 to match LongLive strategy for stability.
   # This MUST be in base_model_kwargs to be passed to the model
-  local_attn_size: 9
+  local_attn_size: 12
   # Sink size: number of frames to keep as semantic anchors
   # More sink tokens = stronger semantic preservation, but uses more memory
   # Original Reward-Forcing uses 3, increase to 6 for better anti-drift
@@ -25,14 +26,16 @@ base_model_kwargs:
   # Higher values (e.g., 0.999) = slower update, more stable long-term context
   # Lower values (e.g., 0.9) = faster update, more recent context emphasis
   # IMPORTANT: Original Reward-Forcing was trained with implicit 0.999
-  compression_alpha: 0.999
+  # BUT: For interactive prompt updates, 0.999 is too sticky and causes artifacts.
+  # Using 0.9 to allow faster adaptation to new prompts.
+  compression_alpha: 0.9
 
 generator_model_name: "generator"
 
 # Frame and patch configuration
 num_frame_per_block: 3
 # Also set local_attn_size at top level for blocks that read from components.config
-local_attn_size: 9
+local_attn_size: 12
 vae_spatial_downsample_factor: 8
 vae_temporal_downsample_factor: 4
 patch_embedding_spatial_downsample_factor: 2
