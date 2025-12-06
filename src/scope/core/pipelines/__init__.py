@@ -12,6 +12,10 @@ def __getattr__(name):
         from .krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
 
         return KreaRealtimeVideoPipeline
+    elif name == "RewardForcingPipeline":
+        from .reward_forcing.pipeline import RewardForcingPipeline
+
+        return RewardForcingPipeline
     elif name == "StreamDiffusionV2Pipeline":
         from .streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 
@@ -48,6 +52,7 @@ __all__ = [
     # Pipeline classes
     "LongLivePipeline",
     "KreaRealtimeVideoPipeline",
+    "RewardForcingPipeline",
     "StreamDiffusionV2Pipeline",
     "PassthroughPipeline",
     # Config classes
