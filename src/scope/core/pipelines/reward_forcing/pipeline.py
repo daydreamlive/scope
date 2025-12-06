@@ -167,6 +167,7 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", 1.0)
+        self.state.set("context_noise", getattr(model_config, "context_noise", 0))
 
         # CRITICAL: Enable timestep warping (Reward-Forcing was trained with this!)
         # This transforms [1000, 750, 500, 250] through scheduler's timestep table
