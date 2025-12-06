@@ -11,13 +11,13 @@ from ..wan2_1.blocks import (
     EmbeddingBlendingBlock,
     PrepareNextBlock,
     SetTimestepsBlock,
+    SetTransformerBlocksLocalAttnSizeBlock,
     SetupCachesBlock,
     TextConditioningBlock,
 )
 from .blocks import (
     PrepareRecacheFramesBlock,
     RecacheFramesBlock,
-    SetTransformerBlocksLocalAttnSizeBlock,
 )
 
 logger = diffusers_logging.get_logger(__name__)
