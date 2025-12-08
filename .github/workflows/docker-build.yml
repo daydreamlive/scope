@@ -1,21 +1,16 @@
 name: Build and Push Docker Image
 
 on:
-  push:
-    branches:
-      - 'main'
-      - 'master'
-      - 'release/*'
-      - '@tony/*'    # Build branches starting with @tony/
-      - 'perf/*'     # Build performance related branches
-    tags:
-      - 'v*'         # Build version tags
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Manual tag override (optional)'
-        required: false
+      version:
+        description: 'Version tag for the Docker image'
+        required: true
         type: string
+        default: 'latest'
+  push:
+    branches:
+      - main
 
 jobs:
   build-and-push:
@@ -30,49 +25,45 @@ jobs:
 
       - name: Clean up before build
         run: |
+          # Clean up unused packages to avoid disk space issues
           sudo rm -rf /usr/local/.ghcup
           sudo rm -rf /opt/hostedtoolcache/CodeQL
           sudo rm -rf /usr/local/lib/android/sdk/ndk
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+
+          # Show disk usage before build
+          echo "Disk usage before build:"
           df -h
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: daydreamlive
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
-      - name: Generate Sanitized Tag
-        id: sanitize_tag
+      - name: Set image tag
+        id: tag
         run: |
-          # Get branch name from GITHUB_REF
-          REF_NAME=${GITHUB_REF#refs/heads/}
-          # Remove leading @ if present
-          CLEAN_REF=${REF_NAME#@}
-          # Replace / with -
-          SANITIZED_TAG=${CLEAN_REF//\//-}
-          echo "Calculated tag: $SANITIZED_TAG"
-          echo "tag=$SANITIZED_TAG" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.version }}"
+            TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
+          else
+            TAG="main"
+            TAGS="daydreamlive/scope:main"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      - name: Extract metadata (tags, labels)
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: tonyabracadabra/scope
+          images: daydreamlive/scope
           tags: |
-            # Use our manually sanitized tag for branches
-            type=raw,value=${{ steps.sanitize_tag.outputs.tag }},enable=${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
-
-            # Tag "latest" only on default branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            # Git tag (v1.0.0)
-            type=ref,event=tag
-            # Short SHA
-            type=sha,prefix=sha-
-            # Manual input override
-            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+            type=raw,value=${{ steps.tag.outputs.tag }}
+            ${{ github.event_name == 'workflow_dispatch' && 'type=raw,value=latest' || '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -80,11 +71,6 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Improve caching configuration
-          cache-from: |
-            type=gha
-            type=registry,ref=tonyabracadabra/scope:build-cache-${{ steps.sanitize_tag.outputs.tag }}
-            type=registry,ref=tonyabracadabra/scope:build-cache-main
-          cache-to: type=registry,ref=tonyabracadabra/scope:build-cache-${{ steps.sanitize_tag.outputs.tag }},mode=max
+          tags: ${{ steps.tag.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
