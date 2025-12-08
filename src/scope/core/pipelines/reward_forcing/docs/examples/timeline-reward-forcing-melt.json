@@ -1,0 +1,50 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 5.337300000011921,
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp",
+      "prompts": [
+        {
+          "text": "A close-up of a perfect ice cube sitting on a polished granite counter, edges sharp and crystalline.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 5.337300000011921,
+      "endTime": 15.769400000035763,
+      "prompts": [
+        {
+          "text": "In the same close-up view, the ice cube slowly melts, forming a growing puddle of water around its base.",
+          "weight": 100
+        }
+      ],
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp"
+    }
+  ],
+  "settings": {
+    "pipelineId": "reward-forcing",
+    "inputMode": "text",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750,
+      500,
+      250
+    ],
+    "manageCache": true,
+    "quantization": null,
+    "kvCacheAttentionBias": 0.3,
+    "loras": [],
+    "loraMergeStrategy": "permanent_merge"
+  },
+  "version": "2.1",
+  "exportedAt": "2025-12-08T16:24:52.015Z"
+}

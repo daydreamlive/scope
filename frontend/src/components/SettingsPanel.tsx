@@ -23,13 +23,13 @@ import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
 import type {
   PipelineId,
   LoRAConfig,
   LoraMergeStrategy,
   SettingsState,
+  InputMode,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
 
@@ -41,7 +41,8 @@ interface SettingsPanelProps {
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
   isDownloading?: boolean;
-  resolution?: {
+  // Resolution is required - parent should always provide from schema defaults
+  resolution: {
     height: number;
     width: number;
   };
@@ -50,6 +51,8 @@ interface SettingsPanelProps {
   onSeedChange?: (seed: number) => void;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
+  // Default denoising steps for reset functionality - derived from backend schema
+  defaultDenoisingSteps: number[];
   noiseScale?: number;
   onNoiseScaleChange?: (noiseScale: number) => void;
   noiseController?: boolean;
@@ -64,6 +67,10 @@ interface SettingsPanelProps {
   loras?: LoRAConfig[];
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
+  // Input mode for conditional rendering of noise controls
+  inputMode?: InputMode;
+  // Whether this pipeline supports noise controls in video mode (schema-derived)
+  supportsNoiseControls?: boolean;
   // Spout settings
   spoutOutput?: SettingsState["spoutOutput"];
   onSpoutOutputChange?: (spoutOutput: SettingsState["spoutOutput"]) => void;
@@ -81,6 +88,7 @@ export function SettingsPanel({
   onSeedChange,
   denoisingSteps = [700, 500],
   onDenoisingStepsChange,
+  defaultDenoisingSteps,
   noiseScale = 0.7,
   onNoiseScaleChange,
   noiseController = true,
@@ -95,12 +103,11 @@ export function SettingsPanel({
   loras = [],
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
+  inputMode,
+  supportsNoiseControls = false,
   spoutOutput,
   onSpoutOutputChange,
 }: SettingsPanelProps) {
-  // Use pipeline-specific default if resolution is not provided
-  const effectiveResolution = resolution || getDefaultResolution(pipelineId);
-
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
@@ -126,7 +133,8 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
     const maxValue = 2048;
@@ -155,14 +163,14 @@ export function SettingsPanel({
 
     // Always update the value (even if invalid)
     onResolutionChange?.({
-      ...effectiveResolution,
+      ...resolution,
       [dimension]: value,
     });
   };
 
   const incrementResolution = (dimension: "height" | "width") => {
     const maxValue = 2048;
-    const newValue = Math.min(maxValue, effectiveResolution[dimension] + 1);
+    const newValue = Math.min(maxValue, resolution[dimension] + 1);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -170,10 +178,11 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
-    const newValue = Math.max(minValue, effectiveResolution[dimension] - 1);
+    const newValue = Math.max(minValue, resolution[dimension] - 1);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -321,7 +330,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2">
@@ -346,7 +356,7 @@ export function SettingsPanel({
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.height}
+                        value={resolution.height}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
@@ -395,7 +405,7 @@ export function SettingsPanel({
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.width}
+                        value={resolution.width}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
@@ -478,7 +488,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -540,16 +551,18 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
-            defaultValues={getDefaultDenoisingSteps(pipelineId)}
+            defaultValues={defaultDenoisingSteps}
             tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
           />
         )}
 
-        {pipelineId === "streamdiffusionv2" && (
+        {/* Noise controls - show for video mode on supported pipelines (schema-derived) */}
+        {inputMode === "video" && supportsNoiseControls && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -593,7 +606,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">

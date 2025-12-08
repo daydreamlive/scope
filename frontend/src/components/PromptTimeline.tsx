@@ -408,6 +408,7 @@ export function PromptTimeline({
       settings: settings
         ? {
             pipelineId: settings.pipelineId,
+            inputMode: settings.inputMode,
             resolution: settings.resolution,
             seed: settings.seed,
             denoisingSteps: settings.denoisingSteps,
@@ -421,7 +422,7 @@ export function PromptTimeline({
             // Exclude paused state as it's runtime-specific
           }
         : undefined,
-      version: "2.0", // Updated version to indicate settings inclusion
+      version: "2.1", // Updated version to indicate inputMode inclusion
       exportedAt: new Date().toISOString(),
     };
 

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   sendWebRTCOffer,
+  sendIceCandidates,
+  getIceServers,
   type PromptItem,
   type PromptTransition,
 } from "../lib/api";
@@ -38,6 +40,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const currentStreamRef = useRef<MediaStream | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const queuedCandidatesRef = useRef<RTCIceCandidate[]>([]);
 
   const startStream = useCallback(
     async (initialParameters?: InitialParameters, stream?: MediaStream) => {
@@ -48,10 +52,27 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       try {
         currentStreamRef.current = stream || null;
 
-        // Create peer connection
-        const config: RTCConfiguration = {
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        };
+        // Fetch ICE servers from backend
+        console.log("Fetching ICE servers from backend...");
+        let config: RTCConfiguration;
+        try {
+          const iceServersResponse = await getIceServers();
+          config = {
+            iceServers: iceServersResponse.iceServers,
+          };
+          console.log(
+            `Using ${iceServersResponse.iceServers.length} ICE servers from backend`
+          );
+        } catch (error) {
+          console.warn(
+            "Failed to fetch ICE servers from backend, using default STUN:",
+            error
+          );
+          // Fallback to default STUN server
+          config = {
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+          };
+        }
 
         const pc = new RTCPeerConnection(config);
         peerConnectionRef.current = pc;
@@ -155,22 +176,21 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         }: RTCPeerConnectionIceEvent) => {
           if (candidate) {
             console.log("ICE candidate:", candidate);
-          } else {
-            // ICE gathering complete - now send the offer
-            console.log("ICE gathering complete, sending offer to server");
-            try {
-              const answer = await sendWebRTCOffer({
-                sdp: pc.localDescription!.sdp,
-                type: pc.localDescription!.type,
-                initialParameters,
-              });
 
-              console.log("Received server answer:", answer);
-              await pc.setRemoteDescription(answer);
-            } catch (error) {
-              console.error("Error in offer/answer exchange:", error);
-              setIsConnecting(false);
+            // Trickle ICE: Send candidate to server immediately
+            if (sessionIdRef.current) {
+              try {
+                await sendIceCandidates(sessionIdRef.current, candidate);
+                console.log("Sent ICE candidate to server");
+              } catch (error) {
+                console.error("Failed to send ICE candidate:", error);
+              }
+            } else {
+              console.log("Session ID not available yet, queuing candidate");
+              queuedCandidatesRef.current.push(candidate);
             }
+          } else {
+            console.log("ICE gathering complete");
           }
         };
 
@@ -183,6 +203,44 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         // Create offer and start ICE gathering
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+
+        // Trickle ICE: Send offer immediately without waiting for ICE gathering
+        console.log("Sending offer to server");
+        try {
+          const answer = await sendWebRTCOffer({
+            sdp: pc.localDescription!.sdp,
+            type: pc.localDescription!.type,
+            initialParameters,
+          });
+
+          console.log("Received server answer:", answer);
+
+          // Store session ID for sending candidates
+          sessionIdRef.current = answer.sessionId;
+          console.log("Session ID:", answer.sessionId);
+
+          // Flush any queued ICE candidates
+          if (queuedCandidatesRef.current.length > 0) {
+            try {
+              await sendIceCandidates(
+                sessionIdRef.current,
+                queuedCandidatesRef.current
+              );
+              console.log("Sent queued ICE candidates to server");
+            } catch (error) {
+              console.error("Failed to send queued ICE candidates:", error);
+            }
+            queuedCandidatesRef.current = [];
+          }
+
+          await pc.setRemoteDescription({
+            sdp: answer.sdp,
+            type: answer.type as RTCSdpType,
+          });
+        } catch (error) {
+          console.error("Error in offer/answer exchange:", error);
+          setIsConnecting(false);
+        }
       } catch (error) {
         console.error("Failed to start stream:", error);
         setIsConnecting(false);
@@ -278,6 +336,12 @@ export function useWebRTC(options?: UseWebRTCOptions) {
 
     // Clear current stream reference (but don't stop it - that's handled by useLocalVideo)
     currentStreamRef.current = null;
+
+    // Clear session ID
+    sessionIdRef.current = null;
+
+    // Clear any queued ICE candidates
+    queuedCandidatesRef.current = [];
 
     setRemoteStream(null);
     setConnectionState("new");

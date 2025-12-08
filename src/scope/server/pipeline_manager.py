@@ -14,6 +14,11 @@ from omegaconf import OmegaConf
 logger = logging.getLogger(__name__)
 
 
+def get_device() -> torch.device:
+    """Get the appropriate device (CUDA if available, CPU otherwise)."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 class PipelineNotAvailableException(Exception):
     """Exception raised when pipeline is not available for processing."""
 
@@ -328,7 +333,7 @@ class PipelineManager:
             pipeline = PassthroughPipeline(
                 height=height,
                 width=width,
-                device=torch.device("cuda"),
+                device=get_device(),
                 dtype=torch.bfloat16,
             )
             logger.info("Passthrough pipeline initialized")
@@ -435,6 +440,55 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("krea-realtime-video pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "reward-forcing":
+            from scope.core.pipelines import (
+                RewardForcingPipeline,
+            )
+
+            from .models_config import get_model_file_path, get_models_dir
+
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    "vae_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+                    ),
+                }
+            )
+
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=320,
+                default_width=576,
+                default_seed=42,
+            )
+
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
+            pipeline = RewardForcingPipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("RewardForcing pipeline initialized")
             return pipeline
 
         else:

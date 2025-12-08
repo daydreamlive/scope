@@ -11,9 +11,10 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 ## Features
 
 - Autoregressive video diffusion models
-  - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md) (video-to-video)
-  - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video)
+  - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md) (text-to-video, video-to-video)
+  - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video, video-to-video)
   - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
+  - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video)
 - WebRTC real-time streaming
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
@@ -106,6 +107,9 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 5. **Access the app**: Wait for deployment to complete, then open the app at port 8000
 
 The template will configure everything needed and the frontend will present a dialog for downloading model weights for pipelines when running them (by pressing play with the pipeline selected) for the first time.
+
+> [!IMPORTANT]
+> The template will store model files under `/workspace/models` because RunPod mounts a volume disk at `/workspace` allowing any files there to be retained across pod restarts.
 
 > [!NOTE]
 > If you want to use the version from the main branch, you need to use the `daydreamlive/scope:main` docker image. You can configure this in the RunPod template by editing the Docker image setting.

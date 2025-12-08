@@ -1,0 +1,114 @@
+"""AutoPipelineBlocks for video preprocessing and latent preparation routing.
+
+This module provides block-level routing between text-to-video and video-to-video
+workflows at two critical points:
+1. Video preprocessing (before SetupCachesBlock)
+2. Latent preparation (after SetupCachesBlock)
+
+This split maintains the correct execution order from the original unified workflow.
+"""
+
+from typing import Any
+
+from diffusers.modular_pipelines import (
+    AutoPipelineBlocks,
+    ModularPipelineBlocks,
+    PipelineState,
+    SequentialPipelineBlocks,
+)
+
+from .noise_scale_controller import NoiseScaleControllerBlock
+from .prepare_latents import PrepareLatentsBlock
+from .prepare_video_latents import PrepareVideoLatentsBlock
+from .preprocess_video import PreprocessVideoBlock
+
+
+class NoOpBlock(ModularPipelineBlocks):
+    model_name = "Wan2.1"
+
+    @property
+    def description(self) -> str:
+        return "NoOpBlock is a block that does nothing"
+
+    def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
+        return components, state
+
+
+class VideoPreprocessingWorkflow(SequentialPipelineBlocks):
+    """Video preprocessing workflow for V2V mode.
+
+    Preprocesses input video and applies motion-aware noise control.
+    Runs BEFORE SetupCachesBlock.
+    """
+
+    block_classes = [
+        PreprocessVideoBlock,
+        NoiseScaleControllerBlock,
+    ]
+
+    block_names = [
+        "preprocess_video",
+        "noise_scale_controller",
+    ]
+
+
+class AutoPreprocessVideoBlock(AutoPipelineBlocks):
+    """Auto-routing block for video preprocessing.
+
+    Routes to video preprocessing workflow when 'video' input is provided,
+    otherwise skips (AutoPipelineBlocks auto-skips when no trigger matches).
+    This runs BEFORE SetupCachesBlock.
+    """
+
+    block_classes = [
+        VideoPreprocessingWorkflow,
+        NoOpBlock,
+    ]
+
+    block_names = [
+        "video_preprocessing",
+        "noop",
+    ]
+
+    block_trigger_inputs = ["video", None]
+
+    @property
+    def description(self):
+        return (
+            "AutoPreprocessVideoBlock: Routes video preprocessing before cache setup:\n"
+            " - Routes to video preprocessing when 'video' input is provided\n"
+            " - Skips preprocessing when no 'video' input is provided\n"
+        )
+
+
+class AutoPrepareLatentsBlock(AutoPipelineBlocks):
+    """Auto-routing block for latent preparation.
+
+    Routes between text-to-video and video-to-video latent preparation
+    based on whether 'video' input is provided. This runs AFTER SetupCachesBlock.
+
+    Uses blocks directly instead of wrapper workflows since each path is a single block.
+    """
+
+    block_classes = [
+        PrepareVideoLatentsBlock,
+        PrepareLatentsBlock,
+    ]
+
+    block_names = [
+        "prepare_video_latents",
+        "prepare_latents",
+    ]
+
+    block_trigger_inputs = [
+        "video",
+        None,
+    ]
+
+    @property
+    def description(self):
+        return (
+            "AutoPrepareLatentsBlock: Routes latent preparation after cache setup:\n"
+            " - Routes to PrepareVideoLatentsBlock when 'video' input is provided\n"
+            " - Routes to PrepareLatentsBlock when no 'video' input is provided\n"
+        )

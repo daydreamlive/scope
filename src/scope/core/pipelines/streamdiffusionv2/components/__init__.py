@@ -1,3 +1,3 @@
-from .vae import WanVAEWrapper
+from .vae import StreamDiffusionV2WanVAEWrapper
 
-__all__ = ["WanVAEWrapper"]
+__all__ = ["StreamDiffusionV2WanVAEWrapper"]

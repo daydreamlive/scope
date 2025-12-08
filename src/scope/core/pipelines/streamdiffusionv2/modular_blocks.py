@@ -3,14 +3,13 @@ from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 from diffusers.utils import logging as diffusers_logging
 
 from ..wan2_1.blocks import (
+    AutoPrepareLatentsBlock,
+    AutoPreprocessVideoBlock,
     CleanKVCacheBlock,
     DecodeBlock,
     DenoiseBlock,
     EmbeddingBlendingBlock,
-    NoiseScaleControllerBlock,
     PrepareNextBlock,
-    PrepareVideoLatentsBlock,
-    PreprocessVideoBlock,
     SetTimestepsBlock,
     SetupCachesBlock,
     TextConditioningBlock,
@@ -18,16 +17,17 @@ from ..wan2_1.blocks import (
 
 logger = diffusers_logging.get_logger(__name__)
 
-# Main pipeline blocks for V2V workflow
+# Main pipeline blocks with multi-mode support (text-to-video and video-to-video)
+# AutoPreprocessVideoBlock: Routes to video preprocessing when 'video' input provided
+# AutoPrepareLatentsBlock: Routes to PrepareVideoLatentsBlock or PrepareLatentsBlock
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("embedding_blending", EmbeddingBlendingBlock),
         ("set_timesteps", SetTimestepsBlock),
-        ("preprocess_video", PreprocessVideoBlock),
-        ("noise_scale_controller", NoiseScaleControllerBlock),
+        ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("setup_caches", SetupCachesBlock),
-        ("prepare_video_latents", PrepareVideoLatentsBlock),
+        ("auto_prepare_latents", AutoPrepareLatentsBlock),
         ("denoise", DenoiseBlock),
         ("clean_kv_cache", CleanKVCacheBlock),
         ("decode", DecodeBlock),

@@ -103,9 +103,8 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
             input_video = input_video[:, :, indices]
 
         # Encode frames to latents using VAE
+        # VAE returns [B, F, C, H, W] which is what DenoiseBlock/Generator expect
         latents = components.vae.encode_to_latent(input_video)
-        # Transpose latents
-        latents = latents.transpose(2, 1)
 
         # The default param for InputParam does not work right now
         # The workaround is to set the default values here

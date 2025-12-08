@@ -1,4 +1,5 @@
-import type { LoRAConfig } from "../types";
+import type { LoRAConfig, IceServersResponse } from "../types";
+
 export interface PromptItem {
   text: string;
   weight: number;
@@ -81,9 +82,32 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
+export const getIceServers = async (): Promise<IceServersResponse> => {
+  const response = await fetch("/api/v1/webrtc/ice-servers", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get ICE servers failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export interface WebRTCOfferResponse {
+  sdp: string;
+  type: string;
+  sessionId: string;
+}
+
 export const sendWebRTCOffer = async (
   data: WebRTCOfferRequest
-): Promise<RTCSessionDescriptionInit> => {
+): Promise<WebRTCOfferResponse> => {
   const response = await fetch("/api/v1/webrtc/offer", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -99,6 +123,34 @@ export const sendWebRTCOffer = async (
 
   const result = await response.json();
   return result;
+};
+
+export const sendIceCandidates = async (
+  sessionId: string,
+  candidates: RTCIceCandidate | RTCIceCandidate[]
+): Promise<void> => {
+  const candidateArray = Array.isArray(candidates) ? candidates : [candidates];
+
+  const response = await fetch(`/api/v1/webrtc/offer/${sessionId}`, {
+    method: "PATCH",
+    // TODO: Use Content-Type 'application/trickle-ice-sdpfrag'
+    // once backend supports it
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      candidates: candidateArray.map(c => ({
+        candidate: c.candidate,
+        sdpMid: c.sdpMid,
+        sdpMLineIndex: c.sdpMLineIndex,
+      })),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Send ICE candidate failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
 };
 
 export const loadPipeline = async (
@@ -244,3 +296,66 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   const result = await response.json();
   return result;
 };
+
+// Pipeline schema types - matches output of get_schema_with_metadata()
+export interface PipelineSchemaProperty {
+  type?: string;
+  default?: unknown;
+  description?: string;
+  // JSON Schema fields
+  minimum?: number;
+  maximum?: number;
+  items?: unknown;
+  anyOf?: unknown[];
+}
+
+export interface PipelineConfigSchema {
+  type: string;
+  properties: Record<string, PipelineSchemaProperty>;
+  required?: string[];
+  title?: string;
+}
+
+// Mode-specific default overrides
+export interface ModeDefaults {
+  height?: number;
+  width?: number;
+  denoising_steps?: number[];
+  noise_scale?: number | null;
+  noise_controller?: boolean | null;
+}
+
+export interface PipelineSchemaInfo {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  config_schema: PipelineConfigSchema;
+  // Mode support - comes from config class
+  supported_modes: ("text" | "video")[];
+  default_mode: "text" | "video";
+  // Mode-specific default overrides (optional)
+  mode_defaults?: Record<"text" | "video", ModeDefaults>;
+}
+
+export interface PipelineSchemasResponse {
+  pipelines: Record<string, PipelineSchemaInfo>;
+}
+
+export const getPipelineSchemas =
+  async (): Promise<PipelineSchemasResponse> => {
+    const response = await fetch("/api/v1/pipelines/schemas", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `Get pipeline schemas failed: ${response.status} ${response.statusText}: ${errorText}`
+      );
+    }
+
+    const result = await response.json();
+    return result;
+  };
