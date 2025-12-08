@@ -267,9 +267,7 @@ class PipelineManager:
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
         if pipeline_id == "streamdiffusionv2":
-            from scope.core.pipelines import (
-                StreamDiffusionV2Pipeline,
-            )
+            from scope.core.pipelines import StreamDiffusionV2Pipeline
 
             from .models_config import get_model_file_path, get_models_dir
 
@@ -382,9 +380,7 @@ class PipelineManager:
             return pipeline
 
         elif pipeline_id == "krea-realtime-video":
-            from scope.core.pipelines import (
-                KreaRealtimeVideoPipeline,
-            )
+            from scope.core.pipelines import KreaRealtimeVideoPipeline
 
             from .models_config import get_model_file_path, get_models_dir
 
@@ -435,6 +431,63 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("krea-realtime-video pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "reward-forcing":
+            from scope.core.pipelines import RewardForcingPipeline
+
+            from .models_config import get_model_file_path, get_models_dir
+
+            # Get EMA sink parameters from load_params (with defaults)
+            compression_alpha = 0.999
+            sink_size = 3
+            if load_params:
+                compression_alpha = load_params.get("compression_alpha", 0.999)
+                sink_size = load_params.get("sink_size", 3)
+
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                    # EMA sink parameters for long video generation
+                    "compression_alpha": compression_alpha,
+                    "sink_size": sink_size,
+                }
+            )
+
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=480,
+                default_width=832,
+                default_seed=42,
+            )
+
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
+            pipeline = RewardForcingPipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info(
+                f"Reward-Forcing pipeline initialized "
+                f"(compression_alpha={compression_alpha}, sink_size={sink_size})"
+            )
             return pipeline
 
         else:

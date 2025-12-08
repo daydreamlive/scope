@@ -368,12 +368,65 @@ class PassthroughConfig(BasePipelineConfig):
     )
 
 
+class RewardForcingConfig(BasePipelineConfig):
+    """Configuration for Reward-Forcing pipeline.
+
+    Reward-Forcing is a training methodology that enables high-quality video
+    generation in just 4 denoising steps by learning from reward signals.
+
+    Reference: https://github.com/JaydenLu666/Reward-Forcing
+    """
+
+    pipeline_id: ClassVar[str] = "reward-forcing"
+    pipeline_name: ClassVar[str] = "Reward-Forcing"
+    pipeline_description: ClassVar[str] = (
+        "Fast 4-step video generation using reward-based distillation"
+    )
+
+    # Mode support - supports both text and video modes
+    supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
+    default_mode: ClassVar[InputMode] = "text"
+
+    # Reward-Forcing defaults (text mode baseline)
+    height: int = Field(default=480, ge=1, description="Output height in pixels")
+    width: int = Field(default=832, ge=1, description="Output width in pixels")
+    denoising_steps: list[int] | None = Field(
+        default=[1000, 750, 500, 250],
+        description="4-step denoising schedule for fast generation",
+    )
+    # noise_scale is None by default (text mode), overridden in video mode
+    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
+        default=None,
+        description="Amount of noise to add during video generation (video mode only)",
+    )
+
+    @classmethod
+    def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
+        """Reward-Forcing mode-specific defaults."""
+        return {
+            "text": ModeDefaults(
+                # Text mode: no video input, no noise controls
+                noise_scale=None,
+                noise_controller=None,
+            ),
+            "video": ModeDefaults(
+                # Video mode: requires input frames, noise controls active
+                height=512,
+                width=512,
+                noise_scale=0.7,
+                noise_controller=True,
+                denoising_steps=[1000, 750],
+            ),
+        }
+
+
 # Registry of pipeline config classes
 PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "longlive": LongLiveConfig,
     "streamdiffusionv2": StreamDiffusionV2Config,
     "krea-realtime-video": KreaRealtimeVideoConfig,
     "passthrough": PassthroughConfig,
+    "reward-forcing": RewardForcingConfig,
 }
 
 

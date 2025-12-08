@@ -1,10 +1,7 @@
 from typing import Any
 
 import torch
-from diffusers.modular_pipelines import (
-    ModularPipelineBlocks,
-    PipelineState,
-)
+from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     ConfigSpec,
@@ -132,13 +129,13 @@ class SetupCachesBlock(ModularPipelineBlocks):
         if block_state.current_start_frame >= max_current_start:
             init_cache = True
 
-        # Clear KV cache when conditioning changes outside of a transition if manage_cache is enabled and video input is present.
+        # Clear KV cache when conditioning changes outside of a transition if manage_cache is enabled.
+        # This applies to both text and video modes to prevent stale prompt context from persisting.
         transitioning_context = is_transitioning or was_transitioning
         if (
             block_state.conditioning_embeds_updated
             and not transitioning_context
             and block_state.manage_cache
-            and block_state.video is not None
         ):
             init_cache = True
 

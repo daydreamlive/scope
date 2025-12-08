@@ -80,6 +80,27 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                 dtype=torch.long,
             )
 
+        # Apply timestep warping if enabled (Reward-Forcing requires this!)
+        # This maps the raw step values [1000, 750, 500, 250] through the scheduler's
+        # timestep table to get the actual sigma values used during training.
+        # NOTE: Default is False - only Reward-Forcing sets this to True
+        warp_denoising_step = state.get("warp_denoising_step", False)
+        if warp_denoising_step and hasattr(components.scheduler, "timesteps"):
+            scheduler_timesteps = components.scheduler.timesteps.cpu()
+            # Append 0 to handle the final step mapping
+            timesteps_with_zero = torch.cat(
+                (
+                    scheduler_timesteps,
+                    torch.tensor([0], dtype=scheduler_timesteps.dtype),
+                )
+            )
+            # Map: input [1000, 750, 500, 250] -> indices [0, 250, 500, 750]
+            # Then look up actual timestep values from scheduler
+            indices = (1000 - denoising_step_list).clamp(
+                0, len(timesteps_with_zero) - 1
+            )
+            denoising_step_list = timesteps_with_zero[indices]
+
         if block_state.current_denoising_step_list is None or not torch.equal(
             block_state.current_denoising_step_list, denoising_step_list
         ):

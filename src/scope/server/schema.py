@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from scope.core.pipelines.schema import (
     KreaRealtimeVideoConfig,
     LongLiveConfig,
+    RewardForcingConfig,
     StreamDiffusionV2Config,
 )
 from scope.core.pipelines.utils import Quantization
@@ -92,6 +93,27 @@ class Parameters(BaseModel):
         description="Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
         ge=0.01,
         le=1.0,
+    )
+    compression_alpha: float | None = Field(
+        default=None,
+        description="EMA coefficient for sink token compression (Reward-Forcing pipeline). "
+        "Controls how much weight is given to historical context vs recent frames. "
+        "Higher values (0.999) = more stable, preserves original prompt context longer. "
+        "Lower values (0.9-0.95) = forgets faster, reduces error accumulation. "
+        "Typical values: 0.999 (default), 0.99 (balanced), 0.95 (less error accumulation). "
+        "Can be changed at runtime without reloading pipeline.",
+        ge=0.0,
+        le=1.0,
+    )
+    sink_size: int | None = Field(
+        default=None,
+        description="Number of frames to keep as semantic anchor tokens (Reward-Forcing pipeline). "
+        "These sink tokens accumulate historical context via EMA compression. "
+        "More sink tokens = stronger semantic preservation but more memory. "
+        "Typical values: 3 (default), 6 (stronger anchoring). "
+        "Changing this will trigger a cache reset but NOT require pipeline reload.",
+        ge=1,
+        le=12,
     )
     lora_scales: list["LoRAScaleUpdate"] | None = Field(
         default=None,
@@ -304,6 +326,60 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
+class RewardForcingLoadParams(LoRAEnabledLoadParams):
+    """Load parameters for Reward-Forcing pipeline.
+
+    Reward-Forcing is a training method that enables few-step video generation
+    by learning from reward signals. The distilled model can generate high-quality
+    videos in just 4 denoising steps (vs. 50+ for standard diffusion).
+
+    Defaults are derived from RewardForcingConfig to ensure consistency.
+
+    Reference: https://github.com/JaydenLu666/Reward-Forcing
+    """
+
+    height: int = Field(
+        default=RewardForcingConfig.model_fields["height"].default,
+        description="Target video height",
+        ge=16,
+        le=2048,
+    )
+    width: int = Field(
+        default=RewardForcingConfig.model_fields["width"].default,
+        description="Target video width",
+        ge=16,
+        le=2048,
+    )
+    seed: int = Field(
+        default=RewardForcingConfig.model_fields["base_seed"].default,
+        description="Random seed for generation",
+        ge=0,
+    )
+    quantization: Quantization | None = Field(
+        default=None,
+        description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    compression_alpha: float = Field(
+        default=0.999,
+        description="EMA coefficient for sink token compression. "
+        "Higher values (0.999) = preserve original prompt context longer. "
+        "Lower values (0.9-0.95) = reduce error accumulation in long videos. "
+        "IMPORTANT: Original Reward-Forcing was trained with 0.999. "
+        "Typical values: 0.999 (original), 0.99 (balanced), 0.95 (experimental).",
+        ge=0.0,
+        le=1.0,
+    )
+    sink_size: int = Field(
+        default=3,
+        description="Number of frames to keep as semantic anchor tokens. "
+        "These sink tokens accumulate historical context via EMA compression. "
+        "More sink tokens = stronger semantic preservation but more memory. "
+        "Typical values: 3 (default), 6 (stronger anchoring).",
+        ge=1,
+        le=12,
+    )
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -315,6 +391,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | RewardForcingLoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 

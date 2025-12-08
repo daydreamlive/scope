@@ -26,6 +26,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         timestep_shift=8.0,
         local_attn_size=-1,
         sink_size=0,
+        compression_alpha: float = 0.999,  # EMA coefficient for sink (Reward-Forcing)
         model_dir: str | None = None,
         generator_path: str | None = None,
         generator_model_name: str | None = None,
@@ -41,12 +42,18 @@ class WanDiffusionWrapper(torch.nn.Module):
             with open(config_path) as f:
                 config = json.load(f)
 
-            config.update({"local_attn_size": local_attn_size, "sink_size": sink_size})
+            config.update(
+                {
+                    "local_attn_size": local_attn_size,
+                    "sink_size": sink_size,
+                    "compression_alpha": compression_alpha,  # EMA coefficient for sink compression
+                }
+            )
 
             state_dict = load_state_dict(generator_path)
             # Handle case where the dict with required keys is nested under a specific key
             # eg state_dict["generator"]
-            if generator_model_name is not None:
+            if generator_model_name is not None and generator_model_name in state_dict:
                 state_dict = state_dict[generator_model_name]
 
             # Remove 'model.' prefix if present (from wrapped models)
@@ -103,7 +110,11 @@ class WanDiffusionWrapper(torch.nn.Module):
                 model_path,
                 **filter_causal_model_cls_config(
                     causal_model_cls,
-                    {"local_attn_size": local_attn_size, "sink_size": sink_size},
+                    {
+                        "local_attn_size": local_attn_size,
+                        "sink_size": sink_size,
+                        "compression_alpha": compression_alpha,
+                    },
                 ),
             )
 

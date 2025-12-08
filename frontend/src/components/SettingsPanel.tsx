@@ -1,5 +1,21 @@
+import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { useState } from "react";
+import { PARAMETER_METADATA } from "../data/parameterMetadata";
+import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
+import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
+import type {
+  InputMode,
+  LoRAConfig,
+  LoraMergeStrategy,
+  PipelineId,
+} from "../types";
+import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
+import { LoRAManager } from "./LoRAManager";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import {
   Select,
   SelectContent,
@@ -7,30 +23,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Badge } from "./ui/badge";
+import { SliderWithInput } from "./ui/slider-with-input";
+import { Toggle } from "./ui/toggle";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "./ui/tooltip";
-import { LabelWithTooltip } from "./ui/label-with-tooltip";
-import { Input } from "./ui/input";
-import { Button } from "./ui/button";
-import { Toggle } from "./ui/toggle";
-import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
-import { PARAMETER_METADATA } from "../data/parameterMetadata";
-import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
-import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type {
-  PipelineId,
-  LoRAConfig,
-  LoraMergeStrategy,
-  InputMode,
-} from "../types";
-import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
 
@@ -127,7 +127,8 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
     const maxValue = 2048;
@@ -171,7 +172,8 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
     const newValue = Math.max(minValue, resolution[dimension] - 1);
@@ -322,7 +324,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2">
@@ -479,7 +482,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -541,7 +545,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
@@ -595,7 +600,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
