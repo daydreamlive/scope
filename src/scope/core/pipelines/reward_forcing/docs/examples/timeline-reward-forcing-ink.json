@@ -1,0 +1,50 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 6.955,
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp",
+      "prompts": [
+        {
+          "text": "A bird's-eye shot of a glass bowl filled with clear water, perfectly still and transparent.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 6.955,
+      "endTime": 16.26789999997616,
+      "prompts": [
+        {
+          "text": "In the same overhead view, a drop of black ink falls into the water, blooming into ethereal wisps and tendrils.",
+          "weight": 100
+        }
+      ],
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp"
+    }
+  ],
+  "settings": {
+    "pipelineId": "reward-forcing",
+    "inputMode": "text",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750,
+      500,
+      250
+    ],
+    "manageCache": true,
+    "quantization": null,
+    "kvCacheAttentionBias": 0.3,
+    "loras": [],
+    "loraMergeStrategy": "permanent_merge"
+  },
+  "version": "2.1",
+  "exportedAt": "2025-12-08T16:23:41.823Z"
+}
