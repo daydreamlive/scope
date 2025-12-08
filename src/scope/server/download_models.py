@@ -184,28 +184,68 @@ def download_krea_realtime_video_pipeline() -> None:
     )
 
 
+def download_reward_forcing_pipeline() -> None:
+    """
+    Download models for the RewardForcing pipeline.
+    """
+    # HuggingFace repos
+    reward_forcing_repo = "JaydenLu666/Reward-Forcing-T2V-1.3B"
+    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
+    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
+    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
+
+    # Ensure models directory exists and get paths
+    models_root = ensure_models_dir()
+    reward_forcing_dst = models_root / "Reward-Forcing-T2V-1.3B"
+    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
+    wan_video_comfy_dst = models_root / "WanVideo_comfy"
+
+    # 1) Download Reward-Forcing model
+    snapshot_download(
+        repo_id=reward_forcing_repo,
+        local_dir=reward_forcing_dst,
+        allow_patterns=["rewardforcing.pt"],
+    )
+
+    # 2) HF repo download for Wan2.1-T2V-1.3B, excluding large file
+    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    download_hf_repo_excluding(
+        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
+    )
+
+    # 3) HF single file download for UMT5 encoder
+    download_hf_single_file(
+        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
+    )
+
+
 def download_models(pipeline_id: str | None = None) -> None:
     """
     Download models. If pipeline_id is None, downloads all pipelines.
     If pipeline_id is specified, downloads that specific pipeline.
 
     Args:
-        pipeline_id: Optional pipeline ID. Supports "streamdiffusionv2" or "longlive".
+        pipeline_id: Optional pipeline ID. Supports "streamdiffusionv2", "longlive",
+                    "krea-realtime-video", or "reward-forcing".
                     If None, downloads all pipelines.
     """
     if pipeline_id is None:
         # Download all pipelines
         download_streamdiffusionv2_pipeline()
         download_longlive_pipeline()
+        download_krea_realtime_video_pipeline()
+        download_reward_forcing_pipeline()
     elif pipeline_id == "streamdiffusionv2":
         download_streamdiffusionv2_pipeline()
     elif pipeline_id == "longlive":
         download_longlive_pipeline()
     elif pipeline_id == "krea-realtime-video":
         download_krea_realtime_video_pipeline()
+    elif pipeline_id == "reward-forcing":
+        download_reward_forcing_pipeline()
     else:
         raise ValueError(
-            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video"
+            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
         )
 
     print("\nAll downloads complete.")
@@ -224,6 +264,8 @@ Examples:
   # Download specific pipeline
   python download_models.py --pipeline streamdiffusionv2
   python download_models.py --pipeline longlive
+  python download_models.py --pipeline krea-realtime-video
+  python download_models.py --pipeline reward-forcing
   python download_models.py -p streamdiffusionv2
         """,
     )
@@ -232,7 +274,7 @@ Examples:
         "-p",
         type=str,
         default=None,
-        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive'). If not specified, downloads all pipelines.",
+        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing'). If not specified, downloads all pipelines.",
     )
 
     args = parser.parse_args()
