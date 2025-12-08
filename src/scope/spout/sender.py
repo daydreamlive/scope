@@ -208,9 +208,7 @@ class SpoutSender:
 
         # Add alpha channel on GPU if needed (RGB -> RGBA)
         if c == 3:
-            alpha = torch.full(
-                (h, w, 1), 255, dtype=torch.uint8, device=frame.device
-            )
+            alpha = torch.full((h, w, 1), 255, dtype=torch.uint8, device=frame.device)
             frame = torch.cat([frame, alpha], dim=-1)
 
         # Ensure contiguous before transfer
