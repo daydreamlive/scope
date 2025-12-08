@@ -39,9 +39,10 @@ def initialize_kv_cache(
         and list(kv_cache_existing[0]["v"].shape) == v_shape
     ):
         for i in range(num_transformer_blocks):
+            kv_cache_existing[i]["k"].zero_()
+            kv_cache_existing[i]["v"].zero_()
+
             if reset_indices:
-                kv_cache_existing[i]["k"].zero_()
-                kv_cache_existing[i]["v"].zero_()
                 kv_cache_existing[i]["global_end_index"] = torch.tensor(
                     [0], dtype=torch.long, device=device
                 )
