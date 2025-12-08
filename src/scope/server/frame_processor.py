@@ -91,6 +91,10 @@ class FrameProcessor:
         self.spout_output_enabled = False
         self.spout_output_name = "Scope"
         self._frame_spout_count = 0
+        self.spout_output_queue = queue.Queue(
+            maxsize=30
+        )  # Queue for async Spout sending
+        self.spout_output_thread = None
 
         # Spout input
         self.spout_receiver = None
@@ -145,6 +149,14 @@ class FrameProcessor:
             self.frame_buffer.clear()
 
         # Clean up Spout sender
+        self.spout_output_enabled = False
+        if self.spout_output_thread and self.spout_output_thread.is_alive():
+            # Signal thread to stop by putting None in queue
+            try:
+                self.spout_output_queue.put_nowait(None)
+            except queue.Full:
+                pass
+            self.spout_output_thread.join(timeout=2.0)
         if self.spout_sender is not None:
             try:
                 self.spout_sender.release()
@@ -186,7 +198,20 @@ class FrameProcessor:
             return None
 
         try:
-            return self.output_queue.get_nowait()
+            frame = self.output_queue.get_nowait()
+            # Enqueue frame for async Spout sending (non-blocking)
+            if self.spout_output_enabled and self.spout_sender is not None:
+                try:
+                    # Frame is (H, W, C) uint8 [0, 255]
+                    frame_np = frame.numpy()
+                    self.spout_output_queue.put_nowait(frame_np)
+                except queue.Full:
+                    # Queue full, drop frame (non-blocking)
+                    logger.debug("Spout output queue full, dropping frame")
+                except Exception as e:
+                    logger.error(f"Error enqueueing Spout frame: {e}")
+
+            return frame
         except queue.Empty:
             return None
 
@@ -269,6 +294,15 @@ class FrameProcessor:
                 if self.spout_sender.create():
                     self.spout_output_enabled = True
                     self.spout_output_name = sender_name
+                    # Start background thread for async sending
+                    if (
+                        self.spout_output_thread is None
+                        or not self.spout_output_thread.is_alive()
+                    ):
+                        self.spout_output_thread = threading.Thread(
+                            target=self._spout_output_loop, daemon=True
+                        )
+                        self.spout_output_thread.start()
                     logger.info(f"Spout output enabled: '{sender_name}'")
                 else:
                     logger.error("Failed to create Spout sender")
@@ -293,6 +327,15 @@ class FrameProcessor:
                 self.spout_sender = SpoutSender(sender_name, 512, 512)
                 if self.spout_sender.create():
                     self.spout_output_name = sender_name
+                    # Ensure output thread is running
+                    if (
+                        self.spout_output_thread is None
+                        or not self.spout_output_thread.is_alive()
+                    ):
+                        self.spout_output_thread = threading.Thread(
+                            target=self._spout_output_loop, daemon=True
+                        )
+                        self.spout_output_thread.start()
                     logger.info(f"Spout output renamed to: '{sender_name}'")
                 else:
                     logger.error("Failed to recreate Spout sender")
@@ -366,6 +409,40 @@ class FrameProcessor:
             except Exception as e:
                 logger.error(f"Error recreating Spout receiver: {e}")
                 self.spout_receiver = None
+
+    def _spout_output_loop(self):
+        """Background thread that sends frames to Spout asynchronously."""
+        logger.info("Spout output thread started")
+        frame_count = 0
+
+        while (
+            self.running and self.spout_output_enabled and self.spout_sender is not None
+        ):
+            try:
+                # Get frame from queue (blocking with timeout)
+                try:
+                    frame_np = self.spout_output_queue.get(timeout=0.1)
+                    # None is a sentinel value to stop the thread
+                    if frame_np is None:
+                        break
+                except queue.Empty:
+                    continue
+
+                # Send frame to Spout
+                success = self.spout_sender.send(frame_np)
+                frame_count += 1
+                if frame_count % 100 == 0:
+                    logger.info(
+                        f"Spout sent frame {frame_count}, "
+                        f"shape={frame_np.shape}, success={success}"
+                    )
+                self._frame_spout_count = frame_count
+
+            except Exception as e:
+                logger.error(f"Error in Spout output loop: {e}")
+                time.sleep(0.01)
+
+        logger.info(f"Spout output thread stopped after {frame_count} frames")
 
     def _spout_input_loop(self):
         """Background thread that receives frames from Spout and adds to buffer."""
@@ -571,22 +648,6 @@ class FrameProcessor:
                         break
 
             for frame in output:
-                # Send to Spout first (independent of WebRTC queue)
-                if self.spout_output_enabled and self.spout_sender is not None:
-                    try:
-                        # Frame is (H, W, C) uint8 [0, 255]
-                        frame_np = frame.numpy()
-                        success = self.spout_sender.send(frame_np)
-                        if self._frame_spout_count % 100 == 0:
-                            logger.info(
-                                f"Spout sent frame {self._frame_spout_count}, "
-                                f"shape={frame_np.shape}, success={success}"
-                            )
-                        self._frame_spout_count += 1
-                    except Exception as e:
-                        logger.error(f"Spout send error: {e}")
-
-                # Then try to add to WebRTC output queue
                 try:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:
