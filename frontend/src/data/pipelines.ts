@@ -73,6 +73,22 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportedModes: ["text", "video"],
     defaultMode: "text",
   },
+  "reward-forcing": {
+    name: "RewardForcing",
+    docsUrl:
+      "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/reward_forcing/docs/usage.md",
+    about:
+      "A streaming pipeline and autoregressive video diffusion model from ZJU, Ant Group, SIAS-ZJU, HUST and SJTU. The model is trained with Rewarded Distribution Matching Distillation using Wan2.1 1.3b as the base model.",
+    modified: true,
+    estimatedVram: 20,
+    requiresModels: true,
+    defaultTemporalInterpolationMethod: "slerp",
+    defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
+    // Multi-mode support
+    supportedModes: ["text", "video"],
+    defaultMode: "text",
+  },
   passthrough: {
     name: "Passthrough",
     about:
