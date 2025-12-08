@@ -115,30 +115,18 @@ class SpoutSender:
             return False
 
         try:
-            # Convert torch tensor to numpy if needed
-            if isinstance(frame, torch.Tensor):
-                frame = frame.detach().cpu().numpy()
+            # Handle torch tensor input - do format conversion on GPU for performance
 
-            # Ensure correct shape
-            if frame.ndim != 3:
-                logger.error(f"Expected 3D array (H, W, C), got shape {frame.shape}")
+            if isinstance(frame, torch.Tensor):
+                frame = self._prepare_tensor_on_gpu(frame)
+            else:
+                # NumPy array path (fallback)
+                frame = self._prepare_numpy_array(frame)
+
+            if frame is None:
                 return False
 
             h, w, c = frame.shape
-
-            # Convert float [0, 1] to uint8 [0, 255]
-            if frame.dtype in (np.float32, np.float64, np.float16):
-                frame = (frame * 255).clip(0, 255).astype(np.uint8)
-
-            # Handle different channel counts
-            if c == 3:
-                # RGB -> RGBA (add alpha channel)
-                frame = np.concatenate(
-                    [frame, np.full((h, w, 1), 255, dtype=np.uint8)], axis=2
-                )
-            elif c != 4:
-                logger.error(f"Expected 3 or 4 channels, got {c}")
-                return False
 
             # Ensure contiguous array
             if not frame.flags["C_CONTIGUOUS"]:
@@ -185,6 +173,86 @@ class SpoutSender:
         except Exception as e:
             logger.error(f"Error sending Spout frame: {e}")
             return False
+
+    def _prepare_tensor_on_gpu(self, frame: torch.Tensor) -> np.ndarray | None:
+        """
+        Prepare a torch tensor for Spout by doing format conversion on GPU.
+
+        Args:
+            frame: PyTorch tensor (H, W, C), float [0,1] or uint8 [0,255]
+
+        Returns:
+            NumPy array ready for sendImage, or None on error
+        """
+        # Ensure correct shape
+        if frame.ndim != 3:
+            logger.error(f"Expected 3D tensor (H, W, C), got shape {frame.shape}")
+            return None
+
+        h, w, c = frame.shape
+
+        # Validate channel count
+        if c not in (3, 4):
+            logger.error(f"Expected 3 or 4 channels, got {c}")
+            return None
+
+        # Detach from computation graph
+        frame = frame.detach()
+
+        # Convert float [0, 1] to uint8 [0, 255] on GPU
+        if frame.dtype in (torch.float32, torch.float64, torch.float16, torch.bfloat16):
+            frame = (frame * 255).clamp(0, 255).to(torch.uint8)
+        elif frame.dtype != torch.uint8:
+            # Convert other integer types to uint8
+            frame = frame.clamp(0, 255).to(torch.uint8)
+
+        # Add alpha channel on GPU if needed (RGB -> RGBA)
+        if c == 3:
+            alpha = torch.full(
+                (h, w, 1), 255, dtype=torch.uint8, device=frame.device
+            )
+            frame = torch.cat([frame, alpha], dim=-1)
+
+        # Ensure contiguous before transfer
+        frame = frame.contiguous()
+
+        # Transfer to CPU and convert to numpy
+        # This is now much smaller (uint8 vs float32) and already formatted
+        return frame.cpu().numpy()
+
+    def _prepare_numpy_array(self, frame: np.ndarray) -> np.ndarray | None:
+        """
+        Prepare a numpy array for Spout (CPU path fallback).
+
+        Args:
+            frame: NumPy array (H, W, C), float [0,1] or uint8 [0,255]
+
+        Returns:
+            NumPy array ready for sendImage, or None on error
+        """
+        # Ensure correct shape
+        if frame.ndim != 3:
+            logger.error(f"Expected 3D array (H, W, C), got shape {frame.shape}")
+            return None
+
+        h, w, c = frame.shape
+
+        # Validate channel count
+        if c not in (3, 4):
+            logger.error(f"Expected 3 or 4 channels, got {c}")
+            return None
+
+        # Convert float [0, 1] to uint8 [0, 255]
+        if frame.dtype in (np.float32, np.float64, np.float16):
+            frame = (frame * 255).clip(0, 255).astype(np.uint8)
+
+        # Add alpha channel if needed (RGB -> RGBA)
+        if c == 3:
+            frame = np.concatenate(
+                [frame, np.full((h, w, 1), 255, dtype=np.uint8)], axis=2
+            )
+
+        return frame
 
     def resize(self, width: int, height: int):
         """
