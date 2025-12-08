@@ -626,6 +626,17 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
+      } else if (pipelineIdToUse === "reward-forcing" && resolution) {
+        loadParams = {
+          height: resolution.height,
+          width: resolution.width,
+          seed: settings.seed ?? 42,
+          quantization: settings.quantization ?? null,
+          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+        };
+        console.log(
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+        );
       }
 
       const loadSuccess = await loadPipeline(
@@ -673,10 +684,11 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for krea_realtime_video and longlive
+      // Cache management for krea_realtime_video, longlive, and reward-forcing
       if (
         pipelineIdToUse === "krea-realtime-video" ||
-        pipelineIdToUse === "longlive"
+        pipelineIdToUse === "longlive" ||
+        pipelineIdToUse === "reward-forcing"
       ) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }

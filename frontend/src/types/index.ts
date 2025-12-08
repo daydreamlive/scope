@@ -2,7 +2,8 @@ export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"
   | "longlive"
-  | "krea-realtime-video";
+  | "krea-realtime-video"
+  | "reward-forcing";
 
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";

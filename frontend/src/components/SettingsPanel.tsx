@@ -127,7 +127,8 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
     const maxValue = 2048;
@@ -171,7 +172,8 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
     const newValue = Math.max(minValue, resolution[dimension] - 1);
@@ -322,7 +324,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2">
@@ -479,7 +482,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -541,7 +545,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
@@ -595,7 +600,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
