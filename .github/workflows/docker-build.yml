@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - main
+      - runpod-serverless
 
 jobs:
   build-and-push:
@@ -49,6 +50,9 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.version }}"
             TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
+          elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
+            TAG="runpod-serverless"
+            TAGS="daydreamlive/scope:runpod-serverless"
           else
             TAG="main"
             TAGS="daydreamlive/scope:main"
