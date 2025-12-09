@@ -28,7 +28,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.pipeline_manager = pipeline_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
-        # FPS variables (will be updated from FrameProcessor)
+        # FPS variables (will be updated from FrameProcessor or input measurement)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
 
@@ -53,7 +53,7 @@ class VideoProcessingTrack(MediaStreamTrack):
             try:
                 input_frame = await self.track.recv()
 
-                # Store raw VideoFrame for later processing
+                # Store raw VideoFrame for later processing (tracks input FPS internally)
                 self.frame_processor.put(input_frame)
 
             except asyncio.CancelledError:
@@ -114,9 +114,9 @@ class VideoProcessingTrack(MediaStreamTrack):
         # Keep running while either WebRTC input is active OR Spout input is enabled
         while self.input_task_running or self._spout_receiver_enabled:
             try:
-                # Update FPS from FrameProcessor
+                # Update FPS: use minimum of input FPS and pipeline FPS
                 if self.frame_processor:
-                    self.fps = self.frame_processor.get_current_pipeline_fps()
+                    self.fps = self.frame_processor.get_output_fps()
                     self.frame_ptime = 1.0 / self.fps
 
                 # If paused, wait for the appropriate frame interval before returning
