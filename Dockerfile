@@ -49,5 +49,11 @@ COPY src/ /app/src/
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
 
-# Default command to run the application
-CMD ["uv", "run", "daydream-scope", "--host", "0.0.0.0", "--port", "8000"]
+# Install runpod for serverless handler
+RUN uv pip install runpod==1.7.0
+
+# Copy RunPod serverless handler
+COPY runpod_serverless.py /app/
+
+# Start RunPod serverless handler
+CMD ["uv", "run", "python", "runpod_serverless.py"]
