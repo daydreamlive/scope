@@ -439,7 +439,9 @@ class FrameProcessor:
                             target=self._spout_sender_loop, daemon=True
                         )
                         self.spout_sender_thread.start()
-                    logger.info(f"Spout output updated: '{sender_name}' ({width}x{height})")
+                    logger.info(
+                        f"Spout output updated: '{sender_name}' ({width}x{height})"
+                    )
                 else:
                     logger.error("Failed to recreate Spout sender")
                     self.spout_sender = None
