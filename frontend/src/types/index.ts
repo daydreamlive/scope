@@ -65,13 +65,13 @@ export interface SettingsState {
   // Track current input mode (text vs video)
   inputMode?: InputMode;
   // Spout settings
-  spoutInput?: {
+  spoutReceiver?: {
     enabled: boolean;
-    senderName: string;
+    name: string;
   };
-  spoutOutput?: {
+  spoutSender?: {
     enabled: boolean;
-    senderName: string;
+    name: string;
   };
 }
 

@@ -446,44 +446,44 @@ export function StreamPage() {
     });
   };
 
-  const handleSpoutOutputChange = (
-    spoutOutput: { enabled: boolean; senderName: string } | undefined
+  const handleSpoutSenderChange = (
+    spoutSender: { enabled: boolean; name: string } | undefined
   ) => {
-    updateSettings({ spoutOutput });
+    updateSettings({ spoutSender });
     // Send Spout output settings to backend
     if (isStreaming) {
       sendParameterUpdate({
-        spout_output: spoutOutput,
+        spout_sender: spoutSender,
       });
     }
   };
 
   // Handle Spout input name change from InputAndControlsPanel
-  const handleSpoutInputNameChange = (name: string) => {
+  const handleSpoutReceiverChange = (name: string) => {
     updateSettings({
-      spoutInput: {
+      spoutReceiver: {
         enabled: mode === "spout",
-        senderName: name,
+        name: name,
       },
     });
   };
 
-  // Sync spoutInput.enabled with mode changes
+  // Sync spoutReceiver.enabled with mode changes
   const handleModeChange = (newMode: typeof mode) => {
     // When switching to spout mode, enable spout input
     if (newMode === "spout") {
       updateSettings({
-        spoutInput: {
+        spoutReceiver: {
           enabled: true,
-          senderName: settings.spoutInput?.senderName ?? "",
+          name: settings.spoutReceiver?.name ?? "",
         },
       });
     } else {
       // When switching away from spout mode, disable spout input
       updateSettings({
-        spoutInput: {
+        spoutReceiver: {
           enabled: false,
-          senderName: settings.spoutInput?.senderName ?? "",
+          name: settings.spoutReceiver?.name ?? "",
         },
       });
     }
@@ -694,7 +694,7 @@ export function StreamPage() {
 
       // Check video requirements based on input mode
       const needsVideoInput = currentMode === "video";
-      const isSpoutMode = mode === "spout" && settings.spoutInput?.enabled;
+      const isSpoutMode = mode === "spout" && settings.spoutReceiver?.enabled;
 
       // Only send video stream for pipelines that need video input (not in Spout mode)
       const streamToSend =
@@ -715,8 +715,8 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
-        spout_output?: { enabled: boolean; senderName: string };
-        spout_input?: { enabled: boolean; senderName: string };
+        spout_sender?: { enabled: boolean; name: string };
+        spout_receiver?: { enabled: boolean; name: string };
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -754,11 +754,11 @@ export function StreamPage() {
       }
 
       // Spout settings - send if enabled
-      if (settings.spoutOutput?.enabled) {
-        initialParameters.spout_output = settings.spoutOutput;
+      if (settings.spoutSender?.enabled) {
+        initialParameters.spout_sender = settings.spoutSender;
       }
-      if (settings.spoutInput?.enabled) {
-        initialParameters.spout_input = settings.spoutInput;
+      if (settings.spoutReceiver?.enabled) {
+        initialParameters.spout_receiver = settings.spoutReceiver;
       }
 
       // Reset paused state when starting a fresh stream
@@ -822,8 +822,8 @@ export function StreamPage() {
             timelinePrompts={timelinePrompts}
             transitionSteps={transitionSteps}
             onTransitionStepsChange={setTransitionSteps}
-            spoutInputName={settings.spoutInput?.senderName ?? ""}
-            onSpoutInputNameChange={handleSpoutInputNameChange}
+            spoutReceiverName={settings.spoutReceiver?.name ?? ""}
+            onSpoutReceiverChange={handleSpoutReceiverChange}
             inputMode={
               settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
             }
@@ -1019,8 +1019,8 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            spoutOutput={settings.spoutOutput}
-            onSpoutOutputChange={handleSpoutOutputChange}
+            spoutSender={settings.spoutSender}
+            onSpoutSenderChange={handleSpoutSenderChange}
           />
         </div>
       </div>

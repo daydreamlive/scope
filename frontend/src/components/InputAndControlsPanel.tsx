@@ -19,6 +19,12 @@ import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 
+// Detect if user is on Windows (Spout is Windows-only)
+const isWindows =
+  typeof navigator !== "undefined" &&
+  (navigator as Navigator & { userAgentData?: { platform: string } })
+    .userAgentData?.platform === "Windows";
+
 interface InputAndControlsPanelProps {
   className?: string;
   localStream: MediaStream | null;
@@ -53,8 +59,8 @@ interface InputAndControlsPanelProps {
   transitionSteps: number;
   onTransitionStepsChange: (steps: number) => void;
   // Spout input settings
-  spoutInputName?: string;
-  onSpoutInputNameChange?: (name: string) => void;
+  spoutReceiverName?: string;
+  onSpoutReceiverChange?: (name: string) => void;
   // Input mode (text vs video) for multi-mode pipelines
   inputMode: InputMode;
   onInputModeChange: (mode: InputMode) => void;
@@ -93,8 +99,8 @@ export function InputAndControlsPanel({
   timelinePrompts: _timelinePrompts = [],
   transitionSteps,
   onTransitionStepsChange,
-  spoutInputName = "",
-  onSpoutInputNameChange,
+  spoutReceiverName = "",
+  onSpoutReceiverChange,
   inputMode,
   onInputModeChange,
 }: InputAndControlsPanelProps) {
@@ -186,9 +192,11 @@ export function InputAndControlsPanel({
               <ToggleGroupItem value="camera" aria-label="Camera">
                 Camera
               </ToggleGroupItem>
-              <ToggleGroupItem value="spout" aria-label="Spout">
-                Spout
-              </ToggleGroupItem>
+              {isWindows && (
+                <ToggleGroupItem value="spout" aria-label="Spout">
+                  Spout
+                </ToggleGroupItem>
+              )}
             </ToggleGroup>
           </div>
         )}
@@ -199,7 +207,7 @@ export function InputAndControlsPanel({
             <h3 className="text-sm font-medium mb-2">Input</h3>
             {mode === "spout" ? (
               /* Spout Input Configuration */
-              <div className="space-y-3 p-3 rounded-lg bg-muted/10">
+              <div className="space-y-3">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Radio className="h-4 w-4" />
                   <span className="text-sm font-medium">Spout Receiver</span>
@@ -210,11 +218,11 @@ export function InputAndControlsPanel({
                   </label>
                   <Input
                     type="text"
-                    value={spoutInputName}
-                    onChange={e => onSpoutInputNameChange?.(e.target.value)}
+                    value={spoutReceiverName}
+                    onChange={e => onSpoutReceiverChange?.(e.target.value)}
                     disabled={isStreaming}
                     className="h-8 text-sm"
-                    placeholder="TouchDesigner, OBS, etc."
+                    placeholder="TDSyphonSpoutOut"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
