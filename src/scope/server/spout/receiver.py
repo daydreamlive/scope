@@ -43,12 +43,12 @@ class SpoutReceiver:
         receiver.release()
     """
 
-    def __init__(self, sender_name: str = "", width: int = 1920, height: int = 1080):
+    def __init__(self, name: str = "", width: int = 1920, height: int = 1080):
         """
         Initialize the Spout receiver.
 
         Args:
-            sender_name: Name of the Spout sender to connect to.
+            name: Name of the Spout sender to connect to.
                         Empty string connects to the active sender.
             width: Initial width for the receive buffer
             height: Initial height for the receive buffer
@@ -58,7 +58,7 @@ class SpoutReceiver:
                 "SpoutGL is not available. Install with: pip install SpoutGL pyopengl"
             )
 
-        self.sender_name = sender_name
+        self.name = name
         self.width = width
         self.height = height
         self.receiver = None
@@ -83,15 +83,15 @@ class SpoutReceiver:
                 logger.info("OpenGL context created for receiver")
 
             # Set receiver name if specified (connects to specific sender)
-            if self.sender_name and hasattr(self.receiver, "setReceiverName"):
-                self.receiver.setReceiverName(self.sender_name)
+            if self.name and hasattr(self.receiver, "setReceiverName"):
+                self.receiver.setReceiverName(self.name)
 
             # Allocate initial buffer (RGBA = 4 channels)
             self._buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
 
             logger.info(
                 f"SpoutReceiver created, looking for sender: "
-                f"'{self.sender_name or 'any'}' ({self.width}x{self.height})"
+                f"'{self.name or 'any'}' ({self.width}x{self.height})"
             )
             return True
 

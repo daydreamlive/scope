@@ -97,11 +97,11 @@ class Parameters(BaseModel):
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
     )
-    spout_output: "SpoutConfig | None" = Field(
+    spout_sender: "SpoutConfig | None" = Field(
         default=None,
         description="Spout output configuration for sending frames to external apps",
     )
-    spout_input: "SpoutConfig | None" = Field(
+    spout_receiver: "SpoutConfig | None" = Field(
         default=None,
         description="Spout input configuration for receiving frames from external apps",
     )
@@ -111,7 +111,7 @@ class SpoutConfig(BaseModel):
     """Configuration for Spout sender/receiver."""
 
     enabled: bool = Field(default=False, description="Enable Spout")
-    senderName: str = Field(default="", description="Spout sender name")
+    name: str = Field(default="", description="Spout sender name")
 
 
 class WebRTCOfferRequest(BaseModel):

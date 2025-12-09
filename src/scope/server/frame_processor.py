@@ -88,19 +88,19 @@ class FrameProcessor:
 
         # Spout integration
         self.spout_sender = None
-        self.spout_output_enabled = False
-        self.spout_output_name = "Scope"
+        self.spout_sender_enabled = False
+        self.spout_sender_name = "ScopeSyphonSpoutOut"
         self._frame_spout_count = 0
-        self.spout_output_queue = queue.Queue(
+        self.spout_sender_queue = queue.Queue(
             maxsize=30
         )  # Queue for async Spout sending
-        self.spout_output_thread = None
+        self.spout_sender_thread = None
 
         # Spout input
         self.spout_receiver = None
-        self.spout_input_enabled = False
-        self.spout_input_name = ""
-        self.spout_input_thread = None
+        self.spout_receiver_enabled = False
+        self.spout_receiver_name = ""
+        self.spout_receiver_thread = None
 
         # Input mode is signaled by the frontend at stream start.
         # This determines whether we wait for video frames or generate immediately.
@@ -114,13 +114,13 @@ class FrameProcessor:
         self.shutdown_event.clear()
 
         # Process any Spout settings from initial parameters
-        if "spout_output" in self.parameters:
-            spout_config = self.parameters.pop("spout_output")
-            self._update_spout_output(spout_config)
+        if "spout_sender" in self.parameters:
+            spout_config = self.parameters.pop("spout_sender")
+            self._update_spout_sender(spout_config)
 
-        if "spout_input" in self.parameters:
-            spout_config = self.parameters.pop("spout_input")
-            self._update_spout_input(spout_config)
+        if "spout_receiver" in self.parameters:
+            spout_config = self.parameters.pop("spout_receiver")
+            self._update_spout_receiver(spout_config)
 
         self.worker_thread = threading.Thread(target=self.worker_loop, daemon=True)
         self.worker_thread.start()
@@ -149,14 +149,14 @@ class FrameProcessor:
             self.frame_buffer.clear()
 
         # Clean up Spout sender
-        self.spout_output_enabled = False
-        if self.spout_output_thread and self.spout_output_thread.is_alive():
+        self.spout_sender_enabled = False
+        if self.spout_sender_thread and self.spout_sender_thread.is_alive():
             # Signal thread to stop by putting None in queue
             try:
-                self.spout_output_queue.put_nowait(None)
+                self.spout_sender_queue.put_nowait(None)
             except queue.Full:
                 pass
-            self.spout_output_thread.join(timeout=2.0)
+            self.spout_sender_thread.join(timeout=2.0)
         if self.spout_sender is not None:
             try:
                 self.spout_sender.release()
@@ -165,7 +165,7 @@ class FrameProcessor:
             self.spout_sender = None
 
         # Clean up Spout receiver
-        self.spout_input_enabled = False
+        self.spout_receiver_enabled = False
         if self.spout_receiver is not None:
             try:
                 self.spout_receiver.release()
@@ -200,11 +200,11 @@ class FrameProcessor:
         try:
             frame = self.output_queue.get_nowait()
             # Enqueue frame for async Spout sending (non-blocking)
-            if self.spout_output_enabled and self.spout_sender is not None:
+            if self.spout_sender_enabled and self.spout_sender is not None:
                 try:
                     # Frame is (H, W, C) uint8 [0, 255]
                     frame_np = frame.numpy()
-                    self.spout_output_queue.put_nowait(frame_np)
+                    self.spout_sender_queue.put_nowait(frame_np)
                 except queue.Full:
                     # Queue full, drop frame (non-blocking)
                     logger.debug("Spout output queue full, dropping frame")
@@ -257,14 +257,14 @@ class FrameProcessor:
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
         # Handle Spout output settings
-        if "spout_output" in parameters:
-            spout_config = parameters.pop("spout_output")
-            self._update_spout_output(spout_config)
+        if "spout_sender" in parameters:
+            spout_config = parameters.pop("spout_sender")
+            self._update_spout_sender(spout_config)
 
         # Handle Spout input settings
-        if "spout_input" in parameters:
-            spout_config = parameters.pop("spout_input")
-            self._update_spout_input(spout_config)
+        if "spout_receiver" in parameters:
+            spout_config = parameters.pop("spout_receiver")
+            self._update_spout_receiver(spout_config)
 
         # Put new parameters in queue (replace any pending update)
         try:
@@ -274,7 +274,7 @@ class FrameProcessor:
             logger.info("Parameter queue full, dropping parameter update")
             return False
 
-    def _update_spout_output(self, config: dict):
+    def _update_spout_sender(self, config: dict):
         """Update Spout output configuration."""
         logger.info(f"Spout output config received: {config}")
 
@@ -283,26 +283,26 @@ class FrameProcessor:
             return
 
         enabled = config.get("enabled", False)
-        sender_name = config.get("senderName", "Scope")
+        sender_name = config.get("name", "ScopeSyphonSpoutOut")
 
         logger.info(f"Spout output: enabled={enabled}, name={sender_name}")
 
-        if enabled and not self.spout_output_enabled:
+        if enabled and not self.spout_sender_enabled:
             # Enable Spout output
             try:
                 self.spout_sender = SpoutSender(sender_name, 512, 512)
                 if self.spout_sender.create():
-                    self.spout_output_enabled = True
-                    self.spout_output_name = sender_name
+                    self.spout_sender_enabled = True
+                    self.spout_sender_name = sender_name
                     # Start background thread for async sending
                     if (
-                        self.spout_output_thread is None
-                        or not self.spout_output_thread.is_alive()
+                        self.spout_sender_thread is None
+                        or not self.spout_sender_thread.is_alive()
                     ):
-                        self.spout_output_thread = threading.Thread(
-                            target=self._spout_output_loop, daemon=True
+                        self.spout_sender_thread = threading.Thread(
+                            target=self._spout_sender_loop, daemon=True
                         )
-                        self.spout_output_thread.start()
+                        self.spout_sender_thread.start()
                     logger.info(f"Spout output enabled: '{sender_name}'")
                 else:
                     logger.error("Failed to create Spout sender")
@@ -311,62 +311,62 @@ class FrameProcessor:
                 logger.error(f"Error creating Spout sender: {e}")
                 self.spout_sender = None
 
-        elif not enabled and self.spout_output_enabled:
+        elif not enabled and self.spout_sender_enabled:
             # Disable Spout output
             if self.spout_sender is not None:
                 self.spout_sender.release()
                 self.spout_sender = None
-            self.spout_output_enabled = False
+            self.spout_sender_enabled = False
             logger.info("Spout output disabled")
 
-        elif enabled and sender_name != self.spout_output_name:
+        elif enabled and sender_name != self.spout_sender_name:
             # Name changed, recreate sender
             if self.spout_sender is not None:
                 self.spout_sender.release()
             try:
                 self.spout_sender = SpoutSender(sender_name, 512, 512)
                 if self.spout_sender.create():
-                    self.spout_output_name = sender_name
+                    self.spout_sender_name = sender_name
                     # Ensure output thread is running
                     if (
-                        self.spout_output_thread is None
-                        or not self.spout_output_thread.is_alive()
+                        self.spout_sender_thread is None
+                        or not self.spout_sender_thread.is_alive()
                     ):
-                        self.spout_output_thread = threading.Thread(
-                            target=self._spout_output_loop, daemon=True
+                        self.spout_sender_thread = threading.Thread(
+                            target=self._spout_sender_loop, daemon=True
                         )
-                        self.spout_output_thread.start()
+                        self.spout_sender_thread.start()
                     logger.info(f"Spout output renamed to: '{sender_name}'")
                 else:
                     logger.error("Failed to recreate Spout sender")
                     self.spout_sender = None
-                    self.spout_output_enabled = False
+                    self.spout_sender_enabled = False
             except Exception as e:
                 logger.error(f"Error recreating Spout sender: {e}")
                 self.spout_sender = None
-                self.spout_output_enabled = False
+                self.spout_sender_enabled = False
 
-    def _update_spout_input(self, config: dict):
+    def _update_spout_receiver(self, config: dict):
         """Update Spout input configuration."""
         if not SPOUT_AVAILABLE:
             logger.warning("Spout not available on this platform")
             return
 
         enabled = config.get("enabled", False)
-        sender_name = config.get("senderName", "")
+        sender_name = config.get("name", "")
 
-        if enabled and not self.spout_input_enabled:
+        if enabled and not self.spout_receiver_enabled:
             # Enable Spout input
             try:
                 self.spout_receiver = SpoutReceiver(sender_name, 512, 512)
                 if self.spout_receiver.create():
-                    self.spout_input_enabled = True
-                    self.spout_input_name = sender_name
+                    self.spout_receiver_enabled = True
+                    self.spout_receiver_name = sender_name
                     # Start receiving thread
-                    self.spout_input_thread = threading.Thread(
-                        target=self._spout_input_loop, daemon=True
+                    self.spout_receiver_thread = threading.Thread(
+                        target=self._spout_receiver_loop, daemon=True
                     )
-                    self.spout_input_thread.start()
+                    self.spout_receiver_thread.start()
                     logger.info(f"Spout input enabled: '{sender_name or 'any'}'")
                 else:
                     logger.error("Failed to create Spout receiver")
@@ -375,33 +375,33 @@ class FrameProcessor:
                 logger.error(f"Error creating Spout receiver: {e}")
                 self.spout_receiver = None
 
-        elif not enabled and self.spout_input_enabled:
+        elif not enabled and self.spout_receiver_enabled:
             # Disable Spout input
-            self.spout_input_enabled = False
+            self.spout_receiver_enabled = False
             if self.spout_receiver is not None:
                 self.spout_receiver.release()
                 self.spout_receiver = None
             logger.info("Spout input disabled")
 
-        elif enabled and sender_name != self.spout_input_name:
+        elif enabled and sender_name != self.spout_receiver_name:
             # Name changed, recreate receiver
-            self.spout_input_enabled = False
+            self.spout_receiver_enabled = False
             if self.spout_receiver is not None:
                 self.spout_receiver.release()
             try:
                 self.spout_receiver = SpoutReceiver(sender_name, 512, 512)
                 if self.spout_receiver.create():
-                    self.spout_input_enabled = True
-                    self.spout_input_name = sender_name
+                    self.spout_receiver_enabled = True
+                    self.spout_receiver_name = sender_name
                     # Restart receiving thread if not running
                     if (
-                        self.spout_input_thread is None
-                        or not self.spout_input_thread.is_alive()
+                        self.spout_receiver_thread is None
+                        or not self.spout_receiver_thread.is_alive()
                     ):
-                        self.spout_input_thread = threading.Thread(
-                            target=self._spout_input_loop, daemon=True
+                        self.spout_receiver_thread = threading.Thread(
+                            target=self._spout_receiver_loop, daemon=True
                         )
-                        self.spout_input_thread.start()
+                        self.spout_receiver_thread.start()
                     logger.info(f"Spout input changed to: '{sender_name or 'any'}'")
                 else:
                     logger.error("Failed to recreate Spout receiver")
@@ -410,18 +410,18 @@ class FrameProcessor:
                 logger.error(f"Error recreating Spout receiver: {e}")
                 self.spout_receiver = None
 
-    def _spout_output_loop(self):
+    def _spout_sender_loop(self):
         """Background thread that sends frames to Spout asynchronously."""
         logger.info("Spout output thread started")
         frame_count = 0
 
         while (
-            self.running and self.spout_output_enabled and self.spout_sender is not None
+            self.running and self.spout_sender_enabled and self.spout_sender is not None
         ):
             try:
                 # Get frame from queue (blocking with timeout)
                 try:
-                    frame_np = self.spout_output_queue.get(timeout=0.1)
+                    frame_np = self.spout_sender_queue.get(timeout=0.1)
                     # None is a sentinel value to stop the thread
                     if frame_np is None:
                         break
@@ -444,7 +444,7 @@ class FrameProcessor:
 
         logger.info(f"Spout output thread stopped after {frame_count} frames")
 
-    def _spout_input_loop(self):
+    def _spout_receiver_loop(self):
         """Background thread that receives frames from Spout and adds to buffer."""
         logger.info("Spout input thread started")
 
@@ -456,7 +456,7 @@ class FrameProcessor:
 
         while (
             self.running
-            and self.spout_input_enabled
+            and self.spout_receiver_enabled
             and self.spout_receiver is not None
         ):
             try:
