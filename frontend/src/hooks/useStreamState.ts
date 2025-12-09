@@ -202,18 +202,27 @@ export function useStreamState() {
   }, []);
 
   // Set recommended quantization when krea-realtime-video is selected
+  // Reset to null when switching to other pipelines
   useEffect(() => {
-    if (
-      settings.pipelineId === "krea-realtime-video" &&
-      hardwareInfo?.vram_gb !== null &&
-      hardwareInfo?.vram_gb !== undefined
-    ) {
-      // > 40GB = no quantization (null), <= 40GB = fp8_e4m3fn
-      const recommendedQuantization =
-        hardwareInfo.vram_gb > 40 ? null : "fp8_e4m3fn";
+    if (settings.pipelineId === "krea-realtime-video") {
+      // Krea pipeline: set quantization based on VRAM if hardware info is available
+      if (
+        hardwareInfo?.vram_gb !== null &&
+        hardwareInfo?.vram_gb !== undefined
+      ) {
+        // > 40GB = no quantization (null), <= 40GB = fp8_e4m3fn
+        const recommendedQuantization =
+          hardwareInfo.vram_gb > 40 ? null : "fp8_e4m3fn";
+        setSettings(prev => ({
+          ...prev,
+          quantization: recommendedQuantization,
+        }));
+      }
+    } else {
+      // Non-Krea pipeline: reset quantization to null (default for other pipelines)
       setSettings(prev => ({
         ...prev,
-        quantization: recommendedQuantization,
+        quantization: null,
       }));
     }
   }, [settings.pipelineId, hardwareInfo]);
