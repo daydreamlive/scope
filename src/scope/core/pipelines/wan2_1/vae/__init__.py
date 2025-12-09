@@ -21,6 +21,7 @@ Usage:
 
 from functools import partial
 
+from .tae import TAEWrapper
 from .wan import WanVAEWrapper
 
 # Registry mapping type names to VAE factory functions
@@ -28,6 +29,7 @@ from .wan import WanVAEWrapper
 VAE_REGISTRY: dict[str, type] = {
     "wan": WanVAEWrapper,
     "lightvae": partial(WanVAEWrapper, use_lightvae=True),
+    "tae": TAEWrapper,
 }
 
 DEFAULT_VAE_TYPE = "wan"
@@ -38,7 +40,7 @@ def create_vae(
     model_name: str = "Wan2.1-T2V-1.3B",
     vae_type: str | None = None,
     vae_path: str | None = None,
-) -> WanVAEWrapper:
+) -> WanVAEWrapper | TAEWrapper:
     """Create VAE instance by type.
 
     Args:
@@ -74,6 +76,7 @@ def list_vae_types() -> list[str]:
 
 __all__ = [
     "WanVAEWrapper",
+    "TAEWrapper",
     "create_vae",
     "list_vae_types",
     "VAE_REGISTRY",
