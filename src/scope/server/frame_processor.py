@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import Spout support (Windows only)
 try:
-    from scope.spout import SpoutReceiver, SpoutSender
+    from scope.server.spout import SpoutReceiver, SpoutSender
 
     SPOUT_AVAILABLE = True
 except ImportError:
