@@ -17,6 +17,7 @@ autoUpdater.logger = log;
 // Configure auto-updater
 autoUpdater.autoDownload = false; // Don't download automatically, ask user first
 autoUpdater.autoInstallOnAppQuit = true; // Install updates when app quits
+autoUpdater.disableDifferentialDownload = true; // Disable differential downloads (no blockmaps)
 
 // Auto-updater event handlers
 let updateDownloaded = false;
