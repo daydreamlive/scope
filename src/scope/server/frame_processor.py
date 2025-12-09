@@ -254,6 +254,18 @@ class FrameProcessor:
 
             self.last_fps_update = current_time
 
+    def _get_pipeline_dimensions(self) -> tuple[int, int]:
+        """Get current pipeline dimensions from pipeline manager."""
+        try:
+            status_info = self.pipeline_manager.get_status_info()
+            load_params = status_info.get("load_params") or {}
+            width = load_params.get("width", 512)
+            height = load_params.get("height", 512)
+            return width, height
+        except Exception as e:
+            logger.warning(f"Could not get pipeline dimensions: {e}")
+            return 512, 512
+
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
         # Handle Spout output settings
@@ -285,12 +297,17 @@ class FrameProcessor:
         enabled = config.get("enabled", False)
         sender_name = config.get("name", "ScopeSyphonSpoutOut")
 
-        logger.info(f"Spout output: enabled={enabled}, name={sender_name}")
+        # Get dimensions from active pipeline
+        width, height = self._get_pipeline_dimensions()
+
+        logger.info(
+            f"Spout output: enabled={enabled}, name={sender_name}, size={width}x{height}"
+        )
 
         if enabled and not self.spout_sender_enabled:
             # Enable Spout output
             try:
-                self.spout_sender = SpoutSender(sender_name, 512, 512)
+                self.spout_sender = SpoutSender(sender_name, width, height)
                 if self.spout_sender.create():
                     self.spout_sender_enabled = True
                     self.spout_sender_name = sender_name
@@ -319,12 +336,21 @@ class FrameProcessor:
             self.spout_sender_enabled = False
             logger.info("Spout output disabled")
 
-        elif enabled and sender_name != self.spout_sender_name:
-            # Name changed, recreate sender
+        elif enabled and (
+            sender_name != self.spout_sender_name
+            or (
+                self.spout_sender
+                and (
+                    self.spout_sender.width != width
+                    or self.spout_sender.height != height
+                )
+            )
+        ):
+            # Name or dimensions changed, recreate sender
             if self.spout_sender is not None:
                 self.spout_sender.release()
             try:
-                self.spout_sender = SpoutSender(sender_name, 512, 512)
+                self.spout_sender = SpoutSender(sender_name, width, height)
                 if self.spout_sender.create():
                     self.spout_sender_name = sender_name
                     # Ensure output thread is running
@@ -336,7 +362,7 @@ class FrameProcessor:
                             target=self._spout_sender_loop, daemon=True
                         )
                         self.spout_sender_thread.start()
-                    logger.info(f"Spout output renamed to: '{sender_name}'")
+                    logger.info(f"Spout output updated: '{sender_name}' ({width}x{height})")
                 else:
                     logger.error("Failed to recreate Spout sender")
                     self.spout_sender = None
