@@ -24,7 +24,12 @@ import type {
   LoraMergeStrategy,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import {
+  checkModelStatus,
+  checkVaeStatus,
+  downloadPipelineModels,
+  downloadVae,
+} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 
 // Delay before resetting video reinitialization flag (ms)
@@ -96,6 +101,10 @@ export function StreamPage() {
   const [pipelineNeedsModels, setPipelineNeedsModels] = useState<string | null>(
     null
   );
+  const [vaeNeedsDownload, setVaeNeedsDownload] = useState<{
+    vaeType: string;
+    modelName: string;
+  } | null>(null);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -274,6 +283,15 @@ export function StreamPage() {
   };
 
   const handleDownloadModels = async () => {
+    // Check if we need to download VAE first
+    if (vaeNeedsDownload) {
+      await handleDownloadVae();
+    } else if (pipelineNeedsModels) {
+      await handleDownloadPipelineModels();
+    }
+  };
+
+  const handleDownloadPipelineModels = async () => {
     if (!pipelineNeedsModels) return;
 
     setIsDownloading(true);
@@ -354,9 +372,74 @@ export function StreamPage() {
     }
   };
 
+  const handleDownloadVae = async () => {
+    if (!vaeNeedsDownload) return;
+
+    setIsDownloading(true);
+    setShowDownloadDialog(false);
+
+    try {
+      await downloadVae(vaeNeedsDownload.vaeType, vaeNeedsDownload.modelName);
+
+      // Start polling to check when download is complete
+      const checkDownloadComplete = async () => {
+        try {
+          const status = await checkVaeStatus(
+            vaeNeedsDownload.vaeType,
+            vaeNeedsDownload.modelName
+          );
+          if (status.downloaded) {
+            setIsDownloading(false);
+            setVaeNeedsDownload(null);
+
+            // After VAE download, check if pipeline models are also needed
+            const pipelineIdToUse = pipelineNeedsModels || settings.pipelineId;
+            const pipelineInfo = PIPELINES[pipelineIdToUse];
+            if (pipelineInfo?.requiresModels) {
+              try {
+                const pipelineStatus = await checkModelStatus(pipelineIdToUse);
+                if (!pipelineStatus.downloaded) {
+                  // Still need pipeline models, show dialog for that
+                  setPipelineNeedsModels(pipelineIdToUse);
+                  setShowDownloadDialog(true);
+                  return;
+                }
+              } catch (error) {
+                console.error("Error checking model status:", error);
+              }
+            }
+
+            // All downloads complete, start the stream
+            setTimeout(async () => {
+              const started = await handleStartStream();
+              if (started && timelinePlayPauseRef.current) {
+                setTimeout(() => {
+                  timelinePlayPauseRef.current?.();
+                }, 2000);
+              }
+            }, 100);
+          } else {
+            // Check again in 2 seconds
+            setTimeout(checkDownloadComplete, 2000);
+          }
+        } catch (error) {
+          console.error("Error checking VAE download status:", error);
+          setIsDownloading(false);
+        }
+      };
+
+      // Start checking for completion
+      setTimeout(checkDownloadComplete, 5000);
+    } catch (error) {
+      console.error("Error downloading VAE:", error);
+      setIsDownloading(false);
+    }
+  };
+
   const handleDialogClose = () => {
     setShowDownloadDialog(false);
     setPipelineNeedsModels(null);
+    setVaeNeedsDownload(null);
 
     // When user cancels, no stream or timeline has started yet, so nothing to clean up
     // Just close the dialog and return early without any state changes
@@ -567,6 +650,24 @@ export function StreamPage() {
           console.error("Error checking model status:", error);
           // Continue anyway if check fails
         }
+      }
+
+      // Check if VAE is needed but not downloaded
+      // Default to "wan" VAE type (backend will handle VAE selection)
+      // NOTE: support for other vae types will be added later. const vaeType = settings.vaeType ?? "wan";
+      const vaeType = "wan";
+      try {
+        const vaeStatus = await checkVaeStatus(vaeType);
+        if (!vaeStatus.downloaded) {
+          // Show download dialog for VAE (use pipeline ID for dialog, but track VAE separately)
+          setVaeNeedsDownload({ vaeType, modelName: "Wan2.1-T2V-1.3B" });
+          setPipelineNeedsModels(pipelineIdToUse);
+          setShowDownloadDialog(true);
+          return false; // Stream did not start
+        }
+      } catch (error) {
+        console.error("Error checking VAE status:", error);
+        // Continue anyway if check fails
       }
 
       // Always load pipeline with current parameters - backend will handle the rest
@@ -971,6 +1072,7 @@ export function StreamPage() {
           pipelineId={pipelineNeedsModels as PipelineId}
           onClose={handleDialogClose}
           onDownload={handleDownloadModels}
+          vaeNeedsDownload={vaeNeedsDownload}
         />
       )}
     </div>
