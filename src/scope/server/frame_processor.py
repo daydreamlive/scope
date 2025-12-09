@@ -21,6 +21,10 @@ MAX_FPS = 60.0  # Maximum FPS cap
 DEFAULT_FPS = 30.0  # Default FPS
 SLEEP_TIME = 0.01
 
+# Input FPS measurement constants
+INPUT_FPS_SAMPLE_SIZE = 30  # Number of frame intervals to track
+INPUT_FPS_MIN_SAMPLES = 5  # Minimum samples needed before using input FPS
+
 
 class FrameProcessor:
     def __init__(
@@ -63,6 +67,12 @@ class FrameProcessor:
         self.current_pipeline_fps = DEFAULT_FPS
         self.fps_lock = threading.Lock()  # Lock for thread-safe FPS updates
 
+        # Input FPS tracking variables
+        self.input_frame_times = deque(maxlen=INPUT_FPS_SAMPLE_SIZE)
+        self.current_input_fps = DEFAULT_FPS
+        self.last_input_fps_update = time.time()
+        self.input_fps_lock = threading.Lock()
+
         self.paused = False
 
         # Input mode is signaled by the frontend at stream start.
@@ -101,6 +111,10 @@ class FrameProcessor:
         with self.frame_buffer_lock:
             self.frame_buffer.clear()
 
+        # Clear input frame times
+        with self.input_fps_lock:
+            self.input_frame_times.clear()
+
         logger.info("FrameProcessor stopped")
 
         # Notify callback that frame processor has stopped
@@ -116,6 +130,9 @@ class FrameProcessor:
     def put(self, frame: VideoFrame) -> bool:
         if not self.running:
             return False
+
+        # Track input frame timestamp for FPS measurement
+        self.track_input_frame()
 
         with self.frame_buffer_lock:
             self.frame_buffer.append(frame)
@@ -134,6 +151,70 @@ class FrameProcessor:
         """Get the current dynamically calculated pipeline FPS"""
         with self.fps_lock:
             return self.current_pipeline_fps
+
+    def get_output_fps(self) -> float:
+        """Get the output FPS that frames should be sent at.
+
+        Returns the minimum of input FPS and pipeline FPS to ensure:
+        1. We don't send frames faster than they were captured (maintains temporal accuracy)
+        2. We don't try to output faster than the pipeline can produce (prevents frame starvation)
+        """
+        input_fps = self._get_input_fps()
+        pipeline_fps = self.get_current_pipeline_fps()
+
+        if input_fps is None:
+            return pipeline_fps
+
+        # Use minimum to respect both input rate and pipeline capacity
+        return min(input_fps, pipeline_fps)
+
+    def _get_input_fps(self) -> float | None:
+        """Get the current measured input FPS.
+
+        Returns the measured input FPS if enough samples are available,
+        otherwise returns None to indicate fallback should be used.
+        """
+        with self.input_fps_lock:
+            if len(self.input_frame_times) < INPUT_FPS_MIN_SAMPLES:
+                return None
+            return self.current_input_fps
+
+    def _calculate_input_fps(self):
+        """Calculate and update input FPS from recent frame timestamps.
+
+        Uses the same time-based update logic as pipeline FPS for consistency.
+        Only updates if enough time has passed since the last update.
+        """
+        # Update FPS if enough time has passed
+        current_time = time.time()
+        if current_time - self.last_input_fps_update >= self.fps_update_interval:
+            with self.input_fps_lock:
+                if len(self.input_frame_times) >= INPUT_FPS_MIN_SAMPLES:
+                    # Calculate FPS from frame intervals
+                    times = list(self.input_frame_times)
+                    if len(times) >= 2:
+                        # Time span from first to last frame
+                        time_span = times[-1] - times[0]
+                        if time_span > 0:
+                            # FPS = (number of intervals) / time_span
+                            num_intervals = len(times) - 1
+                            estimated_fps = num_intervals / time_span
+
+                            # Clamp to reasonable bounds (same as pipeline FPS)
+                            estimated_fps = max(
+                                self.min_fps, min(self.max_fps, estimated_fps)
+                            )
+                            self.current_input_fps = estimated_fps
+
+            self.last_input_fps_update = current_time
+
+    def track_input_frame(self):
+        """Track timestamp of an incoming frame for FPS measurement"""
+        with self.input_fps_lock:
+            self.input_frame_times.append(time.time())
+
+        # Update input FPS calculation using same logic as pipeline FPS
+        self._calculate_input_fps()
 
     def _calculate_pipeline_fps(self, start_time: float, num_frames: int):
         """Calculate FPS based on processing time and number of frames created"""
