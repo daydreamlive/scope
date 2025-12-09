@@ -12,14 +12,6 @@ from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
-# Try to import Spout support (Windows only)
-try:
-    from scope.server.spout import SpoutReceiver, SpoutSender
-
-    SPOUT_AVAILABLE = True
-except ImportError:
-    SPOUT_AVAILABLE = False
-    logger.info("Spout not available (Windows only)")
 
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
@@ -290,10 +282,6 @@ class FrameProcessor:
         """Update Spout output configuration."""
         logger.info(f"Spout output config received: {config}")
 
-        if not SPOUT_AVAILABLE:
-            logger.warning("Spout not available on this platform")
-            return
-
         enabled = config.get("enabled", False)
         sender_name = config.get("name", "ScopeSyphonSpoutOut")
 
@@ -303,6 +291,14 @@ class FrameProcessor:
         logger.info(
             f"Spout output: enabled={enabled}, name={sender_name}, size={width}x{height}"
         )
+
+        # Lazy import SpoutSender
+        try:
+            from scope.server.spout import SpoutSender
+        except ImportError:
+            if enabled:
+                logger.warning("Spout module not available on this platform")
+            return
 
         if enabled and not self.spout_sender_enabled:
             # Enable Spout output
@@ -374,12 +370,16 @@ class FrameProcessor:
 
     def _update_spout_receiver(self, config: dict):
         """Update Spout input configuration."""
-        if not SPOUT_AVAILABLE:
-            logger.warning("Spout not available on this platform")
-            return
-
         enabled = config.get("enabled", False)
         sender_name = config.get("name", "")
+
+        # Lazy import SpoutReceiver
+        try:
+            from scope.server.spout import SpoutReceiver
+        except ImportError:
+            if enabled:
+                logger.warning("Spout module not available on this platform")
+            return
 
         if enabled and not self.spout_receiver_enabled:
             # Enable Spout input
@@ -474,8 +474,8 @@ class FrameProcessor:
         """Background thread that receives frames from Spout and adds to buffer."""
         logger.info("Spout input thread started")
 
-        # Target frame rate for Spout input (match typical pipeline processing rate)
-        target_fps = 30.0
+        # Initial target frame rate
+        target_fps = self.get_current_pipeline_fps()
         frame_interval = 1.0 / target_fps
         last_frame_time = 0.0
         frame_count = 0
@@ -486,6 +486,12 @@ class FrameProcessor:
             and self.spout_receiver is not None
         ):
             try:
+                # Update target FPS dynamically from pipeline performance
+                current_pipeline_fps = self.get_current_pipeline_fps()
+                if current_pipeline_fps > 0:
+                    target_fps = current_pipeline_fps
+                    frame_interval = 1.0 / target_fps
+
                 current_time = time.time()
 
                 # Frame rate limiting - don't receive faster than target FPS
