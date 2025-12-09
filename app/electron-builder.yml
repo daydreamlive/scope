@@ -82,7 +82,7 @@ win:
     - target: nsis
       arch:
         - x64
-  publisherName: Daydream
+  publisherName: Livepeer Inc.
   verifyUpdateCodeSignature: true # Verify code signatures for security
 
 nsis:
@@ -99,8 +99,9 @@ nsis:
   displayLanguageSelector: false
   menuCategory: false
   runAfterFinish: true
-  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+  artifactName: Daydream.Scope-Setup-${version}-${arch}.${ext}
   include: build/win/installer.nsh # Custom script for UV installation during setup
+  differentialPackage: false # Disable differential updates (no blockmap generation)
 
 # Linux configuration
 linux:
