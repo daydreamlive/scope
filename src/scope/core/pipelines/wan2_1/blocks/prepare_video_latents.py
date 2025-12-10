@@ -11,6 +11,9 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+from diffusers.utils import logging as diffusers_logging
+
+logger = diffusers_logging.get_logger(__name__)
 
 
 class PrepareVideoLatentsBlock(ModularPipelineBlocks):
@@ -112,8 +115,20 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         if base_seed is None:
             base_seed = 42
 
+        # PROOF HACK 1: Correct current_start_frame for seed derivation
+        corrected_current_start_frame = block_state.current_start_frame
+        if block_state.current_start_frame > 0:
+            corrected_current_start_frame = block_state.current_start_frame - 1
+            logger.info(
+                f"PROOF HACK 1 (PrepareVideoLatentsBlock): Corrected current_start_frame from {block_state.current_start_frame} to {corrected_current_start_frame} for seed"
+            )
+
         # Create generator from seed for reproducible generation
-        block_seed = base_seed + block_state.current_start_frame
+        block_seed = base_seed + corrected_current_start_frame
+        logger.info(
+            f"PrepareVideoLatentsBlock: current_start_frame={block_state.current_start_frame}, "
+            f"corrected={corrected_current_start_frame}, base_seed={base_seed}, block_seed={block_seed}, target_num_frames={target_num_frames}"
+        )
         rng = torch.Generator(device=components.config.device).manual_seed(block_seed)
 
         # Generate empty latents (noise)

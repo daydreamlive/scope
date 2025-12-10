@@ -10,6 +10,9 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+from diffusers.utils import logging as diffusers_logging
+
+logger = diffusers_logging.get_logger(__name__)
 
 
 class DecodeBlock(ModularPipelineBlocks):
@@ -48,8 +51,18 @@ class DecodeBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
+        _, num_latent_frames, _, _, _ = block_state.latents.shape
+
         # Decode to pixel space
         video = components.vae.decode_to_pixel(block_state.latents, use_cache=True)
+
+        _, num_pixel_frames, _, _, _ = video.shape
+
+        # Log VAE expansion ratio
+        logger.info(
+            f"DecodeBlock: VAE decoded {num_latent_frames} latent frames -> {num_pixel_frames} pixel frames "
+            f"(expansion ratio: {num_pixel_frames/num_latent_frames:.2f}x)"
+        )
 
         block_state.output_video = video
 

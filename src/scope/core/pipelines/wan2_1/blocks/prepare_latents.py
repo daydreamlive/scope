@@ -11,6 +11,9 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+from diffusers.utils import logging as diffusers_logging
+
+logger = diffusers_logging.get_logger(__name__)
 
 
 class PrepareLatentsBlock(ModularPipelineBlocks):
@@ -91,6 +94,10 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
 
         # Create generator from seed for reproducible generation
         block_seed = base_seed + block_state.current_start_frame
+        logger.info(
+            f"PrepareLatentsBlock: current_start_frame={block_state.current_start_frame}, "
+            f"base_seed={base_seed}, block_seed={block_seed}"
+        )
         rng = torch.Generator(device=generator_param.device).manual_seed(block_seed)
 
         # Determine number of latent frames to generate

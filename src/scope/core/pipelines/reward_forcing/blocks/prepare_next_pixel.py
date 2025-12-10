@@ -11,6 +11,9 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+from diffusers.utils import logging as diffusers_logging
+
+logger = diffusers_logging.get_logger(__name__)
 
 
 class PrepareNextPixelFrameBlock(ModularPipelineBlocks):
@@ -72,6 +75,10 @@ class PrepareNextPixelFrameBlock(ModularPipelineBlocks):
         # VAE expands latents to pixels (4 latent → 13 pixel on first batch,
         # 3 latent → 12 pixel on subsequent batches), so we must track pixel space
         # to align with input video chunk extraction.
+        logger.info(
+            f"PrepareNextPixelFrameBlock: incrementing current_start_frame from {block_state.current_start_frame} "
+            f"by {num_output_frames} pixel frames (new value: {block_state.current_start_frame + num_output_frames})"
+        )
         block_state.current_start_frame += num_output_frames
 
         self.set_block_state(state, block_state)

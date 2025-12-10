@@ -11,6 +11,9 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+from diffusers.utils import logging as diffusers_logging
+
+logger = diffusers_logging.get_logger(__name__)
 
 
 class PrepareNextBlock(ModularPipelineBlocks):
@@ -63,6 +66,10 @@ class PrepareNextBlock(ModularPipelineBlocks):
 
         _, num_frames, _, _, _ = block_state.latents.shape
         # Increment the starting index based on the # of latents actually denoised
+        logger.info(
+            f"PrepareNextBlock: incrementing current_start_frame from {block_state.current_start_frame} "
+            f"by {num_frames} latent frames (new value: {block_state.current_start_frame + num_frames})"
+        )
         block_state.current_start_frame += num_frames
 
         self.set_block_state(state, block_state)

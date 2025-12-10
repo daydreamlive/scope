@@ -11,6 +11,9 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+from diffusers.utils import logging as diffusers_logging
+
+logger = diffusers_logging.get_logger(__name__)
 
 
 class DenoiseBlock(ModularPipelineBlocks):
@@ -140,6 +143,14 @@ class DenoiseBlock(ModularPipelineBlocks):
         start_frame = block_state.current_start_frame
         if block_state.start_frame is not None:
             start_frame = block_state.start_frame
+
+        # PROOF HACK 2: Correct start_frame for KV cache positioning
+        original_start_frame = start_frame
+        if start_frame > 0:
+            start_frame = start_frame - 1
+            logger.info(
+                f"PROOF HACK 2 (DenoiseBlock): Corrected start_frame from {original_start_frame} to {start_frame} for cache positioning"
+            )
 
         end_frame = start_frame + num_frames
 

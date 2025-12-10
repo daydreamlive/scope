@@ -9,19 +9,21 @@ from ..wan2_1.blocks import (
     DecodeBlock,
     DenoiseBlock,
     EmbeddingBlendingBlock,
+    PrepareNextBlock,
     SetTimestepsBlock,
     SetTransformerBlocksLocalAttnSizeBlock,
     SetupCachesBlock,
     TextConditioningBlock,
 )
-from .blocks import PrepareNextPixelFrameBlock
+
+# from .blocks import PrepareNextPixelFrameBlock
 
 logger = diffusers_logging.get_logger(__name__)
 
 # Main pipeline blocks with multi-mode support (text-to-video and video-to-video)
 # AutoPreprocessVideoBlock: Routes to video preprocessing when 'video' input provided
 # AutoPrepareLatentsBlock: Routes to PrepareVideoLatentsBlock or PrepareLatentsBlock
-# PrepareNextPixelFrameBlock: reward_forcing-specific block that tracks pixel frames for proper v2v alignment
+# EXPERIMENT: Using PrepareNextBlock (latent tracking) with manual RoPE correction hack
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
@@ -37,7 +39,7 @@ ALL_BLOCKS = InsertableDict(
         ("denoise", DenoiseBlock),
         ("clean_kv_cache", CleanKVCacheBlock),
         ("decode", DecodeBlock),
-        ("prepare_next", PrepareNextPixelFrameBlock),
+        ("prepare_next", PrepareNextBlock),
     ]
 )
 

@@ -12,11 +12,14 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from torch.nn.attention.flex_attention import BlockMask
 from diffusers.models.modeling_utils import ModelMixin
+from diffusers.utils import logging as diffusers_logging
 import torch.nn as nn
 import torch
 import math
 import copy
 import torch.distributed as dist
+
+logger = diffusers_logging.get_logger(__name__)
 
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
@@ -140,6 +143,15 @@ class CausalWanSelfAttention(nn.Module):
 
         frame_seqlen = math.prod(grid_sizes[0][1:]).item()
         current_start_frame = current_start // frame_seqlen
+
+        # PROOF HACK 4: Correct current_start_frame for RoPE positional encoding
+        original_current_start_frame = current_start_frame
+        if current_start_frame > 0:
+            current_start_frame = current_start_frame - 1
+            logger.info(
+                f"PROOF HACK 4 (CausalWanSelfAttention): Corrected current_start_frame from {original_current_start_frame} to {current_start_frame} for RoPE"
+            )
+
         current_end = current_start + q.shape[1]
         total_sink_tokens = self.sink_size * frame_seqlen
 
@@ -174,8 +186,12 @@ class CausalWanSelfAttention(nn.Module):
         else:
             local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
             local_start_index = local_end_index - num_new_tokens
-            # print(kv_cache["k"].shape)
-            # print(local_start_index, local_end_index)
+            # EXPERIMENT 5: Log KV cache indexing
+            logger.info(
+                f"CausalWanSelfAttention KV cache update: local_start_index={local_start_index}, "
+                f"local_end_index={local_end_index}, num_new_tokens={num_new_tokens}, "
+                f"current_start_frame={current_start_frame}, kv_cache_size={kv_cache_size}"
+            )
             kv_cache["k"][:, local_start_index:local_end_index] = k
             kv_cache["v"][:, local_start_index:local_end_index] = v
 

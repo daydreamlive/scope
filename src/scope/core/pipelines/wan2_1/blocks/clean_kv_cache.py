@@ -11,6 +11,9 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+from diffusers.utils import logging as diffusers_logging
+
+logger = diffusers_logging.get_logger(__name__)
 
 
 class CleanKVCacheBlock(ModularPipelineBlocks):
@@ -92,7 +95,16 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
         generator_param = next(components.generator.parameters())
 
         _, num_frames, _, _, _ = block_state.latents.shape
-        current_end_frame = block_state.current_start_frame + num_frames
+
+        # PROOF HACK 3: Correct current_start_frame for KV cache cleanup
+        corrected_current_start_frame = block_state.current_start_frame
+        if block_state.current_start_frame > 0:
+            corrected_current_start_frame = block_state.current_start_frame - 1
+            logger.info(
+                f"PROOF HACK 3 (CleanKVCacheBlock): Corrected current_start_frame from {block_state.current_start_frame} to {corrected_current_start_frame} for cache cleanup"
+            )
+
+        current_end_frame = corrected_current_start_frame + num_frames
 
         # This is defined to give us timestep = 0 while matching shape expected by the generator.
         # After denoising the KV cache will contain keys/values computed from the noisy input at the final timestep.
@@ -117,7 +129,7 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             timestep=context_timestep,
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
-            current_start=block_state.current_start_frame * frame_seq_length,
+            current_start=corrected_current_start_frame * frame_seq_length,
             current_end=current_end_frame * frame_seq_length,
         )
 
