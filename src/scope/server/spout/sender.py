@@ -6,25 +6,18 @@ Spout-compatible applications like TouchDesigner, Resolume, etc.
 
 Note: The Python SpoutGL wrapper API differs from the C++ SDK.
 See: https://github.com/jlai/Python-SpoutGL
+
+Raises:
+    ImportError: If SpoutGL is not installed. Install with: pip install SpoutGL pyopengl
 """
 
 import logging
 
 import numpy as np
+import SpoutGL
 import torch
 
 logger = logging.getLogger(__name__)
-
-# Check if SpoutGL is available
-try:
-    import SpoutGL
-
-    SPOUT_AVAILABLE = True
-    # Log available methods for debugging
-    logger.debug(f"SpoutGL sender methods: {dir(SpoutGL.SpoutSender())}")
-except ImportError:
-    SPOUT_AVAILABLE = False
-    logger.warning("SpoutGL not available. Install with: pip install SpoutGL pyopengl")
 
 
 class SpoutSender:
@@ -51,11 +44,6 @@ class SpoutSender:
             width: Width of the output texture
             height: Height of the output texture
         """
-        if not SPOUT_AVAILABLE:
-            raise RuntimeError(
-                "SpoutGL is not available. Install with: pip install SpoutGL pyopengl"
-            )
-
         self.name = name
         self.width = width
         self.height = height

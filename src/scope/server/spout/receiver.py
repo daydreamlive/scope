@@ -6,24 +6,17 @@ Spout-compatible applications like TouchDesigner, Resolume, etc.
 
 Note: The Python SpoutGL wrapper API differs from the C++ SDK.
 See: https://github.com/jlai/Python-SpoutGL
+
+Raises:
+    ImportError: If SpoutGL is not installed. Install with: pip install SpoutGL pyopengl
 """
 
 import logging
 
 import numpy as np
+import SpoutGL
 
 logger = logging.getLogger(__name__)
-
-# Check if SpoutGL is available
-try:
-    import SpoutGL
-
-    SPOUT_AVAILABLE = True
-    # Log available methods for debugging
-    logger.debug(f"SpoutGL receiver methods: {dir(SpoutGL.SpoutReceiver())}")
-except ImportError:
-    SPOUT_AVAILABLE = False
-    logger.warning("SpoutGL not available. Install with: pip install SpoutGL pyopengl")
 
 
 class SpoutReceiver:
@@ -53,11 +46,6 @@ class SpoutReceiver:
             width: Initial width for the receive buffer
             height: Initial height for the receive buffer
         """
-        if not SPOUT_AVAILABLE:
-            raise RuntimeError(
-                "SpoutGL is not available. Install with: pip install SpoutGL pyopengl"
-            )
-
         self.name = name
         self.width = width
         self.height = height
@@ -229,9 +217,6 @@ def list_senders() -> list[str]:
     Returns:
         List of sender names currently available.
     """
-    if not SPOUT_AVAILABLE:
-        return []
-
     try:
         receiver = SpoutGL.SpoutReceiver()
 
