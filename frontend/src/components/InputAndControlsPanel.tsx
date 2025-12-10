@@ -11,6 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Upload, Radio } from "lucide-react";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import type { InputMode } from "../types";
@@ -210,9 +211,11 @@ export function InputAndControlsPanel({
                   <span className="text-sm font-medium">Spout Receiver</span>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs text-muted-foreground">
-                    Sender Name (leave empty for any)
-                  </label>
+                  <LabelWithTooltip
+                    label="Sender Name"
+                    tooltip="Receive video from Spout-compatible apps like TouchDesigner, Resolume, OBS. Leave empty to receive from any sender."
+                    className="text-xs text-muted-foreground"
+                  />
                   <Input
                     type="text"
                     value={spoutReceiverName}
@@ -222,10 +225,6 @@ export function InputAndControlsPanel({
                     placeholder="TDSyphonSpoutOut"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Receive video from Spout-compatible apps like TouchDesigner,
-                  Resolume, OBS.
-                </p>
               </div>
             ) : (
               /* Video/Camera Input Preview */

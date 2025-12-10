@@ -651,12 +651,12 @@ export function SettingsPanel({
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Radio className="h-4 w-4" />
-                <span className="text-sm font-medium">Spout Sender</span>
+                <LabelWithTooltip
+                  label="Spout Sender"
+                  tooltip="Send processed frames to external apps like TouchDesigner, Resolume, OBS."
+                  className="text-sm font-medium"
+                />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Send processed frames to external apps like TouchDesigner,
-                Resolume, OBS.
-              </p>
               <div className="space-y-2 p-2 border rounded-md">
                 <div className="flex items-center justify-between gap-2">
                   <LabelWithTooltip
