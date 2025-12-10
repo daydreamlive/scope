@@ -234,6 +234,9 @@ export function useStreamState() {
     setPromptData(prev => ({ ...prev, ...newPrompt }));
   }, []);
 
+  // Derive spoutAvailable from hardware info (server-side detection)
+  const spoutAvailable = hardwareInfo?.spout_available ?? false;
+
   return {
     systemMetrics,
     streamStatus,
@@ -247,5 +250,6 @@ export function useStreamState() {
     updatePrompt,
     getDefaults,
     supportsNoiseControls,
+    spoutAvailable,
   };
 }

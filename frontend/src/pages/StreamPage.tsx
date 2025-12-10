@@ -50,8 +50,13 @@ function buildLoRAParams(
 
 export function StreamPage() {
   // Use the stream state hook for settings management
-  const { settings, updateSettings, getDefaults, supportsNoiseControls } =
-    useStreamState();
+  const {
+    settings,
+    updateSettings,
+    getDefaults,
+    supportsNoiseControls,
+    spoutAvailable,
+  } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -828,6 +833,7 @@ export function StreamPage() {
               settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
             }
             onInputModeChange={handleInputModeChange}
+            spoutAvailable={spoutAvailable}
           />
         </div>
 
@@ -1021,6 +1027,7 @@ export function StreamPage() {
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
+            spoutAvailable={spoutAvailable}
           />
         </div>
       </div>

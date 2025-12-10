@@ -19,12 +19,6 @@ import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 
-// Detect if user is on Windows (Spout is Windows-only)
-const isWindows =
-  typeof navigator !== "undefined" &&
-  (navigator as Navigator & { userAgentData?: { platform: string } })
-    .userAgentData?.platform === "Windows";
-
 interface InputAndControlsPanelProps {
   className?: string;
   localStream: MediaStream | null;
@@ -64,6 +58,8 @@ interface InputAndControlsPanelProps {
   // Input mode (text vs video) for multi-mode pipelines
   inputMode: InputMode;
   onInputModeChange: (mode: InputMode) => void;
+  // Whether Spout is available (server-side detection for native Windows, not WSL)
+  spoutAvailable?: boolean;
 }
 
 export function InputAndControlsPanel({
@@ -103,6 +99,7 @@ export function InputAndControlsPanel({
   onSpoutReceiverChange,
   inputMode,
   onInputModeChange,
+  spoutAvailable = false,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -192,7 +189,7 @@ export function InputAndControlsPanel({
               <ToggleGroupItem value="camera" aria-label="Camera">
                 Camera
               </ToggleGroupItem>
-              {isWindows && (
+              {spoutAvailable && (
                 <ToggleGroupItem value="spout" aria-label="Spout">
                   Spout
                 </ToggleGroupItem>

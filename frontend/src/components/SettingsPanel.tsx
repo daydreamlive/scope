@@ -74,13 +74,9 @@ interface SettingsPanelProps {
   // Spout settings
   spoutSender?: SettingsState["spoutSender"];
   onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
+  // Whether Spout is available (server-side detection for native Windows, not WSL)
+  spoutAvailable?: boolean;
 }
-
-// Detect if user is on Windows (Spout is Windows-only)
-const isWindows =
-  typeof navigator !== "undefined" &&
-  (navigator as Navigator & { userAgentData?: { platform: string } })
-    .userAgentData?.platform === "Windows";
 
 export function SettingsPanel({
   className = "",
@@ -113,6 +109,7 @@ export function SettingsPanel({
   supportsNoiseControls = false,
   spoutSender,
   onSpoutSenderChange,
+  spoutAvailable = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -648,8 +645,8 @@ export function SettingsPanel({
           </div>
         )}
 
-        {/* Spout Output Settings (Windows only) */}
-        {isWindows && (
+        {/* Spout Output Settings (available on native Windows only) */}
+        {spoutAvailable && (
           <div className="space-y-4">
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-muted-foreground">
