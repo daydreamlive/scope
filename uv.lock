@@ -636,9 +636,11 @@ dependencies = [
     { name = "lmdb" },
     { name = "omegaconf" },
     { name = "peft" },
+    { name = "pyopengl", marker = "sys_platform == 'win32'" },
     { name = "safetensors" },
     { name = "sageattention", version = "2.2.0", source = { url = "https://github.com/daydreamlive/SageAttention/releases/download/v2.2.0-linux/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
     { name = "sageattention", version = "2.2.0+cu128torch2.8.0.post3", source = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
+    { name = "spoutgl", marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "torchao" },
@@ -680,9 +682,11 @@ requires-dist = [
     { name = "lmdb", specifier = ">=1.7.3" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "peft", specifier = ">=0.17.1" },
+    { name = "pyopengl", marker = "sys_platform == 'win32'", specifier = ">=3.1.10" },
     { name = "safetensors", specifier = ">=0.6.2" },
     { name = "sageattention", marker = "sys_platform == 'linux'", url = "https://github.com/daydreamlive/SageAttention/releases/download/v2.2.0-linux/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl" },
     { name = "sageattention", marker = "sys_platform == 'win32'", url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl" },
+    { name = "spoutgl", marker = "sys_platform == 'win32'", specifier = ">=0.1.1" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==2.8.0" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.8.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchao", specifier = "==0.13.0" },
@@ -2480,6 +2484,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyopengl"
+version = "3.1.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/16/912b7225d56284859cd9a672827f18be43f8012f8b7b932bc4bd959a298e/pyopengl-3.1.10.tar.gz", hash = "sha256:c4a02d6866b54eb119c8e9b3fb04fa835a95ab802dd96607ab4cdb0012df8335", size = 1915580, upload-time = "2025-08-18T02:33:01.76Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/e4/1ba6f44e491c4eece978685230dde56b14d51a0365bc1b774ddaa94d14cd/pyopengl-3.1.10-py3-none-any.whl", hash = "sha256:794a943daced39300879e4e47bd94525280685f42dbb5a998d336cfff151d74f", size = 3194996, upload-time = "2025-08-18T02:32:59.902Z" },
+]
+
+[[package]]
 name = "pyopenssl"
 version = "25.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2877,6 +2890,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "spoutgl"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/cb/2286d3aea56ea4ae2f45c523e67c2ef99d87dc08adc6ae9a83e0d49a2d36/spoutgl-0.1.1.tar.gz", hash = "sha256:89e5269b061a2be40dad87c39625c98b6f57660084f26d93647a328e7299c55c", size = 8497, upload-time = "2025-03-22T03:46:24.842Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/28/0e6ad98cf15b94121db156bd1497291bdb1d69fed84ca23e6a46e690bfc4/spoutgl-0.1.1-cp310-cp310-win32.whl", hash = "sha256:5d6cb43227552867292bd081ed7f726c1cdfcc92b690041485aa2965b441eb6b", size = 285677, upload-time = "2025-03-22T03:46:05.35Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/bb/43de51964db1ad8121e376d26e56bd347f113c334c8c1793b1e87882752e/spoutgl-0.1.1-cp310-cp310-win_amd64.whl", hash = "sha256:f6b236b34a7ed1b9d1bb4529bfc198428a71e71e60cec4d0123575a9a697254e", size = 331597, upload-time = "2025-03-22T03:46:06.669Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/6a/28a2b33bbe5d24e3a7315a02759c09908fc46a7f70b0b3a7162047592509/spoutgl-0.1.1-cp311-cp311-win32.whl", hash = "sha256:594397fe3f85a5c572abddda4de28a9a150df7dca3d7c2c77a015cfe2b813b11", size = 286628, upload-time = "2025-03-22T03:46:08.077Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/26/988546a1044ebd10863c7cf1cd02813e3e27504183480a5ddb2b62962f62/spoutgl-0.1.1-cp311-cp311-win_amd64.whl", hash = "sha256:af1361212350de19de4d9e81b1abf73f5485f7ded46a65c9de8c54b1e9d4e4ab", size = 333041, upload-time = "2025-03-22T03:46:09.755Z" },
+    { url = "https://files.pythonhosted.org/packages/67/4e/18db64d579ca4a19b521d515a6f77cd92ead8b587999d6dcd837978d6b5a/spoutgl-0.1.1-cp312-cp312-win32.whl", hash = "sha256:bef71bef1ad79785c9429cc0a134ac0adb02b015c348f46c6ac2e7e59edc8e6e", size = 285481, upload-time = "2025-03-22T03:46:11.172Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/fa/f6ae088c481ea50f88a4cbab25169eeacb60b8b2434c98029ad5efa7d9a4/spoutgl-0.1.1-cp312-cp312-win_amd64.whl", hash = "sha256:e45b7102ab91ba8a1740c2e9b7ca8ff54796cf9354215e6be4050d1c683d1f1d", size = 333833, upload-time = "2025-03-22T03:46:12.226Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/89/b2e54e07ca7973b2d27ebce2e2343d54e0bd34b9b1ef9963fc73e95d2bda/spoutgl-0.1.1-cp313-cp313-win32.whl", hash = "sha256:a99323be6df9d0b7c245a783409b1ccec64bac99cc5b26752f3174dd1fabe7d0", size = 285592, upload-time = "2025-03-22T03:46:13.483Z" },
+    { url = "https://files.pythonhosted.org/packages/80/22/0ad70c6843a04d49a8dafff0ab1fb69e43f581c6179a9987d9bfc62d91a0/spoutgl-0.1.1-cp313-cp313-win_amd64.whl", hash = "sha256:29ae2e4316c31872b6f05421581ce8a61241e7d01e1363103515e1661ad24857", size = 333859, upload-time = "2025-03-22T03:46:14.904Z" },
+    { url = "https://files.pythonhosted.org/packages/19/bc/87da378f3902b5594d94d31d91186a31dfb81450a495cef4133c44f95250/spoutgl-0.1.1-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:5a41579601965a2c6fd1e09a5dcae1b24159d4e1ddcc76c61c6e927fe97c41a2", size = 331051, upload-time = "2025-03-22T03:46:21.277Z" },
 ]
 
 [[package]]
