@@ -78,22 +78,22 @@ class VaceWanAttentionBlock(CausalWanAttentionBlock):
             c_sliced = c[:, :x.size(1), :]
 
             # Debug block 0 inputs
-            c_sliced_nan = c_sliced.isnan().any().item()
-            c_sliced_min, c_sliced_max = c_sliced.min().item(), c_sliced.max().item()
-            x_nan = x.isnan().any().item()
-            x_min, x_max = x.min().item(), x.max().item()
-            print(f"VaceBlock[{self.block_id}] before_proj input: c_sliced shape={c_sliced.shape}, nan={c_sliced_nan}, range=[{c_sliced_min:.2f},{c_sliced_max:.2f}]")
-            print(f"VaceBlock[{self.block_id}] before_proj input: x shape={x.shape}, nan={x_nan}, range=[{x_min:.2f},{x_max:.2f}]")
+            # c_sliced_nan = c_sliced.isnan().any().item()
+            # c_sliced_min, c_sliced_max = c_sliced.min().item(), c_sliced.max().item()
+            # x_nan = x.isnan().any().item()
+            # x_min, x_max = x.min().item(), x.max().item()
+            # print(f"VaceBlock[{self.block_id}] before_proj input: c_sliced shape={c_sliced.shape}, nan={c_sliced_nan}, range=[{c_sliced_min:.2f},{c_sliced_max:.2f}]")
+            # print(f"VaceBlock[{self.block_id}] before_proj input: x shape={x.shape}, nan={x_nan}, range=[{x_min:.2f},{x_max:.2f}]")
 
             before_proj_out = self.before_proj(c_sliced)
-            bp_nan = before_proj_out.isnan().any().item()
-            bp_min, bp_max = before_proj_out.min().item(), before_proj_out.max().item()
-            print(f"VaceBlock[{self.block_id}] before_proj output: nan={bp_nan}, range=[{bp_min:.2f},{bp_max:.2f}]")
+            # bp_nan = before_proj_out.isnan().any().item()
+            # bp_min, bp_max = before_proj_out.min().item(), before_proj_out.max().item()
+            # print(f"VaceBlock[{self.block_id}] before_proj output: nan={bp_nan}, range=[{bp_min:.2f},{bp_max:.2f}]")
 
             c = before_proj_out + x
-            c_nan = c.isnan().any().item()
-            c_min, c_max = c.min().item(), c.max().item()
-            print(f"VaceBlock[{self.block_id}] after residual: nan={c_nan}, range=[{c_min:.2f},{c_max:.2f}]")
+            # c_nan = c.isnan().any().item()
+            # c_min, c_max = c.min().item(), c.max().item()
+            # print(f"VaceBlock[{self.block_id}] after residual: nan={c_nan}, range=[{c_min:.2f},{c_max:.2f}]")
 
             all_c = []
         else:
@@ -118,17 +118,17 @@ class VaceWanAttentionBlock(CausalWanAttentionBlock):
         )
 
         # Debug after transformer
-        c_nan = c.isnan().any().item()
-        c_min, c_max = c.min().item(), c.max().item()
-        print(f"VaceBlock[{self.block_id}] after transformer: nan={c_nan}, range=[{c_min:.2f},{c_max:.2f}]")
+        # c_nan = c.isnan().any().item()
+        # c_min, c_max = c.min().item(), c.max().item()
+        # print(f"VaceBlock[{self.block_id}] after transformer: nan={c_nan}, range=[{c_min:.2f},{c_max:.2f}]")
 
         # Generate hint for injection
         c_skip = self.after_proj(c)
 
         # Debug after_proj
-        cs_nan = c_skip.isnan().any().item()
-        cs_min, cs_max = c_skip.min().item(), c_skip.max().item()
-        print(f"VaceBlock[{self.block_id}] after_proj output: nan={cs_nan}, range=[{cs_min:.2f},{cs_max:.2f}]")
+        # cs_nan = c_skip.isnan().any().item()
+        # cs_min, cs_max = c_skip.min().item(), c_skip.max().item()
+        # print(f"VaceBlock[{self.block_id}] after_proj output: nan={cs_nan}, range=[{cs_min:.2f},{cs_max:.2f}]")
 
         all_c += [c_skip, c]
 
@@ -215,17 +215,17 @@ class BaseWanAttentionBlock(CausalWanAttentionBlock):
         # Inject VACE hint if this block has one
         if hints is not None and self.block_id is not None:
             hint = hints[self.block_id]
-            x_before_nan = x.isnan().any().item()
-            hint_nan = hint.isnan().any().item()
+            # x_before_nan = x.isnan().any().item()
+            # hint_nan = hint.isnan().any().item()
 
             # Only log first block or when NaN detected
-            if self.block_id == 0 or x_before_nan or hint_nan:
-                print(f"VACEBlock[{self.block_id}]: x_nan={x_before_nan}, hint_nan={hint_nan}, x_range=[{x.min().item():.2f},{x.max().item():.2f}], hint_range=[{hint.min().item():.2f},{hint.max().item():.2f}]")
+            # if self.block_id == 0 or x_before_nan or hint_nan:
+            #     print(f"VACEBlock[{self.block_id}]: x_nan={x_before_nan}, hint_nan={hint_nan}, x_range=[{x.min().item():.2f},{x.max().item():.2f}], hint_range=[{hint.min().item():.2f},{hint.max().item():.2f}]")
 
             x = x + hint * context_scale
 
-            if not x_before_nan and x.isnan().any().item():
-                print(f"VACEBlock[{self.block_id}]: WARNING - NaN introduced by hint injection!")
+            # if not x_before_nan and x.isnan().any().item():
+            #     print(f"VACEBlock[{self.block_id}]: WARNING - NaN introduced by hint injection!")
 
         # Return with cache info if applicable
         if cache_update_info is not None:
@@ -371,28 +371,28 @@ class CausalVaceWanModel(CausalWanModel):
             List of hints to be injected at specified transformer layers
         """
         # Debug: Check input vace_context
-        for i, vc in enumerate(vace_context):
-            vc_nan = vc.isnan().any().item()
-            vc_inf = vc.isinf().any().item()
-            vc_min, vc_max = vc.min().item(), vc.max().item()
-            print(f"forward_vace: vace_context[{i}] shape={vc.shape}, nan={vc_nan}, inf={vc_inf}, range=[{vc_min:.2f},{vc_max:.2f}]")
+        # for i, vc in enumerate(vace_context):
+        #     vc_nan = vc.isnan().any().item()
+        #     vc_inf = vc.isinf().any().item()
+        #     vc_min, vc_max = vc.min().item(), vc.max().item()
+        #     print(f"forward_vace: vace_context[{i}] shape={vc.shape}, nan={vc_nan}, inf={vc_inf}, range=[{vc_min:.2f},{vc_max:.2f}]")
 
         # Embed VACE context
         c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
 
         # Debug: Check after patch embedding
-        for i, emb in enumerate(c):
-            emb_nan = emb.isnan().any().item()
-            emb_inf = emb.isinf().any().item()
-            emb_min, emb_max = emb.min().item(), emb.max().item()
-            print(f"forward_vace: after patch_embed[{i}] shape={emb.shape}, nan={emb_nan}, inf={emb_inf}, range=[{emb_min:.2f},{emb_max:.2f}]")
+        # for i, emb in enumerate(c):
+        #     emb_nan = emb.isnan().any().item()
+        #     emb_inf = emb.isinf().any().item()
+        #     emb_min, emb_max = emb.min().item(), emb.max().item()
+        #     print(f"forward_vace: after patch_embed[{i}] shape={emb.shape}, nan={emb_nan}, inf={emb_inf}, range=[{emb_min:.2f},{emb_max:.2f}]")
 
         # Check patch embedding weights
-        patch_weight = self.vace_patch_embedding.weight
-        pw_nan = patch_weight.isnan().any().item()
-        pw_inf = patch_weight.isinf().any().item()
-        pw_min, pw_max = patch_weight.min().item(), patch_weight.max().item()
-        print(f"forward_vace: vace_patch_embedding.weight nan={pw_nan}, inf={pw_inf}, range=[{pw_min:.6f},{pw_max:.6f}]")
+        # patch_weight = self.vace_patch_embedding.weight
+        # pw_nan = patch_weight.isnan().any().item()
+        # pw_inf = patch_weight.isinf().any().item()
+        # pw_min, pw_max = patch_weight.min().item(), patch_weight.max().item()
+        # print(f"forward_vace: vace_patch_embedding.weight nan={pw_nan}, inf={pw_inf}, range=[{pw_min:.6f},{pw_max:.6f}]")
 
         c = [u.flatten(2).transpose(1, 2) for u in c]
 
@@ -405,10 +405,10 @@ class CausalVaceWanModel(CausalWanModel):
         )
 
         # Debug: Check after padding
-        c_nan = c.isnan().any().item()
-        c_inf = c.isinf().any().item()
-        c_min, c_max = c.min().item(), c.max().item()
-        print(f"forward_vace: after padding shape={c.shape}, nan={c_nan}, inf={c_inf}, range=[{c_min:.2f},{c_max:.2f}]")
+        # c_nan = c.isnan().any().item()
+        # c_inf = c.isinf().any().item()
+        # c_min, c_max = c.min().item(), c.max().item()
+        # print(f"forward_vace: after padding shape={c.shape}, nan={c_nan}, inf={c_inf}, range=[{c_min:.2f},{c_max:.2f}]")
 
         # Process through VACE blocks
         for block_idx, block in enumerate(self.vace_blocks):
@@ -425,10 +425,10 @@ class CausalVaceWanModel(CausalWanModel):
                 crossattn_cache,
             )
             # Debug: Check after each block
-            c_nan = c.isnan().any().item()
-            c_inf = c.isinf().any().item()
-            c_min, c_max = c.min().item(), c.max().item()
-            print(f"forward_vace: after vace_block[{block_idx}] shape={c.shape}, nan={c_nan}, inf={c_inf}, range=[{c_min:.2f},{c_max:.2f}]")
+            # c_nan = c.isnan().any().item()
+            # c_inf = c.isinf().any().item()
+            # c_min, c_max = c.min().item(), c.max().item()
+            # print(f"forward_vace: after vace_block[{block_idx}] shape={c.shape}, nan={c_nan}, inf={c_inf}, range=[{c_min:.2f},{c_max:.2f}]")
 
         # Extract hints (all but the last accumulated context)
         hints = torch.unbind(c)[:-1]
@@ -522,8 +522,8 @@ class CausalVaceWanModel(CausalWanModel):
             )
 
             # Debug: Check if hints contain NaN
-            nan_status = [f"{i}:{'NaN' if hint.isnan().any().item() else 'OK'}" for i, hint in enumerate(hints)]
-            print(f"forward_vace: Generated {len(hints)} hints - {', '.join(nan_status)}")
+            # nan_status = [f"{i}:{'NaN' if hint.isnan().any().item() else 'OK'}" for i, hint in enumerate(hints)]
+            # print(f"forward_vace: Generated {len(hints)} hints - {', '.join(nan_status)}")
 
         # Arguments for transformer blocks
         kwargs = dict(

@@ -41,8 +41,8 @@ config = OmegaConf.create(
         "tokenizer_path": str(get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")),
         "vace_path": vace_path,
         "model_config": OmegaConf.load(Path(__file__).parent / "model.yaml"),
-        "height": 480,
-        "width": 832,
+        "height": 512,
+        "width": 512,
     }
 )
 
@@ -77,43 +77,34 @@ outputs = []
 latency_measures = []
 fps_measures = []
 
-num_chunks = 1
-max_output_frames_per_chunk = 25
+num_frames = 0
+max_output_frames = 50
+while num_frames < max_output_frames:
+    start = time.time()
 
-for chunk_idx in range(num_chunks):
-    num_frames = 0
-    chunk_outputs = []
+    prompts = [{"text": prompt_text, "weight": 100}]
 
-    while num_frames < max_output_frames_per_chunk:
-        start = time.time()
+    # Generate with VACE conditioning if reference images provided
+    # Only pass ref_images on the first call - VACE context is cached
+    kwargs = {"prompts": prompts}
+    if ref_images and vace_path is not None and num_frames == 0:
+        kwargs["ref_images"] = ref_images
+        kwargs["vace_context_scale"] = 1.0
 
-        prompts = [{"text": prompt_text, "weight": 100}]
+    output = pipeline(**kwargs)
 
-        # Generate with VACE conditioning if reference images provided
-        kwargs = {"prompts": prompts}
-        if ref_images and vace_path is not None:
-            kwargs["ref_images"] = ref_images
-            kwargs["vace_context_scale"] = 1.0
+    num_output_frames, _, _, _ = output.shape
+    latency = time.time() - start
+    fps = num_output_frames / latency
 
-        output = pipeline(**kwargs)
+    print(
+        f"Pipeline generated {num_output_frames} frames latency={latency:.2f}s fps={fps:.2f}"
+    )
 
-        num_output_frames, _, _, _ = output.shape
-        latency = time.time() - start
-        fps = num_output_frames / latency
-
-        print(
-            f"Chunk {chunk_idx+1}/{num_chunks}, "
-            f"Frame {num_frames}/{max_output_frames_per_chunk}: "
-            f"Generated {num_output_frames} frames, "
-            f"latency={latency:.2f}s, fps={fps:.2f}"
-        )
-
-        latency_measures.append(latency)
-        fps_measures.append(fps)
-        num_frames += num_output_frames
-        chunk_outputs.append(output.detach().cpu())
-
-    outputs.extend(chunk_outputs)
+    latency_measures.append(latency)
+    fps_measures.append(fps)
+    num_frames += num_output_frames
+    outputs.append(output.detach().cpu())
 
 # Concatenate all THWC tensors
 output_video = torch.concat(outputs)

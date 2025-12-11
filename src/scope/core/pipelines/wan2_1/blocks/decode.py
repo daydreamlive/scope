@@ -32,6 +32,11 @@ class DecodeBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Denoised latents",
             ),
+            InputParam(
+                "vace_ref_images",
+                default=None,
+                description="VACE reference images (not used for frame stripping in this implementation)",
+            ),
         ]
 
     @property
@@ -54,6 +59,10 @@ class DecodeBlock(ModularPipelineBlocks):
 
         # Decode to pixel space
         video = components.vae.decode_to_pixel(latents, use_cache=True)
+
+        # Note: VACE reference frames are NOT prepended to latents in this implementation.
+        # They are only used for VACE context conditioning, so we don't need to strip them.
+        # The vace_ref_images in state is used for VACE context preparation, not for frame stripping.
 
         # Debug: Check for NaN
         has_nan_video = video.isnan().any().item()
