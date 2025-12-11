@@ -157,11 +157,40 @@ export class ScopeSetupService implements SetupService {
       fs.mkdirSync(uvDir, { recursive: true });
     }
 
-    // Download uv
+    // Download uv with retries
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-uv-'));
     const archivePath = path.join(tmpDir, path.basename(downloadUrl));
 
-    await this.downloadFile(downloadUrl, archivePath);
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.info(`Downloading uv (attempt ${attempt}/${maxRetries})...`);
+        await this.downloadFile(downloadUrl, archivePath);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        logger.warn(`Download attempt ${attempt} failed:`, lastError.message);
+        if (attempt < maxRetries) {
+          const delay = attempt * 2000; // Exponential backoff: 2s, 4s
+          logger.info(`Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          // Clean up failed download file if it exists
+          try {
+            if (fs.existsSync(archivePath)) {
+              fs.unlinkSync(archivePath);
+            }
+          } catch {
+            // ignore cleanup errors
+          }
+        }
+      }
+    }
+
+    if (lastError) {
+      throw new Error(`Failed to download uv after ${maxRetries} attempts: ${lastError.message}`);
+    }
 
     // Extract and install
     if (platform === 'win32') {
