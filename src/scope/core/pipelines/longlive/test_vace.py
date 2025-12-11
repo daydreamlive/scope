@@ -50,7 +50,7 @@ device = torch.device("cuda")
 pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
 
 # Test prompt
-prompt_text = ""
+prompt_text = "the woman jumps up"
 
 # Example reference images (provide your own paths)
 # These images will condition the video generation
@@ -78,7 +78,7 @@ latency_measures = []
 fps_measures = []
 
 num_frames = 0
-max_output_frames = 50
+max_output_frames = 80
 while num_frames < max_output_frames:
     start = time.time()
 

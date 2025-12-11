@@ -77,23 +77,12 @@ class VaceWanAttentionBlock(CausalWanAttentionBlock):
             # Slice c to match x's size for residual addition
             c_sliced = c[:, :x.size(1), :]
 
-            # Debug block 0 inputs
-            # c_sliced_nan = c_sliced.isnan().any().item()
-            # c_sliced_min, c_sliced_max = c_sliced.min().item(), c_sliced.max().item()
-            # x_nan = x.isnan().any().item()
-            # x_min, x_max = x.min().item(), x.max().item()
-            # print(f"VaceBlock[{self.block_id}] before_proj input: c_sliced shape={c_sliced.shape}, nan={c_sliced_nan}, range=[{c_sliced_min:.2f},{c_sliced_max:.2f}]")
-            # print(f"VaceBlock[{self.block_id}] before_proj input: x shape={x.shape}, nan={x_nan}, range=[{x_min:.2f},{x_max:.2f}]")
+            print(f"forward_vace VaceBlock[{self.block_id}]: Mixing VACE context (shape={c_sliced.shape}) with current input x (shape={x.shape})")
+            print(f"forward_vace VaceBlock[{self.block_id}]: This mixing causes reference image re-injection - should only happen on first chunk!")
 
             before_proj_out = self.before_proj(c_sliced)
-            # bp_nan = before_proj_out.isnan().any().item()
-            # bp_min, bp_max = before_proj_out.min().item(), before_proj_out.max().item()
-            # print(f"VaceBlock[{self.block_id}] before_proj output: nan={bp_nan}, range=[{bp_min:.2f},{bp_max:.2f}]")
-
             c = before_proj_out + x
-            # c_nan = c.isnan().any().item()
-            # c_min, c_max = c.min().item(), c.max().item()
-            # print(f"VaceBlock[{self.block_id}] after residual: nan={c_nan}, range=[{c_min:.2f},{c_max:.2f}]")
+            print(f"forward_vace VaceBlock[{self.block_id}]: After mixing, c.shape={c.shape}")
 
             all_c = []
         else:
@@ -215,12 +204,9 @@ class BaseWanAttentionBlock(CausalWanAttentionBlock):
         # Inject VACE hint if this block has one
         if hints is not None and self.block_id is not None:
             hint = hints[self.block_id]
-            # x_before_nan = x.isnan().any().item()
-            # hint_nan = hint.isnan().any().item()
-
-            # Only log first block or when NaN detected
-            # if self.block_id == 0 or x_before_nan or hint_nan:
-            #     print(f"VACEBlock[{self.block_id}]: x_nan={x_before_nan}, hint_nan={hint_nan}, x_range=[{x.min().item():.2f},{x.max().item():.2f}], hint_range=[{hint.min().item():.2f},{hint.max().item():.2f}]")
+            # Slice hint to match x's sequence length (x is unpadded, hint may be padded to seq_len)
+            if hint.shape[1] > x.shape[1]:
+                hint = hint[:, :x.shape[1], :]
 
             x = x + hint * context_scale
 
@@ -344,6 +330,7 @@ class CausalVaceWanModel(CausalWanModel):
             self.vace_in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size
         )
 
+
     def forward_vace(
         self,
         x,
@@ -370,12 +357,13 @@ class CausalVaceWanModel(CausalWanModel):
         Returns:
             List of hints to be injected at specified transformer layers
         """
+        print(f"forward_vace: Processing VACE context - x.shape={x.shape}, seq_len={seq_len}, num_contexts={len(vace_context)}")
         # Debug: Check input vace_context
-        # for i, vc in enumerate(vace_context):
-        #     vc_nan = vc.isnan().any().item()
-        #     vc_inf = vc.isinf().any().item()
-        #     vc_min, vc_max = vc.min().item(), vc.max().item()
-        #     print(f"forward_vace: vace_context[{i}] shape={vc.shape}, nan={vc_nan}, inf={vc_inf}, range=[{vc_min:.2f},{vc_max:.2f}]")
+        for i, vc in enumerate(vace_context):
+            vc_nan = vc.isnan().any().item()
+            vc_inf = vc.isinf().any().item()
+            vc_min, vc_max = vc.min().item(), vc.max().item()
+            print(f"forward_vace: vace_context[{i}] shape={vc.shape}, nan={vc_nan}, inf={vc_inf}, range=[{vc_min:.2f},{vc_max:.2f}]")
 
         # Embed VACE context
         c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
@@ -432,7 +420,9 @@ class CausalVaceWanModel(CausalWanModel):
 
         # Extract hints (all but the last accumulated context)
         hints = torch.unbind(c)[:-1]
+        print(f"forward_vace: Generated {len(hints)} hints for injection")
         return hints
+
 
     def _forward_inference(
         self,
@@ -504,22 +494,30 @@ class CausalVaceWanModel(CausalWanModel):
             context = torch.concat([context_clip, context], dim=1)
 
         # Generate VACE hints if vace_context provided
+        # Only generate hints on the first chunk (current_start == 0)
+        # Subsequent chunks proceed without VACE hint injection
         hints = None
         if vace_context is not None:
-            # Use seq_len for padding consistency between x and vace_context
-            hints = self.forward_vace(
-                x,
-                vace_context,
-                seq_len,
-                e0,
-                seq_lens,
-                grid_sizes,
-                self.freqs,
-                context,
-                context_lens,
-                self.block_mask,
-                crossattn_cache,
-            )
+            if current_start == 0:
+                print(f"_forward_inference: Generating VACE hints for first chunk only (current_start={current_start}, seq_len={seq_len})")
+                # Use seq_len for padding consistency between x and vace_context
+                hints = self.forward_vace(
+                    x,
+                    vace_context,
+                    seq_len,
+                    e0,
+                    seq_lens,
+                    grid_sizes,
+                    self.freqs,
+                    context,
+                    context_lens,
+                    self.block_mask,
+                    crossattn_cache,
+                )
+                print(f"_forward_inference: Generated {len(hints)} VACE hints for first chunk - subsequent chunks will not use VACE hints")
+            else:
+                print(f"_forward_inference: Skipping VACE hint generation for chunk (current_start={current_start}) - hints only applied to first chunk")
+                hints = None
 
             # Debug: Check if hints contain NaN
             # nan_status = [f"{i}:{'NaN' if hint.isnan().any().item() else 'OK'}" for i, hint in enumerate(hints)]
