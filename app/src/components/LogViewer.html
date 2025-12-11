@@ -24,26 +24,11 @@
         padding: 12px 0;
         margin-bottom: 12px;
         border-bottom: 1px solid #333;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
       }
       .header h1 {
         font-size: 18px;
         font-weight: 600;
         color: #fff;
-      }
-      .header button {
-        background: #2a2a2a;
-        border: 1px solid #444;
-        color: #e0e0e0;
-        padding: 8px 16px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 13px;
-      }
-      .header button:hover {
-        background: #3a3a3a;
       }
       .log-path {
         font-size: 11px;
@@ -65,7 +50,6 @@
   <body>
     <div class="header">
       <h1>Server Logs</h1>
-      <button id="refreshButton">Refresh</button>
     </div>
     <div class="log-path" id="logPath"></div>
     <pre id="logs"></pre>

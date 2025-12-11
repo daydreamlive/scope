@@ -45,8 +45,8 @@ UV_DIR="$USER_DATA_DIR/uv"
 PROJECT_DIR="$USER_DATA_DIR/python-project"
 RESOURCES_DIR="$INSTALL_DIR/resources"
 
-# Create directories
-su - "$REAL_USER" -c "mkdir -p '$UV_DIR' '$PROJECT_DIR'" || {
+# Create directories (including logs/main for Python server logs)
+su - "$REAL_USER" -c "mkdir -p '$UV_DIR' '$PROJECT_DIR' '$USER_DATA_DIR/logs/main'" || {
     echo "Warning: Failed to create directories. Setup will continue on first launch."
     exit 0
 }
