@@ -238,7 +238,12 @@ export class ScopeElectronAppService {
 
     mainWindow.once('ready-to-show', () => {
       logger.info('Window ready to show');
+      // Ensure window is visible, not minimized, and focused
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
       mainWindow.show();
+      mainWindow.focus();
       this.setupDevToolsSecurity(mainWindow);
     });
 

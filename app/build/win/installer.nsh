@@ -47,7 +47,7 @@
     DetailPrint "Setting up Python environment..."
     !insertmacro WriteLogWithTime "Setting up Python environment..."
 
-    ; Download UV
+    ; Download UV with retries
     DetailPrint "Downloading UV package manager..."
     !insertmacro WriteLogWithTime "Downloading UV package manager from ${UV_DOWNLOAD_URL}"
 
@@ -57,15 +57,51 @@
     CreateDirectory $2
     StrCpy $3 "$2\uv.zip"
 
-    ; Use inetc plugin to download (bundled with electron-builder NSIS)
-    inetc::get /NOCANCEL /CAPTION "Downloading UV..." "${UV_DOWNLOAD_URL}" "$3" /END
-    Pop $4
+    ; Retry download up to 3 times
+    StrCpy $R0 0 ; retry counter
+    StrCpy $R1 3 ; max retries
+    download_retry_loop:
+        IntOp $R0 $R0 + 1
+        ${If} $R0 > 1
+            DetailPrint "Retrying UV download (attempt $R0/$R1)..."
+            !insertmacro WriteLogWithTime "Retrying UV download (attempt $R0/$R1)..."
+            ; Wait before retry (exponential backoff: 2s, 4s)
+            IntOp $R2 $R0 - 1
+            IntOp $R2 $R2 * 2000
+            Sleep $R2
+            ; Clean up failed download if it exists
+            IfFileExists "$3" 0 +2
+                Delete "$3"
+        ${EndIf}
 
-    ${If} $4 != "OK"
-        DetailPrint "Warning: Failed to download UV ($4). UV will be downloaded on first app launch."
-        !insertmacro WriteLogWithTime "ERROR: Failed to download UV - Status: $4"
-        Goto cleanup_download
-    ${EndIf}
+        ; Use inetc plugin to download (bundled with electron-builder NSIS)
+        DetailPrint "Downloading UV (attempt $R0/$R1)..."
+        inetc::get /NOCANCEL /CAPTION "Downloading UV..." "${UV_DOWNLOAD_URL}" "$3" /END
+        Pop $4
+
+        ${If} $4 == "OK"
+            ; Download successful, verify file exists
+            IfFileExists "$3" download_verify 0
+            ; File doesn't exist, check if we should retry
+            ${If} $R0 < $R1
+                !insertmacro WriteLogWithTime "Download file not found, retrying..."
+                Goto download_retry_loop
+            ${EndIf}
+            DetailPrint "Warning: Downloaded UV file not found. UV will be downloaded on first app launch."
+            !insertmacro WriteLogWithTime "ERROR: Downloaded UV file not found after $R0 attempts"
+            Goto cleanup_download
+        ${Else}
+            ; Download failed, check if we should retry
+            ${If} $R0 < $R1
+                !insertmacro WriteLogWithTime "Download failed with status $4, retrying..."
+                Goto download_retry_loop
+            ${EndIf}
+            DetailPrint "Warning: Failed to download UV ($4) after $R1 attempts. UV will be downloaded on first app launch."
+            !insertmacro WriteLogWithTime "ERROR: Failed to download UV after $R1 attempts - Status: $4"
+            Goto cleanup_download
+        ${EndIf}
+
+    download_verify:
 
     ; Verify download file exists and has size > 0
     IfFileExists "$3" 0 download_verify_failed

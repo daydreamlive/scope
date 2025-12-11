@@ -798,6 +798,13 @@ app.on('activate', async () => {
         // Error is already sent to renderer via sendServerError
       }
     }
+  } else {
+    // Window exists, ensure it's visible and focused
+    if (appState.mainWindow.isMinimized()) {
+      appState.mainWindow.restore();
+    }
+    appState.mainWindow.show();
+    appState.mainWindow.focus();
   }
 });
 
