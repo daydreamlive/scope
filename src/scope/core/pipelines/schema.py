@@ -418,6 +418,32 @@ class PassthroughConfig(BasePipelineConfig):
     )
 
 
+class DecartApiConfig(BasePipelineConfig):
+    """Configuration for Decart API pipeline.
+
+    Decart API only supports video mode - it processes video frames through Decart's realtime API.
+    """
+
+    pipeline_id: ClassVar[str] = "decart-api"
+    pipeline_name: ClassVar[str] = "Decart API"
+    pipeline_description: ClassVar[str] = (
+        "Real-time video restyling using Decart's Mirage LSD API"
+    )
+
+    # Mode support - video only
+    supported_modes: ClassVar[list[InputMode]] = ["video"]
+    default_mode: ClassVar[InputMode] = "video"
+
+    # Decart API defaults - model requires specific resolution
+    # Mirage LSD model typically uses 512x512 or similar
+    height: int = Field(default=512, ge=1, description="Output height in pixels")
+    width: int = Field(default=512, ge=1, description="Output width in pixels")
+    input_size: int | None = Field(
+        default=1,
+        description="Expected input video frame count (realtime processes one frame at a time)",
+    )
+
+
 # Registry of pipeline config classes
 PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "longlive": LongLiveConfig,
@@ -425,6 +451,7 @@ PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "krea-realtime-video": KreaRealtimeVideoConfig,
     "reward-forcing": RewardForcingConfig,
     "passthrough": PassthroughConfig,
+    "decart-api": DecartApiConfig,
 }
 
 

@@ -98,6 +98,16 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportedModes: ["video"],
     defaultMode: "video",
   },
+  "decart-api": {
+    name: "Decart API",
+    about:
+      "Real-time video restyling using Decart's Mirage LSD API. Processes video frames through Decart's cloud-based realtime video transformation service.",
+    requiresModels: false,
+    estimatedVram: 0, // Cloud-based, no local VRAM required
+    // Video-only pipeline
+    supportedModes: ["video"],
+    defaultMode: "video",
+  },
 };
 
 export function pipelineSupportsLoRA(pipelineId: string): boolean {

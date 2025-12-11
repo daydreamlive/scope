@@ -68,6 +68,7 @@ class PipelineRegistry:
 def _register_pipelines():
     """Register all built-in pipelines."""
     # Import lazily to avoid circular imports and heavy dependencies
+    from .decart_api.pipeline import DecartApiPipeline
     from .krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
     from .longlive.pipeline import LongLivePipeline
     from .passthrough.pipeline import PassthroughPipeline
@@ -81,6 +82,7 @@ def _register_pipelines():
         StreamDiffusionV2Pipeline,
         PassthroughPipeline,
         RewardForcingPipeline,
+        DecartApiPipeline,
     ]:
         config_class = pipeline_class.get_config_class()
         PipelineRegistry.register(config_class.pipeline_id, pipeline_class)

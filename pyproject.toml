@@ -53,6 +53,7 @@ dependencies = [
     "kernels>=0.10.4",
     "triton==3.4.0; sys_platform == 'linux'",
     "triton-windows==3.4.0.post21; sys_platform == 'win32'",
+    "pillow>=10.0.0",
 ]
 
 [project.scripts]
