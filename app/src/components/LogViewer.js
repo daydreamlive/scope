@@ -57,11 +57,8 @@
     pre.appendChild(fragment);
   }
 
-  // Setup refresh button
-  const refreshButton = document.getElementById('refreshButton');
-  if (refreshButton) {
-    refreshButton.addEventListener('click', () => location.reload());
-  }
+  // Auto-refresh is handled by the main process
+  // No need for client-side refresh logic
 
   // Scroll to bottom
   window.scrollTo(0, document.body.scrollHeight);

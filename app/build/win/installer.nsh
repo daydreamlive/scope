@@ -35,6 +35,7 @@
     CreateDirectory "$1\uv"
     CreateDirectory "$1\python-project"
     CreateDirectory "$1\logs"
+    CreateDirectory "$1\logs\main"
 
     ; Initialize log file
     StrCpy $R8 "$1\logs\installer.log"

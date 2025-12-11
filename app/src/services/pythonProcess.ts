@@ -1,5 +1,7 @@
 import { spawn, ChildProcessWithoutNullStreams, execSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
+import { app } from 'electron';
 import { PythonProcessService } from '../types/services';
 import { getPaths, SERVER_CONFIG, getEnhancedPath, setServerPort } from '../utils/config';
 import { logger } from '../utils/logger';
@@ -62,6 +64,14 @@ export class ScopePythonProcessService implements PythonProcessService {
     const enhancedPath = getEnhancedPath();
     logger.info(`Using PATH: ${enhancedPath}`);
 
+    // Set logs directory to userData/logs/main so Python server writes logs there
+    const userDataPath = app.getPath('userData');
+    const pythonLogsDir = path.join(userDataPath, 'logs', 'main');
+    // Ensure the directory exists
+    if (!fs.existsSync(pythonLogsDir)) {
+      fs.mkdirSync(pythonLogsDir, { recursive: true });
+    }
+
     const child = spawn(uvCommand, [
       'run',
       'daydream-scope',
@@ -77,6 +87,7 @@ export class ScopePythonProcessService implements PythonProcessService {
       env: {
         ...process.env,
         PATH: enhancedPath,
+        DAYDREAM_SCOPE_LOGS_DIR: pythonLogsDir,
       },
     });
 

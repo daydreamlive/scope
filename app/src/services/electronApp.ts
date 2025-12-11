@@ -30,6 +30,7 @@ export class ScopeElectronAppService {
   private appState: AppState;
   private tray: Tray | null = null;
   private logsWindow: BrowserWindow | null = null;
+  private logsRefreshInterval: NodeJS.Timeout | null = null;
 
   constructor(appState: AppState) {
     this.appState = appState;
@@ -410,6 +411,10 @@ export class ScopeElectronAppService {
       this.tray.destroy();
       this.tray = null;
     }
+    if (this.logsRefreshInterval) {
+      clearInterval(this.logsRefreshInterval);
+      this.logsRefreshInterval = null;
+    }
     if (this.logsWindow) {
       this.logsWindow.close();
       this.logsWindow = null;
@@ -436,6 +441,25 @@ export class ScopeElectronAppService {
     contextMenu.popup();
   }
 
+  private reloadLogsWindow(): void {
+    if (!this.logsWindow || this.logsWindow.isDestroyed()) {
+      return;
+    }
+
+    const logPath = getLogPath();
+    const logContent = this.readLogFile();
+
+    const logViewerPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app', '.vite', 'build', 'renderer', 'LogViewer.html')
+      : path.join(__dirname, '../../src/components/LogViewer.html');
+
+    this.logsWindow.loadFile(logViewerPath, {
+      query: { content: logContent, path: logPath },
+    }).catch((err) => {
+      logger.error('Failed to reload log viewer:', err);
+    });
+  }
+
   showLogsWindow(): void {
     if (this.logsWindow && !this.logsWindow.isDestroyed()) {
       this.logsWindow.focus();
@@ -459,20 +483,19 @@ export class ScopeElectronAppService {
 
     this.setupDevToolsSecurity(this.logsWindow);
 
-    const logPath = getLogPath();
-    const logContent = this.readLogFile();
+    // Initial load
+    this.reloadLogsWindow();
 
-    const logViewerPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', '.vite', 'build', 'renderer', 'LogViewer.html')
-      : path.join(__dirname, '../../src/components/LogViewer.html');
-
-    this.logsWindow.loadFile(logViewerPath, {
-      query: { content: logContent, path: logPath },
-    }).catch((err) => {
-      logger.error('Failed to load log viewer:', err);
-    });
+    // Set up auto-refresh: reload logs every 2 seconds
+    this.logsRefreshInterval = setInterval(() => {
+      this.reloadLogsWindow();
+    }, 2000);
 
     this.logsWindow.on('closed', () => {
+      if (this.logsRefreshInterval) {
+        clearInterval(this.logsRefreshInterval);
+        this.logsRefreshInterval = null;
+      }
       this.logsWindow = null;
     });
   }
