@@ -48,8 +48,18 @@ class DecodeBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
+        # Debug: Check latents before decode
+        latents = block_state.latents
+        has_nan_latents = latents.isnan().any().item()
+
         # Decode to pixel space
-        video = components.vae.decode_to_pixel(block_state.latents, use_cache=True)
+        video = components.vae.decode_to_pixel(latents, use_cache=True)
+
+        # Debug: Check for NaN
+        has_nan_video = video.isnan().any().item()
+        print(
+            f"DecodeBlock: latents_nan={has_nan_latents} -> video_nan={has_nan_video}"
+        )
 
         block_state.output_video = video
 

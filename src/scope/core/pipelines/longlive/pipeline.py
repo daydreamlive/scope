@@ -23,6 +23,7 @@ from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStra
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import LongLiveBlocks
 from .modules.causal_model import CausalWanModel
+from .modules.causal_vace_model import CausalVaceWanModel
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -49,6 +50,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         lora_path = getattr(config, "lora_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
+        vace_path = getattr(config, "vace_path", None)
 
         model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
@@ -58,10 +60,18 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         )
         lora_config = getattr(model_config, "adapter", {})
 
-        # Load generator
+        # Load generator (with optional VACE support)
+        # Strategy: Load LongLive base, apply LoRA, then add VACE-specific weights
         start = time.time()
+        model_class = CausalVaceWanModel if vace_path is not None else CausalWanModel
+
+        # VACE requires vace_in_dim=96 for masked video generation (16 base * 6 mask channels)
+        if vace_path is not None:
+            base_model_kwargs = dict(base_model_kwargs) if base_model_kwargs else {}
+            base_model_kwargs["vace_in_dim"] = 96
+
         generator = WanDiffusionWrapper(
-            CausalWanModel,
+            model_class,
             model_name=base_model_name,
             model_dir=model_dir,
             generator_path=generator_path,
@@ -69,7 +79,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             **base_model_kwargs,
         )
 
-        print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+        model_type_str = "VACE-enabled" if vace_path is not None else "standard"
+        print(f"Loaded {model_type_str} diffusion model in {time.time() - start:.3f}s")
 
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
         # This mirrors the original LongLive behavior and is independent of any
@@ -87,6 +98,14 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             )
             ModuleTargetedLoRAStrategy._load_lora_checkpoint(generator.model, lora_path)
             print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
+
+        # Load VACE-specific weights after base model + LoRA are loaded
+        if vace_path is not None:
+            start = time.time()
+            from .vace_weight_loader import load_vace_weights_only
+
+            load_vace_weights_only(generator.model, vace_path)
+            print(f"Loaded VACE conditioning weights in {time.time() - start:.3f}s")
 
         # Initialize any additional, user-configured LoRA adapters via shared manager.
         # This is additive and does not replace the original LongLive performance LoRA.

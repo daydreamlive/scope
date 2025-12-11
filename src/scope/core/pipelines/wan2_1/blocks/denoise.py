@@ -106,6 +106,17 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float | None,
                 description="Amount of noise added to video",
             ),
+            InputParam(
+                "vace_context",
+                default=None,
+                description="VACE context for reference image conditioning",
+            ),
+            InputParam(
+                "vace_context_scale",
+                default=1.0,
+                type_hint=float,
+                description="Scaling factor for VACE hint injection",
+            ),
         ]
 
     @property
@@ -160,6 +171,19 @@ class DenoiseBlock(ModularPipelineBlocks):
             )
 
             if index < len(denoising_step_list) - 1:
+                # Debug: Check inputs before generator call (first step only)
+                if index == 0:
+                    noise_nan = noise.isnan().any().item()
+                    vace_status = "None"
+                    if block_state.vace_context is not None:
+                        vace_nan_count = sum(
+                            vc.isnan().any().item() for vc in block_state.vace_context
+                        )
+                        vace_status = f"{len(block_state.vace_context)} contexts, {vace_nan_count} with NaN, scale={block_state.vace_context_scale}"
+                    print(
+                        f"DenoiseBlock step 0: noise_nan={noise_nan}, vace={vace_status}"
+                    )
+
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
@@ -169,7 +193,15 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    vace_context=block_state.vace_context,
+                    vace_context_scale=block_state.vace_context_scale,
                 )
+
+                # Debug: Check denoised output for NaN
+                has_nan_denoised = denoised_pred.isnan().any().item()
+                if has_nan_denoised:
+                    print(f"DenoiseBlock: NaN detected at step {index}!")
+
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
                 flattened_pred = denoised_pred.flatten(0, 1)
@@ -199,6 +231,8 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    vace_context=block_state.vace_context,
+                    vace_context_scale=block_state.vace_context_scale,
                 )
 
         block_state.latents = denoised_pred

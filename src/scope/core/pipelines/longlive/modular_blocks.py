@@ -17,6 +17,7 @@ from ..wan2_1.blocks import (
 )
 from .blocks import (
     PrepareRecacheFramesBlock,
+    PrepareVaceContextBlock,
     RecacheFramesBlock,
 )
 
@@ -31,6 +32,7 @@ ALL_BLOCKS = InsertableDict(
         ("embedding_blending", EmbeddingBlendingBlock),
         ("set_timesteps", SetTimestepsBlock),
         ("auto_preprocess_video", AutoPreprocessVideoBlock),
+        ("prepare_vace_context", PrepareVaceContextBlock),
         ("setup_caches", SetupCachesBlock),
         (
             "set_transformer_blocks_local_attn_size",

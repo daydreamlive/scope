@@ -156,7 +156,9 @@ class WanVAEWrapper(torch.nn.Module):
         else:
             output = self.model.decode(zs, scale)
 
+        # Clamp output to valid range
         output = output.float().clamp_(-1, 1)
+
         # [batch, channels, frames, h, w] -> [batch, frames, channels, h, w]
         return output.permute(0, 2, 1, 3, 4)
 
