@@ -39,6 +39,14 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused_lock = threading.Lock()
         self._last_frame = None
 
+        # Spout input mode - when enabled, frames come from Spout instead of WebRTC
+        self._spout_receiver_enabled = False
+        if initial_parameters:
+            spout_receiver = initial_parameters.get("spout_receiver")
+            if spout_receiver and spout_receiver.get("enabled"):
+                self._spout_receiver_enabled = True
+                logger.info("Spout input mode enabled")
+
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
         while self.input_task_running:
@@ -102,7 +110,9 @@ class VideoProcessingTrack(MediaStreamTrack):
         """Return the next available processed frame"""
         # Lazy initialization on first call
         self.initialize_output_processing()
-        while self.input_task_running:
+
+        # Keep running while either WebRTC input is active OR Spout input is enabled
+        while self.input_task_running or self._spout_receiver_enabled:
             try:
                 # Update FPS: use minimum of input FPS and pipeline FPS
                 if self.frame_processor:
@@ -150,6 +160,7 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     async def stop(self):
         self.input_task_running = False
+        self._spout_receiver_enabled = False
 
         if self.input_task is not None:
             self.input_task.cancel()

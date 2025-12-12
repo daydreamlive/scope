@@ -512,9 +512,15 @@ async def download_pipeline_models(request: DownloadModelsRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def is_spout_available() -> bool:
+    """Check if Spout is available (native Windows only, not WSL)."""
+    # Spout requires native Windows - it won't work in WSL/Linux
+    return sys.platform == "win32"
+
+
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info():
-    """Get hardware information including available VRAM."""
+    """Get hardware information including available VRAM and Spout availability."""
     try:
         vram_gb = None
 
@@ -523,7 +529,10 @@ async def get_hardware_info():
             _, total_mem = torch.cuda.mem_get_info(0)
             vram_gb = total_mem / (1024**3)
 
-        return HardwareInfoResponse(vram_gb=vram_gb)
+        return HardwareInfoResponse(
+            vram_gb=vram_gb,
+            spout_available=is_spout_available(),
+        )
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

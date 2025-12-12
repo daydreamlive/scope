@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-export type VideoSourceMode = "video" | "camera";
+export type VideoSourceMode = "video" | "camera" | "spout";
 
 interface UseVideoSourceProps {
   onStreamUpdate?: (stream: MediaStream) => Promise<boolean>;
@@ -172,6 +172,20 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       setMode(newMode);
       setError(null);
 
+      // Spout mode - no local stream needed, input comes from Spout receiver
+      if (newMode === "spout") {
+        // Stop current stream
+        if (localStream) {
+          localStream.getTracks().forEach(track => track.stop());
+        }
+        if (videoElementRef.current) {
+          videoElementRef.current.pause();
+          videoElementRef.current = null;
+        }
+        setLocalStream(null);
+        return;
+      }
+
       let newStream: MediaStream | null = null;
 
       if (newMode === "video") {
@@ -182,7 +196,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
           console.error("Failed to create video file stream:", error);
           setError("Failed to load test video");
         }
-      } else {
+      } else if (newMode === "camera") {
         // Switch to camera mode
         try {
           newStream = await requestCameraAccess();

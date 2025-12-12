@@ -97,6 +97,21 @@ class Parameters(BaseModel):
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
     )
+    spout_sender: "SpoutConfig | None" = Field(
+        default=None,
+        description="Spout output configuration for sending frames to external apps",
+    )
+    spout_receiver: "SpoutConfig | None" = Field(
+        default=None,
+        description="Spout input configuration for receiving frames from external apps",
+    )
+
+
+class SpoutConfig(BaseModel):
+    """Configuration for Spout sender/receiver."""
+
+    enabled: bool = Field(default=False, description="Enable Spout")
+    name: str = Field(default="", description="Spout sender name")
 
 
 class WebRTCOfferRequest(BaseModel):
@@ -165,6 +180,10 @@ class HardwareInfoResponse(BaseModel):
 
     vram_gb: float | None = Field(
         default=None, description="Total VRAM in GB (None if CUDA not available)"
+    )
+    spout_available: bool = Field(
+        default=False,
+        description="Whether Spout is available (Windows only, not WSL)",
     )
 
 

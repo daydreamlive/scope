@@ -64,6 +64,15 @@ export interface SettingsState {
   loraMergeStrategy?: LoraMergeStrategy;
   // Track current input mode (text vs video)
   inputMode?: InputMode;
+  // Spout settings
+  spoutReceiver?: {
+    enabled: boolean;
+    name: string;
+  };
+  spoutSender?: {
+    enabled: boolean;
+    name: string;
+  };
 }
 
 export interface PipelineInfo {

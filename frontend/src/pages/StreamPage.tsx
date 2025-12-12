@@ -50,8 +50,13 @@ function buildLoRAParams(
 
 export function StreamPage() {
   // Use the stream state hook for settings management
-  const { settings, updateSettings, getDefaults, supportsNoiseControls } =
-    useStreamState();
+  const {
+    settings,
+    updateSettings,
+    getDefaults,
+    supportsNoiseControls,
+    spoutAvailable,
+  } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -446,6 +451,50 @@ export function StreamPage() {
     });
   };
 
+  const handleSpoutSenderChange = (
+    spoutSender: { enabled: boolean; name: string } | undefined
+  ) => {
+    updateSettings({ spoutSender });
+    // Send Spout output settings to backend
+    if (isStreaming) {
+      sendParameterUpdate({
+        spout_sender: spoutSender,
+      });
+    }
+  };
+
+  // Handle Spout input name change from InputAndControlsPanel
+  const handleSpoutReceiverChange = (name: string) => {
+    updateSettings({
+      spoutReceiver: {
+        enabled: mode === "spout",
+        name: name,
+      },
+    });
+  };
+
+  // Sync spoutReceiver.enabled with mode changes
+  const handleModeChange = (newMode: typeof mode) => {
+    // When switching to spout mode, enable spout input
+    if (newMode === "spout") {
+      updateSettings({
+        spoutReceiver: {
+          enabled: true,
+          name: settings.spoutReceiver?.name ?? "",
+        },
+      });
+    } else {
+      // When switching away from spout mode, disable spout input
+      updateSettings({
+        spoutReceiver: {
+          enabled: false,
+          name: settings.spoutReceiver?.name ?? "",
+        },
+      });
+    }
+    switchMode(newMode);
+  };
+
   const handleLivePromptSubmit = (prompts: PromptItem[]) => {
     // Use the timeline ref to submit the prompt
     if (timelineRef.current) {
@@ -650,11 +699,13 @@ export function StreamPage() {
 
       // Check video requirements based on input mode
       const needsVideoInput = currentMode === "video";
-      const streamToSend = needsVideoInput
-        ? localStream || undefined
-        : undefined;
+      const isSpoutMode = mode === "spout" && settings.spoutReceiver?.enabled;
 
-      if (needsVideoInput && !localStream) {
+      // Only send video stream for pipelines that need video input (not in Spout mode)
+      const streamToSend =
+        needsVideoInput && !isSpoutMode ? localStream || undefined : undefined;
+
+      if (needsVideoInput && !isSpoutMode && !localStream) {
         console.error("Video input required but no local stream available");
         return false;
       }
@@ -669,6 +720,8 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        spout_sender?: { enabled: boolean; name: string };
+        spout_receiver?: { enabled: boolean; name: string };
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -705,6 +758,14 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
+      // Spout settings - send if enabled
+      if (settings.spoutSender?.enabled) {
+        initialParameters.spout_sender = settings.spoutSender;
+      }
+      if (settings.spoutReceiver?.enabled) {
+        initialParameters.spout_receiver = settings.spoutReceiver;
+      }
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
@@ -733,14 +794,16 @@ export function StreamPage() {
             isInitializing={isInitializing}
             error={videoSourceError}
             mode={mode}
-            onModeChange={switchMode}
+            onModeChange={handleModeChange}
             isStreaming={isStreaming}
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={
               settings.inputMode === "text"
                 ? !isInitializing
-                : !!localStream && !isInitializing
+                : mode === "spout"
+                  ? !isInitializing // Spout mode doesn't need local stream
+                  : !!localStream && !isInitializing
             }
             onStartStream={handleStartStream}
             onStopStream={stopStream}
@@ -764,8 +827,13 @@ export function StreamPage() {
             timelinePrompts={timelinePrompts}
             transitionSteps={transitionSteps}
             onTransitionStepsChange={setTransitionSteps}
-            inputMode={settings.inputMode || "video"}
+            spoutReceiverName={settings.spoutReceiver?.name ?? ""}
+            onSpoutReceiverChange={handleSpoutReceiverChange}
+            inputMode={
+              settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
+            }
             onInputModeChange={handleInputModeChange}
+            spoutAvailable={spoutAvailable}
           />
         </div>
 
@@ -957,6 +1025,9 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
+            spoutSender={settings.spoutSender}
+            onSpoutSenderChange={handleSpoutSenderChange}
+            spoutAvailable={spoutAvailable}
           />
         </div>
       </div>

@@ -19,7 +19,7 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
+import { Hammer, Info, Minus, Plus, RotateCcw, Radio } from "lucide-react";
 import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
@@ -28,6 +28,7 @@ import type {
   PipelineId,
   LoRAConfig,
   LoraMergeStrategy,
+  SettingsState,
   InputMode,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
@@ -70,6 +71,11 @@ interface SettingsPanelProps {
   inputMode?: InputMode;
   // Whether this pipeline supports noise controls in video mode (schema-derived)
   supportsNoiseControls?: boolean;
+  // Spout settings
+  spoutSender?: SettingsState["spoutSender"];
+  onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
+  // Whether Spout is available (server-side detection for native Windows, not WSL)
+  spoutAvailable?: boolean;
 }
 
 export function SettingsPanel({
@@ -101,6 +107,9 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
+  spoutSender,
+  onSpoutSenderChange,
+  spoutAvailable = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -631,6 +640,66 @@ export function SettingsPanel({
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Spout Output Settings (available on native Windows only) */}
+        {spoutAvailable && (
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Radio className="h-4 w-4" />
+                <LabelWithTooltip
+                  label="Spout Sender"
+                  tooltip="Send processed frames to external apps like TouchDesigner, Resolume, OBS."
+                  className="text-sm font-medium"
+                />
+              </div>
+              <div className="space-y-2 p-2 border rounded-md">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label="Enable"
+                    tooltip="Send processed frames to Spout receivers"
+                    className="text-sm text-foreground font-medium"
+                  />
+                  <Toggle
+                    pressed={spoutSender?.enabled ?? false}
+                    onPressedChange={enabled => {
+                      onSpoutSenderChange?.({
+                        enabled,
+                        name: spoutSender?.name ?? "ScopeSyphonSpoutOut",
+                      });
+                    }}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                  >
+                    {spoutSender?.enabled ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
+
+                {spoutSender?.enabled && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">
+                      Sender Name
+                    </label>
+                    <Input
+                      type="text"
+                      value={spoutSender?.name ?? "ScopeSyphonSpoutOut"}
+                      onChange={e => {
+                        onSpoutSenderChange?.({
+                          enabled: spoutSender?.enabled ?? false,
+                          name: e.target.value,
+                        });
+                      }}
+                      disabled={isStreaming}
+                      className="h-7 text-sm"
+                      placeholder="ScopeSyphonSpoutOut"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
