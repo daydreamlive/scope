@@ -133,7 +133,16 @@ export function LoRAManager({
 
       {loras.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          No LoRA adapters configured. Add LoRA files to models/lora directory.
+          No LoRA adapters configured. Follow the{" "}
+          <a
+            href="https://github.com/daydreamlive/scope/blob/main/docs/lora.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            docs
+          </a>{" "}
+          to add LoRA files.
         </p>
       )}
 
