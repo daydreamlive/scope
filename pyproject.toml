@@ -44,7 +44,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "accelerate>=1.1.1",
     "flash-attn==2.8.3; sys_platform == 'linux' or sys_platform == 'win32'",
-    "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
+    "sageattention==2.2.0; (sys_platform == 'linux' and python_version == '3.10') or sys_platform == 'win32'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
     "peft>=0.17.1",
@@ -54,6 +54,8 @@ dependencies = [
     "triton==3.4.0; sys_platform == 'linux'",
     "triton-windows==3.4.0.post21; sys_platform == 'win32'",
     "pillow>=10.0.0",
+    "decart>=0.0.8",
+    "tenacity>=9.0.0",
 ]
 
 [project.scripts]
