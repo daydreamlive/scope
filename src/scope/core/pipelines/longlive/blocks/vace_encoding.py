@@ -75,6 +75,12 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 description="VACE input frames [B, C, F, H, W]: depth maps for depth mode, video frames for other modes (12 frames per chunk)",
             ),
             InputParam(
+                "use_dummy_frames",
+                default=False,
+                type_hint=bool,
+                description="For R2V mode: whether to use dummy (zero) frames as temporal placeholder. If False, only ref images are encoded. These dummy frames are required in the original VACE implementation. Including them results in a different behavior.",
+            ),
+            InputParam(
                 "height",
                 type_hint=int,
                 description="Target video height",
@@ -173,7 +179,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         - Static reference images (1-3 frames)
         - Encoded once on first chunk (current_start == 0)
         - Cached in state, reused across all chunks
-        - Uses dummy frames as 'frames' parameter to vace_encode_frames()
+        - Optionally uses dummy frames as 'frames' parameter to vace_encode_frames()
         - Refs passed as 'ref_images' parameter (prepended temporally inside vace_encode_frames)
         - masks=None (no masking path for R2V)
         - Uses vace_in_dim=96 (padded inside vace_encode_frames with pad_to_96=True)
@@ -196,8 +202,11 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             )
             return None, None
 
+        use_dummy_frames = block_state.use_dummy_frames
+
         logger.info(
-            f"VaceEncodingBlock._encode_r2v: Encoding {len(ref_image_paths)} reference images for first chunk"
+            f"VaceEncodingBlock._encode_r2v: Encoding {len(ref_image_paths)} reference images for first chunk "
+            f"(use_dummy_frames={use_dummy_frames})"
         )
 
         # Load and prepare reference images
@@ -225,33 +234,78 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             * components.config.vae_temporal_downsample_factor
         )
 
-        # Create dummy frames (zero frames in pixel space, matching original VACE pattern)
-        # Following notes/VACE/vace/models/wan/wan_vace.py lines 339-341
-        dummy_frames = [
-            torch.zeros(
-                (3, num_frames, block_state.height, block_state.width),
-                device=components.config.device,
-                dtype=next(vace_vae.parameters()).dtype,
+        # Create dummy frames or encode refs-only based on use_dummy_frames flag
+        if use_dummy_frames:
+            # Original VACE pattern: dummy frames as temporal placeholder
+            # Following notes/VACE/vace/models/wan/wan_vace.py lines 339-341
+            dummy_frames = [
+                torch.zeros(
+                    (3, num_frames, block_state.height, block_state.width),
+                    device=components.config.device,
+                    dtype=next(vace_vae.parameters()).dtype,
+                )
+            ]
+            logger.info(
+                f"VaceEncodingBlock._encode_r2v: Created dummy_frames with shape {dummy_frames[0].shape}"
             )
-        ]
 
-        logger.info(
-            f"VaceEncodingBlock._encode_r2v: Created dummy_frames with shape {dummy_frames[0].shape}"
-        )
+            # Encode with ref_images passed as parameter (R2V path)
+            # Original VACE pattern: vace_encode_frames(frames, ref_images, masks=None)
+            # - dummy_frames as 'frames' (full chunk)
+            # - prepared_refs as 'ref_images' (wrapped in list for batch dimension)
+            # - masks=None (no masking for R2V)
+            # - pad_to_96=True (pads to 96 channels for VACE compatibility)
+            vace_context = vace_encode_frames(
+                vace_vae,
+                dummy_frames,
+                ref_images=[prepared_refs],
+                masks=None,
+                pad_to_96=True,
+            )
+        else:
+            # Alternative: Encode only reference images (no dummy frames at all)
+            # This prevents reference images from appearing in the output video
+            logger.info(
+                "VaceEncodingBlock._encode_r2v: Encoding reference images only (no dummy frames)"
+            )
 
-        # Encode with ref_images passed as parameter (R2V path)
-        # Original VACE pattern: vace_encode_frames(frames, ref_images, masks=None)
-        # - dummy_frames as 'frames'
-        # - prepared_refs as 'ref_images' (wrapped in list for batch dimension)
-        # - masks=None (no masking for R2V)
-        # - pad_to_96=True (pads to 96 channels for VACE compatibility)
-        vace_context = vace_encode_frames(
-            vace_vae,
-            dummy_frames,
-            ref_images=[prepared_refs],
-            masks=None,
-            pad_to_96=True,
-        )
+            # Stack refs: list of [C, 1, H, W] -> [1, C, num_refs, H, W]
+            prepared_refs_stacked = torch.cat(prepared_refs, dim=1).unsqueeze(0)
+            # Convert to VAE's dtype (typically bfloat16)
+            vae_dtype = next(vace_vae.parameters()).dtype
+            prepared_refs_stacked = prepared_refs_stacked.to(dtype=vae_dtype)
+            ref_latents_out = vace_vae.encode_to_latent(
+                prepared_refs_stacked, use_cache=False
+            )
+
+            # Convert [1, num_refs, C, H, W] -> [C, num_refs, H, W] (transpose to channel-first)
+            ref_latent_batch = ref_latents_out[0].permute(1, 0, 2, 3)
+
+            # Pad to 96 channels for VACE compatibility
+            # VACE was trained with 96 channels (16 base * 6 for masked video generation)
+            # For R2V mode without masks, we pad with zeros
+            current_channels = ref_latent_batch.shape[0]
+            if current_channels < 96:
+                pad_channels = 96 - current_channels
+                padding = torch.zeros(
+                    (
+                        pad_channels,
+                        ref_latent_batch.shape[1],
+                        ref_latent_batch.shape[2],
+                        ref_latent_batch.shape[3],
+                    ),
+                    dtype=ref_latent_batch.dtype,
+                    device=ref_latent_batch.device,
+                )
+                ref_latent_batch = torch.cat([ref_latent_batch, padding], dim=0)
+
+            # VACE context is just the reference images (no dummy frames for R2V)
+            vace_context = [ref_latent_batch]
+
+            logger.info(
+                f"VaceEncodingBlock._encode_r2v: Encoded {len(prepared_refs)} reference images only, "
+                f"shape={ref_latent_batch.shape}"
+            )
 
         # vace_context is list, each element has refs prepended temporally
         logger.info(
