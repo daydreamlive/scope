@@ -83,7 +83,10 @@ win:
       arch:
         - x64
   publisherName: Livepeer Inc.
-  verifyUpdateCodeSignature: true # Verify code signatures for security
+  verifyUpdateCodeSignature: false # Disable code signature verification
+  sign: false # Skip code signing (disable to avoid privilege errors on Windows)
+  signDlls: false # Skip DLL signing
+  signAndEditExecutable: false # Prevent signing and editing executables
 
 nsis:
   oneClick: false
