@@ -14,7 +14,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
   - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md) (text-to-video, video-to-video)
   - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video, video-to-video)
   - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
-  - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video)
+  - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
 - WebRTC real-time streaming
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
