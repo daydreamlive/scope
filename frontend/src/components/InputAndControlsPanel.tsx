@@ -10,7 +10,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Upload, Radio } from "lucide-react";
+import { Upload } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
@@ -191,8 +191,8 @@ export function InputAndControlsPanel({
                 Camera
               </ToggleGroupItem>
               {spoutAvailable && (
-                <ToggleGroupItem value="spout" aria-label="Spout">
-                  Spout
+                <ToggleGroupItem value="spout" aria-label="Spout Receiver">
+                  Spout Receiver
                 </ToggleGroupItem>
               )}
             </ToggleGroup>
@@ -204,27 +204,21 @@ export function InputAndControlsPanel({
           <div>
             <h3 className="text-sm font-medium mb-2">Input</h3>
             {mode === "spout" ? (
-              /* Spout Input Configuration */
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Radio className="h-4 w-4" />
-                  <span className="text-sm font-medium">Spout Receiver</span>
-                </div>
-                <div className="space-y-2">
-                  <LabelWithTooltip
-                    label="Sender Name"
-                    tooltip="Receive video from Spout-compatible apps like TouchDesigner, Resolume, OBS. Leave empty to receive from any sender."
-                    className="text-xs text-muted-foreground"
-                  />
-                  <Input
-                    type="text"
-                    value={spoutReceiverName}
-                    onChange={e => onSpoutReceiverChange?.(e.target.value)}
-                    disabled={isStreaming}
-                    className="h-8 text-sm"
-                    placeholder="TDSyphonSpoutOut"
-                  />
-                </div>
+              /* Spout Receiver Configuration */
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name:"
+                  tooltip="The name of the sender to receive video from Spout-compatible apps like TouchDesigner, Resolume, OBS. Leave empty to receive from any sender."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={spoutReceiverName}
+                  onChange={e => onSpoutReceiverChange?.(e.target.value)}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="TDSyphonSpoutOut"
+                />
               </div>
             ) : (
               /* Video/Camera Input Preview */

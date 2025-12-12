@@ -19,7 +19,7 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw, Radio } from "lucide-react";
+import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
@@ -645,63 +645,53 @@ export function SettingsPanel({
           </div>
         )}
 
-        {/* Spout Output Settings (available on native Windows only) */}
+        {/* Spout Sender Settings (available on native Windows only) */}
         {spoutAvailable && (
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Radio className="h-4 w-4" />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.spoutSender.label}
+                tooltip={PARAMETER_METADATA.spoutSender.tooltip}
+                className="text-sm text-foreground"
+              />
+              <Toggle
+                pressed={spoutSender?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onSpoutSenderChange?.({
+                    enabled,
+                    name: spoutSender?.name ?? "ScopeOut",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {spoutSender?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {spoutSender?.enabled && (
+              <div className="flex items-center gap-3">
                 <LabelWithTooltip
-                  label="Spout Sender"
-                  tooltip="Send processed frames to external apps like TouchDesigner, Resolume, OBS."
-                  className="text-sm font-medium"
+                  label="Sender Name:"
+                  tooltip="The name of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={spoutSender?.name ?? "ScopeOut"}
+                  onChange={e => {
+                    onSpoutSenderChange?.({
+                      enabled: spoutSender?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="ScopeOut"
                 />
               </div>
-              <div className="space-y-2 p-2 border rounded-md">
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label="Enable"
-                    tooltip="Send processed frames to Spout receivers"
-                    className="text-sm text-foreground font-medium"
-                  />
-                  <Toggle
-                    pressed={spoutSender?.enabled ?? false}
-                    onPressedChange={enabled => {
-                      onSpoutSenderChange?.({
-                        enabled,
-                        name: spoutSender?.name ?? "ScopeSyphonSpoutOut",
-                      });
-                    }}
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                  >
-                    {spoutSender?.enabled ? "ON" : "OFF"}
-                  </Toggle>
-                </div>
-
-                {spoutSender?.enabled && (
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">
-                      Sender Name
-                    </label>
-                    <Input
-                      type="text"
-                      value={spoutSender?.name ?? "ScopeSyphonSpoutOut"}
-                      onChange={e => {
-                        onSpoutSenderChange?.({
-                          enabled: spoutSender?.enabled ?? false,
-                          name: e.target.value,
-                        });
-                      }}
-                      disabled={isStreaming}
-                      className="h-7 text-sm"
-                      placeholder="ScopeSyphonSpoutOut"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
           </div>
         )}
       </CardContent>
