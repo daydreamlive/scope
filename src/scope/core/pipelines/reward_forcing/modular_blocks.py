@@ -9,12 +9,12 @@ from ..wan2_1.blocks import (
     DecodeBlock,
     DenoiseBlock,
     EmbeddingBlendingBlock,
-    PrepareNextBlock,
     SetTimestepsBlock,
     SetTransformerBlocksLocalAttnSizeBlock,
     SetupCachesBlock,
     TextConditioningBlock,
 )
+from .blocks import PrepareNextBlock
 
 logger = diffusers_logging.get_logger(__name__)
 
