@@ -117,6 +117,12 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float,
                 description="Scaling factor for VACE hint injection",
             ),
+            InputParam(
+                "guidance_mode",
+                default=None,
+                type_hint=str | None,
+                description="VACE guidance mode: 'r2v' or 'depth'",
+            ),
         ]
 
     @property
@@ -195,6 +201,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
+                    vace_guidance_mode=block_state.guidance_mode,
                 )
 
                 # Debug: Check denoised output for NaN
@@ -233,6 +240,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
+                    vace_guidance_mode=block_state.guidance_mode,
                 )
 
         block_state.latents = denoised_pred

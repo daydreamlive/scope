@@ -66,10 +66,14 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         start = time.time()
         model_class = CausalVaceWanModel if vace_path is not None else CausalWanModel
 
-        # VACE requires vace_in_dim=96 for masked video generation (16 base * 6 mask channels)
+        # VACE configuration: vace_in_dim determines input channel count
+        # - vace_in_dim=96: R2V mode (16 base * 6 for masking)
+        # - vace_in_dim=16: Depth mode (no masking)
+        # Default to 96 if not specified (R2V mode)
         if vace_path is not None:
             base_model_kwargs = dict(base_model_kwargs) if base_model_kwargs else {}
-            base_model_kwargs["vace_in_dim"] = 96
+            if "vace_in_dim" not in base_model_kwargs:
+                base_model_kwargs["vace_in_dim"] = 96
 
         generator = WanDiffusionWrapper(
             model_class,
@@ -155,6 +159,17 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
 
+        # Load separate vace_vae for VACE encoding (depth mode)
+        # This ensures depth encoding doesn't corrupt main VAE's autoregressive cache
+        vace_vae = None
+        if vace_path is not None:
+            start = time.time()
+            vace_vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
+            print(
+                f"Loaded VACE VAE (separate instance for depth encoding) in {time.time() - start:.3f}s"
+            )
+            vace_vae = vace_vae.to(device=device, dtype=dtype)
+
         # Create components config
         components_config = {}
         components_config.update(model_config)
@@ -165,6 +180,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         components.add("generator", generator)
         components.add("scheduler", generator.get_scheduler())
         components.add("vae", vae)
+        if vace_vae is not None:
+            components.add("vace_vae", vace_vae)
         components.add("text_encoder", text_encoder)
 
         embedding_blender = EmbeddingBlender(

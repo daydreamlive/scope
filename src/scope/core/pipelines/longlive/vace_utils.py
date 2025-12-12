@@ -2,6 +2,13 @@
 VACE encoding utilities for reference image conditioning.
 
 Adapted from notes/VACE/vace/models/wan/wan_vace.py
+
+For depth mode (following original VACE architecture):
+- Depth maps are 3-channel RGB from annotators (notes/VACE/vace/annotators/depth.py line 37)
+- Treated as regular input_frames through standard encoding path
+- masks = ones (all white masks, goes through masking path: inactive + reactive)
+- ref_images = None (no reference images for depth mode)
+- Standard path: vace_encode_frames -> vace_encode_masks -> vace_latent
 """
 
 import torch
@@ -10,7 +17,7 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 
 
-def vace_encode_frames(vae, frames, ref_images, masks=None):
+def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
     """
     Encode frames and reference images via VAE for VACE conditioning.
 
@@ -20,10 +27,18 @@ def vace_encode_frames(vae, frames, ref_images, masks=None):
         ref_images: List of reference images, one list per batch element
                    Each element is a list of reference images [C, 1, H, W]
         masks: Optional list of masks [B, 1, F, H, W] for masked video generation
+        pad_to_96: Whether to pad to 96 channels (default True). Set False when masks will be added later.
 
     Returns:
         List of concatenated latents [ref_latents + frame_latents]
     """
+    print(
+        f"vace_encode_frames: Called with frames list length={len(frames)}, first shape={frames[0].shape if frames else None}"
+    )
+    print(
+        f"vace_encode_frames: ref_images={ref_images}, masks={masks}, pad_to_96={pad_to_96}"
+    )
+
     if ref_images is None:
         ref_images = [None] * len(frames)
     else:
@@ -35,13 +50,24 @@ def vace_encode_frames(vae, frames, ref_images, masks=None):
     # Encode frames (with optional masking)
     # Note: WanVAEWrapper expects [B, C, F, H, W] and returns [B, F, C, H, W]
     if masks is None:
+        print("vace_encode_frames: No masks provided, encoding frames directly")
         # Stack list of [C, F, H, W] -> [B, C, F, H, W]
         frames_stacked = torch.stack(frames, dim=0)
+        print(f"vace_encode_frames: frames_stacked.shape={frames_stacked.shape}")
         frames_stacked = frames_stacked.to(dtype=vae_dtype)
         latents_out = vae.encode_to_latent(frames_stacked, use_cache=False)
+        print(
+            f"vace_encode_frames: After VAE encode, latents_out list length={len(latents_out)}, first shape={latents_out[0].shape}"
+        )
         # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
         latents = [lat.permute(1, 0, 2, 3) for lat in latents_out]
+        print(
+            f"vace_encode_frames: After permute, latents list length={len(latents)}, first shape={latents[0].shape}"
+        )
     else:
+        print(
+            "vace_encode_frames: Masks provided, using masked encoding (inactive + reactive)"
+        )
         masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
         inactive = [i * (1 - m) + 0 * m for i, m in zip(frames, masks, strict=False)]
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
@@ -56,10 +82,16 @@ def vace_encode_frames(vae, frames, ref_images, masks=None):
             torch.cat((u, c), dim=0)
             for u, c in zip(inactive_transposed, reactive_transposed, strict=False)
         ]
+        print(
+            f"vace_encode_frames: After masked encoding, latents list length={len(latents)}, first shape={latents[0].shape}"
+        )
 
     # Concatenate reference images if provided
     cat_latents = []
     for latent, refs in zip(latents, ref_images, strict=False):
+        print(
+            f"vace_encode_frames: Processing batch element, latent.shape={latent.shape}, refs={refs}"
+        )
         if refs is not None:
             # Stack refs: list of [C, 1, H, W] -> [1, C, num_refs, H, W]
             refs_stacked = torch.stack(refs, dim=0)
@@ -79,11 +111,15 @@ def vace_encode_frames(vae, frames, ref_images, masks=None):
             # ref_latent_batch: [C, num_refs, H, W], latent: [C, F, H, W]
             latent = torch.cat([ref_latent_batch, latent], dim=1)
 
-        # Pad latents to 96 channels for VACE compatibility
+        # Pad latents to 96 channels for VACE compatibility (if requested)
         # VACE was trained with 96 channels (16 base * 6 for masked video generation)
         # For R2V mode without masks, we pad with zeros
+        # For depth mode, padding happens after mask concatenation (pad_to_96=False)
         current_channels = latent.shape[0]
-        if current_channels < 96:
+        print(
+            f"vace_encode_frames: Before padding, latent.shape={latent.shape}, current_channels={current_channels}, pad_to_96={pad_to_96}"
+        )
+        if pad_to_96 and current_channels < 96:
             pad_channels = 96 - current_channels
             padding = torch.zeros(
                 (pad_channels, latent.shape[1], latent.shape[2], latent.shape[3]),
@@ -91,9 +127,19 @@ def vace_encode_frames(vae, frames, ref_images, masks=None):
                 device=latent.device,
             )
             latent = torch.cat([latent, padding], dim=0)
+            print(
+                f"vace_encode_frames: After padding {pad_channels} channels, latent.shape={latent.shape}"
+            )
+        elif not pad_to_96:
+            print(
+                f"vace_encode_frames: Skipping padding (pad_to_96=False), latent.shape={latent.shape}"
+            )
 
         cat_latents.append(latent)
 
+    print(
+        f"vace_encode_frames: Returning cat_latents list length={len(cat_latents)}, first shape={cat_latents[0].shape if cat_latents else None}"
+    )
     return cat_latents
 
 
@@ -154,7 +200,14 @@ def vace_latent(z, m):
     Returns:
         List of concatenated [latent, mask] tensors
     """
-    return [torch.cat([zz, mm], dim=0) for zz, mm in zip(z, m, strict=False)]
+    result = [torch.cat([zz, mm], dim=0) for zz, mm in zip(z, m, strict=False)]
+    print(
+        f"vace_latent: Concatenated z and m, result list length={len(result)}, first shape={result[0].shape if result else None}"
+    )
+    print(
+        f"vace_latent: Input z[0].shape={z[0].shape if z else None}, m[0].shape={m[0].shape if m else None}"
+    )
+    return result
 
 
 def load_and_prepare_reference_images(
@@ -248,3 +301,82 @@ def decode_vace_latent(vae, zs, ref_images=None):
         trimmed_zs.append(z)
 
     return vae.decode(trimmed_zs)
+
+
+def preprocess_depth_frames(depth_frames, target_height, target_width, device):
+    """
+    Preprocess depth frames for VACE depth encoding.
+
+    Following original VACE architecture (notes/VACE/vace/annotators/depth.py line 37):
+    - Depth maps must be 3-channel RGB format for VAE encoding
+    - This matches how depth annotators output depth maps
+
+    Args:
+        depth_frames: Depth frames tensor [F, H, W] or [F, C, H, W]
+        target_height: Target video height
+        target_width: Target video width
+        device: Target device
+
+    Returns:
+        Preprocessed depth frames [1, 3, F, H, W] (3-channel RGB, batch dim added)
+    """
+    import torch.nn.functional as F
+
+    # Add channel dimension if needed
+    if depth_frames.dim() == 3:
+        # [F, H, W] -> [F, 1, H, W]
+        depth_frames = depth_frames.unsqueeze(1)
+
+    # Ensure single channel first (take first channel if already RGB)
+    if depth_frames.shape[1] > 1:
+        depth_frames = depth_frames[:, :1, :, :]
+
+    # Resize if needed
+    _, _, curr_h, curr_w = depth_frames.shape
+    if curr_h != target_height or curr_w != target_width:
+        depth_frames = F.interpolate(
+            depth_frames,
+            size=(target_height, target_width),
+            mode="bilinear",
+            align_corners=False,
+        )
+
+    # Normalize to [-1, 1] if not already
+    if depth_frames.min() >= 0:
+        depth_frames = depth_frames * 2.0 - 1.0
+
+    # Convert grayscale to 3-channel RGB (matching original VACE depth annotator output)
+    # [F, 1, H, W] -> [F, 3, H, W]
+    depth_frames = depth_frames.repeat(1, 3, 1, 1)
+
+    # Move to device and add batch dimension: [F, 3, H, W] -> [1, 3, F, H, W]
+    depth_frames = depth_frames.to(device)
+    depth_frames = depth_frames.unsqueeze(0).permute(0, 2, 1, 3, 4)
+
+    return depth_frames
+
+
+def extract_depth_chunk(depth_video, chunk_index, num_frames_per_chunk):
+    """
+    Extract a chunk of depth frames from full depth video.
+
+    Args:
+        depth_video: Full depth video [1, C, F, H, W]
+        chunk_index: Chunk index (0-based)
+        num_frames_per_chunk: Number of frames per chunk (typically 12)
+
+    Returns:
+        Depth chunk [1, C, num_frames_per_chunk, H, W]
+    """
+    start_frame = chunk_index * num_frames_per_chunk
+    end_frame = start_frame + num_frames_per_chunk
+
+    batch_size, channels, num_frames, height, width = depth_video.shape
+
+    if end_frame > num_frames:
+        raise ValueError(
+            f"extract_depth_chunk: Chunk {chunk_index} exceeds video length. "
+            f"Requested frames {start_frame}-{end_frame}, but video has only {num_frames} frames."
+        )
+
+    return depth_video[:, :, start_frame:end_frame, :, :]

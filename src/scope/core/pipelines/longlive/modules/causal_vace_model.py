@@ -434,6 +434,7 @@ class CausalVaceWanModel(CausalWanModel):
         y=None,
         vace_context=None,
         vace_context_scale=1.0,
+        vace_guidance_mode=None,
         kv_cache=None,
         crossattn_cache=None,
         current_start=0,
@@ -443,8 +444,11 @@ class CausalVaceWanModel(CausalWanModel):
         Forward pass with optional VACE conditioning.
 
         Args:
-            vace_context: List of VAE-encoded reference images/frames with masks
+            vace_context: List of VAE-encoded reference images/frames or depth maps
             vace_context_scale: Scaling factor for VACE hint injection
+            vace_guidance_mode: VACE guidance mode ('r2v' or 'depth')
+                - r2v: Generate hints once (current_start==0), cache and reuse
+                - depth: Generate hints every chunk, no caching
         """
         # Standard preprocessing
         if self.model_type == "i2v":
@@ -494,13 +498,39 @@ class CausalVaceWanModel(CausalWanModel):
             context = torch.concat([context_clip, context], dim=1)
 
         # Generate VACE hints if vace_context provided
-        # Only generate hints on the first chunk (current_start == 0)
-        # Subsequent chunks proceed without VACE hint injection
+        # Behavior depends on guidance_mode:
+        # - R2V: Generate hints once (current_start==0), cache and reuse
+        # - Depth: Generate hints every chunk (no caching)
         hints = None
         if vace_context is not None:
-            if current_start == 0:
-                print(f"_forward_inference: Generating VACE hints for first chunk only (current_start={current_start}, seq_len={seq_len})")
-                # Use seq_len for padding consistency between x and vace_context
+            # Default to R2V mode if not specified
+            if vace_guidance_mode is None:
+                vace_guidance_mode = "r2v"
+
+            if vace_guidance_mode == "r2v":
+                # R2V mode: Only generate hints on first chunk
+                if current_start == 0:
+                    print(f"_forward_inference: Generating VACE hints for R2V mode (first chunk only, current_start={current_start}, seq_len={seq_len})")
+                    hints = self.forward_vace(
+                        x,
+                        vace_context,
+                        seq_len,
+                        e0,
+                        seq_lens,
+                        grid_sizes,
+                        self.freqs,
+                        context,
+                        context_lens,
+                        self.block_mask,
+                        crossattn_cache,
+                    )
+                    print(f"_forward_inference: Generated {len(hints)} VACE hints for first chunk - subsequent chunks will not use VACE hints")
+                else:
+                    print(f"_forward_inference: Skipping VACE hint generation for R2V chunk (current_start={current_start}) - hints only applied to first chunk")
+                    hints = None
+            elif vace_guidance_mode == "depth":
+                # Depth mode: Generate hints every chunk
+                print(f"_forward_inference: Generating VACE hints for depth mode (chunk starting at frame {current_start}, seq_len={seq_len})")
                 hints = self.forward_vace(
                     x,
                     vace_context,
@@ -514,10 +544,12 @@ class CausalVaceWanModel(CausalWanModel):
                     self.block_mask,
                     crossattn_cache,
                 )
-                print(f"_forward_inference: Generated {len(hints)} VACE hints for first chunk - subsequent chunks will not use VACE hints")
+                print(f"_forward_inference: Generated {len(hints)} VACE hints for depth chunk at frame {current_start}")
             else:
-                print(f"_forward_inference: Skipping VACE hint generation for chunk (current_start={current_start}) - hints only applied to first chunk")
-                hints = None
+                raise ValueError(
+                    f"CausalVaceWanModel._forward_inference: Unknown vace_guidance_mode '{vace_guidance_mode}', "
+                    f"expected 'r2v' or 'depth'"
+                )
 
             # Debug: Check if hints contain NaN
             # nan_status = [f"{i}:{'NaN' if hint.isnan().any().item() else 'OK'}" for i, hint in enumerate(hints)]
