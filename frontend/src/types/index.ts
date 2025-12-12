@@ -3,7 +3,8 @@ export type PipelineId =
   | "passthrough"
   | "longlive"
   | "krea-realtime-video"
-  | "reward-forcing";
+  | "reward-forcing"
+  | "decart-api";
 
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";

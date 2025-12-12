@@ -491,6 +491,35 @@ class PipelineManager:
             logger.info("RewardForcing pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "decart-api":
+            from scope.core.pipelines import DecartApiPipeline
+            from scope.core.pipelines.schema import DecartApiConfig
+
+            # Create config with defaults from DecartApiConfig
+            config_dict = {
+                "height": DecartApiConfig.model_fields["height"].default,
+                "width": DecartApiConfig.model_fields["width"].default,
+                "seed": DecartApiConfig.model_fields["base_seed"].default,
+            }
+            config = OmegaConf.create(config_dict)
+
+            # Apply load parameters (resolution, seed) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
+            pipeline = DecartApiPipeline(
+                config,
+                device=get_device(),
+                dtype=torch.bfloat16,
+            )
+            logger.info("DecartApi pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 

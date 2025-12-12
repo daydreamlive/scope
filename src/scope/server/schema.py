@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from scope.core.pipelines.schema import (
+    DecartApiConfig,
     KreaRealtimeVideoConfig,
     LongLiveConfig,
     StreamDiffusionV2Config,
@@ -341,6 +342,31 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
+class DecartApiLoadParams(PipelineLoadParams):
+    """Load parameters for Decart API pipeline.
+
+    Defaults are derived from DecartApiConfig to ensure consistency.
+    """
+
+    height: int = Field(
+        default=DecartApiConfig.model_fields["height"].default,
+        description="Target video height",
+        ge=64,
+        le=2048,
+    )
+    width: int = Field(
+        default=DecartApiConfig.model_fields["width"].default,
+        description="Target video width",
+        ge=64,
+        le=2048,
+    )
+    seed: int = Field(
+        default=DecartApiConfig.model_fields["base_seed"].default,
+        description="Random seed for generation (not used by Decart API but kept for consistency)",
+        ge=0,
+    )
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -352,6 +378,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | DecartApiLoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 
