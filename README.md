@@ -122,6 +122,7 @@ Examples with importable timeline files can be found here:
 
 - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md)
 - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md)
+- [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md)
 - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md)
 
 After your first generation you can:
