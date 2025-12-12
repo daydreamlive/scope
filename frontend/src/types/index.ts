@@ -2,6 +2,7 @@ export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"
   | "longlive"
+  | "longlive_vace"
   | "krea-realtime-video"
   | "reward-forcing";
 
@@ -64,6 +65,9 @@ export interface SettingsState {
   loraMergeStrategy?: LoraMergeStrategy;
   // Track current input mode (text vs video)
   inputMode?: InputMode;
+  // VACE-specific settings
+  refImages?: string[];
+  vaceContextScale?: number;
 }
 
 export interface PipelineInfo {

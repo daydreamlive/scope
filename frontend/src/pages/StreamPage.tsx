@@ -439,6 +439,16 @@ export function StreamPage() {
     // Note: Adding/removing LoRAs requires pipeline reload
   };
 
+  const handleRefImagesChange = (images: string[]) => {
+    updateSettings({ refImages: images });
+    // Note: Changing reference images requires pipeline reload
+  };
+
+  const handleVaceContextScaleChange = (scale: number) => {
+    updateSettings({ vaceContextScale: scale });
+    // Note: Changing VACE context scale requires pipeline reload
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -612,6 +622,19 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
+      } else if (pipelineIdToUse === "longlive_vace" && resolution) {
+        loadParams = {
+          height: resolution.height,
+          width: resolution.width,
+          seed: settings.seed ?? 42,
+          quantization: settings.quantization ?? null,
+          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ref_images: settings.refImages || [],
+          vace_context_scale: settings.vaceContextScale ?? 1.0,
+        };
+        console.log(
+          `Loading VACE with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, ref_images: ${loadParams.ref_images.length}, vace_context_scale: ${loadParams.vace_context_scale}`
+        );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
           height: resolution.height,
@@ -669,6 +692,8 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        ref_images?: string[];
+        vace_context_scale?: number;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -684,10 +709,11 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for krea_realtime_video, longlive, and reward-forcing
+      // Cache management for krea_realtime_video, longlive, longlive_vace, and reward-forcing
       if (
         pipelineIdToUse === "krea-realtime-video" ||
         pipelineIdToUse === "longlive" ||
+        pipelineIdToUse === "longlive_vace" ||
         pipelineIdToUse === "reward-forcing"
       ) {
         initialParameters.manage_cache = settings.manageCache ?? true;
@@ -697,6 +723,12 @@ export function StreamPage() {
       if (pipelineIdToUse === "krea-realtime-video") {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
+      }
+
+      // VACE-specific parameters - send reference images and context scale
+      if (pipelineIdToUse === "longlive_vace") {
+        initialParameters.ref_images = settings.refImages || [];
+        initialParameters.vace_context_scale = settings.vaceContextScale ?? 1.0;
       }
 
       // Video mode parameters - applies to all pipelines in video mode
@@ -957,6 +989,10 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
+            refImages={settings.refImages || []}
+            onRefImagesChange={handleRefImagesChange}
+            vaceContextScale={settings.vaceContextScale ?? 1.0}
+            onVaceContextScaleChange={handleVaceContextScaleChange}
           />
         </div>
       </div>

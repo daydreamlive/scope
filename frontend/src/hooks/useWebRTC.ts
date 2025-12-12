@@ -17,6 +17,8 @@ interface InitialParameters {
   noise_controller?: boolean;
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
+  ref_images?: string[];
+  vace_context_scale?: number;
 }
 
 interface UseWebRTCOptions {

@@ -238,6 +238,57 @@ class LongLiveConfig(BasePipelineConfig):
         }
 
 
+class LongLiveVaceConfig(BasePipelineConfig):
+    """Configuration for LongLive VACE pipeline.
+
+    LongLive VACE supports reference image conditioning for video generation.
+    Default mode is text with reference images (R2V).
+    """
+
+    pipeline_id: ClassVar[str] = "longlive_vace"
+    pipeline_name: ClassVar[str] = "LongLive VACE"
+    pipeline_description: ClassVar[str] = (
+        "Long-form video generation with reference image conditioning (VACE)"
+    )
+
+    # Mode support - primarily text mode with reference images
+    supported_modes: ClassVar[list[InputMode]] = ["text"]
+    default_mode: ClassVar[InputMode] = "text"
+
+    # VACE defaults
+    height: int = Field(default=512, ge=1, description="Output height in pixels")
+    width: int = Field(default=512, ge=1, description="Output width in pixels")
+    denoising_steps: list[int] | None = Field(
+        default=[1000, 750, 500, 250],
+        description="Denoising step schedule for progressive generation",
+    )
+
+    # VACE-specific parameters
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
+    )
+
+    @classmethod
+    def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
+        """LongLive VACE mode-specific defaults."""
+        return {
+            "text": ModeDefaults(
+                # Text mode with reference images
+                height=512,
+                width=512,
+                noise_scale=None,
+                noise_controller=None,
+            ),
+        }
+
+
 class StreamDiffusionV2Config(BasePipelineConfig):
     """Configuration for StreamDiffusion V2 pipeline.
 
@@ -421,6 +472,7 @@ class PassthroughConfig(BasePipelineConfig):
 # Registry of pipeline config classes
 PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "longlive": LongLiveConfig,
+    "longlive_vace": LongLiveVaceConfig,
     "streamdiffusionv2": StreamDiffusionV2Config,
     "krea-realtime-video": KreaRealtimeVideoConfig,
     "reward-forcing": RewardForcingConfig,

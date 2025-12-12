@@ -31,6 +31,7 @@ import type {
   InputMode,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
+import { ImageManager } from "./ImageManager";
 
 const MIN_DIMENSION = 16;
 
@@ -70,6 +71,11 @@ interface SettingsPanelProps {
   inputMode?: InputMode;
   // Whether this pipeline supports noise controls in video mode (schema-derived)
   supportsNoiseControls?: boolean;
+  // VACE-specific props
+  refImages?: string[];
+  onRefImagesChange?: (images: string[]) => void;
+  vaceContextScale?: number;
+  onVaceContextScaleChange?: (scale: number) => void;
 }
 
 export function SettingsPanel({
@@ -101,6 +107,10 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
+  refImages = [],
+  onRefImagesChange,
+  vaceContextScale = 1.0,
+  onVaceContextScaleChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -126,6 +136,7 @@ export function SettingsPanel({
   ) => {
     const minValue =
       pipelineId === "longlive" ||
+      pipelineId === "longlive_vace" ||
       pipelineId === "streamdiffusionv2" ||
       pipelineId === "krea-realtime-video" ||
       pipelineId === "reward-forcing"
@@ -171,6 +182,7 @@ export function SettingsPanel({
   const decrementResolution = (dimension: "height" | "width") => {
     const minValue =
       pipelineId === "longlive" ||
+      pipelineId === "longlive_vace" ||
       pipelineId === "streamdiffusionv2" ||
       pipelineId === "krea-realtime-video" ||
       pipelineId === "reward-forcing"
@@ -322,7 +334,35 @@ export function SettingsPanel({
           </div>
         )}
 
+        {pipelineId === "longlive_vace" && (
+          <div className="space-y-4">
+            <ImageManager
+              images={refImages}
+              onImagesChange={onRefImagesChange || (() => {})}
+              disabled={isDownloading}
+              isStreaming={isStreaming}
+            />
+
+            <div className="space-y-2">
+              <LabelWithTooltip
+                label="VACE Context Scale"
+                tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
+                className="text-sm font-medium"
+              />
+              <SliderWithInput
+                value={vaceContextScale}
+                onValueChange={onVaceContextScaleChange || (() => {})}
+                min={0}
+                max={2}
+                step={0.1}
+                disabled={isDownloading || isStreaming}
+              />
+            </div>
+          </div>
+        )}
+
         {(pipelineId === "longlive" ||
+          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (
@@ -481,6 +521,7 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
+          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (
@@ -544,6 +585,7 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
+          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (
@@ -599,6 +641,7 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
+          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (

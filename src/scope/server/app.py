@@ -197,9 +197,14 @@ async def lifespan(app: FastAPI):
     logs_dir = get_logs_dir()
     logger.info(f"Logs directory: {logs_dir}")
 
-    # Ensure models directory and lora subdirectory exist
+    # Ensure models directory and subdirectories exist
     models_dir = ensure_models_dir()
     logger.info(f"Models directory: {models_dir}")
+
+    # Ensure images subdirectory exists for VACE reference images
+    images_dir = models_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Images directory: {images_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
     pipeline_manager = PipelineManager()
@@ -475,6 +480,57 @@ async def list_lora_files():
 
     except Exception as e:  # pragma: no cover - defensive logging
         logger.error(f"list_lora_files: Error listing LoRA files: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class ImageFileInfo(BaseModel):
+    """Metadata for an available image file on disk."""
+
+    name: str
+    path: str
+    size_mb: float
+    folder: str | None = None
+
+
+class ImageFilesResponse(BaseModel):
+    """Response containing all discoverable image files."""
+
+    image_files: list[ImageFileInfo]
+
+
+@app.get("/api/v1/images/list", response_model=ImageFilesResponse)
+async def list_image_files():
+    """List available image files in the models/images directory and its subdirectories."""
+
+    def process_image_file(file_path: Path, images_dir: Path) -> ImageFileInfo:
+        """Extract image file metadata."""
+        size_mb = file_path.stat().st_size / (1024 * 1024)
+        relative_path = file_path.relative_to(images_dir)
+        folder = (
+            str(relative_path.parent) if relative_path.parent != Path(".") else None
+        )
+        return ImageFileInfo(
+            name=file_path.stem,
+            path=str(file_path),
+            size_mb=round(size_mb, 2),
+            folder=folder,
+        )
+
+    try:
+        images_dir = get_models_dir() / "images"
+        image_files: list[ImageFileInfo] = []
+
+        if images_dir.exists() and images_dir.is_dir():
+            for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"):
+                for file_path in images_dir.rglob(pattern):
+                    if file_path.is_file():
+                        image_files.append(process_image_file(file_path, images_dir))
+
+        image_files.sort(key=lambda x: (x.folder or "", x.name))
+        return ImageFilesResponse(image_files=image_files)
+
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"list_image_files: Error listing image files: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

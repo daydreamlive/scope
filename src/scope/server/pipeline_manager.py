@@ -386,6 +386,73 @@ class PipelineManager:
             logger.info("LongLive pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "longlive_vace":
+            from scope.core.pipelines import LongLiveVacePipeline
+
+            from .models_config import get_model_file_path, get_models_dir
+
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                    "generator_path": str(
+                        get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
+                    ),
+                    "lora_path": str(
+                        get_model_file_path("LongLive-1.3B/models/lora.pt")
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                }
+            )
+
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
+            # Extract VACE-specific parameters
+            ref_images = []
+            vace_context_scale = 1.0
+            if load_params:
+                ref_images = load_params.get("ref_images", [])
+                vace_context_scale = load_params.get("vace_context_scale", 1.0)
+                logger.info(
+                    f"_load_pipeline_implementation: Extracted VACE parameters from load_params: "
+                    f"ref_images count={len(ref_images) if ref_images else 0}, "
+                    f"ref_images paths={ref_images if ref_images else 'None'}, "
+                    f"vace_context_scale={vace_context_scale}"
+                )
+            else:
+                logger.warning(
+                    "_load_pipeline_implementation: No load_params provided for longlive_vace pipeline"
+                )
+
+            config["ref_images"] = ref_images
+            config["vace_context_scale"] = vace_context_scale
+
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
+            pipeline = LongLiveVacePipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("LongLive VACE pipeline initialized")
+            return pipeline
+
         elif pipeline_id == "krea-realtime-video":
             from scope.core.pipelines import (
                 KreaRealtimeVideoPipeline,

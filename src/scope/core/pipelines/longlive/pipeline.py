@@ -61,7 +61,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         lora_config = getattr(model_config, "adapter", {})
 
         # Load generator (with optional VACE support)
-        # Strategy: Load LongLive base, apply LoRA, then add VACE-specific weights
+        # Strategy: Load LongLive base, add VACE-specific weights, then apply LoRA
+        # (VACE loaded before LoRA to avoid PEFT wrapper unwrapping issues)
         start = time.time()
         model_class = CausalVaceWanModel if vace_path is not None else CausalWanModel
 
@@ -82,6 +83,15 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         model_type_str = "VACE-enabled" if vace_path is not None else "standard"
         print(f"Loaded {model_type_str} diffusion model in {time.time() - start:.3f}s")
 
+        # Load VACE-specific weights before LoRA application to avoid PEFT wrapper unwrapping issues
+        # VACE weights (vace_blocks.*, vace_patch_embedding.*) are independent of LoRA-modified layers
+        if vace_path is not None:
+            start = time.time()
+            from .vace_weight_loader import load_vace_weights_only
+
+            load_vace_weights_only(generator.model, vace_path)
+            print(f"Loaded VACE conditioning weights in {time.time() - start:.3f}s")
+
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
         # This mirrors the original LongLive behavior and is independent of any
         # additional runtime LoRA strategies managed by LoRAEnabledPipeline.
@@ -98,14 +108,6 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             )
             ModuleTargetedLoRAStrategy._load_lora_checkpoint(generator.model, lora_path)
             print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
-
-        # Load VACE-specific weights after base model + LoRA are loaded
-        if vace_path is not None:
-            start = time.time()
-            from .vace_weight_loader import load_vace_weights_only
-
-            load_vace_weights_only(generator.model, vace_path)
-            print(f"Loaded VACE conditioning weights in {time.time() - start:.3f}s")
 
         # Initialize any additional, user-configured LoRA adapters via shared manager.
         # This is additive and does not replace the original LongLive performance LoRA.
@@ -207,6 +209,17 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             # Trigger cache reset on LoRA scale updates if manage_cache is enabled
             if self.state.get("manage_cache", True):
                 kwargs["init_cache"] = True
+
+        # Log ref_images before setting into state
+        if "ref_images" in kwargs:
+            ref_images = kwargs.get("ref_images", [])
+            logger.info(
+                f"LongLivePipeline._generate: Setting ref_images into state: "
+                f"count={len(ref_images) if ref_images else 0}, "
+                f"paths={ref_images if ref_images else 'None'}"
+            )
+        else:
+            logger.debug("LongLivePipeline._generate: No ref_images in kwargs")
 
         for k, v in kwargs.items():
             self.state.set(k, v)

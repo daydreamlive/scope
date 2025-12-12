@@ -98,8 +98,19 @@ class PrepareVaceContextBlock(ModularPipelineBlocks):
 
         ref_images = block_state.ref_images
 
+        logger.info(
+            f"PrepareVaceContextBlock.__call__: Received ref_images from state: "
+            f"type={type(ref_images)}, "
+            f"value={ref_images}, "
+            f"length={len(ref_images) if ref_images else 0}"
+        )
+
         # Skip if no reference images provided
         if ref_images is None or len(ref_images) == 0:
+            logger.warning(
+                "PrepareVaceContextBlock.__call__: No reference images provided. "
+                "Skipping VACE context preparation."
+            )
             block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
@@ -113,7 +124,7 @@ class PrepareVaceContextBlock(ModularPipelineBlocks):
             return components, state
 
         logger.info(
-            f"PrepareVaceContextBlock: Preparing {len(ref_images)} reference images"
+            f"PrepareVaceContextBlock.__call__: Preparing {len(ref_images)} reference images: {ref_images}"
         )
 
         height = block_state.height
@@ -121,9 +132,18 @@ class PrepareVaceContextBlock(ModularPipelineBlocks):
         vae = components.vae
         device = components.config.device
 
+        logger.info(
+            f"PrepareVaceContextBlock.__call__: Loading reference images with "
+            f"height={height}, width={width}, device={device}"
+        )
+
         # Load and prepare reference images
         prepared_refs = load_and_prepare_reference_images(
             ref_images, height, width, device
+        )
+
+        logger.info(
+            f"PrepareVaceContextBlock.__call__: Successfully loaded {len(prepared_refs)} reference images"
         )
 
         # Encode VACE context using reference-only approach (default)

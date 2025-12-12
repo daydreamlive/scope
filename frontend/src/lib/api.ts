@@ -23,6 +23,8 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
+    ref_images?: string[];
+    vace_context_scale?: number;
   };
 }
 
@@ -54,6 +56,17 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
 }
 
+export interface LongLiveVaceLoadParams extends PipelineLoadParams {
+  height?: number;
+  width?: number;
+  seed?: number;
+  quantization?: "fp8_e4m3fn" | null;
+  loras?: LoRAConfig[];
+  lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  ref_images?: string[];
+  vace_context_scale?: number;
+}
+
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   height?: number;
   width?: number;
@@ -69,6 +82,7 @@ export interface PipelineLoadRequest {
     | PassthroughLoadParams
     | StreamDiffusionV2LoadParams
     | LongLiveLoadParams
+    | LongLiveVaceLoadParams
     | KreaRealtimeVideoLoadParams
     | null;
 }
@@ -290,6 +304,33 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
     const errorText = await response.text();
     throw new Error(
       `List LoRA files failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export interface ImageFileInfo {
+  name: string;
+  path: string;
+  size_mb: number;
+  folder?: string | null;
+}
+
+export interface ImageFilesResponse {
+  image_files: ImageFileInfo[];
+}
+
+export const listImageFiles = async (): Promise<ImageFilesResponse> => {
+  const response = await fetch("/api/v1/images/list", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `List image files failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 

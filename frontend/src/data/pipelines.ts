@@ -57,6 +57,22 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportedModes: ["text", "video"],
     defaultMode: "text",
   },
+  longlive_vace: {
+    name: "LongLive VACE",
+    docsUrl:
+      "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md",
+    about:
+      "LongLive with VACE (Video-Aware Condition Encoding) support for reference image conditioning. Upload reference images to guide video generation style and content.",
+    modified: true,
+    estimatedVram: 20,
+    requiresModels: true,
+    defaultTemporalInterpolationMethod: "slerp",
+    defaultTemporalInterpolationSteps: 0,
+    supportsLoRA: true,
+    // Text-only mode with reference images
+    supportedModes: ["text"],
+    defaultMode: "text",
+  },
   "krea-realtime-video": {
     name: "Krea Realtime Video",
     docsUrl:

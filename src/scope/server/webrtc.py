@@ -159,6 +159,17 @@ class WebRTCManager:
                 )
             logger.info(f"Received initial parameters: {initial_parameters}")
 
+            # Log ref_images specifically for VACE pipeline debugging
+            if "ref_images" in initial_parameters:
+                ref_images = initial_parameters.get("ref_images", [])
+                logger.info(
+                    f"handle_offer: Received ref_images from frontend: "
+                    f"count={len(ref_images) if ref_images else 0}, "
+                    f"paths={ref_images if ref_images else 'None'}"
+                )
+            else:
+                logger.info("handle_offer: No ref_images found in initial parameters")
+
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
             session = Session(pc)

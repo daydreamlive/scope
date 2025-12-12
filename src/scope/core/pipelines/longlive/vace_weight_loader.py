@@ -25,7 +25,8 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
 
     Args:
         model: CausalVaceWanModel instance (already has LongLive base weights)
-                May be wrapped by PEFT, in which case we need to access base_model
+                May be wrapped by PEFT, in which case we unwrap to access base_model.
+                Typically called before PEFT wrapping to avoid unwrapping issues.
         vace_checkpoint_path: Path to VACE safetensors checkpoint
 
     Returns:
