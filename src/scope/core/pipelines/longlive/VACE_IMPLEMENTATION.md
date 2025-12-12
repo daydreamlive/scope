@@ -13,16 +13,17 @@ This implementation adds VACE (Video-Aware Conditioning Enhancement) support to 
    - Implements causal VACE hint generation
    - Compatible with KV caching for incremental generation
 
-2. **VACE Utilities** (`vace_utils.py`)
+2. **VaceEncodingBlock** (`blocks/vace_encoding.py`)
+   - Pipeline block for encoding VACE context (R2V or depth modes)
+   - For R2V: Loads and encodes reference images using dummy frames
+   - For depth: Encodes depth maps via standard VACE path with masking
+   - Executed before denoising, handles caching automatically
+
+3. **VACE Utilities** (`vace_utils.py`)
    - `vace_encode_frames()`: Encode frames and reference images via VAE
    - `vace_encode_masks()`: Encode masks at latent resolution
    - `load_and_prepare_reference_images()`: Load and prepare reference images
    - `decode_vace_latent()`: Decode latents, removing reference frames
-
-3. **PrepareVaceContextBlock** (`blocks/prepare_vace_context.py`)
-   - Pipeline block for preparing VACE context
-   - Loads and encodes reference images
-   - Executed before denoising
 
 4. **Modified DenoiseBlock**
    - Updated to pass `vace_context` and `vace_context_scale` to generator

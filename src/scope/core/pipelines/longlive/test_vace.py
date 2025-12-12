@@ -50,7 +50,7 @@ device = torch.device("cuda")
 pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
 
 # Test prompt
-prompt_text = "the woman jumps up"
+prompt_text = ""
 
 # Example reference images (provide your own paths)
 # These images will condition the video generation

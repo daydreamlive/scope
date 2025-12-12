@@ -112,11 +112,39 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         guidance_mode = block_state.guidance_mode
+        ref_images = block_state.ref_images
+        vace_input = block_state.vace_input
+
+        # Infer guidance_mode if not explicitly provided
         if guidance_mode is None:
-            block_state.vace_context = None
-            block_state.vace_ref_images = None
-            self.set_block_state(state, block_state)
-            return components, state
+            if ref_images is not None and len(ref_images) > 0:
+                guidance_mode = "r2v"
+                logger.info(
+                    "VaceEncodingBlock.__call__: Inferred guidance_mode='r2v' from ref_images"
+                )
+            elif vace_input is not None:
+                guidance_mode = "depth"
+                logger.info(
+                    "VaceEncodingBlock.__call__: Inferred guidance_mode='depth' from vace_input"
+                )
+            else:
+                # No guidance inputs provided
+                block_state.vace_context = None
+                block_state.vace_ref_images = None
+                self.set_block_state(state, block_state)
+                return components, state
+
+        # Validate mutually exclusive modes
+        if guidance_mode == "r2v" and vace_input is not None:
+            raise ValueError(
+                "VaceEncodingBlock: Cannot use both ref_images (R2V mode) and vace_input (depth mode) simultaneously. "
+                "Please provide only one guidance type."
+            )
+        if guidance_mode == "depth" and ref_images is not None and len(ref_images) > 0:
+            raise ValueError(
+                "VaceEncodingBlock: Cannot use both vace_input (depth mode) and ref_images (R2V mode) simultaneously. "
+                "Please provide only one guidance type."
+            )
 
         if guidance_mode not in ["r2v", "depth"]:
             raise ValueError(
@@ -139,14 +167,16 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
     def _encode_r2v(self, components, block_state, current_start, state):
         """
-        Encode reference images for R2V mode.
+        Encode reference images for R2V mode following original VACE pattern.
 
-        R2V characteristics:
+        R2V characteristics (from notes/VACE/vace/models/wan/wan_vace.py lines 127-155, 339-341):
         - Static reference images (1-3 frames)
         - Encoded once on first chunk (current_start == 0)
         - Cached in state, reused across all chunks
-        - Prepended temporally to latent sequence
-        - Uses vace_in_dim=96 (16 base * 6 for masking)
+        - Uses dummy frames as 'frames' parameter to vace_encode_frames()
+        - Refs passed as 'ref_images' parameter (prepended temporally inside vace_encode_frames)
+        - masks=None (no masking path for R2V)
+        - Uses vace_in_dim=96 (padded inside vace_encode_frames with pad_to_96=True)
         """
         # Check cache first
         cached_context = state.get("_vace_r2v_context_cache")
@@ -178,54 +208,63 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             components.config.device,
         )
 
-        # Encode using main VAE (no cache)
-        vae = components.vae
-        vae_dtype = next(vae.parameters()).dtype
-
-        # Convert refs to list of [C, 1, H, W] for encoding
-        ref_images_list = [ref.to(dtype=vae_dtype) for ref in prepared_refs]
-
-        # Stack refs: list of [C, 1, H, W] -> [num_refs, C, 1, H, W]
-        refs_stacked = torch.stack(ref_images_list, dim=0)
-
-        # Encode: [num_refs, C, 1, H, W] -> [num_refs, 1, C_latent, H_latent, W_latent]
-        ref_latent_out = vae.encode_to_latent(refs_stacked, use_cache=False)
-
-        # Transpose: [num_refs, 1, C_latent, H_latent, W_latent] -> [num_refs, C_latent, 1, H_latent, W_latent]
-        ref_latents = [lat.permute(1, 0, 2, 3) for lat in ref_latent_out]
-
-        # Concatenate along frame dimension: [C_latent, num_refs, H_latent, W_latent]
-        vace_context = torch.cat(ref_latents, dim=1)
-
-        # Pad to 96 channels for VACE compatibility (R2V mode uses 96 channels)
-        current_channels = vace_context.shape[0]
-        if current_channels < 96:
-            pad_channels = 96 - current_channels
-            padding = torch.zeros(
-                (
-                    pad_channels,
-                    vace_context.shape[1],
-                    vace_context.shape[2],
-                    vace_context.shape[3],
-                ),
-                dtype=vace_context.dtype,
-                device=vace_context.device,
+        # Use dedicated vace_vae if available, otherwise use main VAE
+        vace_vae = getattr(components, "vace_vae", None)
+        if vace_vae is None:
+            logger.warning(
+                "VaceEncodingBlock._encode_r2v: vace_vae not found, using main VAE (may affect autoregressive cache)"
             )
-            vace_context = torch.cat([vace_context, padding], dim=0)
+            vace_vae = components.vae
 
-        # Return as list for consistency with model expectations
-        vace_context_list = [vace_context]
+        # Import vace_utils for R2V encoding path
+        from ..vace_utils import vace_encode_frames
 
-        # Cache for subsequent chunks
-        state.set("_vace_r2v_context_cache", vace_context_list)
-        state.set("_vace_r2v_refs_cache", prepared_refs)
+        # Calculate number of frames for dummy input (should match chunk size)
+        num_frames = (
+            components.config.num_frame_per_block
+            * components.config.vae_temporal_downsample_factor
+        )
+
+        # Create dummy frames (zero frames in pixel space, matching original VACE pattern)
+        # Following notes/VACE/vace/models/wan/wan_vace.py lines 339-341
+        dummy_frames = [
+            torch.zeros(
+                (3, num_frames, block_state.height, block_state.width),
+                device=components.config.device,
+                dtype=next(vace_vae.parameters()).dtype,
+            )
+        ]
 
         logger.info(
-            f"VaceEncodingBlock._encode_r2v: Encoded R2V context shape={vace_context.shape}, "
+            f"VaceEncodingBlock._encode_r2v: Created dummy_frames with shape {dummy_frames[0].shape}"
+        )
+
+        # Encode with ref_images passed as parameter (R2V path)
+        # Original VACE pattern: vace_encode_frames(frames, ref_images, masks=None)
+        # - dummy_frames as 'frames'
+        # - prepared_refs as 'ref_images' (wrapped in list for batch dimension)
+        # - masks=None (no masking for R2V)
+        # - pad_to_96=True (pads to 96 channels for VACE compatibility)
+        vace_context = vace_encode_frames(
+            vace_vae,
+            dummy_frames,
+            ref_images=[prepared_refs],
+            masks=None,
+            pad_to_96=True,
+        )
+
+        # vace_context is list, each element has refs prepended temporally
+        logger.info(
+            f"VaceEncodingBlock._encode_r2v: Encoded R2V context, "
+            f"list length={len(vace_context)}, first shape={vace_context[0].shape}, "
             f"cached for subsequent chunks"
         )
 
-        return vace_context_list, prepared_refs
+        # Cache for subsequent chunks
+        state.set("_vace_r2v_context_cache", vace_context)
+        state.set("_vace_r2v_refs_cache", prepared_refs)
+
+        return vace_context, prepared_refs
 
     def _encode_standard_vace(self, components, block_state, current_start):
         """
