@@ -343,10 +343,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             f"VaceEncodingBlock._encode_with_conditioning: Encoding {num_frames} conditioning frames "
             f"(with_ref_images={has_ref_images}, chunk {current_start})"
         )
-        print(
-            f"_encode_with_conditioning: Starting encoding, vace_input.shape={vace_input.shape}, "
-            f"has_ref_images={has_ref_images}"
-        )
 
         # Use dedicated vace_vae if available, otherwise use main VAE
         vace_vae = getattr(components, "vace_vae", None)
@@ -365,9 +361,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 "VaceEncodingBlock._encode_with_conditioning: Converting 1-channel input to 3-channel RGB"
             )
             vace_input = vace_input.repeat(1, 3, 1, 1, 1)
-            print(
-                f"_encode_with_conditioning: Converted 1-channel to 3-channel, new shape={vace_input.shape}"
-            )
         elif channels != 3:
             raise ValueError(
                 f"VaceEncodingBlock._encode_with_conditioning: Expected 1 or 3 channels, got {channels}"
@@ -378,9 +371,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         # Convert to list of [C, F, H, W] for vace_encode_frames
         input_frames = [vace_input[b] for b in range(batch_size)]
-        print(
-            f"_encode_with_conditioning: input_frames list length={len(input_frames)}, first shape={input_frames[0].shape}"
-        )
 
         # For conditioning: masks = ones (all white), this routes through standard masking path
         # This matches original VACE architecture where conditioning goes through standard path
@@ -392,12 +382,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             )
             for _ in range(batch_size)
         ]
-        print(
-            "_encode_with_conditioning: Created masks=ones (all white) for standard VACE path"
-        )
-        print(
-            f"_encode_with_conditioning: masks list length={len(masks)}, first shape={masks[0].shape}"
-        )
 
         # Load and prepare reference images if provided (for combined guidance)
         ref_images = None
@@ -420,31 +404,15 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         # Standard VACE encoding path (matching wan_vace.py lines 339-341)
         # z0 = vace_encode_frames(input_frames, ref_images, masks=input_masks)
         # When masks are provided, set pad_to_96=False because mask encoding (64 channels) will be added later
-        print(
-            "_encode_with_conditioning: Calling vace_encode_frames with masks=ones, pad_to_96=False..."
-        )
         z0 = vace_encode_frames(
             vace_vae, input_frames, ref_images, masks=masks, pad_to_96=False
         )
-        print(
-            f"_encode_with_conditioning: After vace_encode_frames, z0 list length={len(z0)}, first shape={z0[0].shape}"
-        )
 
         # m0 = vace_encode_masks(input_masks, ref_images)
-        print("_encode_with_conditioning: Calling vace_encode_masks...")
         m0 = vace_encode_masks(masks, ref_images)
-        print(
-            f"_encode_with_conditioning: After vace_encode_masks, m0 list length={len(m0)}, first shape={m0[0].shape}"
-        )
 
         # z = vace_latent(z0, m0)
-        print(
-            "_encode_with_conditioning: Calling vace_latent to concatenate z0 and m0..."
-        )
         z = vace_latent(z0, m0)
-        print(
-            f"_encode_with_conditioning: After vace_latent, z list length={len(z)}, first shape={z[0].shape}"
-        )
 
         # Validate latent frame count
         expected_latent_frames = components.config.num_frame_per_block

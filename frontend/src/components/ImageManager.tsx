@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
-import { Plus, X, RefreshCw } from "lucide-react";
+import { Plus, X, RefreshCw, Send } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { listImageFiles, type ImageFileInfo } from "../lib/api";
 import { FilePicker } from "./ui/file-picker";
@@ -10,6 +10,7 @@ interface ImageManagerProps {
   onImagesChange: (images: string[]) => void;
   disabled?: boolean;
   isStreaming?: boolean;
+  onSendHint?: (imagePath: string) => void;
 }
 
 export function ImageManager({
@@ -17,6 +18,7 @@ export function ImageManager({
   onImagesChange,
   disabled,
   isStreaming = false,
+  onSendHint,
 }: ImageManagerProps) {
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
@@ -107,20 +109,41 @@ export function ImageManager({
                   emptyMessage="No image files found"
                 />
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleRemoveImage(index)}
-                disabled={disabled || isStreaming}
-                className="h-6 w-6 p-0 shrink-0"
-                title={
-                  isStreaming
-                    ? "Cannot remove images while streaming"
-                    : "Remove image"
-                }
-              >
-                <X className="h-3 w-3" />
-              </Button>
+              <div className="flex items-center gap-1 shrink-0">
+                {onSendHint && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => imagePath && onSendHint(imagePath)}
+                    disabled={disabled || !isStreaming || !imagePath}
+                    className="h-6 px-2"
+                    title={
+                      !isStreaming
+                        ? "Start streaming to send hint"
+                        : !imagePath
+                          ? "Select an image first"
+                          : "Send hint"
+                    }
+                  >
+                    <Send className="h-3 w-3 mr-1" />
+                    Send Hint
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleRemoveImage(index)}
+                  disabled={disabled || isStreaming}
+                  className="h-6 w-6 p-0 shrink-0"
+                  title={
+                    isStreaming
+                      ? "Cannot remove images while streaming"
+                      : "Remove image"
+                  }
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
           </div>
         ))}

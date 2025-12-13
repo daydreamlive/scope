@@ -444,6 +444,13 @@ export function StreamPage() {
     // Note: Changing reference images requires pipeline reload
   };
 
+  const handleSendHint = (imagePath: string) => {
+    // Send reference image hint to backend
+    sendParameterUpdate({
+      ref_images: [imagePath],
+    });
+  };
+
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
     // Note: Changing VACE context scale requires pipeline reload
@@ -993,6 +1000,7 @@ export function StreamPage() {
             onRefImagesChange={handleRefImagesChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
+            onSendHint={handleSendHint}
           />
         </div>
       </div>

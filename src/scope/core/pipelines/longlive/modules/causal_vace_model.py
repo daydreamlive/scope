@@ -77,12 +77,8 @@ class VaceWanAttentionBlock(CausalWanAttentionBlock):
             # Slice c to match x's size for residual addition
             c_sliced = c[:, :x.size(1), :]
 
-            print(f"forward_vace VaceBlock[{self.block_id}]: Mixing VACE context (shape={c_sliced.shape}) with current input x (shape={x.shape})")
-            print(f"forward_vace VaceBlock[{self.block_id}]: This mixing causes reference image re-injection - should only happen on first chunk!")
-
             before_proj_out = self.before_proj(c_sliced)
             c = before_proj_out + x
-            print(f"forward_vace VaceBlock[{self.block_id}]: After mixing, c.shape={c.shape}")
 
             all_c = []
         else:
@@ -208,7 +204,18 @@ class BaseWanAttentionBlock(CausalWanAttentionBlock):
             if hint.shape[1] > x.shape[1]:
                 hint = hint[:, :x.shape[1], :]
 
+            print(
+                f"BaseWanAttentionBlock[{self.block_id}]: Injecting VACE hint with context_scale={context_scale}, "
+                f"hint.shape={hint.shape}, x.shape={x.shape}"
+            )
             x = x + hint * context_scale
+        else:
+            if self.block_id is not None and self.block_id % 5 == 0:
+                print(
+                    f"BaseWanAttentionBlock[{self.block_id}]: NO hint injection "
+                    f"(hints={'present' if hints is not None else 'None'}, block_id={self.block_id})"
+                )
+
 
             # if not x_before_nan and x.isnan().any().item():
             #     print(f"VACEBlock[{self.block_id}]: WARNING - NaN introduced by hint injection!")
@@ -357,14 +364,6 @@ class CausalVaceWanModel(CausalWanModel):
         Returns:
             List of hints to be injected at specified transformer layers
         """
-        print(f"forward_vace: Processing VACE context - x.shape={x.shape}, seq_len={seq_len}, num_contexts={len(vace_context)}")
-        # Debug: Check input vace_context
-        for i, vc in enumerate(vace_context):
-            vc_nan = vc.isnan().any().item()
-            vc_inf = vc.isinf().any().item()
-            vc_min, vc_max = vc.min().item(), vc.max().item()
-            print(f"forward_vace: vace_context[{i}] shape={vc.shape}, nan={vc_nan}, inf={vc_inf}, range=[{vc_min:.2f},{vc_max:.2f}]")
-
         # Embed VACE context
         c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
 
@@ -420,7 +419,6 @@ class CausalVaceWanModel(CausalWanModel):
 
         # Extract hints (all but the last accumulated context)
         hints = torch.unbind(c)[:-1]
-        print(f"forward_vace: Generated {len(hints)} hints for injection")
         return hints
 
 
@@ -500,10 +498,6 @@ class CausalVaceWanModel(CausalWanModel):
         # Generate VACE hints if vace_context provided and regeneration is requested
         hints = None
         if vace_context is not None and vace_regenerate_hints:
-            print(
-                f"_forward_inference: Generating VACE hints "
-                f"(chunk_start={current_start}, seq_len={seq_len})"
-            )
             hints = self.forward_vace(
                 x,
                 vace_context,
@@ -517,13 +511,11 @@ class CausalVaceWanModel(CausalWanModel):
                 self.block_mask,
                 crossattn_cache,
             )
-            print(
-                f"_forward_inference: Generated {len(hints)} VACE hints for chunk at frame {current_start}"
-            )
 
             # Debug: Check if hints contain NaN
             # nan_status = [f"{i}:{'NaN' if hint.isnan().any().item() else 'OK'}" for i, hint in enumerate(hints)]
             # print(f"forward_vace: Generated {len(hints)} hints - {', '.join(nan_status)}")
+
 
         # Arguments for transformer blocks
         kwargs = dict(

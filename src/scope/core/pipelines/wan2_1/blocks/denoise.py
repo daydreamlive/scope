@@ -177,26 +177,13 @@ class DenoiseBlock(ModularPipelineBlocks):
             )
 
             if index < len(denoising_step_list) - 1:
-                # Debug: Check inputs before generator call (first step only)
-                if index == 0:
-                    noise_nan = noise.isnan().any().item()
-                    vace_status = "None"
-                    if block_state.vace_context is not None:
-                        vace_nan_count = sum(
-                            vc.isnan().any().item() for vc in block_state.vace_context
-                        )
-                        vace_status = f"{len(block_state.vace_context)} contexts, {vace_nan_count} with NaN, scale={block_state.vace_context_scale}"
-                    print(
-                        f"DenoiseBlock step 0: noise_nan={noise_nan}, vace={vace_status}"
-                    )
-
                 # Determine if we should regenerate VACE hints:
-                # - If vace_input exists in state, we're using per-chunk conditioning -> regenerate every chunk
-                # - If only ref_images (no vace_input), we're in reference-only mode -> regenerate only on first chunk
+                # - If vace_input exists: per-chunk conditioning -> regenerate every chunk
+                # - If vace_context exists: reference images provided -> regenerate to apply them
+                # This allows ref_images to be sent at any time, not just first chunk
                 has_vace_input = getattr(block_state, "vace_input", None) is not None
-                is_first_chunk = start_frame == 0
                 vace_regenerate_hints = has_vace_input or (
-                    is_first_chunk and block_state.vace_context is not None
+                    block_state.vace_context is not None
                 )
 
                 _, denoised_pred = components.generator(
@@ -239,12 +226,12 @@ class DenoiseBlock(ModularPipelineBlocks):
                 ).unflatten(0, denoised_pred.shape[:2])
             else:
                 # Determine if we should regenerate VACE hints (same logic as above)
-                # - If vace_input exists in state, we're using per-chunk conditioning -> regenerate every chunk
-                # - If only ref_images (no vace_input), we're in reference-only mode -> regenerate only on first chunk
+                # - If vace_input exists: per-chunk conditioning -> regenerate every chunk
+                # - If vace_context exists: reference images provided -> regenerate to apply them
+                # This allows ref_images to be sent at any time, not just first chunk
                 has_vace_input = getattr(block_state, "vace_input", None) is not None
-                is_first_chunk = start_frame == 0
                 vace_regenerate_hints = has_vace_input or (
-                    is_first_chunk and block_state.vace_context is not None
+                    block_state.vace_context is not None
                 )
 
                 _, denoised_pred = components.generator(

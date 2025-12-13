@@ -76,6 +76,7 @@ interface SettingsPanelProps {
   onRefImagesChange?: (images: string[]) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
+  onSendHint?: (imagePath: string) => void;
 }
 
 export function SettingsPanel({
@@ -111,6 +112,7 @@ export function SettingsPanel({
   onRefImagesChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
+  onSendHint,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -341,6 +343,7 @@ export function SettingsPanel({
               onImagesChange={onRefImagesChange || (() => {})}
               disabled={isDownloading}
               isStreaming={isStreaming}
+              onSendHint={onSendHint}
             />
 
             <div className="space-y-2">

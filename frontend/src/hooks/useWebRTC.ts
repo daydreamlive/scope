@@ -297,6 +297,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;
+      ref_images?: string[];
     }) => {
       if (
         dataChannelRef.current &&
