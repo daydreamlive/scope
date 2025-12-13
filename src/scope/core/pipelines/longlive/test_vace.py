@@ -85,9 +85,9 @@ while num_frames < max_output_frames:
     prompts = [{"text": prompt_text, "weight": 100}]
 
     # Generate with VACE conditioning if reference images provided
-    # Only pass ref_images on the first call - VACE context is cached
+    # Application layer resends ref_images each chunk (no pipeline caching)
     kwargs = {"prompts": prompts}
-    if ref_images and vace_path is not None and num_frames == 0:
+    if ref_images and vace_path is not None:
         kwargs["ref_images"] = ref_images
         kwargs["vace_context_scale"] = 1.0
 

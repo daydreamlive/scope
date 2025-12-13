@@ -83,10 +83,10 @@ def generate_depth_maps_depthanything(frames, model_size="small"):
 
     try:
         from depth_anything_v2.dpt import DepthAnythingV2
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "DepthAnything not installed. Install with: pip install depth-anything-v2"
-        )
+        ) from err
 
     # Model configuration
     model_configs = {
@@ -155,7 +155,7 @@ def generate_depth_maps_simple(frames):
 
     depth_maps = []
 
-    for i, frame in enumerate(frames):
+    for _i, frame in enumerate(frames):
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
@@ -295,7 +295,6 @@ def main():
         # Generate with depth guidance (using standard VACE path)
         output = pipeline(
             prompts=[{"text": prompt_text, "weight": 100}],
-            guidance_mode="depth",
             vace_input=depth_chunk,
             vace_context_scale=0.7,
         )

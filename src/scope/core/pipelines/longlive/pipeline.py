@@ -245,6 +245,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
+        # Clear ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "ref_images" not in kwargs:
+            self.state.set("ref_images", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 

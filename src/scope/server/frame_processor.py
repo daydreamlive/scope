@@ -342,18 +342,6 @@ class FrameProcessor:
                 # Signal to prepare() that video input is expected.
                 # This allows resolve_input_mode() to detect video mode correctly.
                 prepare_params["video"] = True  # Placeholder, actual data passed later
-
-            # Log ref_images specifically for VACE pipeline debugging
-            if "ref_images" in prepare_params:
-                ref_images = prepare_params.get("ref_images", [])
-                logger.info(
-                    f"process_chunk: Passing ref_images to pipeline.prepare(): "
-                    f"count={len(ref_images) if ref_images else 0}, "
-                    f"paths={ref_images if ref_images else 'None'}"
-                )
-            else:
-                logger.debug("process_chunk: No ref_images in prepare_params")
-
             requirements = pipeline.prepare(
                 **prepare_params,
             )
@@ -384,18 +372,12 @@ class FrameProcessor:
             if video_input is not None:
                 call_params["video"] = video_input
 
-            # Log ref_images specifically for VACE pipeline debugging
-            if "ref_images" in call_params:
-                ref_images = call_params.get("ref_images", [])
-                logger.info(
-                    f"process_chunk: Passing ref_images to pipeline: "
-                    f"count={len(ref_images) if ref_images else 0}, "
-                    f"paths={ref_images if ref_images else 'None'}"
-                )
-            else:
-                logger.debug("process_chunk: No ref_images in call_params")
-
             output = pipeline(**call_params)
+
+            # Clear ref_images from parameters after use to prevent sending them on subsequent chunks
+            # ref_images should only be sent when explicitly provided in parameter updates
+            if "ref_images" in call_params and "ref_images" in self.parameters:
+                self.parameters.pop("ref_images", None)
 
             # Clear transition when complete (blocks signal completion via _transition_active)
             # Contract: Modular pipelines manage prompts internally; frame_processor manages lifecycle

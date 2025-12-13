@@ -190,6 +190,15 @@ class DenoiseBlock(ModularPipelineBlocks):
                         f"DenoiseBlock step 0: noise_nan={noise_nan}, vace={vace_status}"
                     )
 
+                # Determine if we should regenerate VACE hints:
+                # - If vace_input exists in state, we're using per-chunk conditioning -> regenerate every chunk
+                # - If only ref_images (no vace_input), we're in reference-only mode -> regenerate only on first chunk
+                has_vace_input = getattr(block_state, "vace_input", None) is not None
+                is_first_chunk = start_frame == 0
+                vace_regenerate_hints = has_vace_input or (
+                    is_first_chunk and block_state.vace_context is not None
+                )
+
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
@@ -201,7 +210,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
-                    vace_guidance_mode=block_state.guidance_mode,
+                    vace_regenerate_hints=vace_regenerate_hints,
                 )
 
                 # Debug: Check denoised output for NaN
@@ -229,6 +238,15 @@ class DenoiseBlock(ModularPipelineBlocks):
                     ),
                 ).unflatten(0, denoised_pred.shape[:2])
             else:
+                # Determine if we should regenerate VACE hints (same logic as above)
+                # - If vace_input exists in state, we're using per-chunk conditioning -> regenerate every chunk
+                # - If only ref_images (no vace_input), we're in reference-only mode -> regenerate only on first chunk
+                has_vace_input = getattr(block_state, "vace_input", None) is not None
+                is_first_chunk = start_frame == 0
+                vace_regenerate_hints = has_vace_input or (
+                    is_first_chunk and block_state.vace_context is not None
+                )
+
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
@@ -240,7 +258,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
-                    vace_guidance_mode=block_state.guidance_mode,
+                    vace_regenerate_hints=vace_regenerate_hints,
                 )
 
         block_state.latents = denoised_pred
