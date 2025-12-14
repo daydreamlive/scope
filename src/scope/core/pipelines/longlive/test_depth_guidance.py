@@ -182,7 +182,7 @@ def generate_depth_maps_simple(frames):
 
 def main():
     # Configuration
-    output_dir = Path(__file__).parent / "depth_outputs"
+    output_dir = Path(__file__).parent / "vace_tests" / "depth_guidance"
     output_dir.mkdir(exist_ok=True)
 
     # Pipeline configuration
@@ -295,7 +295,7 @@ def main():
         # Generate with depth guidance (using standard VACE path)
         output = pipeline(
             prompts=[{"text": prompt_text, "weight": 100}],
-            vace_input=depth_chunk,
+            input_frames=depth_chunk,
             vace_context_scale=0.7,
         )
 

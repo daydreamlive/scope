@@ -10,8 +10,8 @@ the denoising block. Supports flexible combinations:
 The mode is implicit based on what inputs are provided - no explicit mode parameter needed.
 
 For conditioning inputs (depth, flow, etc.), follows original VACE architecture:
-- vace_input = conditioning maps (3-channel RGB from annotators)
-- masks = ones (all white masks, goes through masking path)
+- input_frames = conditioning maps (3-channel RGB from annotators)
+- input_masks = spatial control masks (ones for full-frame, regional for masked areas)
 - Standard path: vace_encode_frames -> vace_encode_masks -> vace_latent
 """
 
@@ -61,12 +61,17 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             InputParam(
                 "ref_images",
                 default=None,
-                description="List of reference image paths for style/character consistency (can be combined with vace_input)",
+                description="List of reference image paths for style/character consistency (can be combined with input_frames)",
             ),
             InputParam(
-                "vace_input",
+                "input_frames",
                 default=None,
                 description="VACE conditioning input frames [B, C, F, H, W]: depth, flow, pose, scribble maps, etc. (12 frames per chunk, can be combined with ref_images)",
+            ),
+            InputParam(
+                "input_masks",
+                default=None,
+                description="Spatial control masks [B, 1, F, H, W]: defines WHERE to apply conditioning (white=generate, black=preserve). Defaults to ones (all white) when None. Works with any input_frames type.",
             ),
             InputParam(
                 "use_dummy_frames",
@@ -112,11 +117,11 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         ref_images = block_state.ref_images
-        vace_input = block_state.vace_input
+        input_frames = block_state.input_frames
         current_start = block_state.current_start_frame
 
         # If neither input is provided, skip VACE conditioning
-        if (ref_images is None or len(ref_images) == 0) and vace_input is None:
+        if (ref_images is None or len(ref_images) == 0) and input_frames is None:
             block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
@@ -124,9 +129,9 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         # Determine encoding path based on what's provided (implicit mode detection)
         has_ref_images = ref_images is not None and len(ref_images) > 0
-        has_vace_input = vace_input is not None
+        has_input_frames = input_frames is not None
 
-        if has_vace_input:
+        if has_input_frames:
             # Standard VACE path: conditioning input (depth, flow, pose, etc.)
             # with optional reference images
             logger.info(
@@ -287,11 +292,11 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         Supports any type of conditioning input (depth, flow, pose, scribble, etc.) following
         original VACE approach from notes/VACE/vace/models/wan/wan_vace.py:
-        - vace_input = conditioning maps (3-channel RGB from annotators)
-        - masks = ones (all white masks, goes through standard masking path)
+        - input_frames = conditioning maps (3-channel RGB from annotators)
+        - input_masks = spatial control masks (defaults to ones if None)
         - ref_images = optional (for combined style + structural guidance)
-        - Standard encoding: z0 = vace_encode_frames(input_frames, ref_images, masks=ones)
-                           m0 = vace_encode_masks(masks, ref_images)
+        - Standard encoding: z0 = vace_encode_frames(input_frames, ref_images, masks=input_masks)
+                           m0 = vace_encode_masks(input_masks, ref_images)
                            z = vace_latent(z0, m0)
 
         Characteristics:
@@ -301,19 +306,19 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         - Uses standard VACE path with masking (produces 96 channels: 32 masked + 64 mask_encoding)
         - Can be combined with reference images for style + structure guidance
         """
-        vace_input = block_state.vace_input
-        if vace_input is None:
+        input_frames_data = block_state.input_frames
+        if input_frames_data is None:
             raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: vace_input required at chunk {current_start}"
+                f"VaceEncodingBlock._encode_with_conditioning: input_frames required at chunk {current_start}"
             )
 
-        # Validate vace_input shape
-        if vace_input.dim() != 5:
+        # Validate input_frames shape
+        if input_frames_data.dim() != 5:
             raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: vace_input must be [B, C, F, H, W], got shape {vace_input.shape}"
+                f"VaceEncodingBlock._encode_with_conditioning: input_frames must be [B, C, F, H, W], got shape {input_frames_data.shape}"
             )
 
-        batch_size, channels, num_frames, height, width = vace_input.shape
+        batch_size, channels, num_frames, height, width = input_frames_data.shape
 
         # Validate frame count: should be 12 (output frames per chunk)
         expected_output_frames = (
@@ -360,28 +365,63 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             logger.info(
                 "VaceEncodingBlock._encode_with_conditioning: Converting 1-channel input to 3-channel RGB"
             )
-            vace_input = vace_input.repeat(1, 3, 1, 1, 1)
+            input_frames_data = input_frames_data.repeat(1, 3, 1, 1, 1)
         elif channels != 3:
             raise ValueError(
                 f"VaceEncodingBlock._encode_with_conditioning: Expected 1 or 3 channels, got {channels}"
             )
 
         vae_dtype = next(vace_vae.parameters()).dtype
-        vace_input = vace_input.to(dtype=vae_dtype)
+        input_frames_data = input_frames_data.to(dtype=vae_dtype)
 
         # Convert to list of [C, F, H, W] for vace_encode_frames
-        input_frames = [vace_input[b] for b in range(batch_size)]
+        input_frames_list = [input_frames_data[b] for b in range(batch_size)]
 
-        # For conditioning: masks = ones (all white), this routes through standard masking path
-        # This matches original VACE architecture where conditioning goes through standard path
-        masks = [
-            torch.ones(
-                (1, num_frames, height, width),
-                dtype=vae_dtype,
-                device=vace_input.device,
+        # Get input_masks from block_state or default to ones (all white)
+        input_masks_data = block_state.input_masks
+        if input_masks_data is None:
+            # Default to ones (all white) - apply conditioning everywhere
+            input_masks_list = [
+                torch.ones(
+                    (1, num_frames, height, width),
+                    dtype=vae_dtype,
+                    device=input_frames_data.device,
+                )
+                for _ in range(batch_size)
+            ]
+            logger.info(
+                "VaceEncodingBlock._encode_with_conditioning: input_masks not provided, defaulting to ones (all white)"
             )
-            for _ in range(batch_size)
-        ]
+        else:
+            # Validate input_masks shape
+            if input_masks_data.dim() != 5:
+                raise ValueError(
+                    f"VaceEncodingBlock._encode_with_conditioning: input_masks must be [B, 1, F, H, W], got shape {input_masks_data.shape}"
+                )
+
+            mask_batch, mask_channels, mask_frames, mask_height, mask_width = (
+                input_masks_data.shape
+            )
+            if mask_channels != 1:
+                raise ValueError(
+                    f"VaceEncodingBlock._encode_with_conditioning: input_masks must have 1 channel, got {mask_channels}"
+                )
+            if (
+                mask_frames != num_frames
+                or mask_height != height
+                or mask_width != width
+            ):
+                raise ValueError(
+                    f"VaceEncodingBlock._encode_with_conditioning: input_masks shape mismatch: "
+                    f"expected [B, 1, {num_frames}, {height}, {width}], got [B, 1, {mask_frames}, {mask_height}, {mask_width}]"
+                )
+
+            # Convert to list of [1, F, H, W] for vace_encode_masks
+            input_masks_data = input_masks_data.to(dtype=vae_dtype)
+            input_masks_list = [input_masks_data[b] for b in range(batch_size)]
+            logger.info(
+                "VaceEncodingBlock._encode_with_conditioning: Using provided input_masks"
+            )
 
         # Load and prepare reference images if provided (for combined guidance)
         ref_images = None
@@ -405,11 +445,15 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         # z0 = vace_encode_frames(input_frames, ref_images, masks=input_masks)
         # When masks are provided, set pad_to_96=False because mask encoding (64 channels) will be added later
         z0 = vace_encode_frames(
-            vace_vae, input_frames, ref_images, masks=masks, pad_to_96=False
+            vace_vae,
+            input_frames_list,
+            ref_images,
+            masks=input_masks_list,
+            pad_to_96=False,
         )
 
         # m0 = vace_encode_masks(input_masks, ref_images)
-        m0 = vace_encode_masks(masks, ref_images)
+        m0 = vace_encode_masks(input_masks_list, ref_images)
 
         # z = vace_latent(z0, m0)
         z = vace_latent(z0, m0)

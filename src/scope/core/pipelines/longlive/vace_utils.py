@@ -3,11 +3,11 @@ VACE encoding utilities for reference image conditioning.
 
 Adapted from notes/VACE/vace/models/wan/wan_vace.py
 
-For depth mode (following original VACE architecture):
-- Depth maps are 3-channel RGB from annotators (notes/VACE/vace/annotators/depth.py line 37)
-- Treated as regular input_frames through standard encoding path
-- masks = ones (all white masks, goes through masking path: inactive + reactive)
-- ref_images = None (no reference images for depth mode)
+For conditioning modes (following original VACE architecture):
+- Conditioning maps (depth, flow, pose, etc.) are 3-channel RGB from annotators
+- Treated as input_frames through standard encoding path
+- input_masks defaults to ones (all white) when not provided - goes through masking path
+- ref_images = optional (can be combined with conditioning for style + structure)
 - Standard path: vace_encode_frames -> vace_encode_masks -> vace_latent
 """
 

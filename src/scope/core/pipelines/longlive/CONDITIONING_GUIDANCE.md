@@ -16,8 +16,8 @@ The mode is implicit based on what you provide - no explicit mode parameter need
 
 Following the original VACE implementation (`notes/VACE/vace/models/wan/wan_vace.py`):
 - Conditioning maps are treated as `input_frames` (3-channel RGB from annotators)
-- Standard encoding path: `vace_encode_frames` (with masks=ones) -> `vace_encode_masks` -> `vace_latent`
-- For conditioning: `masks = ones` (all white masks, goes through standard masking path)
+- Spatial control via `input_masks` (defaults to ones/all white when not provided)
+- Standard encoding path: `vace_encode_frames` (with masks) -> `vace_encode_masks` -> `vace_latent`
 - Reference images can be optionally combined with conditioning
 
 ## Architecture
@@ -38,8 +38,9 @@ Following the original VACE implementation (`notes/VACE/vace/models/wan/wan_vace
 **Conditioning Input (depth, flow, pose, scribble, etc.):**
 - Encodes 12 frames per chunk (matching output chunk size) via standard VACE path
 - Conditioning maps are 3-channel RGB (from annotators)
-- Standard encoding: `vace_encode_frames(vace_input, ref_images, masks=ones)` -> `vace_encode_masks(ones, ref_images)` -> `vace_latent`
-- masks=ones goes through masking path: inactive (zeros) + reactive (conditioning) = 32 channels
+- Standard encoding: `vace_encode_frames(input_frames, ref_images, masks=input_masks)` -> `vace_encode_masks(input_masks, ref_images)` -> `vace_latent`
+- input_masks defaults to ones (all white) when not provided
+- masks go through masking path: inactive (zeros) + reactive (conditioning) = 32 channels
 - Generates fresh vace_context every chunk
 - Uses `vace_in_dim=96` (32 channels from masking + 64 mask encoding = 96 total)
 
@@ -145,7 +146,8 @@ for chunk_index in range(num_chunks):
     # Generate with conditioning
     output = pipeline(
         prompts=[{"text": "Your prompt", "weight": 100}],
-        vace_input=conditioning_chunk,
+        input_frames=conditioning_chunk,
+        input_masks=mask_chunk,  # Optional: defaults to ones (all white) if not provided
         vace_context_scale=1.0,
     )
     outputs.append(output)
@@ -165,7 +167,8 @@ for chunk_index in range(num_chunks):
     output = pipeline(
         prompts=[{"text": "Your prompt", "weight": 100}],
         ref_images=["path/to/ref1.png"],  # Style/character
-        vace_input=conditioning_chunk,     # Structural guidance
+        input_frames=conditioning_chunk,  # Structural guidance
+        input_masks=mask_chunk,           # Optional: spatial control
         vace_context_scale=1.0,
     )
     outputs.append(output)
@@ -200,7 +203,7 @@ The same API works for any type of conditioning that can be represented as image
 - **Segmentation**: Semantic segmentation masks
 - **Any other**: Any spatial guidance that can be represented as RGB images
 
-All conditioning types use the same standard VACE encoding path with `masks=ones`.
+All conditioning types use the same standard VACE encoding path with `input_masks` (defaults to ones when not provided).
 
 ## Technical Details
 
@@ -219,7 +222,7 @@ The VaceEncodingBlock performs extensive shape validation:
 VaceEncodingBlock._encode_with_conditioning: Expected 12 frames
 (num_frame_per_block=3 * vae_temporal_downsample_factor=4), got N frames
 ```
-**Solution:** Ensure vace_input has exactly 12 frames per chunk.
+**Solution:** Ensure input_frames has exactly 12 frames per chunk.
 
 ```
 VaceEncodingBlock._encode_with_conditioning: Input resolution HxW does not match

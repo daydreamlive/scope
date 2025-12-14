@@ -27,7 +27,8 @@ output = pipeline(
 ```python
 # Mode is implicit - just provide what you want
 output = pipeline(
-    vace_input=conditioning_chunk,  # Any conditioning type
+    input_frames=conditioning_chunk,  # Any conditioning type (depth, flow, pose, etc.)
+    input_masks=mask_chunk,           # Optional: spatial control (defaults to ones)
 )
 
 # Reference images sent every chunk (application manages reuse)
@@ -37,8 +38,9 @@ output = pipeline(
 
 # Can combine both!
 output = pipeline(
-    ref_images=ref_images,        # Style/character
-    vace_input=conditioning_chunk, # Structure
+    ref_images=ref_images,            # Style/character
+    input_frames=conditioning_chunk,  # Structure (depth, flow, etc.)
+    input_masks=mask_chunk,           # Optional: spatial control
 )
 ```
 
@@ -49,12 +51,15 @@ output = pipeline(
 3. **Clearer**: Mode is implicit based on what's provided
 4. **More control**: Application layer manages input reuse
 5. **Works for any conditioning**: depth, flow, pose, scribble, etc.
+6. **Matches VACE reference**: Parameter names match notes/VACE exactly
 
 ## Migration Guide
 
 See `CONDITIONING_GUIDANCE.md` for complete documentation.
 
 Quick migration:
-- Remove `guidance_mode="depth"` - mode is now implicit
+- Replace `vace_input` with `input_frames`
+- Optionally add `input_masks` for spatial control (defaults to ones if not provided)
+- Remove `guidance_mode` parameter - mode is now implicit
 - Send `ref_images` on every chunk instead of just first chunk
-- Can now combine `ref_images` + `vace_input` for best of both worlds
+- Can now combine `ref_images` + `input_frames` for best of both worlds

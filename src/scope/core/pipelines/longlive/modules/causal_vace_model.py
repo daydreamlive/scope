@@ -204,10 +204,10 @@ class BaseWanAttentionBlock(CausalWanAttentionBlock):
             if hint.shape[1] > x.shape[1]:
                 hint = hint[:, :x.shape[1], :]
 
-            print(
-                f"BaseWanAttentionBlock[{self.block_id}]: Injecting VACE hint with context_scale={context_scale}, "
-                f"hint.shape={hint.shape}, x.shape={x.shape}"
-            )
+            # print(
+            #     f"BaseWanAttentionBlock[{self.block_id}]: Injecting VACE hint with context_scale={context_scale}, "
+            #     f"hint.shape={hint.shape}, x.shape={x.shape}"
+            # )
             x = x + hint * context_scale
         else:
             if self.block_id is not None and self.block_id % 5 == 0:

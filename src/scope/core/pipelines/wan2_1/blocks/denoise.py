@@ -117,12 +117,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float,
                 description="Scaling factor for VACE hint injection",
             ),
-            InputParam(
-                "guidance_mode",
-                default=None,
-                type_hint=str | None,
-                description="VACE guidance mode: 'r2v' or 'depth'",
-            ),
         ]
 
     @property
@@ -178,11 +172,13 @@ class DenoiseBlock(ModularPipelineBlocks):
 
             if index < len(denoising_step_list) - 1:
                 # Determine if we should regenerate VACE hints:
-                # - If vace_input exists: per-chunk conditioning -> regenerate every chunk
+                # - If input_frames exists: per-chunk conditioning -> regenerate every chunk
                 # - If vace_context exists: reference images provided -> regenerate to apply them
                 # This allows ref_images to be sent at any time, not just first chunk
-                has_vace_input = getattr(block_state, "vace_input", None) is not None
-                vace_regenerate_hints = has_vace_input or (
+                has_input_frames = (
+                    getattr(block_state, "input_frames", None) is not None
+                )
+                vace_regenerate_hints = has_input_frames or (
                     block_state.vace_context is not None
                 )
 
@@ -226,11 +222,13 @@ class DenoiseBlock(ModularPipelineBlocks):
                 ).unflatten(0, denoised_pred.shape[:2])
             else:
                 # Determine if we should regenerate VACE hints (same logic as above)
-                # - If vace_input exists: per-chunk conditioning -> regenerate every chunk
+                # - If input_frames exists: per-chunk conditioning -> regenerate every chunk
                 # - If vace_context exists: reference images provided -> regenerate to apply them
                 # This allows ref_images to be sent at any time, not just first chunk
-                has_vace_input = getattr(block_state, "vace_input", None) is not None
-                vace_regenerate_hints = has_vace_input or (
+                has_input_frames = (
+                    getattr(block_state, "input_frames", None) is not None
+                )
+                vace_regenerate_hints = has_input_frames or (
                     block_state.vace_context is not None
                 )
 
