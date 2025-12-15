@@ -55,7 +55,8 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
         frames_stacked = torch.stack(frames, dim=0)
         print(f"vace_encode_frames: frames_stacked.shape={frames_stacked.shape}")
         frames_stacked = frames_stacked.to(dtype=vae_dtype)
-        latents_out = vae.encode_to_latent(frames_stacked, use_cache=False)
+        # Use cache=True to share temporal state with video encoding for consistency
+        latents_out = vae.encode_to_latent(frames_stacked, use_cache=True)
         print(
             f"vace_encode_frames: After VAE encode, latents_out list length={len(latents_out)}, first shape={latents_out[0].shape}"
         )
@@ -73,7 +74,10 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
-        inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=False)
+        # Use cache=True for inactive portion to share temporal state with video encoding
+        # This ensures the unmasked portion has consistent temporal encoding across chunks
+        inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=True)
+        # Reactive portion can use cache=False since it's masked (will be inpainted)
         reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=False)
         # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
         inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
@@ -98,6 +102,7 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
             # Convert to VAE dtype (e.g., bfloat16)
             refs_stacked = refs_stacked.to(dtype=vae_dtype)
             # Encode: [1, C, num_refs, H, W] -> [1, num_refs, C, H, W]
+            # Reference images are static, so cache doesn't matter, but use False to avoid affecting video cache
             ref_latent_out = vae.encode_to_latent(refs_stacked, use_cache=False)
             # Get first batch element and transpose: [num_refs, C, H, W] -> [C, num_refs, H, W]
             ref_latent_batch = ref_latent_out[0].permute(1, 0, 2, 3)

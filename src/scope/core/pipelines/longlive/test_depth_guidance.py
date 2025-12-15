@@ -183,7 +183,7 @@ def generate_depth_maps_simple(frames):
 def main():
     # Configuration
     output_dir = Path(__file__).parent / "vace_tests" / "depth_guidance"
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(exist_ok=True, parents=True)
 
     # Pipeline configuration
     config = OmegaConf.create(
@@ -227,11 +227,7 @@ def main():
     num_output_frames = 36  # 3 chunks * 12 frames
 
     # Load depth maps from existing video
-    depth_video_path = (
-        Path(__file__).parent.parent.parent.parent.parent.parent
-        / "controlnet_test"
-        / "control_frames_depth.mp4"
-    )
+    depth_video_path = Path(__file__).parent / "vace_tests" / "control_frames_depth.mp4"
     if not depth_video_path.exists():
         raise FileNotFoundError(f"Depth video not found at {depth_video_path}")
 

@@ -296,7 +296,10 @@ def main():
         / "core"
         / "pipelines"
         / "longlive"
+        / "vace_tests"
+        # / "white_mask_512x512.mp4"
         / "static_mask_half_white_half_black.mp4"
+        # / "white_square_moving.mp4"
     )
     output_dir = (
         project_root
@@ -357,9 +360,7 @@ def main():
     print("Pipeline loaded\n")
 
     # Parameters
-    prompt_text = (
-        "A serene landscape with mountains and clear sky, high quality, cinematic"
-    )
+    prompt_text = "A fireball, high quality, cinematic"
     num_chunks = 3
     frames_per_chunk = 12
     total_frames = num_chunks * frames_per_chunk

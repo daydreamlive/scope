@@ -189,13 +189,12 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             components.config.device,
         )
 
-        # Use dedicated vace_vae if available, otherwise use main VAE
-        vace_vae = getattr(components, "vace_vae", None)
-        if vace_vae is None:
-            logger.warning(
-                "VaceEncodingBlock._encode_reference_only: vace_vae not found, using main VAE (may affect autoregressive cache)"
-            )
-            vace_vae = components.vae
+        # Use main VAE for consistency
+        # Since VACE encoding uses use_cache=False, it won't affect the autoregressive streaming cache
+        vace_vae = components.vae
+        logger.info(
+            "VaceEncodingBlock._encode_reference_only: Using main VAE for VACE context encoding"
+        )
 
         # Import vace_utils for R2V encoding path
         from ..vace_utils import vace_encode_frames
@@ -246,6 +245,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             # Convert to VAE's dtype (typically bfloat16)
             vae_dtype = next(vace_vae.parameters()).dtype
             prepared_refs_stacked = prepared_refs_stacked.to(dtype=vae_dtype)
+            # Reference images are static, so cache doesn't matter, but use False to avoid affecting video cache
             ref_latents_out = vace_vae.encode_to_latent(
                 prepared_refs_stacked, use_cache=False
             )
@@ -349,13 +349,15 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             f"(with_ref_images={has_ref_images}, chunk {current_start})"
         )
 
-        # Use dedicated vace_vae if available, otherwise use main VAE
-        vace_vae = getattr(components, "vace_vae", None)
-        if vace_vae is None:
-            logger.warning(
-                "VaceEncodingBlock._encode_with_conditioning: vace_vae not found, using main VAE (may affect autoregressive cache)"
-            )
-            vace_vae = components.vae
+        # Use main VAE for consistency with video encoding/decoding
+        # This ensures temporal consistency in inpainting mode where the unmasked portion
+        # is encoded in both VACE context and video latents. Since VACE encoding uses
+        # use_cache=False, it won't affect the autoregressive streaming cache.
+        vace_vae = components.vae
+        logger.info(
+            "VaceEncodingBlock._encode_with_conditioning: Using main VAE for VACE context encoding "
+            "(ensures temporal consistency with video latents)"
+        )
 
         # Import vace_utils for standard encoding path
         from ..vace_utils import vace_encode_frames, vace_encode_masks, vace_latent

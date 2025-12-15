@@ -79,19 +79,21 @@ fps_measures = []
 
 num_frames = 0
 max_output_frames = 80
+is_first_chunk = True
 while num_frames < max_output_frames:
     start = time.time()
 
     prompts = [{"text": prompt_text, "weight": 100}]
 
     # Generate with VACE conditioning if reference images provided
-    # Application layer resends ref_images each chunk (no pipeline caching)
+    # Only send ref_images on the first chunk
     kwargs = {"prompts": prompts}
-    if ref_images and vace_path is not None:
+    if is_first_chunk and ref_images and vace_path is not None:
         kwargs["ref_images"] = ref_images
         kwargs["vace_context_scale"] = 1.0
 
     output = pipeline(**kwargs)
+    is_first_chunk = False
 
     num_output_frames, _, _, _ = output.shape
     latency = time.time() - start
@@ -115,7 +117,8 @@ print(
 )
 
 # Export video - output is already in [0, 1] range from postprocess_chunk
-output_path = Path(__file__).parent / "output_vace_r2v.mp4"
+output_path = Path(__file__).parent / "vace_tests" / "r2v" / "output_vace_r2v.mp4"
+output_path.parent.mkdir(parents=True, exist_ok=True)
 output_video_np = output_video.contiguous().numpy()
 export_to_video(output_video_np, output_path, fps=16)
 print(f"Saved video to {output_path}")
