@@ -239,4 +239,3 @@ class AudioProcessor:
                 self.shutdown_event.wait(0.1)
 
         logger.info("Audio worker thread stopped")
-

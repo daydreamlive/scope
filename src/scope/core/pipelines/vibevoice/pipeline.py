@@ -232,4 +232,3 @@ class VibeVoicePipeline(Pipeline):
             True if generation is in progress, False otherwise.
         """
         return self._audio_generator is not None
-

@@ -491,6 +491,16 @@ class PipelineManager:
             logger.info("RewardForcing pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "vibevoice":
+            from scope.core.pipelines.vibevoice import VibeVoicePipeline
+
+            pipeline = VibeVoicePipeline(
+                device=get_device(),
+                dtype=torch.float32,
+            )
+            logger.info("VibeVoice pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 
