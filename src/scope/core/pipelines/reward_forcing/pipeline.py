@@ -171,6 +171,10 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
+        # Clear video from state if not provided to prevent stale video data
+        if "video" not in kwargs:
+            self.state.set("video", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
