@@ -461,11 +461,19 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         z = vace_latent(z0, m0)
 
         # Validate latent frame count
+        # When reference images are combined with conditioning, they are concatenated
+        # along the frame dimension, so we need to account for them
         expected_latent_frames = components.config.num_frame_per_block
+        if has_ref_images:
+            # Reference images are concatenated to frame latents in vace_encode_frames
+            # Each reference image adds 1 latent frame
+            expected_latent_frames += len(ref_image_paths)
         actual_latent_frames = z[0].shape[1]
         if actual_latent_frames != expected_latent_frames:
             raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: Expected {expected_latent_frames} latent frames, "
+                f"VaceEncodingBlock._encode_with_conditioning: Expected {expected_latent_frames} latent frames "
+                f"({components.config.num_frame_per_block} from conditioning frames"
+                f"{f' + {len(ref_image_paths)} from reference images' if has_ref_images else ''}), "
                 f"got {actual_latent_frames} after VAE encoding"
             )
 
