@@ -44,7 +44,11 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   const queuedCandidatesRef = useRef<RTCIceCandidate[]>([]);
 
   const startStream = useCallback(
-    async (initialParameters?: InitialParameters, stream?: MediaStream) => {
+    async (
+      initialParameters?: InitialParameters,
+      stream?: MediaStream,
+      isAudioPipeline?: boolean
+    ) => {
       if (isConnecting || peerConnectionRef.current) return;
 
       setIsConnecting(true);
@@ -127,8 +131,13 @@ export function useWebRTC(options?: UseWebRTCOptions) {
           console.error("Data channel error:", error);
         };
 
-        // Add video track for sending to server only if stream is provided
-        if (stream) {
+        // Add appropriate transceiver based on pipeline type
+        if (isAudioPipeline) {
+          // For audio pipelines, add an audio transceiver to receive audio from server
+          console.log("Audio pipeline - adding audio transceiver for receiving");
+          pc.addTransceiver("audio", { direction: "recvonly" });
+        } else if (stream) {
+          // Add video track for sending to server
           stream.getTracks().forEach(track => {
             if (track.kind === "video") {
               console.log("Adding video track for sending");

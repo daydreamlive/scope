@@ -786,7 +786,8 @@ export function StreamPage() {
       updateSettings({ paused: false });
 
       // Pipeline is loaded, now start WebRTC stream
-      startStream(initialParameters, streamToSend);
+      // Pass isAudio flag so WebRTC uses correct transceiver type
+      startStream(initialParameters, streamToSend, isAudio);
 
       return true; // Stream started successfully
     } catch (error) {
