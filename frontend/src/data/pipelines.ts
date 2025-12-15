@@ -18,6 +18,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
   supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
+  requiresReferenceImage?: boolean; // Whether this pipeline requires a reference image (e.g. PersonaLive)
 
   // Multi-mode support
   supportedModes: InputMode[];
@@ -98,6 +99,19 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportedModes: ["video"],
     defaultMode: "video",
   },
+  personalive: {
+    name: "PersonaLive",
+    docsUrl: "https://github.com/GVCLab/PersonaLive",
+    about:
+      "Real-time portrait animation pipeline from GVCLab. Animates a reference portrait image using driving video frames to transfer expressions and head movements.",
+    estimatedVram: 12,
+    requiresModels: true,
+    // Video-only pipeline - requires reference image + driving video
+    supportedModes: ["video"],
+    defaultMode: "video",
+    // PersonaLive requires a reference image to be uploaded first
+    requiresReferenceImage: true,
+  },
 };
 
 export function pipelineSupportsLoRA(pipelineId: string): boolean {
@@ -122,4 +136,8 @@ export function getPipelineDefaultMode(pipelineId: string): InputMode {
 
 export function getDefaultPromptForMode(mode: InputMode): string {
   return DEFAULT_PROMPTS[mode];
+}
+
+export function pipelineRequiresReferenceImage(pipelineId: string): boolean {
+  return PIPELINES[pipelineId]?.requiresReferenceImage === true;
 }

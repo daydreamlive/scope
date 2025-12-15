@@ -24,6 +24,10 @@ def __getattr__(name):
         from .passthrough.pipeline import PassthroughPipeline
 
         return PassthroughPipeline
+    elif name == "PersonaLivePipeline":
+        from .personalive.pipeline import PersonaLivePipeline
+
+        return PersonaLivePipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .schema import BasePipelineConfig
@@ -45,6 +49,10 @@ def __getattr__(name):
         from .schema import PassthroughConfig
 
         return PassthroughConfig
+    elif name == "PersonaLiveConfig":
+        from .schema import PersonaLiveConfig
+
+        return PersonaLiveConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -55,10 +63,12 @@ __all__ = [
     "RewardForcingPipeline",
     "StreamDiffusionV2Pipeline",
     "PassthroughPipeline",
+    "PersonaLivePipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
     "StreamDiffusionV2Config",
     "KreaRealtimeVideoConfig",
     "PassthroughConfig",
+    "PersonaLiveConfig",
 ]

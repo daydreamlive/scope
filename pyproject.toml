@@ -55,12 +55,18 @@ dependencies = [
     "triton-windows==3.4.0.post21; sys_platform == 'win32'",
     "SpoutGL>=0.1.1; sys_platform == 'win32'",
     "PyOpenGL>=3.1.10; sys_platform == 'win32'",
+    # PersonaLive dependencies
+    "mediapipe>=0.10.11",
+    "decord>=0.6.0",
+    "xformers>=0.0.32.post2",
+    "scikit-image>=0.22.0",
 ]
 
 [project.scripts]
 daydream-scope = "scope.server.app:main"
 build = "scope.server.build:main"
 download_models = "scope.server.download_models:main"
+patch-xformers = "scope.server.patch_xformers:main"
 
 [project.urls]
 Homepage = "https://github.com/daydreamlive/scope"

@@ -3,7 +3,8 @@ export type PipelineId =
   | "passthrough"
   | "longlive"
   | "krea-realtime-video"
-  | "reward-forcing";
+  | "reward-forcing"
+  | "personalive";
 
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";
@@ -87,6 +88,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationMethod?: "linear" | "slerp";
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
+  requiresReferenceImage?: boolean; // Whether this pipeline requires a reference image (e.g. PersonaLive)
 
   // Multi-mode support
   supportedModes: InputMode[];

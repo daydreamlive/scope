@@ -16,6 +16,7 @@ import {
   PIPELINES,
   getPipelineDefaultMode,
   getDefaultPromptForMode,
+  pipelineRequiresReferenceImage,
 } from "../data/pipelines";
 import type {
   InputMode,
@@ -24,7 +25,11 @@ import type {
   LoraMergeStrategy,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import {
+  checkModelStatus,
+  downloadPipelineModels,
+  uploadPersonaLiveReference,
+} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 
 // Delay before resetting video reinitialization flag (ms)
@@ -101,6 +106,13 @@ export function StreamPage() {
   const [pipelineNeedsModels, setPipelineNeedsModels] = useState<string | null>(
     null
   );
+
+  // PersonaLive reference image state
+  const [referenceImage, setReferenceImage] = useState<File | null>(null);
+  const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(
+    null
+  );
+  const [isUploadingReference, setIsUploadingReference] = useState(false);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -230,6 +242,9 @@ export function StreamPage() {
     if (isStreaming) {
       stopStream();
     }
+
+    // Clear reference image when switching pipelines
+    clearReferenceImage();
 
     const newPipeline = PIPELINES[pipelineId];
     const modeToUse = newPipeline?.defaultMode || "text";
@@ -473,6 +488,25 @@ export function StreamPage() {
     });
   };
 
+  // Handle reference image upload for PersonaLive
+  const handleReferenceImageUpload = (file: File) => {
+    // Clean up old URL
+    if (referenceImageUrl) {
+      URL.revokeObjectURL(referenceImageUrl);
+    }
+    setReferenceImage(file);
+    setReferenceImageUrl(URL.createObjectURL(file));
+  };
+
+  // Clear reference image (used when switching pipelines)
+  const clearReferenceImage = () => {
+    if (referenceImageUrl) {
+      URL.revokeObjectURL(referenceImageUrl);
+    }
+    setReferenceImage(null);
+    setReferenceImageUrl(null);
+  };
+
   // Sync spoutReceiver.enabled with mode changes
   const handleModeChange = (newMode: typeof mode) => {
     // When switching to spout mode, enable spout input
@@ -686,6 +720,22 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
+      } else if (pipelineIdToUse === "personalive" && resolution) {
+        // PersonaLive requires a reference image
+        if (!referenceImage) {
+          console.error(
+            "PersonaLive requires a reference image. Please upload one first."
+          );
+          return false;
+        }
+        loadParams = {
+          height: resolution.height,
+          width: resolution.width,
+          seed: settings.seed ?? 42,
+        };
+        console.log(
+          `Loading PersonaLive with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}`
+        );
       }
 
       const loadSuccess = await loadPipeline(
@@ -695,6 +745,22 @@ export function StreamPage() {
       if (!loadSuccess) {
         console.error("Failed to load pipeline, cannot start stream");
         return false;
+      }
+
+      // For PersonaLive, upload reference image after pipeline is loaded
+      if (pipelineIdToUse === "personalive" && referenceImage) {
+        try {
+          setIsUploadingReference(true);
+          console.log("Uploading PersonaLive reference image...");
+          const result = await uploadPersonaLiveReference(referenceImage);
+          console.log("Reference image uploaded:", result.message);
+        } catch (error) {
+          console.error("Failed to upload reference image:", error);
+          setIsUploadingReference(false);
+          return false;
+        } finally {
+          setIsUploadingReference(false);
+        }
       }
 
       // Check video requirements based on input mode
@@ -729,7 +795,11 @@ export function StreamPage() {
       };
 
       // Common parameters for pipelines that support prompts
-      if (pipelineIdToUse !== "passthrough") {
+      // PersonaLive and Passthrough don't use text prompts
+      if (
+        pipelineIdToUse !== "passthrough" &&
+        pipelineIdToUse !== "personalive"
+      ) {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
@@ -799,11 +869,17 @@ export function StreamPage() {
             isConnecting={isConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={
-              settings.inputMode === "text"
-                ? !isInitializing
-                : mode === "spout"
-                  ? !isInitializing // Spout mode doesn't need local stream
-                  : !!localStream && !isInitializing
+              // PersonaLive requires reference image
+              pipelineRequiresReferenceImage(settings.pipelineId)
+                ? !!referenceImage &&
+                  (mode === "spout"
+                    ? !isInitializing
+                    : !!localStream && !isInitializing)
+                : settings.inputMode === "text"
+                  ? !isInitializing
+                  : mode === "spout"
+                    ? !isInitializing // Spout mode doesn't need local stream
+                    : !!localStream && !isInitializing
             }
             onStartStream={handleStartStream}
             onStopStream={stopStream}
@@ -834,6 +910,9 @@ export function StreamPage() {
             }
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
+            referenceImageUrl={referenceImageUrl}
+            onReferenceImageUpload={handleReferenceImageUpload}
+            isUploadingReference={isUploadingReference}
           />
         </div>
 
@@ -947,6 +1026,7 @@ export function StreamPage() {
               }}
               disabled={
                 settings.pipelineId === "passthrough" ||
+                settings.pipelineId === "personalive" ||
                 isPipelineLoading ||
                 isConnecting ||
                 showDownloadDialog
