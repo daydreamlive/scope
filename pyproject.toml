@@ -38,7 +38,7 @@ dependencies = [
     "easydict>=1.13",
     "diffusers>=0.31.0",
     "ftfy>=6.3.1",
-    "transformers>=4.49.0",
+    "transformers==4.51.3",  # Pinned for VibeVoice compatibility
     "einops>=0.8.1",
     "lmdb>=1.7.3",
     "omegaconf>=2.3.0",
