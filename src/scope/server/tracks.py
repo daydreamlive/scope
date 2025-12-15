@@ -209,6 +209,7 @@ class AudioProcessingTrack(MediaStreamTrack):
         pipeline.prepare(**self.parameters, chunk_size=self.chunk_size)
         self.sample_rate = getattr(pipeline, "sample_rate", self.sample_rate)
         self.time_base = fractions.Fraction(1, self.sample_rate)
+        # Reset timestamp to start from beginning when new audio is prepared
         self.timestamp = 0
         self._prepared = True
 
@@ -225,18 +226,25 @@ class AudioProcessingTrack(MediaStreamTrack):
     def pause(self, paused: bool):
         self._paused = paused
 
+    async def stop(self):
+        """Stop the audio track and cleanup resources."""
+        await super().stop()
+
     def _next_chunk(self) -> np.ndarray | None:
         with self._lock:
+            reset_cache = False
             if self._reset_requested or not self._prepared:
                 self._prepare_pipeline()
+                reset_cache = True  # Signal pipeline to reset on first call after prepare
                 self._reset_requested = False
 
             pipeline = self.pipeline_manager.get_pipeline()
             try:
-                chunk_tensor = pipeline(
-                    chunk_size=self.chunk_size,
-                    **self.parameters,
-                )
+                call_params = dict(self.parameters)
+                call_params["chunk_size"] = self.chunk_size
+                if reset_cache:
+                    call_params["reset_cache"] = True
+                chunk_tensor = pipeline(**call_params)
             except Exception as exc:
                 logger.error("AudioProcessingTrack: pipeline error %s", exc)
                 return None
@@ -268,12 +276,10 @@ class AudioProcessingTrack(MediaStreamTrack):
         chunk = await loop.run_in_executor(None, self._next_chunk)
 
         if chunk is None or chunk.size == 0:
-            if not self._stop_notified and self.notification_callback:
-                try:
-                    self.notification_callback({"type": "stream_stopped"})
-                finally:
-                    self._stop_notified = True
-            raise MediaStreamError("Audio stream ended")
+            # Audio finished, but keep session open - return silence and wait for new audio
+            # This allows the session to stay open so new prompts can trigger new audio
+            await asyncio.sleep(self.chunk_size / self.sample_rate)
+            return self._silence_frame()
 
         # AudioFrame expects shape (channels, samples) for packed mono
         frame = AudioFrame.from_ndarray(

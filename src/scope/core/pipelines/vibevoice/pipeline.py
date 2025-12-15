@@ -290,15 +290,21 @@ class VibeVoicePipeline(Pipeline):
         if not prompts:
             prompts = kwargs.get("prompts") or []
 
+        # Extract new text
+        new_text = None
         if text:
-            self._last_text = text
+            new_text = text
         elif prompts:
             # Use the first prompt's text as the input text
             first = prompts[0]
             if isinstance(first, dict):
-                self._last_text = first.get("text")
+                new_text = first.get("text")
             else:
-                self._last_text = getattr(first, "text", None)
+                new_text = getattr(first, "text", None)
+
+        # Check if text has changed - if so, reset position
+        text_changed = new_text != self._last_text
+        self._last_text = new_text
 
         if not self._last_text:
             logger.warning("No text provided for VibeVoice generation")
@@ -306,6 +312,11 @@ class VibeVoicePipeline(Pipeline):
                 self._audio_buffer = _generate_fallback_tone(3.0, self.vibevoice_sample_rate)
                 self._position = 0
             return Requirements(input_size=1)
+
+        # If text changed, reset position to start from beginning
+        if text_changed:
+            with self._lock:
+                self._position = 0
 
         # Update chunk size if provided
         chunk_size = kwargs.get("chunk_size")
