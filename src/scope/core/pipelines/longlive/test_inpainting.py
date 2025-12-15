@@ -95,8 +95,8 @@ def create_mask_from_video(
     """
     print(f"create_mask_from_video: Loading mask video from {mask_video_path}")
 
-    # Load mask video frames
-    mask_frames = load_video_frames(mask_video_path, max_frames=num_frames)
+    # Load all frames from mask video (no limit)
+    mask_frames = load_video_frames(mask_video_path, max_frames=None)
 
     # Convert to grayscale
     mask_gray = np.mean(mask_frames, axis=-1)
@@ -106,6 +106,28 @@ def create_mask_from_video(
 
     # Threshold to create binary mask (white=1=generate, black=0=preserve)
     binary_mask = (mask_normalized > threshold).astype(np.float32)
+
+    # Loop mask video if it's shorter than required
+    mask_frames_count = binary_mask.shape[0]
+    if mask_frames_count < num_frames:
+        print(
+            f"create_mask_from_video: Mask video has {mask_frames_count} frames, "
+            f"looping to match required {num_frames} frames"
+        )
+        # Calculate how many times to repeat
+        repeats_needed = (num_frames // mask_frames_count) + 1
+        # Repeat the entire mask sequence
+        binary_mask = np.tile(binary_mask, (repeats_needed, 1, 1))
+        # Truncate to exact number of frames needed
+        binary_mask = binary_mask[:num_frames]
+
+    elif mask_frames_count > num_frames:
+        # Truncate if mask video is longer than needed
+        print(
+            f"create_mask_from_video: Mask video has {mask_frames_count} frames, "
+            f"truncating to {num_frames} frames"
+        )
+        binary_mask = binary_mask[:num_frames]
 
     print(f"create_mask_from_video: Created binary mask with shape {binary_mask.shape}")
     print(
@@ -298,7 +320,8 @@ def main():
         / "longlive"
         / "vace_tests"
         # / "white_mask_512x512.mp4"
-        / "static_mask_half_white_half_black.mp4"
+        # / "static_mask_half_white_half_black.mp4"
+        / "circle_mask.mp4"
         # / "white_square_moving.mp4"
     )
     output_dir = (
@@ -361,7 +384,7 @@ def main():
 
     # Parameters
     prompt_text = "A fireball, high quality, cinematic"
-    num_chunks = 3
+    num_chunks = 9
     frames_per_chunk = 12
     total_frames = num_chunks * frames_per_chunk
 
