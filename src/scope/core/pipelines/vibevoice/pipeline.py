@@ -1,6 +1,7 @@
+import copy
 import logging
+import os
 import threading
-import wave
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,8 +40,10 @@ def _generate_fallback_tone(duration_seconds: float, sample_rate: int) -> np.nda
 
 
 class VibeVoicePipeline(Pipeline):
-    """Lightweight text-to-speech stub that streams a wav file in chunks."""
+    """Real-time text-to-speech pipeline using Microsoft VibeVoice."""
 
+    # VibeVoice outputs at 24kHz, we upsample to 48kHz for WebRTC
+    vibevoice_sample_rate = 24_000
     target_sample_rate = 48_000
     default_chunk_size = 960  # 20ms @ 48k, aligns with common WebRTC audio pacing
 
@@ -48,24 +51,197 @@ class VibeVoicePipeline(Pipeline):
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return VibeVoiceConfig
 
-    def __init__(self, audio_path: str | None = None, chunk_size: int | None = None):
-        # Allow overriding the audio file; otherwise use well-known locations
-        self._audio_path = Path(audio_path) if audio_path else None
+    def __init__(
+        self,
+        model_path: str = "microsoft/VibeVoice-Realtime-0.5B",
+        speaker_name: str = "Emma",
+        device: str | None = None,
+        chunk_size: int | None = None,
+        cfg_scale: float = 1.5,
+    ):
+        """Initialize VibeVoice pipeline.
+        
+        Args:
+            model_path: Path to the HuggingFace model
+            speaker_name: Name of the speaker voice to use
+            device: Device for inference (cuda/mps/cpu), auto-detected if None
+            chunk_size: Size of audio chunks to stream
+            cfg_scale: Classifier-free guidance scale for generation
+        """
+        self.model_path = model_path
+        self.speaker_name = speaker_name
         self.chunk_size = chunk_size or self.default_chunk_size
+        self.cfg_scale = cfg_scale
 
+        # Auto-detect device if not specified
+        if device is None:
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+        
+        # Normalize 'mpx' typo to 'mps'
+        if device.lower() == "mpx":
+            device = "mps"
+        
+        # Validate mps availability
+        if device == "mps" and not torch.backends.mps.is_available():
+            logger.warning("MPS not available, falling back to CPU")
+            device = "cpu"
+        
+        self.device = device
+        logger.info(f"VibeVoice using device: {self.device}")
+
+        # Lazy initialization of model components
+        self._model = None
+        self._processor = None
+        self._voice_mapper = None
+        self._voice_sample = None
+
+        # Audio buffer for streaming
         self._audio_buffer: np.ndarray | None = None
-        self.sample_rate: int = self.target_sample_rate
         self._position = 0
         self._lock = threading.Lock()
-
-        # Track the latest text for logging/debugging (not used in this stub)
         self._last_text: str | None = None
+
+    def _ensure_initialized(self):
+        """Lazy load model and processor on first use."""
+        if self._model is not None:
+            return
+        
+        logger.info(f"Loading VibeVoice model from {self.model_path}")
+        
+        try:
+            # Import VibeVoice modules
+            from vibevoice.modular.modeling_vibevoice_streaming_inference import (
+                VibeVoiceStreamingForConditionalGenerationInference,
+            )
+            from vibevoice.processor.vibevoice_streaming_processor import (
+                VibeVoiceStreamingProcessor,
+            )
+        except ImportError as e:
+            logger.error("Failed to import VibeVoice modules. Make sure VibeVoice is installed.")
+            logger.error("Install from: /home/user/VibeVoice")
+            raise RuntimeError(
+                "VibeVoice not available. Please install it from ~/VibeVoice"
+            ) from e
+
+        # Load processor
+        self._processor = VibeVoiceStreamingProcessor.from_pretrained(self.model_path)
+        
+        # Determine dtype and attention implementation based on device
+        if self.device == "mps":
+            load_dtype = torch.float32
+            attn_impl = "sdpa"
+        elif self.device == "cuda":
+            load_dtype = torch.bfloat16
+            attn_impl = "flash_attention_2"
+        else:  # cpu
+            load_dtype = torch.float32
+            attn_impl = "sdpa"
+        
+        logger.info(f"Loading model with dtype={load_dtype}, attn_implementation={attn_impl}")
+        
+        # Load model with device-specific settings
+        try:
+            if self.device == "mps":
+                self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
+                    self.model_path,
+                    torch_dtype=load_dtype,
+                    attn_implementation=attn_impl,
+                    device_map=None,
+                )
+                self._model.to("mps")
+            elif self.device == "cuda":
+                self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
+                    self.model_path,
+                    torch_dtype=load_dtype,
+                    device_map="cuda",
+                    attn_implementation=attn_impl,
+                )
+            else:  # cpu
+                self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
+                    self.model_path,
+                    torch_dtype=load_dtype,
+                    device_map="cpu",
+                    attn_implementation=attn_impl,
+                )
+        except Exception as e:
+            if attn_impl == "flash_attention_2":
+                logger.warning(f"Failed with flash_attention_2: {e}")
+                logger.warning("Retrying with SDPA (may result in lower audio quality)")
+                self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
+                    self.model_path,
+                    torch_dtype=load_dtype,
+                    device_map=(self.device if self.device in ("cuda", "cpu") else None),
+                    attn_implementation="sdpa",
+                )
+                if self.device == "mps":
+                    self._model.to("mps")
+            else:
+                raise
+        
+        self._model.eval()
+        self._model.set_ddpm_inference_steps(num_steps=5)
+        
+        # Load voice sample
+        self._load_voice_sample()
+        
+        logger.info("VibeVoice model loaded successfully")
+
+    def _load_voice_sample(self):
+        """Load the voice sample for the specified speaker."""
+        voices_dir = Path("/home/user/VibeVoice/demo/voices/streaming_model")
+        
+        if not voices_dir.exists():
+            logger.error(f"Voices directory not found: {voices_dir}")
+            raise RuntimeError(f"Voices directory not found: {voices_dir}")
+        
+        # Find matching voice file
+        voice_files = list(voices_dir.glob("*.pt"))
+        voice_map = {f.stem: f for f in voice_files}
+        
+        # Try exact match or partial match
+        voice_path = None
+        if self.speaker_name in voice_map:
+            voice_path = voice_map[self.speaker_name]
+        else:
+            # Try partial matching (case insensitive)
+            speaker_lower = self.speaker_name.lower()
+            for name, path in voice_map.items():
+                if speaker_lower in name.lower() or name.lower() in speaker_lower:
+                    voice_path = path
+                    break
+        
+        # Default to en-Emma_woman if no match
+        if voice_path is None:
+            default_name = "en-Emma_woman"
+            voice_path = voice_map.get(default_name)
+            if voice_path is None and voice_files:
+                voice_path = voice_files[0]
+            logger.warning(
+                f"Speaker '{self.speaker_name}' not found, using {voice_path.stem if voice_path else 'default'}"
+            )
+        
+        if voice_path is None:
+            raise RuntimeError("No voice files found in voices directory")
+        
+        logger.info(f"Loading voice sample: {voice_path}")
+        target_device = self.device if self.device != "cpu" else "cpu"
+        self._voice_sample = torch.load(voice_path, map_location=target_device, weights_only=False)
 
     # Interface compatibility -------------------------------------------------
     def prepare(self, **kwargs) -> Requirements:
-        """Load/refresh audio buffer and reset streaming state."""
+        """Generate audio from text and prepare for streaming."""
+        # Ensure model is loaded
+        self._ensure_initialized()
+        
+        # Extract text from kwargs
         text = kwargs.get("text")
         prompts = kwargs.get("prompts") or []
+        
         if text:
             self._last_text = text
         elif prompts:
@@ -75,13 +251,84 @@ class VibeVoicePipeline(Pipeline):
                 self._last_text = first.get("text")
             else:
                 self._last_text = getattr(first, "text", None)
-
-        chunk_size = kwargs.get("chunk_size") or self.chunk_size
-        with self._lock:
+        
+        if not self._last_text:
+            logger.warning("No text provided for VibeVoice generation")
+            with self._lock:
+                self._audio_buffer = _generate_fallback_tone(3.0, self.vibevoice_sample_rate)
+                self._position = 0
+            return Requirements(input_size=1)
+        
+        # Update chunk size if provided
+        chunk_size = kwargs.get("chunk_size")
+        if chunk_size:
             self.chunk_size = chunk_size
-            self._load_audio()
-            self._position = 0
-
+        
+        # Generate audio
+        logger.info(f"Generating audio for text: {self._last_text[:100]}...")
+        
+        try:
+            # Prepare inputs
+            inputs = self._processor.process_input_with_cached_prompt(
+                text=self._last_text,
+                cached_prompt=self._voice_sample,
+                padding=True,
+                return_tensors="pt",
+                return_attention_mask=True,
+            )
+            
+            # Move tensors to device
+            for k, v in inputs.items():
+                if torch.is_tensor(v):
+                    inputs[k] = v.to(self.device)
+            
+            # Generate audio
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=None,
+                    cfg_scale=self.cfg_scale,
+                    tokenizer=self._processor.tokenizer,
+                    generation_config={"do_sample": False},
+                    verbose=False,
+                    all_prefilled_outputs=copy.deepcopy(self._voice_sample),
+                )
+            
+            # Extract audio (outputs.speech_outputs is a list with one tensor per batch item)
+            if outputs.speech_outputs and outputs.speech_outputs[0] is not None:
+                audio_tensor = outputs.speech_outputs[0]  # Shape: (audio_samples,)
+                
+                # Convert to numpy int16
+                audio_np = audio_tensor.cpu().numpy()
+                # Clamp to [-1, 1] and convert to int16
+                audio_np = np.clip(audio_np, -1.0, 1.0)
+                audio_int16 = (audio_np * 32767).astype(np.int16)
+                
+                # Resample from 24kHz to 48kHz
+                audio_48k = _resample_audio(
+                    audio_int16,
+                    self.vibevoice_sample_rate,
+                    self.target_sample_rate,
+                )
+                
+                with self._lock:
+                    self._audio_buffer = audio_48k
+                    self._position = 0
+                
+                audio_duration = audio_int16.shape[0] / self.vibevoice_sample_rate
+                logger.info(f"Generated {audio_duration:.2f}s of audio ({audio_48k.shape[0]} samples @ 48kHz)")
+            else:
+                logger.error("VibeVoice generation returned no audio")
+                with self._lock:
+                    self._audio_buffer = _generate_fallback_tone(3.0, self.target_sample_rate)
+                    self._position = 0
+        
+        except Exception as e:
+            logger.error(f"VibeVoice generation failed: {e}", exc_info=True)
+            with self._lock:
+                self._audio_buffer = _generate_fallback_tone(3.0, self.target_sample_rate)
+                self._position = 0
+        
         return Requirements(input_size=1)
 
     def __call__(self, **kwargs) -> torch.Tensor | None:
@@ -104,51 +351,3 @@ class VibeVoicePipeline(Pipeline):
         # Normalize to [-1, 1] float32 for downstream processing
         chunk_float = np.clip(chunk.astype(np.float32) / 32767.0, -1.0, 1.0)
         return torch.from_numpy(chunk_float)
-
-    # Internal helpers --------------------------------------------------------
-    def _load_audio(self):
-        """Load the audio from disk (or generate a fallback)."""
-        candidate_paths = []
-        if self._audio_path:
-            candidate_paths.append(self._audio_path)
-        # Prefer the external VibeVoice checkout if it exists
-        candidate_paths.append(Path("/home/user/VibeVoice/output.wav"))
-        # Fallback: look next to this file
-        candidate_paths.append(Path(__file__).parent / "output.wav")
-
-        path_to_use = next((p for p in candidate_paths if p.is_file()), None)
-
-        if path_to_use is None:
-            logger.warning(
-                "VibeVoicePipeline: output.wav not found, generating fallback tone"
-            )
-            self.sample_rate = self.target_sample_rate
-            self._audio_buffer = _generate_fallback_tone(3.0, self.sample_rate)
-            return
-
-        try:
-            with wave.open(str(path_to_use), "rb") as wf:
-                source_rate = wf.getframerate()
-                num_channels = wf.getnchannels()
-                num_frames = wf.getnframes()
-                audio_bytes = wf.readframes(num_frames)
-
-            audio = np.frombuffer(audio_bytes, dtype=np.int16)
-            if num_channels > 1:
-                audio = audio.reshape(-1, num_channels).mean(axis=1).astype(np.int16)
-
-            if source_rate != self.target_sample_rate:
-                audio = _resample_audio(audio, source_rate, self.target_sample_rate)
-
-            self._audio_buffer = audio
-            self.sample_rate = self.target_sample_rate
-            logger.info(
-                "VibeVoicePipeline loaded audio from %s (src_rate=%s, samples=%s)",
-                path_to_use,
-                source_rate,
-                audio.shape[0],
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error("Failed to load audio for VibeVoice: %s", exc)
-            self.sample_rate = self.target_sample_rate
-            self._audio_buffer = _generate_fallback_tone(3.0, self.sample_rate)
