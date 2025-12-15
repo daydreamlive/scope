@@ -78,7 +78,7 @@ latency_measures = []
 fps_measures = []
 
 num_frames = 0
-max_output_frames = 80
+max_output_frames = 180
 is_first_chunk = True
 while num_frames < max_output_frames:
     start = time.time()

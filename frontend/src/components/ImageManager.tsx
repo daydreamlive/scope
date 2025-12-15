@@ -75,13 +75,9 @@ export function ImageManager({
           <Button
             size="sm"
             onClick={handleAddImage}
-            disabled={disabled || isStreaming}
+            disabled={disabled}
             className="h-6 px-2"
-            title={
-              isStreaming
-                ? "Cannot add images while streaming"
-                : "Add reference image"
-            }
+            title="Add reference image"
           >
             <Plus className="h-3 w-3 mr-1" />
             Add Image
@@ -104,7 +100,7 @@ export function ImageManager({
                   value={imagePath}
                   onChange={path => handleImageChange(index, path)}
                   files={availableImages}
-                  disabled={disabled || isStreaming}
+                  disabled={disabled}
                   placeholder="Select image file"
                   emptyMessage="No image files found"
                 />
@@ -133,13 +129,9 @@ export function ImageManager({
                   size="sm"
                   variant="ghost"
                   onClick={() => handleRemoveImage(index)}
-                  disabled={disabled || isStreaming}
+                  disabled={disabled}
                   className="h-6 w-6 p-0 shrink-0"
-                  title={
-                    isStreaming
-                      ? "Cannot remove images while streaming"
-                      : "Remove image"
-                  }
+                  title="Remove image"
                 >
                   <X className="h-3 w-3" />
                 </Button>

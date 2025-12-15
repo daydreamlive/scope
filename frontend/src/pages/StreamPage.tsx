@@ -441,7 +441,8 @@ export function StreamPage() {
 
   const handleRefImagesChange = (images: string[]) => {
     updateSettings({ refImages: images });
-    // Note: Changing reference images requires pipeline reload
+    // Note: Changing reference images in dropdown only updates local state.
+    // Use "Send Hint" button to send hints to backend during streaming.
   };
 
   const handleSendHint = (imagePath: string) => {
@@ -453,7 +454,12 @@ export function StreamPage() {
 
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
-    // Note: Changing VACE context scale requires pipeline reload
+    // Send VACE context scale update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        vace_context_scale: scale,
+      });
+    }
   };
 
   const handleResetCache = () => {

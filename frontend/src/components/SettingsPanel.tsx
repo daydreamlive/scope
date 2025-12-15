@@ -358,7 +358,7 @@ export function SettingsPanel({
                 min={0}
                 max={2}
                 step={0.1}
-                disabled={isDownloading || isStreaming}
+                disabled={isDownloading}
               />
             </div>
           </div>
