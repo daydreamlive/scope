@@ -19,7 +19,7 @@ from aiortc.sdp import candidate_from_sdp
 from .credentials import get_turn_credentials
 from .pipeline_manager import PipelineManager
 from .schema import WebRTCOfferRequest
-from .tracks import VideoProcessingTrack
+from .tracks import AudioProcessingTrack, VideoProcessingTrack
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +39,19 @@ vpx.MAX_BITRATE = 10000000
 
 
 class Session:
-    """WebRTC Session containing peer connection and associated video track."""
+    """WebRTC Session containing peer connection and associated tracks."""
 
     def __init__(
         self,
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
+        audio_track: MediaStreamTrack | None = None,
         data_channel: RTCDataChannel | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
+        self.audio_track = audio_track
         self.data_channel = data_channel
 
     async def close(self):
@@ -58,6 +60,10 @@ class Session:
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
                 await self.video_track.stop()
+
+            # Stop audio track to cleanup AudioProcessor
+            if self.audio_track is not None:
+                await self.audio_track.stop()
 
             if self.pc.connectionState not in ["closed", "failed"]:
                 await self.pc.close()
@@ -167,21 +173,40 @@ class WebRTCManager:
             # Create NotificationSender for this session to send notifications to the frontend
             notification_sender = NotificationSender()
 
-            video_track = VideoProcessingTrack(
-                pipeline_manager,
-                initial_parameters=initial_parameters,
-                notification_callback=notification_sender.call,
+            # Check if the current pipeline is an audio pipeline
+            current_pipeline = pipeline_manager.get_pipeline()
+            is_audio_pipeline = (
+                current_pipeline is not None
+                and hasattr(current_pipeline, "is_audio_pipeline")
+                and current_pipeline.is_audio_pipeline
             )
-            session.video_track = video_track
-            pc.addTrack(video_track)
 
-            logger.info(f"Created new session: {session}")
+            if is_audio_pipeline:
+                # Create audio track for audio pipelines
+                audio_track = AudioProcessingTrack(
+                    pipeline_manager,
+                    initial_parameters=initial_parameters,
+                    notification_callback=notification_sender.call,
+                )
+                session.audio_track = audio_track
+                pc.addTrack(audio_track)
+                logger.info(f"Created new audio session: {session}")
+            else:
+                # Create video track for video pipelines
+                video_track = VideoProcessingTrack(
+                    pipeline_manager,
+                    initial_parameters=initial_parameters,
+                    notification_callback=notification_sender.call,
+                )
+                session.video_track = video_track
+                pc.addTrack(video_track)
+                logger.info(f"Created new video session: {session}")
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
-                if track.kind == "video":
-                    video_track.initialize_input_processing(track)
+                if track.kind == "video" and session.video_track:
+                    session.video_track.initialize_input_processing(track)
 
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
@@ -228,18 +253,25 @@ class WebRTCManager:
                         data = json.loads(message)
                         logger.info(f"Received parameter update: {data}")
 
-                        # Check for paused parameter and call pause() method on video track
-                        if "paused" in data and session.video_track:
-                            session.video_track.pause(data["paused"])
+                        # Check for paused parameter and call pause() method on track
+                        if "paused" in data:
+                            if session.video_track:
+                                session.video_track.pause(data["paused"])
+                            if session.audio_track:
+                                session.audio_track.pause(data["paused"])
 
-                        # Send parameters to the frame processor
+                        # Send parameters to the appropriate processor
                         if session.video_track and hasattr(
                             session.video_track, "frame_processor"
                         ):
                             session.video_track.frame_processor.update_parameters(data)
+                        elif session.audio_track and hasattr(
+                            session.audio_track, "audio_processor"
+                        ):
+                            session.audio_track.audio_processor.update_parameters(data)
                         else:
                             logger.warning(
-                                "No frame processor available for parameter update"
+                                "No processor available for parameter update"
                             )
 
                     except json.JSONDecodeError as e:

@@ -4,14 +4,22 @@ import logging
 import threading
 import time
 
+import numpy as np
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
-from av import VideoFrame
+from av import AudioFrame, VideoFrame
 
+from .audio_processor import AudioProcessor
 from .frame_processor import FrameProcessor
 from .pipeline_manager import PipelineManager
 
 logger = logging.getLogger(__name__)
+
+# Audio constants
+AUDIO_SAMPLE_RATE = 24000  # 24kHz for VibeVoice
+AUDIO_CLOCK_RATE = 48000  # WebRTC typically uses 48kHz
+AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
+AUDIO_SAMPLES_PER_FRAME = 960  # 20ms at 48kHz
 
 
 class VideoProcessingTrack(MediaStreamTrack):
@@ -171,5 +179,112 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         if self.frame_processor is not None:
             self.frame_processor.stop()
+
+        await super().stop()
+
+
+class AudioProcessingTrack(MediaStreamTrack):
+    """Audio track for streaming audio from audio pipelines like VibeVoice."""
+
+    kind = "audio"
+
+    def __init__(
+        self,
+        pipeline_manager: PipelineManager,
+        initial_parameters: dict = None,
+        notification_callback: callable = None,
+    ):
+        super().__init__()
+        self.pipeline_manager = pipeline_manager
+        self.initial_parameters = initial_parameters or {}
+        self.notification_callback = notification_callback
+
+        self.audio_processor = None
+        self._paused = False
+        self._paused_lock = threading.Lock()
+
+        # Audio buffering
+        self._audio_buffer = np.array([], dtype=np.float32)
+        self._timestamp = 0
+        self._last_frame_time = None
+
+        logger.info("AudioProcessingTrack initialized")
+
+    def initialize_processing(self):
+        """Initialize the audio processor."""
+        if not self.audio_processor:
+            self.audio_processor = AudioProcessor(
+                pipeline_manager=self.pipeline_manager,
+                initial_parameters=self.initial_parameters,
+                notification_callback=self.notification_callback,
+            )
+            self.audio_processor.start()
+
+    async def recv(self) -> AudioFrame:
+        """Return the next available audio frame."""
+        # Lazy initialization on first call
+        self.initialize_processing()
+
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        while True:
+            # Check if we have enough samples for a frame
+            if len(self._audio_buffer) >= AUDIO_SAMPLES_PER_FRAME:
+                # Extract samples for this frame
+                samples = self._audio_buffer[:AUDIO_SAMPLES_PER_FRAME]
+                self._audio_buffer = self._audio_buffer[AUDIO_SAMPLES_PER_FRAME:]
+
+                # Create audio frame
+                # WebRTC expects s16 format at 48kHz
+                # Resample from 24kHz to 48kHz (simple duplication)
+                resampled = np.repeat(samples, 2)
+
+                # Convert to int16
+                audio_int16 = (resampled * 32767).astype(np.int16)
+
+                # Create AudioFrame
+                frame = AudioFrame(format="s16", layout="mono", samples=len(audio_int16))
+                frame.sample_rate = AUDIO_CLOCK_RATE
+                frame.pts = self._timestamp
+                frame.time_base = AUDIO_TIME_BASE
+
+                # Copy data to frame
+                frame.planes[0].update(audio_int16.tobytes())
+
+                # Update timestamp
+                self._timestamp += len(audio_int16)
+
+                return frame
+
+            # Try to get more audio data
+            with self._paused_lock:
+                paused = self._paused
+
+            if not paused:
+                chunk = self.audio_processor.get()
+                if chunk is not None:
+                    self._audio_buffer = np.concatenate([self._audio_buffer, chunk])
+                    continue
+
+            # Check if generation is complete
+            if self.audio_processor.is_complete() and len(self._audio_buffer) == 0:
+                # Generate silence while waiting for new input
+                silence = np.zeros(AUDIO_SAMPLES_PER_FRAME // 2, dtype=np.float32)
+                self._audio_buffer = np.concatenate([self._audio_buffer, silence])
+
+            # Wait a bit before trying again
+            await asyncio.sleep(0.01)
+
+    def pause(self, paused: bool):
+        """Pause or resume audio processing."""
+        with self._paused_lock:
+            self._paused = paused
+        logger.info(f"Audio track {'paused' if paused else 'resumed'}")
+
+    async def stop(self):
+        """Stop the audio track."""
+        if self.audio_processor is not None:
+            self.audio_processor.stop()
 
         await super().stop()

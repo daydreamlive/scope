@@ -418,6 +418,45 @@ class PassthroughConfig(BasePipelineConfig):
     )
 
 
+class VibeVoiceConfig(BasePipelineConfig):
+    """Configuration for VibeVoice Text-to-Speech pipeline.
+
+    VibeVoice generates speech audio from text input. This is an audio-only
+    pipeline that does not produce video output.
+    """
+
+    pipeline_id: ClassVar[str] = "vibevoice"
+    pipeline_name: ClassVar[str] = "VibeVoice"
+    pipeline_description: ClassVar[str] = (
+        "Text-to-speech synthesis using VibeVoice streaming model"
+    )
+
+    # Mode support - text only (no video input)
+    supported_modes: ClassVar[list[InputMode]] = ["text"]
+    default_mode: ClassVar[InputMode] = "text"
+
+    # VibeVoice is an audio pipeline, not video
+    # Override video-related fields to None
+    height: int = Field(default=0, ge=0, description="Not applicable for audio")
+    width: int = Field(default=0, ge=0, description="Not applicable for audio")
+    denoising_steps: list[int] | None = Field(
+        default=None,
+        description="Not applicable for audio",
+    )
+    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
+        default=None,
+        description="Not applicable for audio",
+    )
+    noise_controller: bool | None = Field(
+        default=None,
+        description="Not applicable for audio",
+    )
+    input_size: int | None = Field(
+        default=None,
+        description="Not applicable for audio",
+    )
+
+
 # Registry of pipeline config classes
 PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "longlive": LongLiveConfig,
@@ -425,6 +464,7 @@ PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "krea-realtime-video": KreaRealtimeVideoConfig,
     "reward-forcing": RewardForcingConfig,
     "passthrough": PassthroughConfig,
+    "vibevoice": VibeVoiceConfig,
 }
 
 

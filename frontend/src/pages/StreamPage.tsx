@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
+import { AudioOutput } from "../components/AudioOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
@@ -16,6 +17,8 @@ import {
   PIPELINES,
   getPipelineDefaultMode,
   getDefaultPromptForMode,
+  pipelineIsAudio,
+  getDefaultAudioText,
 } from "../data/pipelines";
 import type {
   InputMode,
@@ -234,6 +237,7 @@ export function StreamPage() {
     const newPipeline = PIPELINES[pipelineId];
     const modeToUse = newPipeline?.defaultMode || "text";
     const currentMode = settings.inputMode || "text";
+    const isAudio = pipelineIsAudio(pipelineId);
 
     // Trigger video reinitialization if switching to video mode
     if (modeToUse === "video" && currentMode !== "video") {
@@ -256,8 +260,14 @@ export function StreamPage() {
     // Get all defaults for the new pipeline + mode from backend schema
     const defaults = getDefaults(pipelineId, modeToUse);
 
-    // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
-    setPromptItems([{ text: getDefaultPromptForMode(modeToUse), weight: 100 }]);
+    // Update prompts/text based on pipeline type
+    if (isAudio) {
+      // For audio pipelines, use default audio text
+      setPromptItems([{ text: getDefaultAudioText(), weight: 100 }]);
+    } else {
+      // For video pipelines, use mode-specific defaults
+      setPromptItems([{ text: getDefaultPromptForMode(modeToUse), weight: 100 }]);
+    }
 
     // Use custom video resolution if mode is video and one exists
     // This preserves the user's uploaded video resolution across pipeline switches
@@ -599,6 +609,7 @@ export function StreamPage() {
 
     // Use override pipeline ID if provided, otherwise use current settings
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
+    const isAudio = pipelineIsAudio(pipelineIdToUse);
 
     try {
       // Check if models are needed but not downloaded
@@ -686,6 +697,10 @@ export function StreamPage() {
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
         );
+      } else if (pipelineIdToUse === "vibevoice") {
+        // Audio pipeline - minimal params
+        loadParams = {};
+        console.log("Loading VibeVoice audio pipeline");
       }
 
       const loadSuccess = await loadPipeline(
@@ -698,10 +713,11 @@ export function StreamPage() {
       }
 
       // Check video requirements based on input mode
-      const needsVideoInput = currentMode === "video";
+      // Audio pipelines don't need video input
+      const needsVideoInput = currentMode === "video" && !isAudio;
       const isSpoutMode = mode === "spout" && settings.spoutReceiver?.enabled;
 
-      // Only send video stream for pipelines that need video input (not in Spout mode)
+      // Only send video stream for pipelines that need video input (not in Spout mode, not audio)
       const streamToSend =
         needsVideoInput && !isSpoutMode ? localStream || undefined : undefined;
 
@@ -839,36 +855,67 @@ export function StreamPage() {
 
         {/* Center Panel - Video Output + Timeline */}
         <div className="flex-1 flex flex-col min-h-0">
-          {/* Video area - takes remaining space but can shrink */}
+          {/* Video/Audio output area - takes remaining space but can shrink */}
           <div className="flex-1 min-h-0">
-            <VideoOutput
-              className="h-full"
-              remoteStream={remoteStream}
-              isPipelineLoading={isPipelineLoading}
-              isConnecting={isConnecting}
-              pipelineError={pipelineError}
-              isPlaying={!settings.paused}
-              isDownloading={isDownloading}
-              onPlayPauseToggle={() => {
-                // Use timeline's play/pause handler instead of direct video toggle
-                if (timelinePlayPauseRef.current) {
-                  timelinePlayPauseRef.current();
-                }
-              }}
-              onStartStream={() => {
-                // Use timeline's play/pause handler to start stream
-                if (timelinePlayPauseRef.current) {
-                  timelinePlayPauseRef.current();
-                }
-              }}
-              onVideoPlaying={() => {
-                // Execute callback when video starts playing
-                if (onVideoPlayingCallbackRef.current) {
-                  onVideoPlayingCallbackRef.current();
-                  onVideoPlayingCallbackRef.current = null; // Clear after execution
-                }
-              }}
-            />
+            {pipelineIsAudio(settings.pipelineId) ? (
+              <AudioOutput
+                className="h-full"
+                remoteStream={remoteStream}
+                isPipelineLoading={isPipelineLoading}
+                isConnecting={isConnecting}
+                pipelineError={pipelineError}
+                isPlaying={!settings.paused}
+                isDownloading={isDownloading}
+                onPlayPauseToggle={() => {
+                  // Use timeline's play/pause handler instead of direct toggle
+                  if (timelinePlayPauseRef.current) {
+                    timelinePlayPauseRef.current();
+                  }
+                }}
+                onStartStream={() => {
+                  // Use timeline's play/pause handler to start stream
+                  if (timelinePlayPauseRef.current) {
+                    timelinePlayPauseRef.current();
+                  }
+                }}
+                onAudioPlaying={() => {
+                  // Execute callback when audio starts playing
+                  if (onVideoPlayingCallbackRef.current) {
+                    onVideoPlayingCallbackRef.current();
+                    onVideoPlayingCallbackRef.current = null;
+                  }
+                }}
+              />
+            ) : (
+              <VideoOutput
+                className="h-full"
+                remoteStream={remoteStream}
+                isPipelineLoading={isPipelineLoading}
+                isConnecting={isConnecting}
+                pipelineError={pipelineError}
+                isPlaying={!settings.paused}
+                isDownloading={isDownloading}
+                onPlayPauseToggle={() => {
+                  // Use timeline's play/pause handler instead of direct video toggle
+                  if (timelinePlayPauseRef.current) {
+                    timelinePlayPauseRef.current();
+                  }
+                }}
+                onStartStream={() => {
+                  // Use timeline's play/pause handler to start stream
+                  if (timelinePlayPauseRef.current) {
+                    timelinePlayPauseRef.current();
+                  }
+                }}
+                onVideoPlaying={() => {
+                  // Execute callback when video starts playing
+                  if (onVideoPlayingCallbackRef.current) {
+                    onVideoPlayingCallbackRef.current();
+                    onVideoPlayingCallbackRef.current = null; // Clear after execution
+                  }
+                }}
+              />
+            )}
           </div>
           {/* Timeline area - compact, always visible */}
           <div className="flex-shrink-0 mt-2">

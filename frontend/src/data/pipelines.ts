@@ -8,6 +8,10 @@ export const DEFAULT_PROMPTS: Record<InputMode, string> = {
     "A 3D animated scene. A **panda** sitting in the grass, looking around.",
 };
 
+// Default text for audio pipelines
+export const DEFAULT_AUDIO_TEXT =
+  "Hello! Welcome to VibeVoice, a streaming text-to-speech system that generates natural sounding speech from text.";
+
 export interface PipelineInfo {
   name: string;
   about: string;
@@ -18,6 +22,8 @@ export interface PipelineInfo {
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
   supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
+  isAudioPipeline?: boolean; // Whether this is an audio-only pipeline (TTS, etc.)
+  promptLabel?: string; // Custom label for the prompt input (e.g., "Text input" for TTS)
 
   // Multi-mode support
   supportedModes: InputMode[];
@@ -98,6 +104,18 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportedModes: ["video"],
     defaultMode: "video",
   },
+  vibevoice: {
+    name: "VibeVoice",
+    about:
+      "A streaming text-to-speech pipeline that generates natural sounding speech from text using the VibeVoice model from Microsoft.",
+    requiresModels: false, // For now, using hardcoded output
+    estimatedVram: 8,
+    isAudioPipeline: true,
+    promptLabel: "Text input",
+    // Text-only pipeline for TTS
+    supportedModes: ["text"],
+    defaultMode: "text",
+  },
 };
 
 export function pipelineSupportsLoRA(pipelineId: string): boolean {
@@ -122,4 +140,16 @@ export function getPipelineDefaultMode(pipelineId: string): InputMode {
 
 export function getDefaultPromptForMode(mode: InputMode): string {
   return DEFAULT_PROMPTS[mode];
+}
+
+export function pipelineIsAudio(pipelineId: string): boolean {
+  return PIPELINES[pipelineId]?.isAudioPipeline === true;
+}
+
+export function getPipelinePromptLabel(pipelineId: string): string {
+  return PIPELINES[pipelineId]?.promptLabel ?? "Prompt";
+}
+
+export function getDefaultAudioText(): string {
+  return DEFAULT_AUDIO_TEXT;
 }
