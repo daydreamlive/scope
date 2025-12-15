@@ -647,6 +647,10 @@ class FrameProcessor:
                 ):
                     self.parameters.pop("transition", None)
 
+                # Update video mode if input_mode parameter changes
+                if "input_mode" in new_parameters:
+                    self._video_mode = new_parameters.get("input_mode") == "video"
+
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
         except queue.Empty:
