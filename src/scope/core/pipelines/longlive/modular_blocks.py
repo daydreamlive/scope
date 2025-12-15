@@ -15,10 +15,10 @@ from ..wan2_1.blocks import (
     SetupCachesBlock,
     TextConditioningBlock,
 )
+from ..wan2_1.vace.blocks import VaceEncodingBlock
 from .blocks import (
     PrepareRecacheFramesBlock,
     RecacheFramesBlock,
-    VaceEncodingBlock,
 )
 
 logger = diffusers_logging.get_logger(__name__)

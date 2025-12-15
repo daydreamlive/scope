@@ -30,7 +30,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ..vace_utils import load_and_prepare_reference_images
+from ..utils.encoding import load_and_prepare_reference_images
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +197,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         )
 
         # Import vace_utils for R2V encoding path
-        from ..vace_utils import vace_encode_frames
+        from ..utils.encoding import vace_encode_frames
 
         # Calculate number of frames for dummy input (should match chunk size)
         num_frames = (
@@ -360,7 +360,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         )
 
         # Import vace_utils for standard encoding path
-        from ..vace_utils import vace_encode_frames, vace_encode_masks, vace_latent
+        from ..utils.encoding import vace_encode_frames, vace_encode_masks, vace_latent
 
         # Ensure 3-channel input for VAE (conditioning maps should already be 3-channel RGB)
         if channels == 1:
@@ -429,7 +429,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         ref_images = None
         prepared_refs = None
         if has_ref_images:
-            from ..vace_utils import load_and_prepare_reference_images
+            from ..utils.encoding import load_and_prepare_reference_images
 
             prepared_refs = load_and_prepare_reference_images(
                 ref_image_paths,

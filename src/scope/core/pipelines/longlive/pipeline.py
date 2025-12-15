@@ -20,10 +20,10 @@ from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
+from ..wan2_1.vace import CausalVaceWanModel
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import LongLiveBlocks
 from .modules.causal_model import CausalWanModel
-from .modules.causal_vace_model import CausalVaceWanModel
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -91,7 +91,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         # VACE weights (vace_blocks.*, vace_patch_embedding.*) are independent of LoRA-modified layers
         if vace_path is not None:
             start = time.time()
-            from .vace_weight_loader import load_vace_weights_only
+            from ..wan2_1.vace import load_vace_weights_only
 
             load_vace_weights_only(generator.model, vace_path)
             print(f"Loaded VACE conditioning weights in {time.time() - start:.3f}s")
