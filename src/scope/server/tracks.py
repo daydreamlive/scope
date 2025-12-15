@@ -3,6 +3,7 @@ import fractions
 import logging
 import threading
 import time
+from typing import Callable, Optional
 
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
@@ -24,7 +25,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         pipeline_manager: PipelineManager,
         fps: int = 30,
         initial_parameters: dict = None,
-        notification_callback: callable = None,
+        notification_callback: Optional[Callable[[dict], None]] = None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
@@ -184,7 +185,7 @@ class AudioProcessingTrack(MediaStreamTrack):
         self,
         pipeline_manager: PipelineManager,
         initial_parameters: dict | None = None,
-        notification_callback: callable | None = None,
+        notification_callback: Optional[Callable[[dict], None]] = None,
         chunk_size: int = 960,
     ):
         super().__init__()

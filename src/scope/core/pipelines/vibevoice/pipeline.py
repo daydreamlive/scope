@@ -152,4 +152,3 @@ class VibeVoicePipeline(Pipeline):
             logger.error("Failed to load audio for VibeVoice: %s", exc)
             self.sample_rate = self.target_sample_rate
             self._audio_buffer = _generate_fallback_tone(3.0, self.sample_rate)
-
