@@ -272,8 +272,9 @@ class AudioProcessingTrack(MediaStreamTrack):
                     self._stop_notified = True
             raise MediaStreamError("Audio stream ended")
 
+        # AudioFrame expects shape (channels, samples) for packed mono
         frame = AudioFrame.from_ndarray(
-            chunk.reshape(-1, 1), format="s16", layout="mono"
+            chunk.reshape(1, -1), format="s16", layout="mono"
         )
         frame.sample_rate = self.sample_rate
         frame.pts = self.timestamp
@@ -286,7 +287,7 @@ class AudioProcessingTrack(MediaStreamTrack):
     def _silence_frame(self) -> AudioFrame:
         silence = np.zeros(self.chunk_size, dtype=np.int16)
         frame = AudioFrame.from_ndarray(
-            silence.reshape(-1, 1), format="s16", layout="mono"
+            silence.reshape(1, -1), format="s16", layout="mono"
         )
         frame.sample_rate = self.sample_rate
         frame.pts = self.timestamp
