@@ -193,12 +193,51 @@ class VibeVoicePipeline(Pipeline):
 
     def _load_voice_sample(self):
         """Load the voice sample for the specified speaker."""
-        voices_dir = Path("/home/user/VibeVoice/demo/voices/streaming_model")
-
-        if not voices_dir.exists():
-            logger.error(f"Voices directory not found: {voices_dir}")
-            raise RuntimeError(f"Voices directory not found: {voices_dir}")
-
+        # Try to find voices directory in multiple locations:
+        # 1. From VIBEVOICE_VOICES_DIR environment variable
+        # 2. In a local VibeVoice git clone at ~/VibeVoice
+        # 3. In the installed vibevoice package (if demo files were included)
+        
+        voices_dir = None
+        
+        # Try environment variable first
+        env_voices_dir = os.environ.get("VIBEVOICE_VOICES_DIR")
+        if env_voices_dir:
+            voices_dir = Path(env_voices_dir)
+            if voices_dir.exists():
+                logger.info(f"Using voices from VIBEVOICE_VOICES_DIR: {voices_dir}")
+        
+        # Try local VibeVoice clone
+        if not voices_dir or not voices_dir.exists():
+            local_voices = Path.home() / "VibeVoice" / "demo" / "voices" / "streaming_model"
+            if local_voices.exists():
+                voices_dir = local_voices
+                logger.info(f"Using voices from local VibeVoice clone: {voices_dir}")
+        
+        # Try installed package
+        if not voices_dir or not voices_dir.exists():
+            try:
+                import vibevoice
+                pkg_voices = Path(vibevoice.__file__).parent.parent / "demo" / "voices" / "streaming_model"
+                if pkg_voices.exists():
+                    voices_dir = pkg_voices
+                    logger.info(f"Using voices from installed package: {voices_dir}")
+            except (ImportError, AttributeError):
+                pass
+        
+        if not voices_dir or not voices_dir.exists():
+            logger.error(
+                "Voices directory not found. Tried:\n"
+                f"  - VIBEVOICE_VOICES_DIR environment variable\n"
+                f"  - ~/VibeVoice/demo/voices/streaming_model\n"
+                f"  - Installed vibevoice package\n"
+            )
+            raise RuntimeError(
+                "Voice files not found. Please either:\n"
+                "  1. Clone VibeVoice to ~/VibeVoice: git clone https://github.com/microsoft/VibeVoice.git ~/VibeVoice\n"
+                "  2. Set VIBEVOICE_VOICES_DIR to point to the voices/streaming_model directory"
+            )
+        
         # Find matching voice file
         voice_files = list(voices_dir.glob("*.pt"))
         voice_map = {f.stem: f for f in voice_files}
@@ -297,20 +336,20 @@ class VibeVoicePipeline(Pipeline):
             # Extract audio (outputs.speech_outputs is a list with one tensor per batch item)
             if outputs.speech_outputs and outputs.speech_outputs[0] is not None:
                 audio_tensor = outputs.speech_outputs[0]  # Shape: (audio_samples,) or (1, audio_samples)
-                
+
                 # Convert to numpy int16 (handle bfloat16 by converting to float32 first)
                 if audio_tensor.dtype == torch.bfloat16:
                     audio_tensor = audio_tensor.float()
                 audio_np = audio_tensor.cpu().numpy()
-                
+
                 # Flatten if multi-dimensional
                 if audio_np.ndim > 1:
                     audio_np = audio_np.flatten()
-                
+
                 # Clamp to [-1, 1] and convert to int16
                 audio_np = np.clip(audio_np, -1.0, 1.0)
                 audio_int16 = (audio_np * 32767).astype(np.int16)
-                
+
                 # Resample from 24kHz to 48kHz
                 audio_48k = _resample_audio(
                     audio_int16,

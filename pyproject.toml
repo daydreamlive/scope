@@ -39,6 +39,7 @@ dependencies = [
     "diffusers>=0.31.0",
     "ftfy>=6.3.1",
     "transformers==4.51.3",  # Pinned for VibeVoice compatibility
+    "vibevoice @ git+https://github.com/microsoft/VibeVoice.git",
     "einops>=0.8.1",
     "lmdb>=1.7.3",
     "omegaconf>=2.3.0",
@@ -148,6 +149,9 @@ known-first-party = ["src"]
 [build-system]
 requires = ["hatchling", "editables"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scope"]
