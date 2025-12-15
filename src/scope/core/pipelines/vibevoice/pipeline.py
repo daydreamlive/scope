@@ -197,23 +197,23 @@ class VibeVoicePipeline(Pipeline):
         # 1. From VIBEVOICE_VOICES_DIR environment variable
         # 2. In a local VibeVoice git clone at ~/VibeVoice
         # 3. In the installed vibevoice package (if demo files were included)
-        
+
         voices_dir = None
-        
+
         # Try environment variable first
         env_voices_dir = os.environ.get("VIBEVOICE_VOICES_DIR")
         if env_voices_dir:
             voices_dir = Path(env_voices_dir)
             if voices_dir.exists():
                 logger.info(f"Using voices from VIBEVOICE_VOICES_DIR: {voices_dir}")
-        
+
         # Try local VibeVoice clone
         if not voices_dir or not voices_dir.exists():
             local_voices = Path.home() / "VibeVoice" / "demo" / "voices" / "streaming_model"
             if local_voices.exists():
                 voices_dir = local_voices
                 logger.info(f"Using voices from local VibeVoice clone: {voices_dir}")
-        
+
         # Try installed package
         if not voices_dir or not voices_dir.exists():
             try:
@@ -224,7 +224,7 @@ class VibeVoicePipeline(Pipeline):
                     logger.info(f"Using voices from installed package: {voices_dir}")
             except (ImportError, AttributeError):
                 pass
-        
+
         if not voices_dir or not voices_dir.exists():
             logger.error(
                 "Voices directory not found. Tried:\n"
@@ -237,7 +237,7 @@ class VibeVoicePipeline(Pipeline):
                 "  1. Clone VibeVoice to ~/VibeVoice: git clone https://github.com/microsoft/VibeVoice.git ~/VibeVoice\n"
                 "  2. Set VIBEVOICE_VOICES_DIR to point to the voices/streaming_model directory"
             )
-        
+
         # Find matching voice file
         voice_files = list(voices_dir.glob("*.pt"))
         voice_map = {f.stem: f for f in voice_files}
@@ -279,7 +279,16 @@ class VibeVoicePipeline(Pipeline):
 
         # Extract text from kwargs
         text = kwargs.get("text")
-        prompts = kwargs.get("prompts") or []
+
+        # Check for transition.target_prompts first (takes precedence over old prompts)
+        transition = kwargs.get("transition")
+        prompts = None
+        if transition and isinstance(transition, dict):
+            prompts = transition.get("target_prompts")
+
+        # Fall back to direct prompts if no transition
+        if not prompts:
+            prompts = kwargs.get("prompts") or []
 
         if text:
             self._last_text = text

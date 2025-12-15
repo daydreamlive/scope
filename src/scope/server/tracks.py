@@ -214,6 +214,9 @@ class AudioProcessingTrack(MediaStreamTrack):
 
     def update_parameters(self, params: dict):
         with self._lock:
+            # When a transition is received, clear old prompts so transition.target_prompts takes precedence
+            if "transition" in params and "prompts" in self.parameters:
+                self.parameters.pop("prompts", None)
             self.parameters.update(params)
             if "chunk_size" in params and isinstance(params["chunk_size"], int):
                 self.chunk_size = params["chunk_size"]
