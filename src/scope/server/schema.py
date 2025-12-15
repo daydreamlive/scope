@@ -360,6 +360,21 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
+class VibeVoiceLoadParams(PipelineLoadParams):
+    """Load parameters for VibeVoice pipeline."""
+
+    audio_path: str | None = Field(
+        default=None,
+        description="Optional override path for the output audio file (wav).",
+    )
+    chunk_size: int | None = Field(
+        default=None,
+        description="Optional override for audio chunk size (samples per chunk).",
+        ge=160,
+        le=4096,
+    )
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -371,6 +386,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | VibeVoiceLoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 

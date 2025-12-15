@@ -6,7 +6,9 @@ import time
 
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
-from av import VideoFrame
+from av import AudioFrame, VideoFrame
+import numpy as np
+import torch
 
 from .frame_processor import FrameProcessor
 from .pipeline_manager import PipelineManager
@@ -173,3 +175,120 @@ class VideoProcessingTrack(MediaStreamTrack):
             self.frame_processor.stop()
 
         await super().stop()
+
+
+class AudioProcessingTrack(MediaStreamTrack):
+    kind = "audio"
+
+    def __init__(
+        self,
+        pipeline_manager: PipelineManager,
+        initial_parameters: dict | None = None,
+        notification_callback: callable | None = None,
+        chunk_size: int = 960,
+    ):
+        super().__init__()
+        self.pipeline_manager = pipeline_manager
+        self.parameters = initial_parameters or {}
+        self.notification_callback = notification_callback
+
+        self.chunk_size = chunk_size
+        self.sample_rate = 48_000
+        self.time_base = fractions.Fraction(1, self.sample_rate)
+        self.timestamp = 0
+
+        self._prepared = False
+        self._reset_requested = True
+        self._lock = threading.Lock()
+        self._paused = False
+        self._stop_notified = False
+
+    def _prepare_pipeline(self):
+        pipeline = self.pipeline_manager.get_pipeline()
+        pipeline.prepare(**self.parameters, chunk_size=self.chunk_size)
+        self.sample_rate = getattr(pipeline, "sample_rate", self.sample_rate)
+        self.time_base = fractions.Fraction(1, self.sample_rate)
+        self.timestamp = 0
+        self._prepared = True
+
+    def update_parameters(self, params: dict):
+        with self._lock:
+            self.parameters.update(params)
+            if "chunk_size" in params and isinstance(params["chunk_size"], int):
+                self.chunk_size = params["chunk_size"]
+            self._reset_requested = True
+
+    def pause(self, paused: bool):
+        self._paused = paused
+
+    def _next_chunk(self) -> np.ndarray | None:
+        with self._lock:
+            if self._reset_requested or not self._prepared:
+                self._prepare_pipeline()
+                self._reset_requested = False
+
+            pipeline = self.pipeline_manager.get_pipeline()
+            try:
+                chunk_tensor = pipeline(
+                    chunk_size=self.chunk_size,
+                    **self.parameters,
+                )
+            except Exception as exc:
+                logger.error("AudioProcessingTrack: pipeline error %s", exc)
+                return None
+
+            if chunk_tensor is None:
+                return None
+
+            chunk_tensor = torch.as_tensor(chunk_tensor)
+            if chunk_tensor.numel() == 0:
+                return None
+
+            chunk_np = chunk_tensor.detach().cpu().numpy()
+            chunk_np = np.squeeze(chunk_np)
+            chunk_np = np.clip(chunk_np, -1.0, 1.0)
+            if chunk_np.dtype != np.int16:
+                chunk_np = (chunk_np * 32767.0).astype(np.int16)
+
+            return chunk_np
+
+    async def recv(self) -> AudioFrame:
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        if self._paused:
+            await asyncio.sleep(self.chunk_size / self.sample_rate)
+            return self._silence_frame()
+
+        loop = asyncio.get_event_loop()
+        chunk = await loop.run_in_executor(None, self._next_chunk)
+
+        if chunk is None or chunk.size == 0:
+            if not self._stop_notified and self.notification_callback:
+                try:
+                    self.notification_callback({"type": "stream_stopped"})
+                finally:
+                    self._stop_notified = True
+            raise MediaStreamError("Audio stream ended")
+
+        frame = AudioFrame.from_ndarray(
+            chunk.reshape(-1, 1), format="s16", layout="mono"
+        )
+        frame.sample_rate = self.sample_rate
+        frame.pts = self.timestamp
+        frame.time_base = self.time_base
+        self.timestamp += chunk.shape[0]
+
+        await asyncio.sleep(chunk.shape[0] / self.sample_rate)
+        return frame
+
+    def _silence_frame(self) -> AudioFrame:
+        silence = np.zeros(self.chunk_size, dtype=np.int16)
+        frame = AudioFrame.from_ndarray(
+            silence.reshape(-1, 1), format="s16", layout="mono"
+        )
+        frame.sample_rate = self.sample_rate
+        frame.pts = self.timestamp
+        frame.time_base = self.time_base
+        self.timestamp += silence.shape[0]
+        return frame

@@ -14,6 +14,7 @@ interface VideoOutputProps {
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
   onVideoPlaying?: () => void;
+  isAudioOnly?: boolean;
 }
 
 export function VideoOutput({
@@ -27,17 +28,45 @@ export function VideoOutput({
   onPlayPauseToggle,
   onStartStream,
   onVideoPlaying,
+  isAudioOnly = false,
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (videoRef.current && remoteStream) {
+    if (!isAudioOnly && videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream]);
+  }, [remoteStream, isAudioOnly]);
+
+  useEffect(() => {
+    if (isAudioOnly && audioRef.current && remoteStream) {
+      audioRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, isAudioOnly]);
+
+  // Notify when audio starts playing (parity with video)
+  useEffect(() => {
+    if (!isAudioOnly) return;
+    const audio = audioRef.current;
+    if (!audio || !remoteStream) return;
+
+    const handlePlaying = () => {
+      onVideoPlaying?.();
+    };
+
+    if (!audio.paused && audio.currentTime > 0 && !audio.ended) {
+      setTimeout(() => onVideoPlaying?.(), 0);
+    }
+
+    audio.addEventListener("playing", handlePlaying);
+    return () => {
+      audio.removeEventListener("playing", handlePlaying);
+    };
+  }, [isAudioOnly, onVideoPlaying, remoteStream]);
 
   // Listen for video playing event to notify parent
   useEffect(() => {
@@ -132,7 +161,17 @@ export function VideoOutput({
         <CardTitle className="text-base font-medium">Video Output</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
-        {remoteStream ? (
+        {remoteStream && isAudioOnly ? (
+          <div className="w-full">
+            <audio
+              ref={audioRef}
+              className="w-full"
+              autoPlay
+              controls
+              playsInline
+            />
+          </div>
+        ) : remoteStream ? (
           <div
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}

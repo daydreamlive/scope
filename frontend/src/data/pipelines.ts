@@ -98,6 +98,13 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportedModes: ["video"],
     defaultMode: "video",
   },
+  vibevoice: {
+    name: "VibeVoice",
+    about: "Streaming text-to-speech pipeline that outputs audio chunks.",
+    requiresModels: false,
+    supportedModes: ["text"],
+    defaultMode: "text",
+  },
 };
 
 export function pipelineSupportsLoRA(pipelineId: string): boolean {

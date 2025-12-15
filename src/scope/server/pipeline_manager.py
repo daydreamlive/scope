@@ -491,6 +491,22 @@ class PipelineManager:
             logger.info("RewardForcing pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "vibevoice":
+            from scope.core.pipelines import VibeVoicePipeline
+
+            audio_path = None
+            chunk_size = None
+            if load_params:
+                audio_path = load_params.get("audio_path")
+                chunk_size = load_params.get("chunk_size")
+
+            pipeline = VibeVoicePipeline(
+                audio_path=audio_path,
+                chunk_size=chunk_size,
+            )
+            logger.info("VibeVoice pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 

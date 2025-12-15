@@ -116,6 +116,7 @@ export function InputAndControlsPanel({
 
   // Check if this pipeline supports multiple input modes
   const isMultiMode = pipelineIsMultiMode(pipelineId);
+  const promptLabel = pipelineId === "vibevoice" ? "Text input" : "Prompts";
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -288,7 +289,7 @@ export function InputAndControlsPanel({
             return (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium">Prompts</h3>
+                  <h3 className="text-sm font-medium">{promptLabel}</h3>
                   {isEditMode && (
                     <Badge variant="secondary" className="text-xs">
                       Editing
