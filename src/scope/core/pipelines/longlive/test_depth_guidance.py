@@ -208,8 +208,8 @@ def main():
                 get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
             ),
             "model_config": OmegaConf.load(Path(__file__).parent / "model.yaml"),
-            "height": 480,
-            "width": 832,
+            "height": 512,
+            "width": 512,
         }
     )
 

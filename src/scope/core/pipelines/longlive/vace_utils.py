@@ -32,13 +32,6 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
     Returns:
         List of concatenated latents [ref_latents + frame_latents]
     """
-    print(
-        f"vace_encode_frames: Called with frames list length={len(frames)}, first shape={frames[0].shape if frames else None}"
-    )
-    print(
-        f"vace_encode_frames: ref_images={ref_images}, masks={masks}, pad_to_96={pad_to_96}"
-    )
-
     if ref_images is None:
         ref_images = [None] * len(frames)
     else:
@@ -50,25 +43,14 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
     # Encode frames (with optional masking)
     # Note: WanVAEWrapper expects [B, C, F, H, W] and returns [B, F, C, H, W]
     if masks is None:
-        print("vace_encode_frames: No masks provided, encoding frames directly")
         # Stack list of [C, F, H, W] -> [B, C, F, H, W]
         frames_stacked = torch.stack(frames, dim=0)
-        print(f"vace_encode_frames: frames_stacked.shape={frames_stacked.shape}")
         frames_stacked = frames_stacked.to(dtype=vae_dtype)
         # Use cache=True to share temporal state with video encoding for consistency
         latents_out = vae.encode_to_latent(frames_stacked, use_cache=True)
-        print(
-            f"vace_encode_frames: After VAE encode, latents_out list length={len(latents_out)}, first shape={latents_out[0].shape}"
-        )
         # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
         latents = [lat.permute(1, 0, 2, 3) for lat in latents_out]
-        print(
-            f"vace_encode_frames: After permute, latents list length={len(latents)}, first shape={latents[0].shape}"
-        )
     else:
-        print(
-            "vace_encode_frames: Masks provided, using masked encoding (inactive + reactive)"
-        )
         masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
         inactive = [i * (1 - m) + 0 * m for i, m in zip(frames, masks, strict=False)]
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
@@ -86,16 +68,10 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
             torch.cat((u, c), dim=0)
             for u, c in zip(inactive_transposed, reactive_transposed, strict=False)
         ]
-        print(
-            f"vace_encode_frames: After masked encoding, latents list length={len(latents)}, first shape={latents[0].shape}"
-        )
 
     # Concatenate reference images if provided
     cat_latents = []
     for latent, refs in zip(latents, ref_images, strict=False):
-        print(
-            f"vace_encode_frames: Processing batch element, latent.shape={latent.shape}, refs={refs}"
-        )
         if refs is not None:
             # Stack refs: list of [C, 1, H, W] -> [1, C, num_refs, H, W]
             refs_stacked = torch.stack(refs, dim=0)
@@ -121,9 +97,6 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
         # For R2V mode without masks, we pad with zeros
         # For depth mode, padding happens after mask concatenation (pad_to_96=False)
         current_channels = latent.shape[0]
-        print(
-            f"vace_encode_frames: Before padding, latent.shape={latent.shape}, current_channels={current_channels}, pad_to_96={pad_to_96}"
-        )
         if pad_to_96 and current_channels < 96:
             pad_channels = 96 - current_channels
             padding = torch.zeros(
@@ -132,19 +105,9 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
                 device=latent.device,
             )
             latent = torch.cat([latent, padding], dim=0)
-            print(
-                f"vace_encode_frames: After padding {pad_channels} channels, latent.shape={latent.shape}"
-            )
-        elif not pad_to_96:
-            print(
-                f"vace_encode_frames: Skipping padding (pad_to_96=False), latent.shape={latent.shape}"
-            )
 
         cat_latents.append(latent)
 
-    print(
-        f"vace_encode_frames: Returning cat_latents list length={len(cat_latents)}, first shape={cat_latents[0].shape if cat_latents else None}"
-    )
     return cat_latents
 
 
@@ -206,12 +169,6 @@ def vace_latent(z, m):
         List of concatenated [latent, mask] tensors
     """
     result = [torch.cat([zz, mm], dim=0) for zz, mm in zip(z, m, strict=False)]
-    print(
-        f"vace_latent: Concatenated z and m, result list length={len(result)}, first shape={result[0].shape if result else None}"
-    )
-    print(
-        f"vace_latent: Input z[0].shape={z[0].shape if z else None}, m[0].shape={m[0].shape if m else None}"
-    )
     return result
 
 
