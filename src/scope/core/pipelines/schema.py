@@ -59,10 +59,21 @@ class BasePipelineConfig(BaseModel):
     pipeline_name: ClassVar[str] = "Base Pipeline"
     pipeline_description: ClassVar[str] = "Base pipeline configuration"
     pipeline_version: ClassVar[str] = "1.0.0"
+    docs_url: ClassVar[str | None] = None
+    estimated_vram_gb: ClassVar[float | None] = None
+    requires_models: ClassVar[bool] = False
+    supports_lora: ClassVar[bool] = False
 
     # Mode support - override in subclasses
     supported_modes: ClassVar[list[InputMode]] = ["text"]
     default_mode: ClassVar[InputMode] = "text"
+
+    # Prompt and temporal interpolation support
+    supports_prompts: ClassVar[bool] = True
+    default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
+        "slerp"
+    )
+    default_temporal_interpolation_steps: ClassVar[int] = 0
 
     # Resolution settings
     height: int = Field(default=512, ge=1, description="Output height in pixels")
@@ -154,16 +165,22 @@ class BasePipelineConfig(BaseModel):
         This is the primary method for API/UI schema generation.
 
         Returns:
-            Dict containing:
-            - Pipeline metadata (id, name, description, version)
-            - supported_modes: List of supported input modes
-            - default_mode: Default input mode
-            - mode_defaults: Dict of mode-specific default overrides
-            - config_schema: Full JSON schema for the config model
+            Dict containing pipeline metadata
         """
         metadata = cls.get_pipeline_metadata()
         metadata["supported_modes"] = cls.supported_modes
         metadata["default_mode"] = cls.default_mode
+        metadata["supports_prompts"] = cls.supports_prompts
+        metadata["default_temporal_interpolation_method"] = (
+            cls.default_temporal_interpolation_method
+        )
+        metadata["default_temporal_interpolation_steps"] = (
+            cls.default_temporal_interpolation_steps
+        )
+        metadata["docs_url"] = cls.docs_url
+        metadata["estimated_vram_gb"] = cls.estimated_vram_gb
+        metadata["requires_models"] = cls.requires_models
+        metadata["supports_lora"] = cls.supports_lora
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults if defined
@@ -198,8 +215,16 @@ class LongLiveConfig(BasePipelineConfig):
     pipeline_id: ClassVar[str] = "longlive"
     pipeline_name: ClassVar[str] = "LongLive"
     pipeline_description: ClassVar[str] = (
-        "Long-form video generation with temporal consistency"
+        "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. "
+        "The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt "
+        "switching and improved quality over longer time periods while maintaining fast generation."
     )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 20.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -246,10 +271,18 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     """
 
     pipeline_id: ClassVar[str] = "streamdiffusionv2"
-    pipeline_name: ClassVar[str] = "StreamDiffusion V2"
+    pipeline_name: ClassVar[str] = "StreamDiffusionV2"
     pipeline_description: ClassVar[str] = (
-        "Real-time video-to-video generation with temporal consistency"
+        "A streaming pipeline and autoregressive video diffusion model from the creators of the original "
+        "StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications "
+        "to support streaming."
     )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/streamdiffusionv2/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 20.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -305,8 +338,20 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     pipeline_id: ClassVar[str] = "krea-realtime-video"
     pipeline_name: ClassVar[str] = "Krea Realtime Video"
     pipeline_description: ClassVar[str] = (
-        "High-quality real-time video generation with 14B model"
+        "A streaming pipeline and autoregressive video diffusion model from Krea. "
+        "The model is trained using Self-Forcing on Wan2.1 14b."
     )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/krea_realtime_video/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 32.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
+
+    default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
+        "linear"
+    )
+    default_temporal_interpolation_steps: ClassVar[int] = 4
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -355,8 +400,15 @@ class RewardForcingConfig(BasePipelineConfig):
     pipeline_id: ClassVar[str] = "reward-forcing"
     pipeline_name: ClassVar[str] = "RewardForcing"
     pipeline_description: ClassVar[str] = (
-        "Efficient streaming video generation with rewarded distribution matching distillation"
+        "A streaming pipeline and autoregressive video diffusion model from ZJU, Ant Group, SIAS-ZJU, HUST and SJTU. "
+        "The model is trained with Rewarded Distribution Matching Distillation using Wan2.1 1.3b as the base model."
     )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/reward_forcing/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 20.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -403,11 +455,16 @@ class PassthroughConfig(BasePipelineConfig):
 
     pipeline_id: ClassVar[str] = "passthrough"
     pipeline_name: ClassVar[str] = "Passthrough"
-    pipeline_description: ClassVar[str] = "Passthrough pipeline for testing"
+    pipeline_description: ClassVar[str] = (
+        "A pipeline that returns the input video without any processing that is useful for testing and debugging."
+    )
 
     # Mode support - video only
     supported_modes: ClassVar[list[InputMode]] = ["video"]
     default_mode: ClassVar[InputMode] = "video"
+
+    # Does not support prompts
+    supports_prompts: ClassVar[bool] = False
 
     # Passthrough defaults - requires video input (distinct from StreamDiffusionV2)
     height: int = Field(default=512, ge=1, description="Output height in pixels")

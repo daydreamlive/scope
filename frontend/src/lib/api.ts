@@ -331,10 +331,19 @@ export interface PipelineSchemaInfo {
   name: string;
   description: string;
   version: string;
+  docs_url: string | null;
+  estimated_vram_gb: number | null;
+  requires_models: boolean;
+  supports_lora: boolean;
+  // Pipeline config schema
   config_schema: PipelineConfigSchema;
   // Mode support - comes from config class
   supported_modes: ("text" | "video")[];
   default_mode: "text" | "video";
+  // Prompt and temporal interpolation support
+  supports_prompts: boolean;
+  default_temporal_interpolation_method: "linear" | "slerp";
+  default_temporal_interpolation_steps: number;
   // Mode-specific default overrides (optional)
   mode_defaults?: Record<"text" | "video", ModeDefaults>;
 }

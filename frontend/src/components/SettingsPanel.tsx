@@ -19,7 +19,7 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
+import { Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
@@ -259,9 +259,7 @@ export function SettingsPanel({
               </div>
 
               <div>
-                {(currentPipeline.about ||
-                  currentPipeline.docsUrl ||
-                  currentPipeline.modified) && (
+                {(currentPipeline.about || currentPipeline.docsUrl) && (
                   <div className="flex items-stretch gap-1 h-6">
                     {currentPipeline.about && (
                       <TooltipProvider>
@@ -276,26 +274,6 @@ export function SettingsPanel({
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs">
                             <p className="text-xs">{currentPipeline.about}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                    {currentPipeline.modified && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="outline"
-                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
-                            >
-                              <Hammer className="h-3.5 w-3.5" />
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>
-                              This pipeline contains modifications based on the
-                              original project.
-                            </p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>

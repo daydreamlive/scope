@@ -288,6 +288,11 @@ export function InputAndControlsPanel({
             // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
             const isEditMode = selectedTimelinePrompt && isVideoPaused;
 
+            // Hide prompts section if pipeline doesn't support prompts
+            if (pipeline?.supportsPrompts === false) {
+              return null;
+            }
+
             return (
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -317,7 +322,6 @@ export function InputAndControlsPanel({
                     onPromptsSubmit={onPromptsSubmit}
                     onTransitionSubmit={onTransitionSubmit}
                     disabled={
-                      pipelineId === "passthrough" ||
                       (_isTimelinePlaying &&
                         !isVideoPaused &&
                         !isAtEndOfTimeline()) ||

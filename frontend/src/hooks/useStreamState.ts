@@ -13,11 +13,9 @@ import {
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
-import { getPipelineDefaultMode } from "../data/pipelines";
 
 // Generic fallback defaults used before schemas are loaded.
-// Resolution and denoising steps use conservative values; mode-specific
-// values are derived from pipelines.ts when possible.
+// Resolution and denoising steps use conservative values.
 const BASE_FALLBACK = {
   height: 512,
   width: 512,
@@ -26,9 +24,9 @@ const BASE_FALLBACK = {
 };
 
 // Get fallback defaults for a pipeline before schemas are loaded
-// Derives mode from pipelines.ts to stay in sync with frontend definitions
-function getFallbackDefaults(pipelineId: PipelineId, mode?: InputMode) {
-  const effectiveMode = mode ?? getPipelineDefaultMode(pipelineId);
+function getFallbackDefaults(mode?: InputMode) {
+  // Default to text mode if no mode specified (will be corrected when schemas load)
+  const effectiveMode = mode ?? "text";
   const isVideoMode = effectiveMode === "video";
 
   // Video mode gets noise controls, text mode doesn't
@@ -107,8 +105,7 @@ export function useStreamState() {
         };
       }
       // Fallback to derived defaults if schemas not loaded
-      // Mode is derived from pipelines.ts to stay in sync
-      return getFallbackDefaults(pipelineId, mode);
+      return getFallbackDefaults(mode);
     },
     [pipelineSchemas]
   );
@@ -137,7 +134,7 @@ export function useStreamState() {
   );
 
   // Get initial defaults (use fallback since schemas haven't loaded yet)
-  const initialDefaults = getFallbackDefaults("streamdiffusionv2");
+  const initialDefaults = getFallbackDefaults();
 
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
@@ -200,6 +197,20 @@ export function useStreamState() {
 
     fetchInitialData();
   }, []);
+
+  // Update inputMode when schemas load for the first time
+  // This corrects the initial fallback mode to match the pipeline's actual default mode
+  useEffect(() => {
+    if (pipelineSchemas) {
+      const schema = pipelineSchemas.pipelines[settings.pipelineId];
+      if (schema?.default_mode && settings.inputMode !== schema.default_mode) {
+        setSettings(prev => ({
+          ...prev,
+          inputMode: schema.default_mode,
+        }));
+      }
+    }
+  }, [pipelineSchemas, settings.pipelineId, settings.inputMode]);
 
   // Set recommended quantization when krea-realtime-video is selected
   // Reset to null when switching to other pipelines
