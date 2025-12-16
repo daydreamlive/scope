@@ -614,7 +614,7 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
-  // Update temporal interpolation defaults when pipeline changes
+  // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
     const pipeline = pipelines?.[settings.pipelineId];
     if (pipeline) {
@@ -624,6 +624,11 @@ export function StreamPage() {
 
       setTemporalInterpolationMethod(defaultMethod);
       setTransitionSteps(defaultSteps);
+
+      // Clear prompts if pipeline doesn't support them
+      if (pipeline.supportsPrompts === false) {
+        setPromptItems([{ text: "", weight: 1.0 }]);
+      }
     }
   }, [settings.pipelineId, pipelines]);
 
@@ -805,7 +810,7 @@ export function StreamPage() {
       };
 
       // Common parameters for pipelines that support prompts
-      if (pipelineIdToUse !== "passthrough") {
+      if (pipelineInfo?.supportsPrompts !== false) {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
@@ -1041,12 +1046,7 @@ export function StreamPage() {
                   });
                 }
               }}
-              disabled={
-                settings.pipelineId === "passthrough" ||
-                isPipelineLoading ||
-                isConnecting ||
-                showDownloadDialog
-              }
+              disabled={isPipelineLoading || isConnecting || showDownloadDialog}
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}

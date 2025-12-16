@@ -84,13 +84,13 @@ export interface PipelineInfo {
   about: string;
   projectUrl?: string;
   docsUrl?: string;
-  modified?: boolean;
   defaultPrompt?: string;
   estimatedVram?: number;
   requiresModels?: boolean;
   defaultTemporalInterpolationMethod?: "linear" | "slerp";
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
+  supportsVACE?: boolean;
 
   // Multi-mode support
   supportedModes: InputMode[];

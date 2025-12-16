@@ -5,10 +5,10 @@ import type { InputMode } from "../types";
 export interface PipelineInfo {
   name: string;
   about: string;
-  docsUrl?: string;
-  modified?: boolean;
-  estimatedVram?: number;
+  docsUrl?: string | null;
+  estimatedVram?: number | null;
   requiresModels?: boolean;
+  supportsPrompts?: boolean;
   defaultTemporalInterpolationMethod?: "linear" | "slerp";
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
@@ -35,25 +35,24 @@ export function usePipelines() {
 
         if (!mounted) return;
 
-        // Transform schemas into PipelineInfo format
+        // Transform to camelCase for TypeScript conventions
         const transformed: Record<string, PipelineInfo> = {};
-
-        // TODO: Just rely on the backend for everything
         for (const [id, schema] of Object.entries(schemas.pipelines)) {
           transformed[id] = {
             name: schema.name,
             about: schema.description,
             supportedModes: schema.supported_modes as InputMode[],
             defaultMode: schema.default_mode as InputMode,
-            // Defaults for optional fields
-            docsUrl: undefined,
-            modified: false,
-            estimatedVram: undefined,
-            requiresModels: false,
-            defaultTemporalInterpolationMethod: "slerp",
-            defaultTemporalInterpolationSteps: 0,
-            supportsLoRA: false,
-            supportsVACE: false,
+            supportsPrompts: schema.supports_prompts,
+            defaultTemporalInterpolationMethod:
+              schema.default_temporal_interpolation_method,
+            defaultTemporalInterpolationSteps:
+              schema.default_temporal_interpolation_steps,
+            docsUrl: schema.docs_url,
+            estimatedVram: schema.estimated_vram_gb,
+            requiresModels: schema.requires_models,
+            supportsLoRA: schema.supports_lora,
+            supportsVACE: schema.supports_vace,
           };
         }
 
