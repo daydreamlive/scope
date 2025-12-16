@@ -325,15 +325,17 @@ async def get_pipeline_schemas():
 
     The frontend should use this as the source of truth for parameter defaults.
     """
-    from scope.core.pipelines.schema import PIPELINE_CONFIGS
+    from scope.core.pipelines.registry import PipelineRegistry
 
     pipelines: dict = {}
 
-    for pipeline_id, config_class in PIPELINE_CONFIGS.items():
-        # get_schema_with_metadata() now includes supported_modes, default_mode,
-        # and mode_defaults directly from the config class
-        schema_data = config_class.get_schema_with_metadata()
-        pipelines[pipeline_id] = schema_data
+    for pipeline_id in PipelineRegistry.list_pipelines():
+        config_class = PipelineRegistry.get_config_class(pipeline_id)
+        if config_class:
+            # get_schema_with_metadata() includes supported_modes, default_mode,
+            # and mode_defaults directly from the config class
+            schema_data = config_class.get_schema_with_metadata()
+            pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
 
