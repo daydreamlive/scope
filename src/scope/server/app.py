@@ -875,6 +875,11 @@ def open_browser_when_ready(host: str, port: int, server):
 
 def run_server(reload: bool, host: str, port: int, no_browser: bool):
     """Run the Daydream Scope server."""
+
+    from scope.core.pipelines.registry import (
+        PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
+    )
+
     # Configure static file serving
     configure_static_files()
 
