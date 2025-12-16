@@ -1,4 +1,46 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" fill="#000000"/>
-  <text x="16" y="24" text-anchor="middle" fill="#FFFFFF" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="bold">D</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="112" height="99" viewBox="0 0 112 99" fill="none">
+  <defs>
+    <!-- Daydream gradient -->
+    <linearGradient id="g" x1="56" y1="0" x2="56" y2="99" gradientUnits="userSpaceOnUse">
+      <stop offset=".001" stop-color="#36619D"></stop>
+      <stop offset=".21" stop-color="#2FBEC5"></stop>
+      <stop offset=".723" stop-color="#FF982E"></stop>
+      <stop offset=".988" stop-color="#F73B41"></stop>
+    </linearGradient>
+  </defs>
+
+  <!-- Slightly horizontally narrower -->
+  <g transform="translate(56 0) scale(0.92 1) translate(-56 0)">
+    <!-- Tripod + mount -->
+    <g stroke="url(#g)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M56 64 L36 94"></path>
+      <path d="M56 64 L56 94"></path>
+      <path d="M56 64 L76 94"></path>
+      <path d="M56 58 L56 64"></path>
+      <circle cx="56" cy="58" r="6"></circle>
+    </g>
+
+    <!-- Telescope body (simplified left end: nub connects directly to tube, no extra protruding section) -->
+    <g transform="rotate(-18 56 45)">
+      <!-- subtle interior fill -->
+      <path d="M6 40
+           H22 V35
+           H92 V31
+           H108 V59
+           H92 V55
+           H22 V50
+           H6 Z" fill="url(#g)" opacity="0.10"></path>
+      <!-- hard, rectangular outline -->
+      <path d="M6 40
+           H22 V35
+           H92 V31
+           H108 V59
+           H92 V55
+           H22 V50
+           H6 Z" stroke="url(#g)" stroke-width="8" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="10" fill="none"></path>
+    </g>
+
+    <!-- connector from tube to mount -->
+    <path d="M56 52 L56 58" stroke="url(#g)" stroke-width="8" stroke-linecap="round"></path>
+  </g>
 </svg>
