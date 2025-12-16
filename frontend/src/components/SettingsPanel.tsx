@@ -20,7 +20,6 @@ import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
@@ -31,12 +30,14 @@ import type {
   SettingsState,
   InputMode,
 } from "../types";
+import type { PipelineInfo } from "../hooks/usePipelines";
 import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
 
 interface SettingsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   pipelineId: PipelineId;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
@@ -80,6 +81,7 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({
   className = "",
+  pipelines,
   pipelineId,
   onPipelineIdChange,
   isStreaming = false,
@@ -124,7 +126,7 @@ export function SettingsPanel({
   const [seedError, setSeedError] = useState<string | null>(null);
 
   const handlePipelineIdChange = (value: string) => {
-    if (value in PIPELINES) {
+    if (pipelines && value in pipelines) {
       onPipelineIdChange?.(value as PipelineId);
     }
   };
@@ -218,7 +220,7 @@ export function SettingsPanel({
     handleSeedChange(newValue);
   };
 
-  const currentPipeline = PIPELINES[pipelineId];
+  const currentPipeline = pipelines?.[pipelineId];
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
@@ -237,11 +239,12 @@ export function SettingsPanel({
               <SelectValue placeholder="Select a pipeline" />
             </SelectTrigger>
             <SelectContent>
-              {Object.keys(PIPELINES).map(id => (
-                <SelectItem key={id} value={id}>
-                  {id}
-                </SelectItem>
-              ))}
+              {pipelines &&
+                Object.keys(pipelines).map(id => (
+                  <SelectItem key={id} value={id}>
+                    {id}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -319,7 +322,7 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {pipelineSupportsLoRA(pipelineId) && (
+        {currentPipeline?.supportsLoRA && (
           <div className="space-y-4">
             <LoRAManager
               loras={loras}

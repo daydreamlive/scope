@@ -12,11 +12,8 @@ import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
-import {
-  PIPELINES,
-  getPipelineDefaultMode,
-  getDefaultPromptForMode,
-} from "../data/pipelines";
+import { usePipelines } from "../hooks/usePipelines";
+import { getDefaultPromptForMode } from "../data/pipelines";
 import type {
   InputMode,
   PipelineId,
@@ -49,6 +46,14 @@ function buildLoRAParams(
 }
 
 export function StreamPage() {
+  // Fetch available pipelines dynamically
+  const { pipelines } = usePipelines();
+
+  // Helper to get default mode for a pipeline
+  const getPipelineDefaultMode = (pipelineId: string): InputMode => {
+    return pipelines?.[pipelineId]?.defaultMode ?? "text";
+  };
+
   // Use the stream state hook for settings management
   const {
     settings,
@@ -231,7 +236,7 @@ export function StreamPage() {
       stopStream();
     }
 
-    const newPipeline = PIPELINES[pipelineId];
+    const newPipeline = pipelines?.[pipelineId];
     const modeToUse = newPipeline?.defaultMode || "text";
     const currentMode = settings.inputMode || "text";
 
@@ -306,7 +311,7 @@ export function StreamPage() {
             setExternalSelectedPromptId(null);
 
             // Get defaults for the pipeline's default mode
-            const newPipeline = PIPELINES[pipelineId];
+            const newPipeline = pipelines?.[pipelineId];
             const defaultMode = newPipeline?.defaultMode || "text";
             const defaults = getDefaults(pipelineId, defaultMode);
 
@@ -553,7 +558,7 @@ export function StreamPage() {
 
   // Update temporal interpolation defaults when pipeline changes
   useEffect(() => {
-    const pipeline = PIPELINES[settings.pipelineId];
+    const pipeline = pipelines?.[settings.pipelineId];
     if (pipeline) {
       const defaultMethod =
         pipeline.defaultTemporalInterpolationMethod || "slerp";
@@ -562,7 +567,7 @@ export function StreamPage() {
       setTemporalInterpolationMethod(defaultMethod);
       setTransitionSteps(defaultSteps);
     }
-  }, [settings.pipelineId]);
+  }, [settings.pipelineId, pipelines]);
 
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
@@ -602,7 +607,7 @@ export function StreamPage() {
 
     try {
       // Check if models are needed but not downloaded
-      const pipelineInfo = PIPELINES[pipelineIdToUse];
+      const pipelineInfo = pipelines?.[pipelineIdToUse];
       if (pipelineInfo?.requiresModels) {
         try {
           const status = await checkModelStatus(pipelineIdToUse);
@@ -790,6 +795,7 @@ export function StreamPage() {
         <div className="w-1/5">
           <InputAndControlsPanel
             className="h-full"
+            pipelines={pipelines}
             localStream={localStream}
             isInitializing={isInitializing}
             error={videoSourceError}
@@ -980,6 +986,7 @@ export function StreamPage() {
         <div className="w-1/5">
           <SettingsPanel
             className="h-full"
+            pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
@@ -1039,6 +1046,7 @@ export function StreamPage() {
       {pipelineNeedsModels && (
         <DownloadDialog
           open={showDownloadDialog}
+          pipelines={pipelines}
           pipelineId={pipelineNeedsModels as PipelineId}
           onClose={handleDialogClose}
           onDownload={handleDownloadModels}

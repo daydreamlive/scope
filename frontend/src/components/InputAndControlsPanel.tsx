@@ -15,13 +15,14 @@ import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import type { InputMode } from "../types";
-import { pipelineIsMultiMode } from "../data/pipelines";
+import type { PipelineInfo } from "../hooks/usePipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 
 interface InputAndControlsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
@@ -65,6 +66,7 @@ interface InputAndControlsPanelProps {
 
 export function InputAndControlsPanel({
   className = "",
+  pipelines,
   localStream,
   isInitializing,
   error,
@@ -115,7 +117,8 @@ export function InputAndControlsPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Check if this pipeline supports multiple input modes
-  const isMultiMode = pipelineIsMultiMode(pipelineId);
+  const pipeline = pipelines?.[pipelineId];
+  const isMultiMode = (pipeline?.supportedModes?.length ?? 0) > 1;
 
   useEffect(() => {
     if (videoRef.current && localStream) {
