@@ -12,6 +12,8 @@ on:
     branches:
       - main
       - runpod-serverless
+    tags:
+      - 'v*'
 
 jobs:
   build-and-push:
@@ -50,6 +52,12 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.version }}"
             TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Extract version from tag (e.g., v0.1.0 -> 0.1.0)
+            VERSION_TAG="${{ github.ref_name }}"
+            VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
+            TAG="$VERSION"
+            TAGS="daydreamlive/scope:$VERSION,daydreamlive/scope:latest"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
             TAG="runpod-serverless"
             TAGS="daydreamlive/scope:runpod-serverless"
@@ -67,7 +75,7 @@ jobs:
           images: daydreamlive/scope
           tags: |
             type=raw,value=${{ steps.tag.outputs.tag }}
-            ${{ github.event_name == 'workflow_dispatch' && 'type=raw,value=latest' || '' }}
+            ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'type=raw,value=latest' || '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
