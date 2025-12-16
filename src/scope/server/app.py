@@ -993,5 +993,53 @@ def pipelines():
         click.echo(f"  • {pipeline_id}")
 
 
+@main.command()
+@click.argument("packages", nargs=-1, required=False)
+@click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
+@click.option(
+    "-e", "--editable", help="Install a project in editable mode from this path"
+)
+@click.option("--force-reinstall", is_flag=True, help="Force reinstall packages")
+@click.option("--no-cache-dir", is_flag=True, help="Disable the cache")
+@click.option(
+    "--pre", is_flag=True, help="Include pre-release and development versions"
+)
+def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
+    """Install a plugin."""
+    args = ["uv", "pip", "install"]
+    if upgrade:
+        args.append("--upgrade")
+    if editable:
+        args += ["--editable", editable]
+    if force_reinstall:
+        args.append("--force-reinstall")
+    if no_cache_dir:
+        args.append("--no-cache-dir")
+    if pre:
+        args.append("--pre")
+    args += list(packages)
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+@main.command()
+@click.argument("packages", nargs=-1, required=True)
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation")
+def uninstall(packages, yes):
+    """Uninstall a plugin."""
+    args = ["uv", "pip", "uninstall"]
+    args += list(packages)
+    if yes:
+        args.append("-y")
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
 if __name__ == "__main__":
     main()
