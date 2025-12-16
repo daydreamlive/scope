@@ -5,11 +5,14 @@ accessing pipelines by ID. It enables dynamic pipeline discovery and
 metadata retrieval.
 """
 
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .interface import Pipeline
     from .schema import BasePipelineConfig
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineRegistry:
@@ -86,5 +89,21 @@ def _register_pipelines():
         PipelineRegistry.register(config_class.pipeline_id, pipeline_class)
 
 
+def _initialize_registry():
+    """Initialize registry with built-in pipelines and plugins."""
+    # Register built-in pipelines first
+    _register_pipelines()
+
+    # Load and register plugin pipelines
+    from scope.core.plugins import load_plugins, register_plugin_pipelines
+
+    load_plugins()
+    register_plugin_pipelines(PipelineRegistry)
+
+    logger.info(
+        f"Registry initialized with {len(PipelineRegistry.list_pipelines())} pipeline(s)"
+    )
+
+
 # Auto-register pipelines on module import
-_register_pipelines()
+_initialize_registry()

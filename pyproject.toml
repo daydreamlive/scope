@@ -47,6 +47,7 @@ dependencies = [
     "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
+    "pluggy>=1.5.0",
     "peft>=0.17.1",
     "torchao==0.13.0",
     "kernels>=0.10.4",
