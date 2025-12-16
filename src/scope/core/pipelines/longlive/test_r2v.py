@@ -1,7 +1,7 @@
 """
-Test script for VACE R2V (Reference-to-Video) functionality.
+Test script for VACE R2V using NEW COMPOSITION approach.
 
-This script demonstrates how to use reference image conditioning with the Longlive pipeline.
+This uses pipeline.py which imports causal_vace_model.py
 """
 
 import time
@@ -14,6 +14,10 @@ from omegaconf import OmegaConf
 from scope.core.config import get_model_file_path, get_models_dir
 
 from .pipeline import LongLivePipeline
+
+print("\n" + "=" * 80)
+print("  TESTING: NEW COMPOSITION APPROACH")
+print("=" * 80 + "\n")
 
 # Check if VACE model is available
 vace_model_path = Path.home() / ".daydream-scope" / "models" / "Wan2.1-VACE-1.3B"
@@ -78,7 +82,7 @@ latency_measures = []
 fps_measures = []
 
 num_frames = 0
-max_output_frames = 180
+max_output_frames = 45
 is_first_chunk = True
 while num_frames < max_output_frames:
     start = time.time()
@@ -117,7 +121,7 @@ print(
 )
 
 # Export video - output is already in [0, 1] range from postprocess_chunk
-output_path = Path(__file__).parent / "vace_tests" / "r2v" / "output_vace_r2v.mp4"
+output_path = Path(__file__).parent / "vace_tests" / "r2v" / "output_vace_r2v_NEW.mp4"
 output_path.parent.mkdir(parents=True, exist_ok=True)
 output_video_np = output_video.contiguous().numpy()
 export_to_video(output_video_np, output_path, fps=16)
@@ -136,7 +140,10 @@ print(
     f"Min: {min(fps_measures):.2f}"
 )
 
-print("\n=== VACE R2V Test Complete ===")
+print("\n" + "=" * 80)
+print("  COMPLETED: NEW COMPOSITION APPROACH")
+print("=" * 80 + "\n")
+print(f"Output saved to: {output_path}")
 if ref_images:
     print(f"Used {len(ref_images)} reference image(s) for conditioning")
 else:

@@ -163,7 +163,6 @@ class BaseWanAttentionBlock(CausalWanAttentionBlock):
             hints: List of VACE hints, one per injection layer
             context_scale: Scaling factor for hint injection
         """
-        # Standard forward pass
         result = super().forward(
             x,
             e,
@@ -192,7 +191,6 @@ class BaseWanAttentionBlock(CausalWanAttentionBlock):
             # Slice hint to match x's sequence length (x is unpadded, hint may be padded to seq_len)
             if hint.shape[1] > x.shape[1]:
                 hint = hint[:, : x.shape[1], :]
-
             x = x + hint * context_scale
 
         # Return with cache info if applicable

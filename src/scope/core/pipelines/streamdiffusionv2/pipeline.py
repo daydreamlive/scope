@@ -19,6 +19,7 @@ from ..schema import StreamDiffusionV2Config
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.vace import CausalVaceWanModel
 from .components import StreamDiffusionV2WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modules.causal_model import CausalWanModel
@@ -47,6 +48,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         generator_path = getattr(config, "generator_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
+        vace_path = getattr(config, "vace_path", None)
 
         model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
@@ -55,8 +57,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             model_config, "generator_model_name", "generator"
         )
 
-        # Load generator
+        # Load generator (with optional VACE support via composition)
         start = time.time()
+
+        # Always create base CausalWanModel first
         generator = WanDiffusionWrapper(
             CausalWanModel,
             model_name=base_model_name,
@@ -66,7 +70,32 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             **base_model_kwargs,
         )
 
-        print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+        print(f"Loaded base diffusion model in {time.time() - start:.3f}s")
+
+        # Wrap with VACE if configured (before loading VACE weights)
+        if vace_path is not None:
+            start_vace = time.time()
+            # VACE configuration: vace_in_dim determines input channel count
+            # - vace_in_dim=96: R2V mode (16 base * 6 for masking)
+            # - vace_in_dim=16: Depth mode (no masking)
+            # Default to 96 if not specified (R2V mode)
+            vace_in_dim = (
+                base_model_kwargs.get("vace_in_dim", 96) if base_model_kwargs else 96
+            )
+            generator.model = CausalVaceWanModel(
+                generator.model, vace_in_dim=vace_in_dim
+            )
+            print(
+                f"Wrapped model with VACE support (vace_in_dim={vace_in_dim}) in {time.time() - start_vace:.3f}s"
+            )
+
+        # Load VACE-specific weights if path provided
+        if vace_path is not None:
+            start = time.time()
+            from ..wan2_1.vace import load_vace_weights_only
+
+            load_vace_weights_only(generator.model, vace_path)
+            print(f"Loaded VACE conditioning weights in {time.time() - start:.3f}s")
 
         # Initialize optional LoRA adapters on the underlying model.
         generator.model = self._init_loras(config, generator.model)

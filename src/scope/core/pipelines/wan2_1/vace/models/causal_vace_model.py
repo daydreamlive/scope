@@ -1,81 +1,102 @@
 # Modified from notes/VACE/vace/models/wan/modules/model.py
-# Adapted for causal/autoregressive generation with Longlive
+# Adapted for causal/autoregressive generation with composition pattern
 import torch
 import torch.nn as nn
-from diffusers.configuration_utils import register_to_config
 
-from ....longlive.modules.causal_model import CausalWanModel
 from ....longlive.modules.model import sinusoidal_embedding_1d
 from .attention_blocks import BaseWanAttentionBlock, VaceWanAttentionBlock
 
 
-class CausalVaceWanModel(CausalWanModel):
+class CausalVaceWanModel(nn.Module):
     """
-    Causal Wan model with VACE support for reference image conditioning.
-
-    This model extends CausalWanModel with VACE blocks that process reference images
-    and generate hints for injection into the main transformer blocks.
-
-    Key differences from standard VACE:
-    - Causal processing: Reference images are processed with causal attention
-    - KV cache compatible: Works with Longlive's incremental generation
-    - Hint caching: VACE hints are computed once and reused across frames
+    VACE wrapper that adds reference image conditioning to any CausalWanModel.
+    Uses composition to wrap an existing CausalWanModel instance.
     """
 
-    @register_to_config
     def __init__(
         self,
+        causal_wan_model,
+        vace_in_dim=96,
         vace_layers=None,
-        vace_in_dim=None,
-        model_type="t2v",
-        patch_size=(1, 2, 2),
-        text_len=512,
-        in_dim=16,
-        dim=2048,
-        ffn_dim=8192,
-        freq_dim=256,
-        text_dim=4096,
-        out_dim=16,
-        num_heads=16,
-        num_layers=32,
-        local_attn_size=-1,
-        sink_size=0,
-        qk_norm=True,
-        cross_attn_norm=True,
-        eps=1e-6,
     ):
-        # Initialize base model
-        super().__init__(
-            model_type,
-            patch_size,
-            text_len,
-            in_dim,
-            dim,
-            ffn_dim,
-            freq_dim,
-            text_dim,
-            out_dim,
-            num_heads,
-            num_layers,
-            local_attn_size,
-            sink_size,
-            qk_norm,
-            cross_attn_norm,
-            eps,
-        )
+        super().__init__()
+
+        # Store wrapped model
+        self.causal_wan_model = causal_wan_model
+
+        # Extract configuration from wrapped model via duck typing
+        self.num_layers = causal_wan_model.num_layers
+        self.dim = causal_wan_model.dim
+        self.ffn_dim = causal_wan_model.ffn_dim
+        self.num_heads = causal_wan_model.num_heads
+        self.local_attn_size = getattr(causal_wan_model, "local_attn_size", -1)
+        if hasattr(causal_wan_model, "config") and hasattr(
+            causal_wan_model.config, "sink_size"
+        ):
+            self.sink_size = causal_wan_model.config.sink_size
+        else:
+            self.sink_size = getattr(causal_wan_model, "sink_size", 0)
+        self.qk_norm = causal_wan_model.qk_norm
+        self.cross_attn_norm = causal_wan_model.cross_attn_norm
+        self.eps = causal_wan_model.eps
+        self.model_type = causal_wan_model.model_type
+        self.patch_size = causal_wan_model.patch_size
+        self.in_dim = causal_wan_model.in_dim
 
         # VACE configuration
         self.vace_layers = (
             list(range(0, self.num_layers, 2)) if vace_layers is None else vace_layers
         )
-        self.vace_in_dim = self.in_dim if vace_in_dim is None else vace_in_dim
+        self.vace_in_dim = vace_in_dim
 
         assert 0 in self.vace_layers
         self.vace_layers_mapping = {i: n for n, i in enumerate(self.vace_layers)}
 
-        # Replace standard blocks with BaseWanAttentionBlock (supports hint injection)
-        cross_attn_type = "t2v_cross_attn" if model_type == "t2v" else "i2v_cross_attn"
-        self.blocks = nn.ModuleList(
+        # Replace wrapped model's blocks with BaseWanAttentionBlock to support hint injection
+        self._replace_blocks_with_hint_injection_support()
+
+        # Add VACE-specific components
+        cross_attn_type = (
+            "t2v_cross_attn" if self.model_type == "t2v" else "i2v_cross_attn"
+        )
+
+        # VACE blocks (parallel processing path for reference images)
+        self.vace_blocks = nn.ModuleList(
+            [
+                VaceWanAttentionBlock(
+                    cross_attn_type,
+                    self.dim,
+                    self.ffn_dim,
+                    self.num_heads,
+                    self.local_attn_size,
+                    self.sink_size,
+                    self.qk_norm,
+                    self.cross_attn_norm,
+                    self.eps,
+                    block_id=i,
+                )
+                for i in range(len(self.vace_layers))
+            ]
+        )
+
+        # VACE patch embedding (separate encoder for reference images)
+        self.vace_patch_embedding = nn.Conv3d(
+            self.vace_in_dim,
+            self.dim,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        )
+
+    def _replace_blocks_with_hint_injection_support(self):
+        """Replace wrapped model's blocks with BaseWanAttentionBlock to support hint injection."""
+        cross_attn_type = (
+            "t2v_cross_attn" if self.model_type == "t2v" else "i2v_cross_attn"
+        )
+
+        original_blocks = self.causal_wan_model.blocks
+
+        # Create new blocks with hint injection support
+        new_blocks = nn.ModuleList(
             [
                 BaseWanAttentionBlock(
                     cross_attn_type,
@@ -83,7 +104,7 @@ class CausalVaceWanModel(CausalWanModel):
                     self.ffn_dim,
                     self.num_heads,
                     self.local_attn_size,
-                    sink_size,
+                    self.sink_size,
                     self.qk_norm,
                     self.cross_attn_norm,
                     self.eps,
@@ -95,32 +116,37 @@ class CausalVaceWanModel(CausalWanModel):
             ]
         )
 
-        # VACE blocks (separate processing path)
-        self.vace_blocks = nn.ModuleList(
-            [
-                VaceWanAttentionBlock(
-                    cross_attn_type,
-                    self.dim,
-                    self.ffn_dim,
-                    self.num_heads,
-                    self.local_attn_size,
-                    sink_size,
-                    self.qk_norm,
-                    self.cross_attn_norm,
-                    self.eps,
-                    block_id=i,
-                )
-                for i in range(len(self.vace_layers))
-            ]
-        )
+        # Set new blocks to eval mode
+        new_blocks.eval()
 
-        # VACE patch embedding (separate from main patch embedding)
-        self.vace_patch_embedding = nn.Conv3d(
-            self.vace_in_dim,
-            self.dim,
-            kernel_size=self.patch_size,
-            stride=self.patch_size,
-        )
+        # Move new blocks to same device/dtype as original blocks
+        orig_dtype = next(original_blocks[0].parameters()).dtype
+        orig_device = next(original_blocks[0].parameters()).device
+        new_blocks.to(device=orig_device, dtype=orig_dtype)
+
+        # Copy weights from original blocks to new blocks
+        for _i, (orig_block, new_block) in enumerate(
+            zip(original_blocks, new_blocks, strict=False)
+        ):
+            orig_state = orig_block.state_dict()
+            new_state = new_block.state_dict()
+            saved_block_id = new_block.block_id
+
+            for key in orig_state.keys():
+                if key in new_state:
+                    new_state[key] = orig_state[key].clone()
+
+            new_block.load_state_dict(new_state, strict=False, assign=True)
+            new_block.block_id = saved_block_id
+
+        # Replace the blocks in wrapped model
+        self.causal_wan_model.blocks = new_blocks
+
+        # CRITICAL: Also register blocks directly on self so that named_modules()
+        # sees them at "blocks.0", "blocks.1", etc. This ensures LoRA checkpoint
+        # keys (saved with inheritance-style paths like "blocks.0.self_attn.q")
+        # match correctly when loaded via peft.set_peft_model_state_dict().
+        self.blocks = new_blocks
 
     def forward_vace(
         self,
@@ -136,24 +162,12 @@ class CausalVaceWanModel(CausalWanModel):
         block_mask,
         crossattn_cache,
     ):
-        """
-        Process VACE context (reference images + frames) to generate hints.
-
-        Args:
-            x: Main latent input (used for shape reference in block 0)
-            vace_context: List of VAE-encoded reference images/frames concatenated with masks
-            seq_len: Maximum sequence length
-            Other args: Standard transformer block arguments needed for VACE blocks
-
-        Returns:
-            List of hints to be injected at specified transformer layers
-        """
+        """Process VACE context to generate hints."""
         # Embed VACE context
         c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
-
         c = [u.flatten(2).transpose(1, 2) for u in c]
 
-        # Pad to seq_len (only if context is shorter; reference frames may exceed seq_len)
+        # Pad to seq_len
         c = torch.cat(
             [
                 torch.cat(
@@ -178,7 +192,7 @@ class CausalVaceWanModel(CausalWanModel):
                 crossattn_cache,
             )
 
-        # Extract hints (all but the last accumulated context)
+        # Extract hints
         hints = torch.unbind(c)[:-1]
         return hints
 
@@ -198,64 +212,62 @@ class CausalVaceWanModel(CausalWanModel):
         current_start=0,
         cache_start=0,
     ):
-        """
-        Forward pass with optional VACE conditioning.
-
-        Args:
-            vace_context: List of VAE-encoded conditioning (reference images, depth, flow, pose, etc.)
-            vace_context_scale: Scaling factor for VACE hint injection
-            vace_regenerate_hints: Whether to regenerate hints for this chunk.
-                - True: Generate fresh hints (for per-chunk conditioning like depth/flow)
-                - False: Skip hint generation (for static reference images after first chunk)
-        """
-        # Standard preprocessing
+        """Forward pass with optional VACE conditioning."""
         if self.model_type == "i2v":
             assert clip_fea is not None and y is not None
 
-        device = self.patch_embedding.weight.device
-        if self.freqs.device != device:
-            self.freqs = self.freqs.to(device)
+        device = self.causal_wan_model.patch_embedding.weight.device
+        if self.causal_wan_model.freqs.device != device:
+            self.causal_wan_model.freqs = self.causal_wan_model.freqs.to(device)
 
         if y is not None:
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y, strict=False)]
 
         # Embeddings
-        x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
+        x = [self.causal_wan_model.patch_embedding(u.unsqueeze(0)) for u in x]
         grid_sizes = torch.stack(
             [torch.tensor(u.shape[2:], dtype=torch.long) for u in x]
         )
         x = [u.flatten(2).transpose(1, 2) for u in x]
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
         assert seq_lens.max() <= seq_len
-        # Don't pad x - causal model needs unpadded sequences for KV cache
         x = torch.cat(x)
 
         # Time embeddings
-        e = self.time_embedding(
-            sinusoidal_embedding_1d(self.freq_dim, t.flatten()).type_as(x)
+        e = self.causal_wan_model.time_embedding(
+            sinusoidal_embedding_1d(
+                self.causal_wan_model.freq_dim, t.flatten()
+            ).type_as(x)
         )
         e0 = (
-            self.time_projection(e)
+            self.causal_wan_model.time_projection(e)
             .unflatten(1, (6, self.dim))
             .unflatten(dim=0, sizes=t.shape)
         )
 
         # Context
         context_lens = None
-        context = self.text_embedding(
+        context = self.causal_wan_model.text_embedding(
             torch.stack(
                 [
-                    torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
+                    torch.cat(
+                        [
+                            u,
+                            u.new_zeros(
+                                self.causal_wan_model.text_len - u.size(0), u.size(1)
+                            ),
+                        ]
+                    )
                     for u in context
                 ]
             )
         )
 
         if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)
+            context_clip = self.causal_wan_model.img_emb(clip_fea)
             context = torch.concat([context_clip, context], dim=1)
 
-        # Generate VACE hints if vace_context provided and regeneration is requested
+        # Generate VACE hints
         hints = None
         if vace_context is not None and vace_regenerate_hints:
             hints = self.forward_vace(
@@ -265,10 +277,10 @@ class CausalVaceWanModel(CausalWanModel):
                 e0,
                 seq_lens,
                 grid_sizes,
-                self.freqs,
+                self.causal_wan_model.freqs,
                 context,
                 context_lens,
-                self.block_mask,
+                self.causal_wan_model.block_mask,
                 crossattn_cache,
             )
 
@@ -277,10 +289,10 @@ class CausalVaceWanModel(CausalWanModel):
             "e": e0,
             "seq_lens": seq_lens,
             "grid_sizes": grid_sizes,
-            "freqs": self.freqs,
+            "freqs": self.causal_wan_model.freqs,
             "context": context,
             "context_lens": context_lens,
-            "block_mask": self.block_mask,
+            "block_mask": self.causal_wan_model.block_mask,
             "hints": hints,
             "context_scale": vace_context_scale,
         }
@@ -291,9 +303,10 @@ class CausalVaceWanModel(CausalWanModel):
 
             return custom_forward
 
+        # Process through blocks
         cache_update_infos = []
         for block_index, block in enumerate(self.blocks):
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
+            if torch.is_grad_enabled() and self.causal_wan_model.gradient_checkpointing:
                 kwargs.update(
                     {
                         "kv_cache": kv_cache[block_index],
@@ -328,13 +341,23 @@ class CausalVaceWanModel(CausalWanModel):
                 else:
                     x = result
 
-        # Apply cache updates
         if kv_cache is not None and cache_update_infos:
-            self._apply_cache_updates(kv_cache, cache_update_infos)
+            self.causal_wan_model._apply_cache_updates(kv_cache, cache_update_infos)
 
-        # Head
-        x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
-
-        # Unpatchify
-        x = self.unpatchify(x, grid_sizes)
+        x = self.causal_wan_model.head(
+            x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2)
+        )
+        x = self.causal_wan_model.unpatchify(x, grid_sizes)
         return torch.stack(x)
+
+    def forward(self, *args, **kwargs):
+        if kwargs.get("kv_cache", None) is not None:
+            return self._forward_inference(*args, **kwargs)
+        else:
+            return self.causal_wan_model._forward_train(*args, **kwargs)
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.causal_wan_model, name)

@@ -60,23 +60,14 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         )
         lora_config = getattr(model_config, "adapter", {})
 
-        # Load generator (with optional VACE support)
-        # Strategy: Load LongLive base, add VACE-specific weights, then apply LoRA
+        # Load generator (with optional VACE support via composition)
+        # Strategy: Load LongLive base, wrap with VACE, add VACE weights, then apply LoRA
         # (VACE loaded before LoRA to avoid PEFT wrapper unwrapping issues)
         start = time.time()
-        model_class = CausalVaceWanModel if vace_path is not None else CausalWanModel
 
-        # VACE configuration: vace_in_dim determines input channel count
-        # - vace_in_dim=96: R2V mode (16 base * 6 for masking)
-        # - vace_in_dim=16: Depth mode (no masking)
-        # Default to 96 if not specified (R2V mode)
-        if vace_path is not None:
-            base_model_kwargs = dict(base_model_kwargs) if base_model_kwargs else {}
-            if "vace_in_dim" not in base_model_kwargs:
-                base_model_kwargs["vace_in_dim"] = 96
-
+        # Always create base CausalWanModel first
         generator = WanDiffusionWrapper(
-            model_class,
+            CausalWanModel,
             model_name=base_model_name,
             model_dir=model_dir,
             generator_path=generator_path,
@@ -84,8 +75,24 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             **base_model_kwargs,
         )
 
-        model_type_str = "VACE-enabled" if vace_path is not None else "standard"
-        print(f"Loaded {model_type_str} diffusion model in {time.time() - start:.3f}s")
+        print(f"Loaded base diffusion model in {time.time() - start:.3f}s")
+
+        # Wrap with VACE if configured (before loading VACE weights)
+        if vace_path is not None:
+            start_vace = time.time()
+            # VACE configuration: vace_in_dim determines input channel count
+            # - vace_in_dim=96: R2V mode (16 base * 6 for masking)
+            # - vace_in_dim=16: Depth mode (no masking)
+            # Default to 96 if not specified (R2V mode)
+            vace_in_dim = (
+                base_model_kwargs.get("vace_in_dim", 96) if base_model_kwargs else 96
+            )
+            generator.model = CausalVaceWanModel(
+                generator.model, vace_in_dim=vace_in_dim
+            )
+            print(
+                f"Wrapped model with VACE support (vace_in_dim={vace_in_dim}) in {time.time() - start_vace:.3f}s"
+            )
 
         # Load VACE-specific weights before LoRA application to avoid PEFT wrapper unwrapping issues
         # VACE weights (vace_blocks.*, vace_patch_embedding.*) are independent of LoRA-modified layers

@@ -171,8 +171,9 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
     pw_min, pw_max = patch_weight.min().item(), patch_weight.max().item()
     pw_mean = patch_weight.mean().item()
     pw_std = patch_weight.std().item()
+    pw_checksum = patch_weight.abs().sum().item()
     logger.info(
-        f"load_vace_weights_only: After loading, vace_patch_embedding.weight stats: min={pw_min:.6f}, max={pw_max:.6f}, mean={pw_mean:.6f}, std={pw_std:.6f}"
+        f"load_vace_weights_only[COMPOSITION]: After loading, vace_patch_embedding.weight stats: min={pw_min:.6f}, max={pw_max:.6f}, mean={pw_mean:.6f}, std={pw_std:.6f}, checksum={pw_checksum:.6f}"
     )
     if pw_min == 0.0 and pw_max == 0.0:
         logger.error(
@@ -180,6 +181,15 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
         )
         raise RuntimeError(
             "VACE weight loading failed - vace_patch_embedding weights are all zeros"
+        )
+
+    # Verify vace_blocks weights were loaded
+    for i in range(min(3, len(actual_model.vace_blocks))):
+        block_checksum = sum(
+            p.abs().sum().item() for p in actual_model.vace_blocks[i].parameters()
+        )
+        logger.info(
+            f"load_vace_weights_only[COMPOSITION]: vace_blocks[{i}] weight checksum={block_checksum:.6f}"
         )
 
     logger.info("load_vace_weights_only: Successfully loaded VACE weights")
