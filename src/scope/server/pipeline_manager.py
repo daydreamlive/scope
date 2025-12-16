@@ -271,6 +271,27 @@ class PipelineManager:
         self, pipeline_id: str, load_params: dict | None = None
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        # Check if pipeline is in registry
+        pipeline_class = PipelineRegistry.get(pipeline_id)
+
+        # List of built-in pipelines with custom initialization
+        BUILTIN_PIPELINES = {
+            "streamdiffusionv2",
+            "passthrough",
+            "longlive",
+            "krea-realtime-video",
+            "reward-forcing",
+        }
+
+        if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
+            # Plugin pipeline - instantiate generically with load_params
+            logger.info(f"Loading plugin pipeline: {pipeline_id}")
+            load_params = load_params or {}
+            return pipeline_class(**load_params)
+
+        # Fall through to built-in pipeline initialization
         if pipeline_id == "streamdiffusionv2":
             from scope.core.pipelines import (
                 StreamDiffusionV2Pipeline,
