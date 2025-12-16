@@ -97,32 +97,36 @@ export class ScopeElectronAppService {
    * so users need a draggable region to move the window.
    *
    * Note: Scrollbar styling is handled by the frontend itself.
+   * Uses !important to prevent Radix UI portals/scroll-locks from overriding styles.
    */
   private injectDraggableTitleBarCSS(window: BrowserWindow): void {
     const css = `
       /* Draggable title bar region for Windows/macOS with hidden title bar */
       body::before {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 32px;
+        content: '' !important;
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        height: 32px !important;
         -webkit-app-region: drag;
-        z-index: 10000;
-        pointer-events: auto;
+        z-index: 10000 !important;
+        pointer-events: auto !important;
       }
       /* Add padding to body to prevent content from overlapping with title bar */
       /* Prevent overflow by ensuring html and body don't exceed viewport height */
+      /* Uses !important to prevent Radix UI scroll-lock from overriding padding */
       html {
-        height: 100%;
-        overflow: hidden;
+        height: 100% !important;
+        overflow: hidden !important;
       }
       body {
-        padding-top: 32px;
-        height: 100%;
-        overflow: hidden;
-        box-sizing: border-box;
+        padding-top: 32px !important;
+        height: 100% !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+        position: relative !important;
+        margin-right: 0 !important;
       }
       /* Make interactive elements non-draggable */
       button, input, textarea, select, a,

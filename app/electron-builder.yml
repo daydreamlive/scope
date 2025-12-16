@@ -83,16 +83,16 @@ win:
       arch:
         - x64
   publisherName: Livepeer Inc.
-  verifyUpdateCodeSignature: false # Disable code signature verification
+  verifyUpdateCodeSignature: true
   sign: false # Skip code signing (disable to avoid privilege errors on Windows)
   signDlls: false # Skip DLL signing
-  signAndEditExecutable: false # Prevent signing and editing executables
+  signAndEditExecutable: true
 
 nsis:
   oneClick: false
   perMachine: false # Per-user installation (best practice - no admin required)
   allowToChangeInstallationDirectory: true
-  createDesktopShortcut: always
+  createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Daydream Scope
   installerIcon: assets/icon.ico
@@ -116,10 +116,9 @@ linux:
         - x64
   executableName: daydream-scope
   desktop: build/linux/daydream-scope.desktop
-  synopsis: Real-time AI video generation and streaming
+  synopsis: A tool for running and customizing real-time, interactive generative AI pipelines and models
   description: >
-    Daydream Scope enables real-time AI-powered video generation and streaming
-    using state-of-the-art diffusion models.
+    A tool for running and customizing real-time, interactive generative AI pipelines and models
   maintainer: Daydream <info@daydream.live>
 
 # Debian package configuration
