@@ -9,11 +9,12 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Progress } from "./ui/progress";
-import { PIPELINES } from "../data/pipelines";
 import type { PipelineId, DownloadProgress } from "../types";
+import type { PipelineInfo } from "../hooks/usePipelines";
 
 interface DownloadDialogProps {
   open: boolean;
+  pipelines: Record<string, PipelineInfo> | null;
   pipelineId: PipelineId;
   onClose: () => void;
   onDownload: () => void;
@@ -23,13 +24,14 @@ interface DownloadDialogProps {
 
 export function DownloadDialog({
   open,
+  pipelines,
   pipelineId,
   onClose,
   onDownload,
   isDownloading = false,
   progress = null,
 }: DownloadDialogProps) {
-  const pipelineInfo = PIPELINES[pipelineId];
+  const pipelineInfo = pipelines?.[pipelineId];
   if (!pipelineInfo) return null;
 
   return (
