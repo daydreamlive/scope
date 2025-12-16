@@ -609,7 +609,7 @@ def open_browser_when_ready(host: str, port: int, server):
 def main():
     """Main entry point for the daydream-scope command."""
     parser = argparse.ArgumentParser(
-        description="Daydream Scope - Real-time AI video generation and streaming"
+        description="A tool for running and customizing real-time, interactive generative AI pipelines and models"
     )
     parser.add_argument(
         "--version",
