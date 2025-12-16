@@ -2,6 +2,10 @@
 
 Animates a reference portrait image using driving video frames.
 Based on: https://github.com/GVCLab/PersonaLive
+
+Supports optional TensorRT acceleration when installed:
+    pip install daydream-scope[tensorrt]
+    convert-personalive-trt --model-dir ./models --height 512 --width 512
 """
 
 import logging
@@ -36,6 +40,12 @@ from .modules import (
     draw_keypoints,
     get_boxes,
 )
+
+# TensorRT support (optional)
+try:
+    from .tensorrt import TRT_AVAILABLE, TRTRunner, get_engine_path
+except ImportError:
+    TRT_AVAILABLE = False
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -259,8 +269,16 @@ class PersonaLivePipeline(Pipeline):
         # Enable memory efficient attention
         self._enable_xformers()
 
+        # TensorRT support (optional)
+        self.use_tensorrt = False
+        self.trt_runner = None
+        self._model_dir = model_dir  # Store for TensorRT path lookup
+
+        if TRT_AVAILABLE:
+            self._init_tensorrt(model_dir)
+
         torch.cuda.empty_cache()
-        logger.info("PersonaLive pipeline initialized")
+        logger.info(f"PersonaLive pipeline initialized (TensorRT: {self.use_tensorrt})")
 
     def _enable_xformers(self):
         """Enable xformers memory efficient attention if available."""
@@ -270,6 +288,41 @@ class PersonaLivePipeline(Pipeline):
             logger.info("Enabled xformers memory efficient attention")
         except Exception as e:
             logger.warning(f"Could not enable xformers: {e}")
+
+    def _init_tensorrt(self, model_dir: Path):
+        """Initialize TensorRT engine if available.
+
+        Args:
+            model_dir: Base model directory.
+        """
+        engine_path = get_engine_path(model_dir, self.height, self.width)
+
+        if not engine_path.exists():
+            logger.info(
+                f"TensorRT engine not found at {engine_path}. "
+                f"Run 'convert-personalive-trt' to create it for faster inference."
+            )
+            return
+
+        try:
+            device_index = self.device.index if self.device.index is not None else 0
+            self.trt_runner = TRTRunner(engine_path, device=self.device)
+
+            # Setup output-to-input bindings for recurrent state
+            self.trt_runner.bind({
+                "motion_hidden_states_out": "motion_hidden_states",
+                "pose_cond_fea_out": "pose_cond_fea",
+                "latents": "sample",
+            })
+
+            self.use_tensorrt = True
+            logger.info(f"TensorRT engine loaded from {engine_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to load TensorRT engine: {e}")
+            logger.warning("Falling back to PyTorch inference")
+            self.trt_runner = None
+            self.use_tensorrt = False
 
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements.
@@ -381,7 +434,29 @@ class PersonaLivePipeline(Pipeline):
             encoder_hidden_states=self.encoder_hidden_states,
             return_dict=False,
         )
-        self.reference_control_reader.update(self.reference_control_writer)
+
+        # Handle TensorRT vs PyTorch mode differently
+        if self.use_tensorrt:
+            # For TensorRT, extract reference hidden states and prefill
+            reference_hidden_states = self.reference_control_writer.output()
+            self._reference_hidden_states = reference_hidden_states
+
+            # Prefill TensorRT runner with constant inputs
+            self.trt_runner.clear_prefill()
+            self.trt_runner.prefill(encoder_hidden_states=self.encoder_hidden_states)
+
+            # Prefill reference hidden states
+            ref_hidden_names = [
+                "d00", "d01", "d10", "d11", "d20", "d21", "m",
+                "u10", "u11", "u12", "u20", "u21", "u22", "u30", "u31", "u32"
+            ]
+            for name in ref_hidden_names:
+                if name in reference_hidden_states:
+                    self.trt_runner.prefill(**{name: reference_hidden_states[name]})
+        else:
+            # For PyTorch, update the reader
+            self.reference_control_reader.update(self.reference_control_writer)
+
         self.encoder_hidden_states = self.encoder_hidden_states.to(self.device)
 
         # Prepare conditioning tensor for pose encoder
@@ -411,6 +486,18 @@ class PersonaLivePipeline(Pipeline):
             l = i * self.temporal_window_size
             r = (i + 1) * self.temporal_window_size
             self.latents_pile.append(noisy_latents_first[:, :, l:r])
+
+        # For TensorRT, also prefill initial latents
+        if self.use_tensorrt:
+            sample = torch.cat(list(self.latents_pile), dim=2)
+            # Add placeholder for new latents
+            new_latents = self.ref_image_latents.unsqueeze(2).repeat(
+                1, 1, self.temporal_window_size, 1, 1
+            )
+            noise = torch.randn_like(new_latents)
+            new_latents = self.scheduler.add_noise(new_latents, noise, self.timesteps[-1:])
+            sample = torch.cat([sample, new_latents], dim=2)
+            self.trt_runner.prefill(latents=sample)
 
         self.reference_fused = True
         logger.info("Reference image fused successfully")
@@ -469,6 +556,165 @@ class PersonaLivePipeline(Pipeline):
     @torch.no_grad()
     def _process_frames(self, images: torch.Tensor) -> torch.Tensor:
         """Process driving frames through the pipeline.
+
+        Args:
+            images: Input tensor of shape (B, C, T, H, W) in [-1, 1] or [0, 1] range.
+
+        Returns:
+            Output frames tensor of shape (T, H, W, C) in [0, 1] range.
+        """
+        # Route to TensorRT or PyTorch implementation
+        if self.use_tensorrt:
+            return self._process_frames_trt(images)
+        else:
+            return self._process_frames_pytorch(images)
+
+    @torch.no_grad()
+    def _process_frames_trt(self, images: torch.Tensor) -> torch.Tensor:
+        """Process frames using TensorRT engine.
+
+        Args:
+            images: Input tensor of shape (B, C, T, H, W) in [-1, 1] or [0, 1] range.
+
+        Returns:
+            Output frames tensor of shape (T, H, W, C) in [0, 1] range.
+        """
+        batch_size = self.batch_size
+        device = self.device
+        temporal_window_size = self.temporal_window_size
+        temporal_adaptive_step = self.temporal_adaptive_step
+
+        # Reshape from (B, C, T, H, W) to (T, C, H, W) for processing
+        if images.dim() == 5:
+            images = images.squeeze(0).permute(1, 0, 2, 3)
+
+        num_frames = images.shape[0]
+        if num_frames != temporal_window_size:
+            images = images[-temporal_window_size:]
+
+        if images.min() < 0:
+            images = images / 2 + 0.5
+        images = images.clamp(0, 1)
+
+        # Get keypoints using pose encoder (still PyTorch)
+        tgt_cond_tensor = self._fast_resize(images, 256, 256).clamp(0, 1)
+
+        if self.first_frame:
+            mot_bbox_param, kps_ref, kps_frame1, kps_dri = self.pose_encoder.interpolate_kps_online(
+                self.ref_cond_tensor, tgt_cond_tensor, num_interp=12 + 1
+            )
+            self.kps_ref = kps_ref
+            self.kps_frame1 = kps_frame1
+        else:
+            mot_bbox_param, kps_dri = self.pose_encoder.get_kps(
+                self.kps_ref, self.kps_frame1, tgt_cond_tensor
+            )
+
+        keypoints = draw_keypoints(mot_bbox_param, device=device)
+        boxes = get_boxes(kps_dri)
+        keypoints = rearrange(keypoints.unsqueeze(2), 'f c b h w -> b c f h w')
+        keypoints = keypoints.to(device=device, dtype=self.dtype)
+
+        # Prepare motion input (face crops)
+        if self.first_frame:
+            ref_box = get_boxes(mot_bbox_param[:1])
+            ref_face = self._crop_face_tensor(self.ref_image_tensor, ref_box[0])
+            motion_face = [ref_face]
+            for i, frame in enumerate(images):
+                motion_face.append(self._crop_face_tensor(frame, boxes[i]))
+            pose_cond_tensor = torch.cat(motion_face, dim=0).transpose(0, 1)
+            pose_cond_tensor = pose_cond_tensor.unsqueeze(0)
+
+            # For first frame, compute initial states using PyTorch motion encoder
+            motion_hidden_states = self.motion_encoder(pose_cond_tensor)
+            ref_motion = motion_hidden_states[:, :1]
+            dri_motion = motion_hidden_states[:, 1:]
+
+            init_motion_hidden_states = self._interpolate_tensors(
+                ref_motion, dri_motion[:, :1], num=12 + 1
+            )[:, :-1]
+
+            # Compute initial pose features using PyTorch pose guider
+            pose_fea = self.pose_guider(keypoints)
+
+            # Prefill TensorRT with initial states
+            self.trt_runner.prefill(
+                motion_hidden_states_out=init_motion_hidden_states,
+                pose_cond_fea_out=pose_fea[:, :, :temporal_window_size * (temporal_adaptive_step - 1)],
+            )
+
+            self.motion_bank = ref_motion
+            self.first_frame = False
+
+            # Prepare TensorRT inputs
+            pose = keypoints[:, :, -temporal_window_size:]
+            motion = dri_motion.transpose(1, 2).unsqueeze(0)  # Reshape for TRT
+        else:
+            motion_face = []
+            for i, frame in enumerate(images):
+                motion_face.append(self._crop_face_tensor(frame, boxes[i]))
+            motion = torch.cat(motion_face, dim=0).transpose(0, 1).unsqueeze(0)
+            pose = keypoints
+
+        # Prepare new noise for next iteration
+        new_noise = torch.randn(
+            batch_size, 4, temporal_window_size,
+            self.height // 8, self.width // 8,
+            device=device, dtype=self.dtype
+        )
+
+        # Run TensorRT inference
+        outputs = self.trt_runner(
+            output_names=["pred_video", "motion_out", "latent_first"],
+            return_torch=True,
+            pose=pose,
+            motion=motion.to(self.dtype),
+            new_noise=new_noise,
+        )
+
+        video = outputs["pred_video"]
+        motion_out = outputs.get("motion_out")
+
+        # Keyframe tracking
+        if motion_out is not None and self.count > 8:
+            idx_to_add, self.motion_bank, _ = self._calculate_dis(
+                self.motion_bank, motion_out.unsqueeze(0), threshold=17.0
+            )
+
+            if len(idx_to_add) > 0 and self.num_khf < 3:
+                # Update reference hidden states for keyframe
+                latent_first = outputs.get("latent_first")
+                if latent_first is not None:
+                    self.reference_control_writer.clear()
+                    self.reference_unet(
+                        latent_first.to(self.reference_unet.dtype),
+                        torch.zeros((batch_size,), dtype=self.dtype, device=device),
+                        encoder_hidden_states=self.encoder_hidden_states,
+                        return_dict=False,
+                    )
+                    new_ref_hidden = self.reference_control_writer.output()
+
+                    # Concatenate new keyframe features
+                    ref_hidden_names = [
+                        "d00", "d01", "d10", "d11", "d20", "d21", "m",
+                        "u10", "u11", "u12", "u20", "u21", "u22", "u30", "u31", "u32"
+                    ]
+                    for name in ref_hidden_names:
+                        if name in self._reference_hidden_states and name in new_ref_hidden:
+                            self._reference_hidden_states[name] = torch.cat(
+                                [self._reference_hidden_states[name], new_ref_hidden[name]], dim=1
+                            )
+                            self.trt_runner.prefill(**{name: self._reference_hidden_states[name]})
+
+                    logger.debug("Added history keyframe (TensorRT)")
+                    self.num_khf += 1
+
+        self.count += 1
+        return video.cpu()
+
+    @torch.no_grad()
+    def _process_frames_pytorch(self, images: torch.Tensor) -> torch.Tensor:
+        """Process frames using PyTorch (original implementation).
 
         Args:
             images: Input tensor of shape (B, C, T, H, W) in [-1, 1] or [0, 1] range.

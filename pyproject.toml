@@ -57,9 +57,16 @@ dependencies = [
     "PyOpenGL>=3.1.10; sys_platform == 'win32'",
     # PersonaLive dependencies
     "mediapipe>=0.10.11",
-    "decord>=0.6.0",
     "xformers>=0.0.32.post2",
-    "scikit-image>=0.22.0",
+]
+
+[project.optional-dependencies]
+tensorrt = [
+    "tensorrt>=10.0.0; sys_platform == 'linux' or sys_platform == 'win32'",
+    "tensorrt-cu12>=10.0.0; sys_platform == 'linux' or sys_platform == 'win32'",
+    "polygraphy>=0.49.0",
+    "onnx>=1.17.0",
+    "onnx-graphsurgeon>=0.5.0",
 ]
 
 [project.scripts]
@@ -67,6 +74,7 @@ daydream-scope = "scope.server.app:main"
 build = "scope.server.build:main"
 download_models = "scope.server.download_models:main"
 patch-xformers = "scope.server.patch_xformers:main"
+convert-personalive-trt = "scope.core.pipelines.personalive.tensorrt.convert:main"
 
 [project.urls]
 Homepage = "https://github.com/daydreamlive/scope"

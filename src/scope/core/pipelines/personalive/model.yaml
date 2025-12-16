@@ -9,6 +9,13 @@ vae_model_path: "sd-vae-ft-mse"
 # PersonaLive custom weights
 personalive_weights_path: "PersonaLive/pretrained_weights/personalive"
 
+# TensorRT acceleration (optional)
+# Run `convert-personalive-trt` to generate the engine file
+# Engine path format: tensorrt/unet_work_{height}x{width}.engine
+tensorrt:
+  onnx_path: "PersonaLive/pretrained_weights/onnx/unet_opt/unet_opt.onnx"
+  engine_dir: "PersonaLive/pretrained_weights/tensorrt"
+
 # Inference configuration
 dtype: "fp16"
 batch_size: 1
