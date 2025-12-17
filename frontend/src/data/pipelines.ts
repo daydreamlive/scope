@@ -46,7 +46,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     docsUrl:
       "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md",
     about:
-      "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt switching and improved quality over longer time periods while maintaining fast generation.",
+      "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt switching and improved quality over longer time periods while maintaining fast generation. Supports optional VACE (Video-Aware Condition Encoding) for reference image conditioning.",
     modified: true,
     estimatedVram: 20,
     requiresModels: true,
@@ -55,22 +55,6 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     supportsLoRA: true,
     // Multi-mode support
     supportedModes: ["text", "video"],
-    defaultMode: "text",
-  },
-  longlive_vace: {
-    name: "LongLive VACE",
-    docsUrl:
-      "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md",
-    about:
-      "LongLive with VACE (Video-Aware Condition Encoding) support for reference image conditioning. Upload reference images to guide video generation style and content.",
-    modified: true,
-    estimatedVram: 20,
-    requiresModels: true,
-    defaultTemporalInterpolationMethod: "slerp",
-    defaultTemporalInterpolationSteps: 0,
-    supportsLoRA: true,
-    // Text-only mode with reference images
-    supportedModes: ["text"],
     defaultMode: "text",
   },
   "krea-realtime-video": {

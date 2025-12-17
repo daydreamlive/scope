@@ -138,7 +138,6 @@ export function SettingsPanel({
   ) => {
     const minValue =
       pipelineId === "longlive" ||
-      pipelineId === "longlive_vace" ||
       pipelineId === "streamdiffusionv2" ||
       pipelineId === "krea-realtime-video" ||
       pipelineId === "reward-forcing"
@@ -184,7 +183,6 @@ export function SettingsPanel({
   const decrementResolution = (dimension: "height" | "width") => {
     const minValue =
       pipelineId === "longlive" ||
-      pipelineId === "longlive_vace" ||
       pipelineId === "streamdiffusionv2" ||
       pipelineId === "krea-realtime-video" ||
       pipelineId === "reward-forcing"
@@ -336,7 +334,7 @@ export function SettingsPanel({
           </div>
         )}
 
-        {pipelineId === "longlive_vace" && (
+        {pipelineId === "longlive" && (
           <div className="space-y-4">
             <ImageManager
               images={refImages}
@@ -365,7 +363,6 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
-          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (
@@ -524,7 +521,6 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
-          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (
@@ -588,7 +584,6 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
-          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (
@@ -644,7 +639,6 @@ export function SettingsPanel({
         )}
 
         {(pipelineId === "longlive" ||
-          pipelineId === "longlive_vace" ||
           pipelineId === "streamdiffusionv2" ||
           pipelineId === "krea-realtime-video" ||
           pipelineId === "reward-forcing") && (

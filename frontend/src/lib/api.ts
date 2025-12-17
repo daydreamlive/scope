@@ -54,15 +54,7 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
-}
-
-export interface LongLiveVaceLoadParams extends PipelineLoadParams {
-  height?: number;
-  width?: number;
-  seed?: number;
-  quantization?: "fp8_e4m3fn" | null;
-  loras?: LoRAConfig[];
-  lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  // VACE (optional reference image conditioning)
   ref_images?: string[];
   vace_context_scale?: number;
 }
@@ -82,7 +74,6 @@ export interface PipelineLoadRequest {
     | PassthroughLoadParams
     | StreamDiffusionV2LoadParams
     | LongLiveLoadParams
-    | LongLiveVaceLoadParams
     | KreaRealtimeVideoLoadParams
     | null;
 }

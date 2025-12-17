@@ -631,22 +631,16 @@ export function StreamPage() {
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          // Optional VACE parameters
+          ...(settings.refImages && settings.refImages.length > 0
+            ? {
+                ref_images: settings.refImages,
+                vace_context_scale: settings.vaceContextScale ?? 1.0,
+              }
+            : {}),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      } else if (pipelineIdToUse === "longlive_vace" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ref_images: settings.refImages || [],
-          vace_context_scale: settings.vaceContextScale ?? 1.0,
-        };
-        console.log(
-          `Loading VACE with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, ref_images: ${loadParams.ref_images.length}, vace_context_scale: ${loadParams.vace_context_scale}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}${settings.refImages && settings.refImages.length > 0 ? `, ref_images: ${settings.refImages.length}, vace_context_scale: ${settings.vaceContextScale ?? 1.0}` : ""}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -722,11 +716,10 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for krea_realtime_video, longlive, longlive_vace, and reward-forcing
+      // Cache management for krea_realtime_video, longlive, and reward-forcing
       if (
         pipelineIdToUse === "krea-realtime-video" ||
         pipelineIdToUse === "longlive" ||
-        pipelineIdToUse === "longlive_vace" ||
         pipelineIdToUse === "reward-forcing"
       ) {
         initialParameters.manage_cache = settings.manageCache ?? true;
@@ -738,9 +731,13 @@ export function StreamPage() {
           settings.kvCacheAttentionBias ?? 1.0;
       }
 
-      // VACE-specific parameters - send reference images and context scale
-      if (pipelineIdToUse === "longlive_vace") {
-        initialParameters.ref_images = settings.refImages || [];
+      // VACE-specific parameters for longlive - send reference images and context scale
+      if (
+        pipelineIdToUse === "longlive" &&
+        settings.refImages &&
+        settings.refImages.length > 0
+      ) {
+        initialParameters.ref_images = settings.refImages;
         initialParameters.vace_context_scale = settings.vaceContextScale ?? 1.0;
       }
 

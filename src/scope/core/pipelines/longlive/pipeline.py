@@ -50,7 +50,23 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         lora_path = getattr(config, "lora_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
+
+        # Auto-detect VACE checkpoint if not explicitly set (enables VACE support if available)
+        if not hasattr(config, "vace_path") or config.vace_path is None:
+            from scope.core.config import get_models_dir
+
+            vace_model_path = get_models_dir() / "Wan2.1-VACE-1.3B"
+            vace_checkpoint = vace_model_path / "diffusion_pytorch_model.safetensors"
+
+            if vace_checkpoint.exists():
+                config.vace_path = str(vace_checkpoint)
+                logger.info(
+                    f"LongLivePipeline.__init__: Auto-detected VACE checkpoint at {vace_checkpoint}"
+                )
+
+        # Read vace_path after auto-detection
         vace_path = getattr(config, "vace_path", None)
+        print(f"DEBUG: After auto-detection, vace_path={vace_path}")
 
         model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
@@ -78,6 +94,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         print(f"Loaded base diffusion model in {time.time() - start:.3f}s")
 
         # Wrap with VACE if configured (before loading VACE weights)
+        print(f"DEBUG: Before wrapping, vace_path={vace_path}")
         if vace_path is not None:
             start_vace = time.time()
             # VACE configuration: vace_in_dim determines input channel count

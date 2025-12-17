@@ -70,7 +70,6 @@ def _register_pipelines():
     # Import lazily to avoid circular imports and heavy dependencies
     from .krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
     from .longlive.pipeline import LongLivePipeline
-    from .longlive.pipeline_vace import LongLiveVacePipeline
     from .passthrough.pipeline import PassthroughPipeline
     from .reward_forcing.pipeline import RewardForcingPipeline
     from .streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
@@ -78,7 +77,6 @@ def _register_pipelines():
     # Register each pipeline with its ID from its config class
     for pipeline_class in [
         LongLivePipeline,
-        LongLiveVacePipeline,
         KreaRealtimeVideoPipeline,
         StreamDiffusionV2Pipeline,
         PassthroughPipeline,

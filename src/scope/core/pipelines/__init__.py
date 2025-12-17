@@ -8,10 +8,6 @@ def __getattr__(name):
         from .longlive.pipeline import LongLivePipeline
 
         return LongLivePipeline
-    elif name == "LongLiveVacePipeline":
-        from .longlive.pipeline_vace import LongLiveVacePipeline
-
-        return LongLiveVacePipeline
     elif name == "KreaRealtimeVideoPipeline":
         from .krea_realtime_video.pipeline import KreaRealtimeVideoPipeline
 
@@ -37,10 +33,6 @@ def __getattr__(name):
         from .schema import LongLiveConfig
 
         return LongLiveConfig
-    elif name == "LongLiveVaceConfig":
-        from .schema import LongLiveVaceConfig
-
-        return LongLiveVaceConfig
     elif name == "StreamDiffusionV2Config":
         from .schema import StreamDiffusionV2Config
 
@@ -59,7 +51,6 @@ def __getattr__(name):
 __all__ = [
     # Pipeline classes
     "LongLivePipeline",
-    "LongLiveVacePipeline",
     "KreaRealtimeVideoPipeline",
     "RewardForcingPipeline",
     "StreamDiffusionV2Pipeline",
@@ -67,7 +58,6 @@ __all__ = [
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
-    "LongLiveVaceConfig",
     "StreamDiffusionV2Config",
     "KreaRealtimeVideoConfig",
     "PassthroughConfig",
