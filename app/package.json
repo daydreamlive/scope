@@ -1,7 +1,7 @@
 {
   "name": "daydream-scope-desktop",
   "productName": "Daydream Scope",
-  "version": "0.1.0-rc1",
+  "version": "0.1.0-alpha.9",
   "description": "A tool for running and customizing real-time, interactive generative AI pipelines and models",
   "main": ".vite/build/main.js",
   "scripts": {
