@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import mediapipe as mp
+
     MEDIAPIPE_AVAILABLE = True
 except ImportError:
     MEDIAPIPE_AVAILABLE = False
@@ -58,9 +59,7 @@ class FaceDetector:
         return None
 
     def get_face_bounding_box(
-        self,
-        image: np.ndarray,
-        padding_ratio: float = 0.2
+        self, image: np.ndarray, padding_ratio: float = 0.2
     ) -> Tuple[int, int, int, int] | None:
         """Get bounding box for the detected face.
 
@@ -192,9 +191,8 @@ class FaceDetector:
 
     def close(self):
         """Release resources."""
-        if hasattr(self, 'face_mesh') and self.face_mesh:
+        if hasattr(self, "face_mesh") and self.face_mesh:
             self.face_mesh.close()
 
     def __del__(self):
         self.close()
-

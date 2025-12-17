@@ -85,7 +85,9 @@ def create_optimization_profile(
         Polygraphy Profile object.
     """
     if not TRT_AVAILABLE:
-        raise RuntimeError("TensorRT is not available. Install with: pip install daydream-scope[tensorrt]")
+        raise RuntimeError(
+            "TensorRT is not available. Install with: pip install daydream-scope[tensorrt]"
+        )
 
     # Derived dimensions
     tb = temporal_window_size * temporal_adaptive_step  # temporal batch size (16)
@@ -105,9 +107,20 @@ def create_optimization_profile(
     fixed_inputs = {
         "sample": (batch_size, lc, tb, lh, lw),
         "encoder_hidden_states": (batch_size, 1, emb),
-        "motion_hidden_states": (batch_size, temporal_window_size * (temporal_adaptive_step - 1), ml, mc),
+        "motion_hidden_states": (
+            batch_size,
+            temporal_window_size * (temporal_adaptive_step - 1),
+            ml,
+            mc,
+        ),
         "motion": (batch_size, ic, temporal_window_size, mh, mw),
-        "pose_cond_fea": (batch_size, cd0, temporal_window_size * (temporal_adaptive_step - 1), lh, lw),
+        "pose_cond_fea": (
+            batch_size,
+            cd0,
+            temporal_window_size * (temporal_adaptive_step - 1),
+            lh,
+            lw,
+        ),
         "pose": (batch_size, ic, temporal_window_size, height, width),
         "new_noise": (batch_size, lc, temporal_window_size, lh, lw),
     }
@@ -177,7 +190,9 @@ def build_engine(
         FileNotFoundError: If ONNX model doesn't exist.
     """
     if not TRT_AVAILABLE:
-        raise RuntimeError("TensorRT is not available. Install with: pip install daydream-scope[tensorrt]")
+        raise RuntimeError(
+            "TensorRT is not available. Install with: pip install daydream-scope[tensorrt]"
+        )
 
     onnx_path = Path(onnx_path)
     engine_path = Path(engine_path)
@@ -241,4 +256,3 @@ def is_engine_available(model_dir: Path, height: int = 512, width: int = 512) ->
     """
     engine_path = get_engine_path(model_dir, height, width)
     return engine_path.exists()
-

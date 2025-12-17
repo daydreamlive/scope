@@ -117,28 +117,46 @@ class EngineModel:
                     # Use max profile shape for dynamic dimensions
                     profile = engine.get_tensor_profile_shape(name, 0)
                     if profile:
-                        logger.debug(f"Dynamic shape for {name}: {shape} -> Max: {profile[2]}")
+                        logger.debug(
+                            f"Dynamic shape for {name}: {shape} -> Max: {profile[2]}"
+                        )
                         return profile[2]
                 return shape
 
             # Get shapes and dtypes for all tensors
-            self.input_shapes = {name: get_safe_shape(self.engine, name) for name in self.input_names}
-            self.input_dtypes = {name: self.engine.get_tensor_dtype(name) for name in self.input_names}
+            self.input_shapes = {
+                name: get_safe_shape(self.engine, name) for name in self.input_names
+            }
+            self.input_dtypes = {
+                name: self.engine.get_tensor_dtype(name) for name in self.input_names
+            }
             self.input_nbytes = {
-                name: trt.volume(self.input_shapes[name]) * trt.nptype(self.input_dtypes[name])().itemsize
+                name: trt.volume(self.input_shapes[name])
+                * trt.nptype(self.input_dtypes[name])().itemsize
                 for name in self.input_names
             }
 
-            self.output_shapes = {name: get_safe_shape(self.engine, name) for name in self.output_names}
-            self.output_dtypes = {name: self.engine.get_tensor_dtype(name) for name in self.output_names}
+            self.output_shapes = {
+                name: get_safe_shape(self.engine, name) for name in self.output_names
+            }
+            self.output_dtypes = {
+                name: self.engine.get_tensor_dtype(name) for name in self.output_names
+            }
             self.output_nbytes = {
-                name: trt.volume(self.output_shapes[name]) * trt.nptype(self.output_dtypes[name])().itemsize
+                name: trt.volume(self.output_shapes[name])
+                * trt.nptype(self.output_dtypes[name])().itemsize
                 for name in self.output_names
             }
 
             # Allocate CUDA device memory for inputs and outputs
-            self.dinputs = {name: cuda.mem_alloc(self.input_nbytes[name]) for name in self.input_names}
-            self.doutputs = {name: cuda.mem_alloc(self.output_nbytes[name]) for name in self.output_names}
+            self.dinputs = {
+                name: cuda.mem_alloc(self.input_nbytes[name])
+                for name in self.input_names
+            }
+            self.doutputs = {
+                name: cuda.mem_alloc(self.output_nbytes[name])
+                for name in self.output_names
+            }
 
             # Create execution context
             self.context = self.engine.create_execution_context()
@@ -156,12 +174,14 @@ class EngineModel:
             self.houtputs = {
                 name: cuda.pagelocked_empty(
                     trt.volume(self.output_shapes[name]),
-                    dtype=trt.nptype(self.output_dtypes[name])
+                    dtype=trt.nptype(self.output_dtypes[name]),
                 )
                 for name in self.output_names
             }
 
-            logger.info(f"TensorRT engine loaded successfully ({len(self.input_names)} inputs, {len(self.output_names)} outputs)")
+            logger.info(
+                f"TensorRT engine loaded successfully ({len(self.input_names)} inputs, {len(self.output_names)} outputs)"
+            )
 
         except Exception as e:
             self.ctx.pop()
@@ -197,14 +217,18 @@ class EngineModel:
                 if name not in self.input_names:
                     continue
 
-                if isinstance(hinput, torch.Tensor) and hinput.is_cuda and hinput.device.index == self.device_int:
+                if (
+                    isinstance(hinput, torch.Tensor)
+                    and hinput.is_cuda
+                    and hinput.device.index == self.device_int
+                ):
                     # GPU tensor on same device - device-to-device copy (fast!)
                     hinput_con = hinput.contiguous()
                     cuda.memcpy_dtod_async(
                         self.dinputs[name],
                         hinput_con.data_ptr(),
                         self.input_nbytes[name],
-                        self.stream
+                        self.stream,
                     )
                 else:
                     # CPU tensor or numpy array - host-to-device copy
@@ -228,20 +252,24 @@ class EngineModel:
                     t = torch.zeros(
                         trt.volume(self.output_shapes[name]),
                         device=self._torch_device,
-                        dtype=_numpy_to_torch_dtype(trt.nptype(self.output_dtypes[name]))
+                        dtype=_numpy_to_torch_dtype(
+                            trt.nptype(self.output_dtypes[name])
+                        ),
                     )
                     cuda.memcpy_dtod_async(
                         t.data_ptr(),
                         self.doutputs[name],
                         self.output_nbytes[name],
-                        self.stream
+                        self.stream,
                     )
                     t = t.reshape(tuple(self.output_shapes[name]))
                     result[name] = t
             else:
                 # Device-to-host copy to numpy
                 for name in output_names:
-                    cuda.memcpy_dtoh_async(self.houtputs[name], self.doutputs[name], self.stream)
+                    cuda.memcpy_dtoh_async(
+                        self.houtputs[name], self.doutputs[name], self.stream
+                    )
                     result[name] = self.houtputs[name].reshape(self.output_shapes[name])
 
             # Synchronize stream
@@ -287,10 +315,16 @@ class EngineModel:
                     real_nbytes = hinput.nbytes
 
                 # Copy to device
-                if isinstance(hinput, torch.Tensor) and hinput.is_cuda and hinput.device.index == self.device_int:
+                if (
+                    isinstance(hinput, torch.Tensor)
+                    and hinput.is_cuda
+                    and hinput.device.index == self.device_int
+                ):
                     # GPU tensor - device-to-device copy
                     hinput_con = hinput.contiguous()
-                    cuda.memcpy_dtod_async(dst_ptr, hinput_con.data_ptr(), real_nbytes, self.stream)
+                    cuda.memcpy_dtod_async(
+                        dst_ptr, hinput_con.data_ptr(), real_nbytes, self.stream
+                    )
                 else:
                     # CPU tensor/numpy - host-to-device copy
                     if isinstance(hinput, torch.Tensor):
@@ -333,7 +367,9 @@ class EngineModel:
                     continue
 
                 # Point input address to output buffer
-                self.context.set_tensor_address(input_name, int(self.doutputs[output_name]))
+                self.context.set_tensor_address(
+                    input_name, int(self.doutputs[output_name])
+                )
 
         except Exception as e:
             logger.error(f"Bind failed: {e}")
@@ -367,12 +403,12 @@ class EngineModel:
     def __del__(self):
         """Clean up CUDA resources."""
         try:
-            if hasattr(self, 'ctx'):
+            if hasattr(self, "ctx"):
                 self.ctx.push()
                 # Free CUDA memory
-                for ptr in getattr(self, 'dinputs', {}).values():
+                for ptr in getattr(self, "dinputs", {}).values():
                     ptr.free()
-                for ptr in getattr(self, 'doutputs', {}).values():
+                for ptr in getattr(self, "doutputs", {}).values():
                     ptr.free()
                 self.ctx.pop()
         except Exception:
@@ -390,5 +426,3 @@ class EngineModel:
             r += f"    {name}: {dtype}{tuple(self.output_shapes[name])},\n"
         r += "  ]\n)"
         return r
-
-

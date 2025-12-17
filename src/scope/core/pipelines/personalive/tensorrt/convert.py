@@ -35,7 +35,9 @@ def log_gpu_memory(msg: str = ""):
     if torch.cuda.is_available():
         allocated = torch.cuda.memory_allocated() / 1024**3
         reserved = torch.cuda.memory_reserved() / 1024**3
-        logger.info(f"GPU Memory {msg}: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+        logger.info(
+            f"GPU Memory {msg}: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
+        )
 
 
 def parse_args():
@@ -103,6 +105,7 @@ def load_models(model_dir: Path, device: torch.device, dtype: torch.dtype):
         MotEncoder,
         PoseGuider,
     )
+
     # Use explicit reference UNet for TensorRT export
     from .unet_explicit import UNet3DConditionModelExplicit
 
@@ -182,7 +185,9 @@ def load_models(model_dir: Path, device: torch.device, dtype: torch.dtype):
 
     # Load VAE
     logger.info("Loading VAE...")
-    vae = AutoencoderKL.from_pretrained(str(vae_path)).to(device=device, dtype=export_dtype)
+    vae = AutoencoderKL.from_pretrained(str(vae_path)).to(
+        device=device, dtype=export_dtype
+    )
     vae.set_default_attn_processor()
     cleanup()
 
@@ -295,7 +300,9 @@ def main():
         logger.error(f"Model directory not found: {args.model_dir}")
         sys.exit(1)
 
-    personalive_weights = args.model_dir / "PersonaLive" / "pretrained_weights" / "personalive"
+    personalive_weights = (
+        args.model_dir / "PersonaLive" / "pretrained_weights" / "personalive"
+    )
     if not personalive_weights.exists():
         logger.error(f"PersonaLive weights not found at: {personalive_weights}")
         logger.error("Please download PersonaLive models first using: download_models")
@@ -323,7 +330,9 @@ def main():
     logger.info(f"Converting PersonaLive models to TensorRT")
     logger.info(f"  Model directory: {args.model_dir}")
     logger.info(f"  Target resolution: {args.height}x{args.width}")
-    logger.info(f"  ONNX export resolution: {onnx_height}x{onnx_width} (to save memory)")
+    logger.info(
+        f"  ONNX export resolution: {onnx_height}x{onnx_width} (to save memory)"
+    )
     logger.info(f"  Precision: {'FP32' if args.fp32 else 'FP16'}")
     logger.info(f"  Device: {device}")
 
@@ -342,7 +351,7 @@ def main():
             models=models,
             onnx_path=onnx_path,
             height=onnx_height,  # 256 to save memory
-            width=onnx_width,    # 256 to save memory
+            width=onnx_width,  # 256 to save memory
             batch_size=args.batch_size,
             device=device,
             dtype=dtype,

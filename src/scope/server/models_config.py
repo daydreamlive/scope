@@ -126,14 +126,46 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     # personalive pipeline
     if pipeline_id == "personalive":
         return [
-            models_dir / "PersonaLive" / "pretrained_weights" / "personalive" / "denoising_unet.pth",
-            models_dir / "PersonaLive" / "pretrained_weights" / "personalive" / "reference_unet.pth",
-            models_dir / "PersonaLive" / "pretrained_weights" / "personalive" / "motion_encoder.pth",
-            models_dir / "PersonaLive" / "pretrained_weights" / "personalive" / "motion_extractor.pth",
-            models_dir / "PersonaLive" / "pretrained_weights" / "personalive" / "pose_guider.pth",
-            models_dir / "PersonaLive" / "pretrained_weights" / "personalive" / "temporal_module.pth",
-            models_dir / "PersonaLive" / "pretrained_weights" / "sd-image-variations-diffusers" / "model_index.json",
-            models_dir / "PersonaLive" / "pretrained_weights" / "sd-vae-ft-mse" / "config.json",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "personalive"
+            / "denoising_unet.pth",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "personalive"
+            / "reference_unet.pth",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "personalive"
+            / "motion_encoder.pth",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "personalive"
+            / "motion_extractor.pth",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "personalive"
+            / "pose_guider.pth",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "personalive"
+            / "temporal_module.pth",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "sd-image-variations-diffusers"
+            / "model_index.json",
+            models_dir
+            / "PersonaLive"
+            / "pretrained_weights"
+            / "sd-vae-ft-mse"
+            / "config.json",
         ]
 
     # Default: nothing is required

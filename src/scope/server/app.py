@@ -336,13 +336,12 @@ async def set_personalive_reference(
         status_info = await pipeline_manager.get_status_info_async()
         if status_info.get("pipeline_id") != "personalive":
             raise HTTPException(
-                status_code=400,
-                detail="PersonaLive pipeline must be loaded first"
+                status_code=400, detail="PersonaLive pipeline must be loaded first"
             )
         if status_info.get("status") != "loaded":
             raise HTTPException(
                 status_code=400,
-                detail=f"Pipeline not ready. Current status: {status_info.get('status')}"
+                detail=f"Pipeline not ready. Current status: {status_info.get('status')}",
             )
 
         # Get image from request body
@@ -354,7 +353,9 @@ async def set_personalive_reference(
         try:
             image = Image.open(BytesIO(body)).convert("RGB")
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid image data: {e}") from e
+            raise HTTPException(
+                status_code=400, detail=f"Invalid image data: {e}"
+            ) from e
 
         # Get pipeline and fuse reference
         pipeline = pipeline_manager.get_pipeline()
@@ -366,7 +367,7 @@ async def set_personalive_reference(
 
         return PersonaLiveReferenceResponse(
             success=True,
-            message="Reference image set successfully. Ready to process driving video."
+            message="Reference image set successfully. Ready to process driving video.",
         )
 
     except HTTPException:

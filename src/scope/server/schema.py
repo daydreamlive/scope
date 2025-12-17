@@ -391,7 +391,9 @@ class PersonaLiveLoadParams(PipelineLoadParams):
 class PersonaLiveReferenceResponse(BaseModel):
     """Response after setting PersonaLive reference image."""
 
-    success: bool = Field(..., description="Whether the reference image was set successfully")
+    success: bool = Field(
+        ..., description="Whether the reference image was set successfully"
+    )
     message: str = Field(..., description="Status message")
 
 

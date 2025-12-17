@@ -84,6 +84,7 @@ def _profile_stage(name: str):
     elapsed = time.perf_counter() - start
     _profiling_timings[name].append(elapsed)
 
+
 # TensorRT support (optional)
 try:
     from .tensorrt import TRT_AVAILABLE, TRTRunner, get_engine_path, PYCUDA_AVAILABLE
@@ -199,7 +200,9 @@ class PersonaLivePipeline(Pipeline):
 
         # Load pose encoder (motion extractor)
         start = time.time()
-        self.pose_encoder = MotionExtractor(num_kp=21).to(device=device, dtype=dtype).eval()
+        self.pose_encoder = (
+            MotionExtractor(num_kp=21).to(device=device, dtype=dtype).eval()
+        )
         pose_encoder_path = personalive_weights / "motion_extractor.pth"
         if pose_encoder_path.exists():
             state_dict = torch.load(pose_encoder_path, map_location="cpu")
@@ -291,7 +294,9 @@ class PersonaLivePipeline(Pipeline):
         )
         self.clip_image_processor = CLIPImageProcessor()
         self.cond_image_processor = VaeImageProcessor(
-            vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True, do_normalize=True
+            vae_scale_factor=self.vae_scale_factor,
+            do_convert_rgb=True,
+            do_normalize=True,
         )
 
         # Face detector
@@ -365,14 +370,18 @@ class PersonaLivePipeline(Pipeline):
                 self._use_engine_model = True
 
                 # Setup output-to-input bindings for recurrent state (zero-copy)
-                self.trt_runner.bind({
-                    "motion_hidden_states_out": "motion_hidden_states",
-                    "pose_cond_fea_out": "pose_cond_fea",
-                    "latents": "sample",
-                })
+                self.trt_runner.bind(
+                    {
+                        "motion_hidden_states_out": "motion_hidden_states",
+                        "pose_cond_fea_out": "pose_cond_fea",
+                        "latents": "sample",
+                    }
+                )
 
                 self.use_tensorrt = True
-                logger.info(f"TensorRT engine loaded with pycuda (EngineModel) from {engine_path}")
+                logger.info(
+                    f"TensorRT engine loaded with pycuda (EngineModel) from {engine_path}"
+                )
                 return
 
             except Exception as e:
@@ -385,14 +394,18 @@ class PersonaLivePipeline(Pipeline):
             self._use_engine_model = False
 
             # Setup output-to-input bindings for recurrent state
-            self.trt_runner.bind({
-                "motion_hidden_states_out": "motion_hidden_states",
-                "pose_cond_fea_out": "pose_cond_fea",
-                "latents": "sample",
-            })
+            self.trt_runner.bind(
+                {
+                    "motion_hidden_states_out": "motion_hidden_states",
+                    "pose_cond_fea_out": "pose_cond_fea",
+                    "latents": "sample",
+                }
+            )
 
             self.use_tensorrt = True
-            logger.info(f"TensorRT engine loaded with polygraphy (TRTRunner) from {engine_path}")
+            logger.info(
+                f"TensorRT engine loaded with polygraphy (TRTRunner) from {engine_path}"
+            )
 
         except Exception as e:
             logger.warning(f"Failed to load TensorRT engine: {e}")
@@ -417,7 +430,9 @@ class PersonaLivePipeline(Pipeline):
             return Requirements(input_size=self.temporal_window_size)
         return None
 
-    def _fast_resize(self, images: torch.Tensor, height: int, width: int) -> torch.Tensor:
+    def _fast_resize(
+        self, images: torch.Tensor, height: int, width: int
+    ) -> torch.Tensor:
         """Fast bilinear resize of image tensor."""
         return F.interpolate(
             images,
@@ -426,7 +441,9 @@ class PersonaLivePipeline(Pipeline):
             align_corners=False,
         )
 
-    def _interpolate_tensors(self, a: torch.Tensor, b: torch.Tensor, num: int) -> torch.Tensor:
+    def _interpolate_tensors(
+        self, a: torch.Tensor, b: torch.Tensor, num: int
+    ) -> torch.Tensor:
         """Linear interpolation between tensors a and b."""
         if a.shape != b.shape:
             raise ValueError(f"Shape mismatch: a.shape={a.shape}, b.shape={b.shape}")
@@ -447,7 +464,9 @@ class PersonaLivePipeline(Pipeline):
         dist = torch.cdist(B_flat.to(torch.float32), A_flat.to(torch.float32), p=2)
         min_dist, min_idx = dist.min(dim=1)
 
-        idx_to_add = torch.nonzero(min_dist[:1] > threshold, as_tuple=False).squeeze(1).tolist()
+        idx_to_add = (
+            torch.nonzero(min_dist[:1] > threshold, as_tuple=False).squeeze(1).tolist()
+        )
 
         if len(idx_to_add) > 0:
             B_to_add = B[:, idx_to_add]
@@ -499,7 +518,9 @@ class PersonaLivePipeline(Pipeline):
         self.encoder_hidden_states = clip_image_embeds.unsqueeze(1)
 
         # Encode reference image
-        ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
+        ref_image_tensor = ref_image_tensor.to(
+            dtype=self.vae.dtype, device=self.vae.device
+        )
         self.ref_image_tensor = ref_image_tensor.squeeze(0)
         ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
         ref_image_latents = ref_image_latents * 0.18215
@@ -509,7 +530,9 @@ class PersonaLivePipeline(Pipeline):
         self.reference_control_writer.clear()
         self.reference_unet(
             ref_image_latents.to(self.reference_unet.device),
-            torch.zeros((self.batch_size,), dtype=self.dtype, device=self.reference_unet.device),
+            torch.zeros(
+                (self.batch_size,), dtype=self.dtype, device=self.reference_unet.device
+            ),
             encoder_hidden_states=self.encoder_hidden_states,
             return_dict=False,
         )
@@ -521,14 +544,28 @@ class PersonaLivePipeline(Pipeline):
             self._reference_hidden_states = reference_hidden_states
 
             # Clear previous prefill values (TRTRunner only - EngineModel persists buffers)
-            if hasattr(self.trt_runner, 'clear_prefill'):
+            if hasattr(self.trt_runner, "clear_prefill"):
                 self.trt_runner.clear_prefill()
             self.trt_runner.prefill(encoder_hidden_states=self.encoder_hidden_states)
 
             # Prefill reference hidden states
             ref_hidden_names = [
-                "d00", "d01", "d10", "d11", "d20", "d21", "m",
-                "u10", "u11", "u12", "u20", "u21", "u22", "u30", "u31", "u32"
+                "d00",
+                "d01",
+                "d10",
+                "d11",
+                "d20",
+                "d21",
+                "m",
+                "u10",
+                "u11",
+                "u12",
+                "u20",
+                "u21",
+                "u22",
+                "u30",
+                "u31",
+                "u32",
             ]
             for name in ref_hidden_names:
                 if name in reference_hidden_states:
@@ -559,8 +596,12 @@ class PersonaLivePipeline(Pipeline):
         padding_num = (self.temporal_adaptive_step - 1) * self.temporal_window_size
         init_latents = ref_image_latents.unsqueeze(2).repeat(1, 1, padding_num, 1, 1)
         noise = torch.randn_like(init_latents)
-        init_timesteps = reversed(self.timesteps).repeat_interleave(self.temporal_window_size, dim=0)
-        noisy_latents_first = self.scheduler.add_noise(init_latents, noise, init_timesteps[:padding_num])
+        init_timesteps = reversed(self.timesteps).repeat_interleave(
+            self.temporal_window_size, dim=0
+        )
+        noisy_latents_first = self.scheduler.add_noise(
+            init_latents, noise, init_timesteps[:padding_num]
+        )
 
         for i in range(self.temporal_adaptive_step - 1):
             l = i * self.temporal_window_size
@@ -575,9 +616,13 @@ class PersonaLivePipeline(Pipeline):
                 1, 1, self.temporal_window_size, 1, 1
             )
             noise = torch.randn_like(new_latents)
-            new_latents = self.scheduler.add_noise(new_latents, noise, self.timesteps[-1:])
+            new_latents = self.scheduler.add_noise(
+                new_latents, noise, self.timesteps[-1:]
+            )
             sample = torch.cat([sample, new_latents], dim=2)
-            self.trt_runner.prefill(sample=sample)  # Use 'sample' (input name), not 'latents' (output name)
+            self.trt_runner.prefill(
+                sample=sample
+            )  # Use 'sample' (input name), not 'latents' (output name)
 
         self.reference_fused = True
         logger.info("Reference image fused successfully")
@@ -683,8 +728,10 @@ class PersonaLivePipeline(Pipeline):
             tgt_cond_tensor = self._fast_resize(images, 256, 256).clamp(0, 1)
 
             if self.first_frame:
-                mot_bbox_param, kps_ref, kps_frame1, kps_dri = self.pose_encoder.interpolate_kps_online(
-                    self.ref_cond_tensor, tgt_cond_tensor, num_interp=12 + 1
+                mot_bbox_param, kps_ref, kps_frame1, kps_dri = (
+                    self.pose_encoder.interpolate_kps_online(
+                        self.ref_cond_tensor, tgt_cond_tensor, num_interp=12 + 1
+                    )
                 )
                 self.kps_ref = kps_ref
                 self.kps_frame1 = kps_frame1
@@ -697,7 +744,7 @@ class PersonaLivePipeline(Pipeline):
         with _profile_stage("keypoint_drawing"):
             keypoints = draw_keypoints(mot_bbox_param, device=device)
             boxes = get_boxes(kps_dri)
-            keypoints = rearrange(keypoints.unsqueeze(2), 'f c b h w -> b c f h w')
+            keypoints = rearrange(keypoints.unsqueeze(2), "f c b h w -> b c f h w")
             keypoints = keypoints.to(device=device, dtype=self.dtype)
 
         # Face cropping for motion input
@@ -733,7 +780,9 @@ class PersonaLivePipeline(Pipeline):
                 # Prefill TensorRT with initial motion and pose states
                 self.trt_runner.prefill(
                     motion_hidden_states=init_motion_hidden_states,
-                    pose_cond_fea=pose_fea[:, :, :temporal_window_size * (temporal_adaptive_step - 1)],
+                    pose_cond_fea=pose_fea[
+                        :, :, : temporal_window_size * (temporal_adaptive_step - 1)
+                    ],
                 )
 
                 self.motion_bank = ref_motion
@@ -750,9 +799,13 @@ class PersonaLivePipeline(Pipeline):
         # Prepare noise
         with _profile_stage("noise_generation"):
             new_noise = torch.randn(
-                batch_size, 4, temporal_window_size,
-                self.height // 8, self.width // 8,
-                device=device, dtype=self.dtype
+                batch_size,
+                4,
+                temporal_window_size,
+                self.height // 8,
+                self.width // 8,
+                device=device,
+                dtype=self.dtype,
             )
 
         # TensorRT inference (includes motion_encoder, pose_guider, denoising_unet, vae_decode)
@@ -801,15 +854,38 @@ class PersonaLivePipeline(Pipeline):
 
                         # Concatenate new keyframe features
                         ref_hidden_names = [
-                            "d00", "d01", "d10", "d11", "d20", "d21", "m",
-                            "u10", "u11", "u12", "u20", "u21", "u22", "u30", "u31", "u32"
+                            "d00",
+                            "d01",
+                            "d10",
+                            "d11",
+                            "d20",
+                            "d21",
+                            "m",
+                            "u10",
+                            "u11",
+                            "u12",
+                            "u20",
+                            "u21",
+                            "u22",
+                            "u30",
+                            "u31",
+                            "u32",
                         ]
                         for name in ref_hidden_names:
-                            if name in self._reference_hidden_states and name in new_ref_hidden:
+                            if (
+                                name in self._reference_hidden_states
+                                and name in new_ref_hidden
+                            ):
                                 self._reference_hidden_states[name] = torch.cat(
-                                    [self._reference_hidden_states[name], new_ref_hidden[name]], dim=1
+                                    [
+                                        self._reference_hidden_states[name],
+                                        new_ref_hidden[name],
+                                    ],
+                                    dim=1,
                                 )
-                                self.trt_runner.prefill(**{name: self._reference_hidden_states[name]})
+                                self.trt_runner.prefill(
+                                    **{name: self._reference_hidden_states[name]}
+                                )
 
                         logger.debug("Added history keyframe (TensorRT)")
                         self.num_khf += 1
@@ -866,8 +942,10 @@ class PersonaLivePipeline(Pipeline):
 
         # Get keypoints
         if self.first_frame:
-            mot_bbox_param, kps_ref, kps_frame1, kps_dri = self.pose_encoder.interpolate_kps_online(
-                self.ref_cond_tensor, tgt_cond_tensor, num_interp=12 + 1
+            mot_bbox_param, kps_ref, kps_frame1, kps_dri = (
+                self.pose_encoder.interpolate_kps_online(
+                    self.ref_cond_tensor, tgt_cond_tensor, num_interp=12 + 1
+                )
             )
             self.kps_ref = kps_ref
             self.kps_frame1 = kps_frame1
@@ -879,7 +957,7 @@ class PersonaLivePipeline(Pipeline):
         # Draw keypoints and get bounding boxes
         keypoints = draw_keypoints(mot_bbox_param, device=device)
         boxes = get_boxes(kps_dri)
-        keypoints = rearrange(keypoints.unsqueeze(2), 'f c b h w -> b c f h w')
+        keypoints = rearrange(keypoints.unsqueeze(2), "f c b h w -> b c f h w")
         keypoints = keypoints.to(device=device, dtype=self.pose_guider.dtype)
 
         # Process motion features
@@ -926,7 +1004,9 @@ class PersonaLivePipeline(Pipeline):
             self.pose_pile.append(pose_fea)
 
         # Prepare noisy latents for new frames
-        latents = self.ref_image_latents.unsqueeze(2).repeat(1, 1, temporal_window_size, 1, 1)
+        latents = self.ref_image_latents.unsqueeze(2).repeat(
+            1, 1, temporal_window_size, 1, 1
+        )
         noise = torch.randn_like(latents)
         latents = self.scheduler.add_noise(latents, noise, self.timesteps[:1])
         self.latents_pile.append(latents)
@@ -946,9 +1026,11 @@ class PersonaLivePipeline(Pipeline):
         # Denoise
         latents_model_input = torch.cat(list(self.latents_pile), dim=2)
         for j in range(jump):
-            timesteps = reversed(self.timesteps[j::jump]).repeat_interleave(temporal_window_size, dim=0)
+            timesteps = reversed(self.timesteps[j::jump]).repeat_interleave(
+                temporal_window_size, dim=0
+            )
             timesteps = torch.stack([timesteps] * batch_size)
-            timesteps = rearrange(timesteps, 'b f -> (b f)')
+            timesteps = rearrange(timesteps, "b f -> (b f)")
 
             noise_pred = self.denoising_unet(
                 latents_model_input,
@@ -962,18 +1044,28 @@ class PersonaLivePipeline(Pipeline):
             )[0]
 
             clip_length = noise_pred.shape[2]
-            mid_noise_pred = rearrange(noise_pred, 'b c f h w -> (b f) c h w')
-            mid_latents = rearrange(latents_model_input, 'b c f h w -> (b f) c h w')
+            mid_noise_pred = rearrange(noise_pred, "b c f h w -> (b f) c h w")
+            mid_latents = rearrange(latents_model_input, "b c f h w -> (b f) c h w")
             latents_model_input, pred_original_sample = self.scheduler.step(
-                mid_noise_pred, timesteps, mid_latents,
-                generator=self.generator, return_dict=False
+                mid_noise_pred,
+                timesteps,
+                mid_latents,
+                generator=self.generator,
+                return_dict=False,
             )
-            latents_model_input = rearrange(latents_model_input, '(b f) c h w -> b c f h w', f=clip_length)
-            pred_original_sample = rearrange(pred_original_sample, '(b f) c h w -> b c f h w', f=clip_length)
-            latents_model_input = torch.cat([
-                pred_original_sample[:, :, :temporal_window_size],
-                latents_model_input[:, :, temporal_window_size:]
-            ], dim=2)
+            latents_model_input = rearrange(
+                latents_model_input, "(b f) c h w -> b c f h w", f=clip_length
+            )
+            pred_original_sample = rearrange(
+                pred_original_sample, "(b f) c h w -> b c f h w", f=clip_length
+            )
+            latents_model_input = torch.cat(
+                [
+                    pred_original_sample[:, :, :temporal_window_size],
+                    latents_model_input[:, :, temporal_window_size:],
+                ],
+                dim=2,
+            )
             latents_model_input = latents_model_input.to(dtype=self.dtype)
 
         # History keyframe mechanism
@@ -981,7 +1073,9 @@ class PersonaLivePipeline(Pipeline):
             self.reference_control_writer.clear()
             self.reference_unet(
                 pred_original_sample[:, :, 0].to(self.reference_unet.dtype),
-                torch.zeros((batch_size,), dtype=self.dtype, device=self.reference_unet.device),
+                torch.zeros(
+                    (batch_size,), dtype=self.dtype, device=self.reference_unet.device
+                ),
                 encoder_hidden_states=self.encoder_hidden_states,
                 return_dict=False,
             )
@@ -992,7 +1086,11 @@ class PersonaLivePipeline(Pipeline):
         # Update latent piles
         for i in range(len(self.latents_pile)):
             self.latents_pile[i] = latents_model_input[
-                :, :, i * temporal_adaptive_step:(i + 1) * temporal_adaptive_step, :, :
+                :,
+                :,
+                i * temporal_adaptive_step : (i + 1) * temporal_adaptive_step,
+                :,
+                :,
             ]
 
         # Pop oldest latents and decode

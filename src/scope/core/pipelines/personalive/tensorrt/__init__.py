@@ -30,6 +30,7 @@ try:
     # Check for zero-copy CUDA buffer support (polygraphy)
     try:
         from polygraphy.cuda import DeviceView  # noqa: F401
+
         CUDA_BUFFERS_AVAILABLE = True
     except ImportError:
         pass
@@ -38,6 +39,7 @@ try:
     try:
         import pycuda.driver  # noqa: F401
         import pycuda.autoinit  # noqa: F401
+
         PYCUDA_AVAILABLE = True
     except ImportError:
         pass
@@ -68,17 +70,23 @@ if TRT_AVAILABLE:
 else:
     # Provide stub functions when TRT is not available
     def get_engine_path(*args, **kwargs):
-        raise RuntimeError("TensorRT not available. Install with: pip install daydream-scope[tensorrt]")
+        raise RuntimeError(
+            "TensorRT not available. Install with: pip install daydream-scope[tensorrt]"
+        )
 
     def build_engine(*args, **kwargs):
-        raise RuntimeError("TensorRT not available. Install with: pip install daydream-scope[tensorrt]")
+        raise RuntimeError(
+            "TensorRT not available. Install with: pip install daydream-scope[tensorrt]"
+        )
 
     def is_engine_available(*args, **kwargs):
         return False
 
     class TRTRunner:
         def __init__(self, *args, **kwargs):
-            raise RuntimeError("TensorRT not available. Install with: pip install daydream-scope[tensorrt]")
+            raise RuntimeError(
+                "TensorRT not available. Install with: pip install daydream-scope[tensorrt]"
+            )
 
     __all__ = [
         "build_engine",

@@ -25,7 +25,11 @@ from diffusers.utils import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, BaseOutput, 
 from safetensors.torch import load_file
 
 from ..modules.resnet import InflatedConv3d, InflatedGroupNorm
-from ..modules.unet_3d_blocks import UNetMidBlock3DCrossAttn, get_down_block, get_up_block
+from ..modules.unet_3d_blocks import (
+    UNetMidBlock3DCrossAttn,
+    get_down_block,
+    get_up_block,
+)
 
 logger = logging.get_logger(__name__)
 
@@ -41,6 +45,7 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
     This model accepts reference hidden states (d00, d01, ..., u32) as explicit
     forward parameters instead of using attention processor hooks.
     """
+
     _supports_gradient_checkpointing = True
 
     @register_to_config
@@ -169,7 +174,7 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
                 motion_module_type=motion_module_type,
                 temporal_module_type=temporal_module_type,
                 motion_module_kwargs=motion_module_kwargs,
-                temporal_module_kwargs=temporal_module_kwargs
+                temporal_module_kwargs=temporal_module_kwargs,
             )
             self.down_blocks.append(down_block)
 
@@ -404,7 +409,9 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
 
         if self.class_embedding is not None:
             if class_labels is None:
-                raise ValueError("class_labels should be provided when num_class_embeds > 0")
+                raise ValueError(
+                    "class_labels should be provided when num_class_embeds > 0"
+                )
             if self.config.class_embed_type == "timestep":
                 class_labels = self.time_proj(class_labels)
             class_emb = self.class_embedding(class_labels).to(dtype=self.dtype)
@@ -453,7 +460,9 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
             for down_block_res_sample, down_block_additional_residual in zip(
                 down_block_res_samples, down_block_additional_residuals
             ):
-                down_block_res_sample = down_block_res_sample + down_block_additional_residual
+                down_block_res_sample = (
+                    down_block_res_sample + down_block_additional_residual
+                )
                 new_down_block_res_samples += (down_block_res_sample,)
             down_block_res_samples = new_down_block_res_samples
 
@@ -482,8 +491,10 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
 
             is_final_block = i == len(self.up_blocks) - 1
 
-            res_samples = down_block_res_samples[-len(upsample_block.resnets):]
-            down_block_res_samples = down_block_res_samples[:-len(upsample_block.resnets)]
+            res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
+            down_block_res_samples = down_block_res_samples[
+                : -len(upsample_block.resnets)
+            ]
 
             if not is_final_block and forward_upsample_size:
                 upsample_size = down_block_res_samples[-1].shape[2:]
@@ -583,8 +594,9 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
                 raise RuntimeError(f"Unknown format: {motion_module_path.suffix}")
 
             motion_state_dict = {
-                k.replace('motion_modules.', 'temporal_modules.'): v
-                for k, v in motion_state_dict.items() if "pos_encoder" not in k
+                k.replace("motion_modules.", "temporal_modules."): v
+                for k, v in motion_state_dict.items()
+                if "pos_encoder" not in k
             }
 
             if mm_zero_proj_out:
@@ -598,4 +610,3 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
         logger.debug(f"Missing keys: {len(m)}; Unexpected keys: {len(u)}")
 
         return model
-

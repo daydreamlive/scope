@@ -26,6 +26,7 @@ try:
     # Suppress polygraphy deprecation warnings about DeviceView.dtype
     # (warns about future API change: DataType.from_dtype(device_view.dtype).numpy())
     from polygraphy.logger import G_LOGGER
+
     G_LOGGER.severity = G_LOGGER.ERROR  # Only show errors, not warnings
 
     TRT_AVAILABLE = True
@@ -33,9 +34,12 @@ try:
     # Check for CUDA buffer support (polygraphy >= 0.47)
     try:
         from polygraphy.cuda import DeviceView
+
         CUDA_BUFFERS_AVAILABLE = True
     except ImportError:
-        logger.warning("polygraphy.cuda.DeviceView not available - using numpy path (slower)")
+        logger.warning(
+            "polygraphy.cuda.DeviceView not available - using numpy path (slower)"
+        )
 except ImportError:
     pass
 
@@ -68,7 +72,9 @@ class TRTRunner:
             FileNotFoundError: If engine file doesn't exist.
         """
         if not TRT_AVAILABLE:
-            raise RuntimeError("TensorRT is not available. Install with: pip install daydream-scope[tensorrt]")
+            raise RuntimeError(
+                "TensorRT is not available. Install with: pip install daydream-scope[tensorrt]"
+            )
 
         engine_path = Path(engine_path)
         if not engine_path.exists():
@@ -92,7 +98,9 @@ class TRTRunner:
         if CUDA_BUFFERS_AVAILABLE:
             logger.info("TensorRT runner using CUDA device buffers (zero-copy)")
         else:
-            logger.warning("TensorRT runner using numpy path (slower - install polygraphy>=0.47 for zero-copy)")
+            logger.warning(
+                "TensorRT runner using numpy path (slower - install polygraphy>=0.47 for zero-copy)"
+            )
 
     def _load_engine(self):
         """Load the TensorRT engine."""
@@ -261,7 +269,7 @@ class TRTRunner:
         # Convert outputs to PyTorch tensors (they come back as DeviceView or numpy)
         result = {}
         for name, output in outputs.items():
-            if hasattr(output, 'numpy'):
+            if hasattr(output, "numpy"):
                 # DeviceView - create tensor from same memory
                 arr = output.numpy()
                 result[name] = torch.from_numpy(arr).to(self.device)
@@ -352,13 +360,19 @@ class TRTRunner:
         """Get input tensor shapes."""
         if self._runner is None:
             return {}
-        return {name: tuple(meta.shape) for name, meta in self._runner.get_input_metadata().items()}
+        return {
+            name: tuple(meta.shape)
+            for name, meta in self._runner.get_input_metadata().items()
+        }
 
     def get_output_shapes(self) -> dict[str, tuple]:
         """Get output tensor shapes."""
         if self._runner is None:
             return {}
-        return {name: tuple(meta.shape) for name, meta in self._runner.get_output_metadata().items()}
+        return {
+            name: tuple(meta.shape)
+            for name, meta in self._runner.get_output_metadata().items()
+        }
 
     def __del__(self):
         """Clean up resources."""

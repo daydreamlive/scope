@@ -13,6 +13,7 @@ from einops import rearrange
 
 try:
     from polygraphy.backend.trt import Profile
+
     POLYGRAPHY_AVAILABLE = True
 except ImportError:
     POLYGRAPHY_AVAILABLE = False
@@ -121,7 +122,9 @@ class UNetWork(nn.Module):
 
         # Encode new motion features and concatenate
         new_motion_hidden_states = self.motion_encoder(motion)
-        motion_hidden_states = torch.cat([motion_hidden_states, new_motion_hidden_states], dim=1)
+        motion_hidden_states = torch.cat(
+            [motion_hidden_states, new_motion_hidden_states], dim=1
+        )
 
         # Prepare encoder hidden states for UNet [clip_embeds, motion_features]
         encoder_hidden_states_combined = [encoder_hidden_states, motion_hidden_states]
@@ -132,13 +135,27 @@ class UNetWork(nn.Module):
             self.timesteps,
             encoder_hidden_states_combined,
             pose_cond_fea,
-            d00, d01, d10, d11, d20, d21, m,
-            u10, u11, u12, u20, u21, u22, u30, u31, u32,
+            d00,
+            d01,
+            d10,
+            d11,
+            d20,
+            d21,
+            m,
+            u10,
+            u11,
+            u12,
+            u20,
+            u21,
+            u22,
+            u30,
+            u31,
+            u32,
         )
 
         # Scheduler step
-        score = rearrange(score, 'b c f h w -> (b f) c h w')
-        sample_flat = rearrange(sample, 'b c f h w -> (b f) c h w')
+        score = rearrange(score, "b c f h w -> (b f) c h w")
+        sample_flat = rearrange(sample, "b c f h w -> (b f) c h w")
 
         latents_model_input, pred_original_sample = self.scheduler.step(
             score, self.timesteps, sample_flat, return_dict=False
@@ -148,7 +165,9 @@ class UNetWork(nn.Module):
         pred_original_sample = pred_original_sample.to(sample.dtype)
 
         # Reshape back to 5D
-        latents_model_input = rearrange(latents_model_input, '(b f) c h w -> b c f h w', f=16)
+        latents_model_input = rearrange(
+            latents_model_input, "(b f) c h w -> b c f h w", f=16
+        )
 
         # Decode first 4 frames (temporal_window_size)
         pred_video = self.decode_slice(self.vae, pred_original_sample[:4])
@@ -167,7 +186,14 @@ class UNetWork(nn.Module):
         # First frame latent for potential keyframe update
         latent_first = pred_original_sample[:1]
 
-        return pred_video, latents, pose_cond_fea_out, motion_hidden_states_out, motion_out, latent_first
+        return (
+            pred_video,
+            latents,
+            pose_cond_fea_out,
+            motion_hidden_states_out,
+            motion_out,
+            latent_first,
+        )
 
     def get_sample_input(self, batchsize: int, height: int, width: int, dtype, device):
         """Generate sample inputs for ONNX export.
@@ -182,11 +208,23 @@ class UNetWork(nn.Module):
         Returns:
             Dictionary of sample tensors for ONNX export.
         """
-        tw, ts, tb = 4, 4, 16  # temporal_window_size, temporal_adaptive_steps, temporal_batch
+        tw, ts, tb = (
+            4,
+            4,
+            16,
+        )  # temporal_window_size, temporal_adaptive_steps, temporal_batch
         ml, mc, mh, mw = 32, 16, 224, 224  # motion latent dims
         b, h, w = batchsize, height, width
         lh, lw = height // 8, width // 8  # latent height/width
-        cd0, cd1, cd2, cm, cu1, cu2, cu3 = 320, 640, 1280, 1280, 1280, 640, 320  # unet channels
+        cd0, cd1, cd2, cm, cu1, cu2, cu3 = (
+            320,
+            640,
+            1280,
+            1280,
+            1280,
+            640,
+            320,
+        )  # unet channels
         emb = 768  # CLIP embedding dims
         lc, ic = 4, 3  # latent/image channels
 
@@ -221,18 +259,41 @@ class UNetWork(nn.Module):
     def get_input_names():
         """Get ordered input names for ONNX export."""
         return [
-            "sample", "encoder_hidden_states", "motion_hidden_states",
-            "motion", "pose_cond_fea", "pose", "new_noise",
-            "d00", "d01", "d10", "d11", "d20", "d21", "m",
-            "u10", "u11", "u12", "u20", "u21", "u22", "u30", "u31", "u32"
+            "sample",
+            "encoder_hidden_states",
+            "motion_hidden_states",
+            "motion",
+            "pose_cond_fea",
+            "pose",
+            "new_noise",
+            "d00",
+            "d01",
+            "d10",
+            "d11",
+            "d20",
+            "d21",
+            "m",
+            "u10",
+            "u11",
+            "u12",
+            "u20",
+            "u21",
+            "u22",
+            "u30",
+            "u31",
+            "u32",
         ]
 
     @staticmethod
     def get_output_names():
         """Get ordered output names for ONNX export."""
         return [
-            "pred_video", "latents", "pose_cond_fea_out",
-            "motion_hidden_states_out", "motion_out", "latent_first"
+            "pred_video",
+            "latents",
+            "pose_cond_fea_out",
+            "motion_hidden_states_out",
+            "motion_out",
+            "latent_first",
         ]
 
     @staticmethod

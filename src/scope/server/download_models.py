@@ -250,7 +250,9 @@ def download_personalive_pipeline() -> None:
         )
         print(f"[OK] Downloaded sd-image-variations-diffusers to: {sd_variations_dst}")
     else:
-        print(f"[SKIP] sd-image-variations-diffusers already exists at: {sd_variations_dst}")
+        print(
+            f"[SKIP] sd-image-variations-diffusers already exists at: {sd_variations_dst}"
+        )
 
     # 2. Download sd-vae-ft-mse (improved VAE)
     # This provides: config.json, diffusion_pytorch_model.safetensors
