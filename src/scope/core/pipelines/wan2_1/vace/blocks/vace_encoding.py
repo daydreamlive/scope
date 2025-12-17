@@ -36,6 +36,26 @@ logger = logging.getLogger(__name__)
 
 
 class VaceEncodingBlock(ModularPipelineBlocks):
+    """
+    VACE encoding block with internal routing logic.
+
+    Architectural Note: This block does NOT use AutoPipelineBlock pattern despite having
+    multiple execution paths. Rationale:
+
+    1. Single Operation: All paths perform the same conceptual operation (VACE encoding)
+       with shared logic (VAE selection, reference image loading, validation).
+
+    2. OR Condition: Block should run if EITHER ref_images OR input_frames is provided.
+       AutoPipelineBlock uses sequential first-match logic, making OR conditions awkward
+       (would require duplicate block instances with different triggers).
+
+    3. Simple Skip Logic: The skip condition is trivial (3 lines in __call__) and
+       self-contained. Using AutoPipelineBlock would add complexity without benefit.
+
+    Compare to AutoPrepareLatentsBlock: That routes between fundamentally different
+    operations (prepare fresh latents vs. encode video) with a single trigger (video).
+    VACE has one operation with multiple potential triggers, better handled internally.
+    """
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
