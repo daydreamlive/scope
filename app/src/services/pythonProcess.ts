@@ -64,13 +64,6 @@ export class ScopePythonProcessService implements PythonProcessService {
     const enhancedPath = getEnhancedPath();
     logger.info(`Using PATH: ${enhancedPath}`);
 
-    // Set logs directory to userData/logs/main so Python server writes logs there
-    const userDataPath = app.getPath('userData');
-    const pythonLogsDir = path.join(userDataPath, 'logs', 'main');
-    // Ensure the directory exists
-    if (!fs.existsSync(pythonLogsDir)) {
-      fs.mkdirSync(pythonLogsDir, { recursive: true });
-    }
 
     const child = spawn(uvCommand, [
       'run',
@@ -87,7 +80,6 @@ export class ScopePythonProcessService implements PythonProcessService {
       env: {
         ...process.env,
         PATH: enhancedPath,
-        DAYDREAM_SCOPE_LOGS_DIR: pythonLogsDir,
       },
     });
 
