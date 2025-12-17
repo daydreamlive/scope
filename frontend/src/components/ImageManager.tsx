@@ -75,7 +75,7 @@ export function ImageManager({
           <Button
             size="sm"
             onClick={handleAddImage}
-            disabled={disabled}
+            disabled={disabled || isStreaming}
             className="h-6 px-2"
             title="Add reference image"
           >
