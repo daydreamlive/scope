@@ -612,9 +612,18 @@ export function StreamPage() {
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          // Optional VACE parameters for text mode
+          ...(currentMode === "text" &&
+          settings.refImages &&
+          settings.refImages.length > 0
+            ? {
+                ref_images: settings.refImages,
+                vace_context_scale: settings.vaceContextScale ?? 1.0,
+              }
+            : {}),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}${currentMode === "text" && settings.refImages && settings.refImages.length > 0 ? `, ref_images: ${settings.refImages.length}, vace_context_scale: ${settings.vaceContextScale ?? 1.0}` : ""}`
         );
       } else if (pipelineIdToUse === "passthrough" && resolution) {
         loadParams = {
@@ -731,9 +740,11 @@ export function StreamPage() {
           settings.kvCacheAttentionBias ?? 1.0;
       }
 
-      // VACE-specific parameters for longlive - send reference images and context scale
+      // VACE-specific parameters for longlive and streamdiffusionv2 text mode
       if (
-        pipelineIdToUse === "longlive" &&
+        (pipelineIdToUse === "longlive" ||
+          (pipelineIdToUse === "streamdiffusionv2" &&
+            currentMode === "text")) &&
         settings.refImages &&
         settings.refImages.length > 0
       ) {

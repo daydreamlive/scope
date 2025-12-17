@@ -62,7 +62,7 @@ prompt_text = ""
 # Example reference images (provide your own paths)
 # These images will condition the video generation
 ref_images = [
-    "C:/_dev/projects/scope/example.png",
+    "frontend/public/assets/example.png",
     # "path/to/reference_image_1.png",
     # "path/to/reference_image_2.jpg",
 ]

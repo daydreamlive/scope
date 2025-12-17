@@ -49,6 +49,21 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         generator_path = getattr(config, "generator_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
+
+        # Auto-detect VACE checkpoint if not explicitly set (enables VACE support if available)
+        if not hasattr(config, "vace_path") or config.vace_path is None:
+            from scope.core.config import get_models_dir
+
+            vace_model_path = get_models_dir() / "Wan2.1-VACE-1.3B"
+            vace_checkpoint = vace_model_path / "diffusion_pytorch_model.safetensors"
+
+            if vace_checkpoint.exists():
+                config.vace_path = str(vace_checkpoint)
+                logger.info(
+                    f"StreamDiffusionV2Pipeline.__init__: Auto-detected VACE checkpoint at {vace_checkpoint}"
+                )
+
+        # Read vace_path after auto-detection
         vace_path = getattr(config, "vace_path", None)
 
         model_config = load_model_config(config, __file__)
@@ -145,19 +160,18 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
 
-        # Load separate vace_vae for VACE encoding (R2V and depth modes)
+        # ALWAYS load separate vace_vae for VACE encoding (R2V and depth modes)
         # StreamDiffusionV2's main VAE uses streaming with caching that requires
         # specific temporal dimensions. Reference images only have 1-2 frames,
         # which is too small for the streaming encoder's 3D convolutions.
-        # Use standard WanVAEWrapper for VACE encoding instead.
-        vace_vae = None
-        if vace_path is not None:
-            start = time.time()
-            vace_vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
-            print(
-                f"Loaded VACE VAE (separate instance for ref image encoding) in {time.time() - start:.3f}s"
-            )
-            vace_vae = vace_vae.to(device=device, dtype=dtype)
+        # We MUST use standard WanVAEWrapper for VACE encoding, regardless of whether
+        # VACE model weights are loaded. This ensures ref_images can always be encoded.
+        start = time.time()
+        vace_vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
+        print(
+            f"Loaded VACE VAE (separate instance for ref image encoding) in {time.time() - start:.3f}s"
+        )
+        vace_vae = vace_vae.to(device=device, dtype=dtype)
 
         # Create components config
         components_config = {}
@@ -169,8 +183,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         components.add("generator", generator)
         components.add("scheduler", generator.get_scheduler())
         components.add("vae", vae)
-        if vace_vae is not None:
-            components.add("vace_vae", vace_vae)
+        components.add("vace_vae", vace_vae)
         components.add("text_encoder", text_encoder)
 
         embedding_blender = EmbeddingBlender(

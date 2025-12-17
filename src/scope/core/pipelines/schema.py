@@ -257,6 +257,8 @@ class StreamDiffusionV2Config(BasePipelineConfig):
 
     StreamDiffusionV2 supports both text-to-video and video-to-video modes.
     Default mode is video (V2V was the original training focus).
+
+    Optional VACE support: Set ref_images to enable reference image conditioning in text mode.
     """
 
     pipeline_id: ClassVar[str] = "streamdiffusionv2"
@@ -287,6 +289,18 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     input_size: int | None = Field(
         default=4,
         description="Expected input video frame count",
+    )
+
+    # VACE (optional reference image conditioning for text mode)
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning in text mode",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
     )
 
     @classmethod

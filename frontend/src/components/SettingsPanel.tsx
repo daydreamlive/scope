@@ -334,7 +334,8 @@ export function SettingsPanel({
           </div>
         )}
 
-        {pipelineId === "longlive" && (
+        {(pipelineId === "longlive" ||
+          (pipelineId === "streamdiffusionv2" && inputMode === "text")) && (
           <div className="space-y-4">
             <ImageManager
               images={refImages}

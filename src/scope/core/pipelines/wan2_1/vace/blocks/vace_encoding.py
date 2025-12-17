@@ -56,6 +56,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     operations (prepare fresh latents vs. encode video) with a single trigger (video).
     VACE has one operation with multiple potential triggers, better handled internally.
     """
+
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
@@ -209,18 +210,22 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             components.config.device,
         )
 
-        # Use vace_vae if available (for pipelines with streaming VAEs that can't handle small temporal dims),
-        # otherwise use main VAE for consistency.
-        # Reference images (1-2 frames) may be too small for streaming VAE encoders.
+        # CRITICAL: Use vace_vae for encoding reference images.
+        # Reference images (1-2 frames) are too small for streaming VAE encoders that
+        # use 3D convolutions with temporal caching. Pipelines with streaming VAEs
+        # MUST provide a separate standard WanVAE as vace_vae for VACE encoding.
         if hasattr(components, "vace_vae") and components.vace_vae is not None:
             vace_vae = components.vace_vae
             logger.info(
                 "VaceEncodingBlock._encode_reference_only: Using separate vace_vae for VACE context encoding"
             )
         else:
+            # Fallback to main VAE only for pipelines with standard (non-streaming) VAEs
+            # This will fail for pipelines with streaming VAEs
             vace_vae = components.vae
-            logger.info(
-                "VaceEncodingBlock._encode_reference_only: Using main VAE for VACE context encoding"
+            logger.warning(
+                "VaceEncodingBlock._encode_reference_only: Using main VAE for VACE context encoding. "
+                "If the main VAE is a streaming VAE, this will fail with temporal dimension errors."
             )
 
         # Import vace_utils for R2V encoding path
