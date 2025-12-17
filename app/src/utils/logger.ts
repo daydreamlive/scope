@@ -1,26 +1,57 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { app } from 'electron';
 
 const LOG_DIR = path.join(app.getPath('userData'), 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'main.log');
-const PYTHON_LOGS_DIR = path.join(LOG_DIR, 'main');
+
+// Default logs directory (matches Python's DEFAULT_LOGS_DIR)
+const DEFAULT_LOGS_DIR = '~/.daydream-scope/logs';
+
+// Environment variable for overriding logs directory (matches Python's LOGS_DIR_ENV_VAR)
+const LOGS_DIR_ENV_VAR = 'DAYDREAM_SCOPE_LOGS_DIR';
+
+/**
+ * Get the Python server logs directory.
+ * Matches the logic from Python's logs_config.py get_logs_dir():
+ * 1. Check DAYDREAM_SCOPE_LOGS_DIR environment variable
+ * 2. Fall back to DEFAULT_LOGS_DIR (~/.daydream-scope/logs)
+ */
+function getPythonLogsDir(): string {
+  // Check environment variable first
+  const envDir = process.env[LOGS_DIR_ENV_VAR];
+  if (envDir) {
+    // Expand ~ if present and resolve to absolute path
+    const expandedDir = envDir.startsWith('~')
+      ? envDir.replace('~', os.homedir())
+      : envDir;
+    return path.resolve(expandedDir);
+  }
+
+  // Use default directory
+  const expandedDir = DEFAULT_LOGS_DIR.replace('~', os.homedir());
+  return path.resolve(expandedDir);
+}
 
 /**
  * Get the path to the most recent Python server log file.
  * Python server writes logs as scope-logs-YYYY-MM-DD-HH-MM-SS.log
+ * Reads directly from ~/.daydream-scope/logs
  */
 function getMostRecentPythonLogFile(): string | null {
-  if (!fs.existsSync(PYTHON_LOGS_DIR)) {
+  const pythonLogsDir = getPythonLogsDir();
+
+  if (!fs.existsSync(pythonLogsDir)) {
     return null;
   }
 
   try {
-    const files = fs.readdirSync(PYTHON_LOGS_DIR)
+    const files = fs.readdirSync(pythonLogsDir)
       .filter(file => file.startsWith('scope-logs-') && file.endsWith('.log'))
       .map(file => ({
         name: file,
-        path: path.join(PYTHON_LOGS_DIR, file),
+        path: path.join(pythonLogsDir, file),
         // Extract timestamp from filename for sorting (scope-logs-YYYY-MM-DD-HH-MM-SS.log)
         timestamp: file.replace('scope-logs-', '').replace('.log', ''),
       }))
