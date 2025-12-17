@@ -505,6 +505,8 @@ class PersonaLivePipeline(Pipeline):
         ref_image_latents = ref_image_latents * 0.18215
 
         # Run reference UNet to cache features
+        # Clear writer first to prevent accumulation from previous keyframes when re-fusing
+        self.reference_control_writer.clear()
         self.reference_unet(
             ref_image_latents.to(self.reference_unet.device),
             torch.zeros((self.batch_size,), dtype=self.dtype, device=self.reference_unet.device),

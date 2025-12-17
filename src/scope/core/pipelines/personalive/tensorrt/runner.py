@@ -23,6 +23,11 @@ try:
     from polygraphy.backend.common import BytesFromPath
     from polygraphy.backend.trt import EngineFromBytes, TrtRunner
 
+    # Suppress polygraphy deprecation warnings about DeviceView.dtype
+    # (warns about future API change: DataType.from_dtype(device_view.dtype).numpy())
+    from polygraphy.logger import G_LOGGER
+    G_LOGGER.severity = G_LOGGER.ERROR  # Only show errors, not warnings
+
     TRT_AVAILABLE = True
 
     # Check for CUDA buffer support (polygraphy >= 0.47)
