@@ -20,6 +20,7 @@ from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vace import CausalVaceWanModel
+from ..wan2_1.vae import WanVAEWrapper
 from .components import StreamDiffusionV2WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modules.causal_model import CausalWanModel
@@ -144,6 +145,20 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
 
+        # Load separate vace_vae for VACE encoding (R2V and depth modes)
+        # StreamDiffusionV2's main VAE uses streaming with caching that requires
+        # specific temporal dimensions. Reference images only have 1-2 frames,
+        # which is too small for the streaming encoder's 3D convolutions.
+        # Use standard WanVAEWrapper for VACE encoding instead.
+        vace_vae = None
+        if vace_path is not None:
+            start = time.time()
+            vace_vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
+            print(
+                f"Loaded VACE VAE (separate instance for ref image encoding) in {time.time() - start:.3f}s"
+            )
+            vace_vae = vace_vae.to(device=device, dtype=dtype)
+
         # Create components config
         components_config = {}
         components_config.update(model_config)
@@ -154,6 +169,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         components.add("generator", generator)
         components.add("scheduler", generator.get_scheduler())
         components.add("vae", vae)
+        if vace_vae is not None:
+            components.add("vace_vae", vace_vae)
         components.add("text_encoder", text_encoder)
 
         embedding_blender = EmbeddingBlender(
@@ -207,6 +224,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
             self.state.set("transition", None)
+
+        # Clear ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "ref_images" not in kwargs:
+            self.state.set("ref_images", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

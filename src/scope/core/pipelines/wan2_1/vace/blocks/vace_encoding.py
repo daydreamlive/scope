@@ -189,12 +189,19 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             components.config.device,
         )
 
-        # Use main VAE for consistency
-        # Since VACE encoding uses use_cache=False, it won't affect the autoregressive streaming cache
-        vace_vae = components.vae
-        logger.info(
-            "VaceEncodingBlock._encode_reference_only: Using main VAE for VACE context encoding"
-        )
+        # Use vace_vae if available (for pipelines with streaming VAEs that can't handle small temporal dims),
+        # otherwise use main VAE for consistency.
+        # Reference images (1-2 frames) may be too small for streaming VAE encoders.
+        if hasattr(components, "vace_vae") and components.vace_vae is not None:
+            vace_vae = components.vace_vae
+            logger.info(
+                "VaceEncodingBlock._encode_reference_only: Using separate vace_vae for VACE context encoding"
+            )
+        else:
+            vace_vae = components.vae
+            logger.info(
+                "VaceEncodingBlock._encode_reference_only: Using main VAE for VACE context encoding"
+            )
 
         # Import vace_utils for R2V encoding path
         from ..utils.encoding import vace_encode_frames
@@ -349,15 +356,21 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             f"(with_ref_images={has_ref_images}, chunk {current_start})"
         )
 
-        # Use main VAE for consistency with video encoding/decoding
-        # This ensures temporal consistency in inpainting mode where the unmasked portion
-        # is encoded in both VACE context and video latents. Since VACE encoding uses
-        # use_cache=False, it won't affect the autoregressive streaming cache.
-        vace_vae = components.vae
-        logger.info(
-            "VaceEncodingBlock._encode_with_conditioning: Using main VAE for VACE context encoding "
-            "(ensures temporal consistency with video latents)"
-        )
+        # Use vace_vae if available (for pipelines with streaming VAEs that can't handle
+        # conditioning frame batches), otherwise use main VAE for consistency with video encoding.
+        # Main VAE is preferred when available since it ensures temporal consistency in inpainting
+        # mode where unmasked portions are encoded in both VACE context and video latents.
+        if hasattr(components, "vace_vae") and components.vace_vae is not None:
+            vace_vae = components.vace_vae
+            logger.info(
+                "VaceEncodingBlock._encode_with_conditioning: Using separate vace_vae for VACE context encoding"
+            )
+        else:
+            vace_vae = components.vae
+            logger.info(
+                "VaceEncodingBlock._encode_with_conditioning: Using main VAE for VACE context encoding "
+                "(ensures temporal consistency with video latents)"
+            )
 
         # Import vace_utils for standard encoding path
         from ..utils.encoding import vace_encode_frames, vace_encode_masks, vace_latent

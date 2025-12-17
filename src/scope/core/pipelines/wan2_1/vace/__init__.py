@@ -6,7 +6,10 @@ and structural guidance (depth, flow, pose, etc.) across all Wan2.1 pipelines.
 """
 
 from .blocks.vace_encoding import VaceEncodingBlock
-from .models.attention_blocks import BaseWanAttentionBlock, VaceWanAttentionBlock
+from .models.attention_blocks import (
+    create_base_attention_block_class,
+    create_vace_attention_block_class,
+)
 from .models.causal_vace_model import CausalVaceWanModel
 from .utils.encoding import (
     decode_vace_latent,
@@ -21,8 +24,8 @@ from .utils.weight_loader import load_vace_weights_only
 
 __all__ = [
     "CausalVaceWanModel",
-    "VaceWanAttentionBlock",
-    "BaseWanAttentionBlock",
+    "create_vace_attention_block_class",
+    "create_base_attention_block_class",
     "vace_encode_frames",
     "vace_encode_masks",
     "vace_latent",

@@ -1,16 +1,45 @@
 # Modified from notes/VACE/vace/models/wan/modules/model.py
-# Adapted for causal/autoregressive generation with composition pattern
+# Adapted for causal/autoregressive generation with factory pattern
+# Pipeline-agnostic using duck typing - works with any CausalWanModel
+import math
+
 import torch
 import torch.nn as nn
 
-from ....longlive.modules.model import sinusoidal_embedding_1d
-from .attention_blocks import BaseWanAttentionBlock, VaceWanAttentionBlock
+from .attention_blocks import (
+    create_base_attention_block_class,
+    create_vace_attention_block_class,
+)
+
+
+# TODO: Consolidate this with other pipeline implementations into a shared wan2_1/utils module.
+# This is a standard sinusoidal positional embedding - identical across all pipelines apart from krea which has forced dtype
+def sinusoidal_embedding_1d(dim, position):
+    """
+    Standard sinusoidal positional embedding.
+
+    Args:
+        dim: Embedding dimension
+        position: Position tensor of shape [B]
+
+    Returns:
+        Embeddings of shape [B, dim]
+    """
+    half = dim // 2
+    freqs = torch.exp(
+        -math.log(10000) * torch.arange(half, device=position.device) / half
+    )
+    args = position[:, None].float() * freqs[None]
+    return torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
 
 
 class CausalVaceWanModel(nn.Module):
     """
     VACE wrapper that adds reference image conditioning to any CausalWanModel.
+
     Uses composition to wrap an existing CausalWanModel instance.
+    Pipeline-agnostic via duck typing - works with longlive, streamdiffusionv2,
+    krea_realtime_video, reward_forcing, or any future CausalWanModel implementation.
     """
 
     def __init__(
@@ -29,19 +58,22 @@ class CausalVaceWanModel(nn.Module):
         self.dim = causal_wan_model.dim
         self.ffn_dim = causal_wan_model.ffn_dim
         self.num_heads = causal_wan_model.num_heads
-        self.local_attn_size = getattr(causal_wan_model, "local_attn_size", -1)
-        if hasattr(causal_wan_model, "config") and hasattr(
-            causal_wan_model.config, "sink_size"
-        ):
-            self.sink_size = causal_wan_model.config.sink_size
-        else:
-            self.sink_size = getattr(causal_wan_model, "sink_size", 0)
         self.qk_norm = causal_wan_model.qk_norm
         self.cross_attn_norm = causal_wan_model.cross_attn_norm
         self.eps = causal_wan_model.eps
         self.model_type = causal_wan_model.model_type
         self.patch_size = causal_wan_model.patch_size
         self.in_dim = causal_wan_model.in_dim
+
+        # Pipeline-specific attributes (duck typed with defaults)
+        self.local_attn_size = getattr(causal_wan_model, "local_attn_size", -1)
+        self.window_size = getattr(causal_wan_model, "window_size", (-1, -1))
+        if hasattr(causal_wan_model, "config") and hasattr(
+            causal_wan_model.config, "sink_size"
+        ):
+            self.sink_size = causal_wan_model.config.sink_size
+        else:
+            self.sink_size = getattr(causal_wan_model, "sink_size", 0)
 
         # VACE configuration
         self.vace_layers = (
@@ -52,32 +84,22 @@ class CausalVaceWanModel(nn.Module):
         assert 0 in self.vace_layers
         self.vace_layers_mapping = {i: n for n, i in enumerate(self.vace_layers)}
 
-        # Replace wrapped model's blocks with BaseWanAttentionBlock to support hint injection
+        # Get the original block class BEFORE replacing blocks
+        self._original_block_class = type(causal_wan_model.blocks[0])
+
+        # Create factory-generated classes for this pipeline's block type
+        self._BaseWanAttentionBlock = create_base_attention_block_class(
+            self._original_block_class
+        )
+        self._VaceWanAttentionBlock = create_vace_attention_block_class(
+            self._original_block_class
+        )
+
+        # Replace blocks with hint-injection-enabled versions
         self._replace_blocks_with_hint_injection_support()
 
-        # Add VACE-specific components
-        cross_attn_type = (
-            "t2v_cross_attn" if self.model_type == "t2v" else "i2v_cross_attn"
-        )
-
-        # VACE blocks (parallel processing path for reference images)
-        self.vace_blocks = nn.ModuleList(
-            [
-                VaceWanAttentionBlock(
-                    cross_attn_type,
-                    self.dim,
-                    self.ffn_dim,
-                    self.num_heads,
-                    self.local_attn_size,
-                    self.sink_size,
-                    self.qk_norm,
-                    self.cross_attn_norm,
-                    self.eps,
-                    block_id=i,
-                )
-                for i in range(len(self.vace_layers))
-            ]
-        )
+        # Create VACE blocks (parallel processing path for reference images)
+        self._create_vace_blocks()
 
         # VACE patch embedding (separate encoder for reference images)
         self.vace_patch_embedding = nn.Conv3d(
@@ -87,44 +109,72 @@ class CausalVaceWanModel(nn.Module):
             stride=self.patch_size,
         )
 
-    def _replace_blocks_with_hint_injection_support(self):
-        """Replace wrapped model's blocks with BaseWanAttentionBlock to support hint injection."""
+    def _get_block_init_kwargs(self):
+        """Get initialization kwargs for creating new blocks.
+
+        Uses duck typing to determine which parameters the block class expects.
+        """
         cross_attn_type = (
             "t2v_cross_attn" if self.model_type == "t2v" else "i2v_cross_attn"
         )
 
+        # Base kwargs that all blocks should have
+        kwargs = {
+            "cross_attn_type": cross_attn_type,
+            "dim": self.dim,
+            "ffn_dim": self.ffn_dim,
+            "num_heads": self.num_heads,
+            "qk_norm": self.qk_norm,
+            "cross_attn_norm": self.cross_attn_norm,
+            "eps": self.eps,
+        }
+
+        # Add pipeline-specific kwargs based on what the original block class expects
+        import inspect
+
+        sig = inspect.signature(self._original_block_class.__init__)
+        params = sig.parameters
+
+        if "local_attn_size" in params:
+            kwargs["local_attn_size"] = self.local_attn_size
+        if "sink_size" in params:
+            kwargs["sink_size"] = self.sink_size
+        if "window_size" in params:
+            kwargs["window_size"] = self.window_size
+
+        return kwargs
+
+    def _replace_blocks_with_hint_injection_support(self):
+        """Replace blocks with BaseWanAttentionBlock to support hint injection.
+
+        Creates new block instances of the factory-generated class and copies
+        weights from the original blocks. Uses proper inheritance (not composition),
+        so state_dict paths are preserved.
+        """
         original_blocks = self.causal_wan_model.blocks
 
-        # Create new blocks with hint injection support
-        new_blocks = nn.ModuleList(
-            [
-                BaseWanAttentionBlock(
-                    cross_attn_type,
-                    self.dim,
-                    self.ffn_dim,
-                    self.num_heads,
-                    self.local_attn_size,
-                    self.sink_size,
-                    self.qk_norm,
-                    self.cross_attn_norm,
-                    self.eps,
-                    block_id=self.vace_layers_mapping[i]
-                    if i in self.vace_layers
-                    else None,
-                )
-                for i in range(self.num_layers)
-            ]
-        )
-
-        # Set new blocks to eval mode
-        new_blocks.eval()
-
-        # Move new blocks to same device/dtype as original blocks
+        # Get device and dtype from original blocks
         orig_dtype = next(original_blocks[0].parameters()).dtype
         orig_device = next(original_blocks[0].parameters()).device
+
+        # Get initialization kwargs
+        block_kwargs = self._get_block_init_kwargs()
+
+        # Create new blocks with hint injection support
+        new_blocks = nn.ModuleList()
+        for i in range(self.num_layers):
+            block_id = self.vace_layers_mapping[i] if i in self.vace_layers else None
+            new_block = self._BaseWanAttentionBlock(
+                **block_kwargs,
+                block_id=block_id,
+            )
+            new_blocks.append(new_block)
+
+        # Set to eval mode and move to correct device/dtype
+        new_blocks.eval()
         new_blocks.to(device=orig_device, dtype=orig_dtype)
 
-        # Copy weights from original blocks to new blocks
+        # Copy weights from original blocks
         for _i, (orig_block, new_block) in enumerate(
             zip(original_blocks, new_blocks, strict=False)
         ):
@@ -139,14 +189,34 @@ class CausalVaceWanModel(nn.Module):
             new_block.load_state_dict(new_state, strict=False, assign=True)
             new_block.block_id = saved_block_id
 
-        # Replace the blocks in wrapped model
+        # Replace blocks in wrapped model
         self.causal_wan_model.blocks = new_blocks
 
-        # CRITICAL: Also register blocks directly on self so that named_modules()
-        # sees them at "blocks.0", "blocks.1", etc. This ensures LoRA checkpoint
-        # keys (saved with inheritance-style paths like "blocks.0.self_attn.q")
-        # match correctly when loaded via peft.set_peft_model_state_dict().
+        # Also register blocks on self for LoRA compatibility
         self.blocks = new_blocks
+
+    def _create_vace_blocks(self):
+        """Create VACE blocks for parallel processing of reference images."""
+        # Get device and dtype from existing blocks
+        orig_dtype = next(self.blocks[0].parameters()).dtype
+        orig_device = next(self.blocks[0].parameters()).device
+
+        # Get initialization kwargs
+        block_kwargs = self._get_block_init_kwargs()
+
+        # Create VACE blocks
+        vace_blocks = nn.ModuleList()
+        for block_id in range(len(self.vace_layers)):
+            vace_block = self._VaceWanAttentionBlock(
+                **block_kwargs,
+                block_id=block_id,
+            )
+            vace_blocks.append(vace_block)
+
+        # Move to correct device/dtype
+        vace_blocks.to(device=orig_device, dtype=orig_dtype)
+
+        self.vace_blocks = vace_blocks
 
     def forward_vace(
         self,
@@ -210,7 +280,7 @@ class CausalVaceWanModel(nn.Module):
         kv_cache=None,
         crossattn_cache=None,
         current_start=0,
-        cache_start=0,
+        **block_kwargs,
     ):
         """Forward pass with optional VACE conditioning."""
         if self.model_type == "i2v":
@@ -311,7 +381,7 @@ class CausalVaceWanModel(nn.Module):
                     {
                         "kv_cache": kv_cache[block_index],
                         "current_start": current_start,
-                        "cache_start": cache_start,
+                        **block_kwargs,
                     }
                 )
                 result = torch.utils.checkpoint.checkpoint(
@@ -331,7 +401,7 @@ class CausalVaceWanModel(nn.Module):
                         "kv_cache": kv_cache[block_index],
                         "crossattn_cache": crossattn_cache[block_index],
                         "current_start": current_start,
-                        "cache_start": cache_start,
+                        **block_kwargs,
                     }
                 )
                 result = block(x, **kwargs)
