@@ -174,7 +174,27 @@ export function useStreamState() {
         ]);
 
         if (schemasResult.status === "fulfilled") {
-          setPipelineSchemas(schemasResult.value);
+          const schemas = schemasResult.value;
+          setPipelineSchemas(schemas);
+
+          // Check if the default pipeline (streamdiffusionv2) is available
+          // If not, switch to the first available pipeline
+          const availablePipelines = Object.keys(schemas.pipelines);
+          const preferredPipeline = "streamdiffusionv2";
+
+          if (
+            !availablePipelines.includes(preferredPipeline) &&
+            availablePipelines.length > 0
+          ) {
+            const firstPipelineId = availablePipelines[0] as PipelineId;
+            const firstPipelineSchema = schemas.pipelines[firstPipelineId];
+
+            setSettings(prev => ({
+              ...prev,
+              pipelineId: firstPipelineId,
+              inputMode: firstPipelineSchema.default_mode,
+            }));
+          }
         } else {
           console.error(
             "useStreamState: Failed to fetch pipeline schemas:",
