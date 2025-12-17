@@ -212,6 +212,41 @@ export function useStreamState() {
     }
   }, [pipelineSchemas, settings.pipelineId, settings.inputMode]);
 
+  // Switch to passthrough if streamdiffusionv2 is not available
+  // This handles cases where streamdiffusionv2 is the default but unavailable (e.g., no GPU)
+  useEffect(() => {
+    if (pipelineSchemas) {
+      // Only auto-switch if current pipeline is streamdiffusionv2 and it's not available
+      const streamdiffusionv2Available =
+        "streamdiffusionv2" in pipelineSchemas.pipelines;
+      const passthroughAvailable = "passthrough" in pipelineSchemas.pipelines;
+
+      if (
+        settings.pipelineId === "streamdiffusionv2" &&
+        !streamdiffusionv2Available &&
+        passthroughAvailable
+      ) {
+        const passthroughSchema = pipelineSchemas.pipelines["passthrough"];
+        const defaults = getDefaults(
+          "passthrough",
+          passthroughSchema.default_mode
+        );
+        setSettings(prev => ({
+          ...prev,
+          pipelineId: "passthrough",
+          inputMode: passthroughSchema.default_mode,
+          resolution: {
+            height: defaults.height,
+            width: defaults.width,
+          },
+          denoisingSteps: defaults.denoisingSteps,
+          noiseScale: defaults.noiseScale,
+          noiseController: defaults.noiseController,
+        }));
+      }
+    }
+  }, [pipelineSchemas, settings.pipelineId, getDefaults]);
+
   // Set recommended quantization when krea-realtime-video is selected
   // Reset to null when switching to other pipelines
   useEffect(() => {
