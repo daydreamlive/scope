@@ -17,6 +17,7 @@ import {
   getPipelineDefaultMode,
   getDefaultPromptForMode,
   pipelineRequiresReferenceImage,
+  pipelineShowsTimeline,
 } from "../data/pipelines";
 import type {
   InputMode,
@@ -31,6 +32,7 @@ import {
   uploadPersonaLiveReference,
 } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
+import { toast } from "sonner";
 
 // Delay before resetting video reinitialization flag (ms)
 // This allows useVideoSource to detect the flag change and trigger reinitialization
@@ -55,13 +57,8 @@ function buildLoRAParams(
 
 export function StreamPage() {
   // Use the stream state hook for settings management
-  const {
-    settings,
-    updateSettings,
-    getDefaults,
-    supportsNoiseControls,
-    spoutAvailable,
-  } = useStreamState();
+  const { settings, updateSettings, getDefaults, spoutAvailable } =
+    useStreamState();
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -238,6 +235,10 @@ export function StreamPage() {
   };
 
   const handlePipelineIdChange = (pipelineId: PipelineId) => {
+    console.log(
+      `[handlePipelineIdChange] Switching to pipeline: ${pipelineId}`
+    );
+
     // Stop the stream if it's currently running
     if (isStreaming) {
       stopStream();
@@ -634,6 +635,11 @@ export function StreamPage() {
     // Use override pipeline ID if provided, otherwise use current settings
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
+    // Debug: Log which pipeline is being started
+    console.log(
+      `[handleStartStream] Starting pipeline: ${pipelineIdToUse} (settings.pipelineId: ${settings.pipelineId}, override: ${overridePipelineId})`
+    );
+
     try {
       // Check if models are needed but not downloaded
       const pipelineInfo = PIPELINES[pipelineIdToUse];
@@ -642,6 +648,9 @@ export function StreamPage() {
           const status = await checkModelStatus(pipelineIdToUse);
           if (!status.downloaded) {
             // Show download dialog
+            console.log(
+              `[handleStartStream] Models not downloaded for: ${pipelineIdToUse}, showing download dialog`
+            );
             setPipelineNeedsModels(pipelineIdToUse);
             setShowDownloadDialog(true);
             return false; // Stream did not start
@@ -651,9 +660,6 @@ export function StreamPage() {
           // Continue anyway if check fails
         }
       }
-
-      // Always load pipeline with current parameters - backend will handle the rest
-      console.log(`Loading ${pipelineIdToUse} pipeline...`);
 
       // Determine current input mode
       const currentMode =
@@ -723,9 +729,11 @@ export function StreamPage() {
       } else if (pipelineIdToUse === "personalive" && resolution) {
         // PersonaLive requires a reference image
         if (!referenceImage) {
-          console.error(
-            "PersonaLive requires a reference image. Please upload one first."
-          );
+          toast.error("Reference Image Required", {
+            description:
+              "Please upload a reference portrait image before starting PersonaLive.",
+            duration: 5000,
+          });
           return false;
         }
         loadParams = {
@@ -929,15 +937,27 @@ export function StreamPage() {
               isPlaying={!settings.paused}
               isDownloading={isDownloading}
               onPlayPauseToggle={() => {
-                // Use timeline's play/pause handler instead of direct video toggle
-                if (timelinePlayPauseRef.current) {
+                // For pipelines with timeline, use timeline's play/pause handler
+                // For pipelines without timeline (PersonaLive, Passthrough), toggle directly
+                if (
+                  pipelineShowsTimeline(settings.pipelineId) &&
+                  timelinePlayPauseRef.current
+                ) {
                   timelinePlayPauseRef.current();
+                } else {
+                  handlePlayPauseToggle();
                 }
               }}
               onStartStream={() => {
-                // Use timeline's play/pause handler to start stream
-                if (timelinePlayPauseRef.current) {
+                // For pipelines with timeline, use timeline's play/pause handler
+                // For pipelines without timeline (PersonaLive, Passthrough), start directly
+                if (
+                  pipelineShowsTimeline(settings.pipelineId) &&
+                  timelinePlayPauseRef.current
+                ) {
                   timelinePlayPauseRef.current();
+                } else {
+                  handleStartStream();
                 }
               }}
               onVideoPlaying={() => {
@@ -949,111 +969,113 @@ export function StreamPage() {
               }}
             />
           </div>
-          {/* Timeline area - compact, always visible */}
-          <div className="flex-shrink-0 mt-2">
-            <PromptInputWithTimeline
-              currentPrompt={promptItems[0]?.text || ""}
-              currentPromptItems={promptItems}
-              transitionSteps={transitionSteps}
-              temporalInterpolationMethod={temporalInterpolationMethod}
-              onPromptSubmit={text => {
-                // Update the left panel's prompt state to reflect current timeline prompt
-                const prompts = [{ text, weight: 100 }];
-                setPromptItems(prompts);
+          {/* Timeline area - only show for pipelines that support text prompts */}
+          {pipelineShowsTimeline(settings.pipelineId) && (
+            <div className="flex-shrink-0 mt-2">
+              <PromptInputWithTimeline
+                currentPrompt={promptItems[0]?.text || ""}
+                currentPromptItems={promptItems}
+                transitionSteps={transitionSteps}
+                temporalInterpolationMethod={temporalInterpolationMethod}
+                onPromptSubmit={text => {
+                  // Update the left panel's prompt state to reflect current timeline prompt
+                  const prompts = [{ text, weight: 100 }];
+                  setPromptItems(prompts);
 
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && transitionSteps > 0) {
-                  sendParameterUpdate({
-                    transition: {
-                      target_prompts: prompts,
-                      num_steps: transitionSteps,
-                      temporal_interpolation_method:
-                        temporalInterpolationMethod,
-                    },
-                  });
-                } else {
-                  // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
-                }
-              }}
-              onPromptItemsSubmit={(
-                prompts,
-                blockTransitionSteps,
-                blockTemporalInterpolationMethod
-              ) => {
-                // Update the left panel's prompt state to reflect current timeline prompt blend
-                setPromptItems(prompts);
+                  // Send to backend - use transition if streaming and transition steps > 0
+                  if (isStreaming && transitionSteps > 0) {
+                    sendParameterUpdate({
+                      transition: {
+                        target_prompts: prompts,
+                        num_steps: transitionSteps,
+                        temporal_interpolation_method:
+                          temporalInterpolationMethod,
+                      },
+                    });
+                  } else {
+                    // Send direct prompts without transition
+                    sendParameterUpdate({
+                      prompts,
+                      prompt_interpolation_method: interpolationMethod,
+                      denoising_step_list: settings.denoisingSteps || [
+                        700, 500,
+                      ],
+                    });
+                  }
+                }}
+                onPromptItemsSubmit={(
+                  prompts,
+                  blockTransitionSteps,
+                  blockTemporalInterpolationMethod
+                ) => {
+                  // Update the left panel's prompt state to reflect current timeline prompt blend
+                  setPromptItems(prompts);
 
-                // Use transition params from block if provided, otherwise use global settings
-                const effectiveTransitionSteps =
-                  blockTransitionSteps ?? transitionSteps;
-                const effectiveTemporalInterpolationMethod =
-                  blockTemporalInterpolationMethod ??
-                  temporalInterpolationMethod;
+                  // Use transition params from block if provided, otherwise use global settings
+                  const effectiveTransitionSteps =
+                    blockTransitionSteps ?? transitionSteps;
+                  const effectiveTemporalInterpolationMethod =
+                    blockTemporalInterpolationMethod ??
+                    temporalInterpolationMethod;
 
-                // Update the left panel's transition settings to reflect current block's values
-                if (blockTransitionSteps !== undefined) {
-                  setTransitionSteps(blockTransitionSteps);
-                }
-                if (blockTemporalInterpolationMethod !== undefined) {
-                  setTemporalInterpolationMethod(
-                    blockTemporalInterpolationMethod
-                  );
-                }
+                  // Update the left panel's transition settings to reflect current block's values
+                  if (blockTransitionSteps !== undefined) {
+                    setTransitionSteps(blockTransitionSteps);
+                  }
+                  if (blockTemporalInterpolationMethod !== undefined) {
+                    setTemporalInterpolationMethod(
+                      blockTemporalInterpolationMethod
+                    );
+                  }
 
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && effectiveTransitionSteps > 0) {
-                  sendParameterUpdate({
-                    transition: {
-                      target_prompts: prompts,
-                      num_steps: effectiveTransitionSteps,
-                      temporal_interpolation_method:
-                        effectiveTemporalInterpolationMethod,
-                    },
-                  });
-                } else {
-                  // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
+                  // Send to backend - use transition if streaming and transition steps > 0
+                  if (isStreaming && effectiveTransitionSteps > 0) {
+                    sendParameterUpdate({
+                      transition: {
+                        target_prompts: prompts,
+                        num_steps: effectiveTransitionSteps,
+                        temporal_interpolation_method:
+                          effectiveTemporalInterpolationMethod,
+                      },
+                    });
+                  } else {
+                    // Send direct prompts without transition
+                    sendParameterUpdate({
+                      prompts,
+                      prompt_interpolation_method: interpolationMethod,
+                      denoising_step_list: settings.denoisingSteps || [
+                        700, 500,
+                      ],
+                    });
+                  }
+                }}
+                disabled={
+                  isPipelineLoading || isConnecting || showDownloadDialog
                 }
-              }}
-              disabled={
-                settings.pipelineId === "passthrough" ||
-                settings.pipelineId === "personalive" ||
-                isPipelineLoading ||
-                isConnecting ||
-                showDownloadDialog
-              }
-              isStreaming={isStreaming}
-              isVideoPaused={settings.paused}
-              timelineRef={timelineRef}
-              onLiveStateChange={setIsLive}
-              onLivePromptSubmit={handleLivePromptSubmit}
-              onDisconnect={stopStream}
-              onStartStream={handleStartStream}
-              onVideoPlayPauseToggle={handlePlayPauseToggle}
-              onPromptEdit={handleTimelinePromptEdit}
-              isCollapsed={isTimelineCollapsed}
-              onCollapseToggle={setIsTimelineCollapsed}
-              externalSelectedPromptId={externalSelectedPromptId}
-              settings={settings}
-              onSettingsImport={updateSettings}
-              onPlayPauseRef={timelinePlayPauseRef}
-              onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
-              onResetCache={handleResetCache}
-              onTimelinePromptsChange={handleTimelinePromptsChange}
-              onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
-              onTimelinePlayingChange={handleTimelinePlayingChange}
-              isDownloading={isDownloading}
-            />
-          </div>
+                isStreaming={isStreaming}
+                isVideoPaused={settings.paused}
+                timelineRef={timelineRef}
+                onLiveStateChange={setIsLive}
+                onLivePromptSubmit={handleLivePromptSubmit}
+                onDisconnect={stopStream}
+                onStartStream={handleStartStream}
+                onVideoPlayPauseToggle={handlePlayPauseToggle}
+                onPromptEdit={handleTimelinePromptEdit}
+                isCollapsed={isTimelineCollapsed}
+                onCollapseToggle={setIsTimelineCollapsed}
+                externalSelectedPromptId={externalSelectedPromptId}
+                settings={settings}
+                onSettingsImport={updateSettings}
+                onPlayPauseRef={timelinePlayPauseRef}
+                onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
+                onResetCache={handleResetCache}
+                onTimelinePromptsChange={handleTimelinePromptsChange}
+                onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
+                onTimelinePlayingChange={handleTimelinePlayingChange}
+                isDownloading={isDownloading}
+              />
+            </div>
+          )}
         </div>
 
         {/* Right Panel - Settings */}
@@ -1104,7 +1126,6 @@ export function StreamPage() {
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
-            supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}

@@ -76,6 +76,20 @@ export interface SettingsState {
   };
 }
 
+// UI capability flags - controls which UI elements are shown for each pipeline
+export interface PipelineUICapabilities {
+  showTimeline?: boolean; // Show prompt timeline (default: true)
+  showPromptInput?: boolean; // Show prompt input controls (default: true)
+  showResolutionControl?: boolean; // Show resolution width/height controls
+  showSeedControl?: boolean; // Show seed control
+  showDenoisingSteps?: boolean; // Show denoising steps slider
+  showCacheManagement?: boolean; // Show cache management toggle and reset
+  showQuantization?: boolean; // Show quantization selector
+  showKvCacheAttentionBias?: boolean; // Show KV cache attention bias slider (krea-realtime-video)
+  showNoiseControls?: boolean; // Show noise scale and controller (video mode)
+  canChangeReferenceWhileStreaming?: boolean; // Allow changing reference image during stream
+}
+
 export interface PipelineInfo {
   name: string;
   about: string;
@@ -89,8 +103,12 @@ export interface PipelineInfo {
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
   requiresReferenceImage?: boolean; // Whether this pipeline requires a reference image (e.g. PersonaLive)
+  referenceImageDescription?: string; // Description of what the reference image is for
 
   // Multi-mode support
   supportedModes: InputMode[];
   defaultMode: InputMode;
+
+  // UI capabilities - controls which settings/controls are shown
+  ui?: PipelineUICapabilities;
 }

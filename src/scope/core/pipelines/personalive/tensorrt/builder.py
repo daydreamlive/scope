@@ -241,3 +241,4 @@ def is_engine_available(model_dir: Path, height: int = 512, width: int = 512) ->
     """
     engine_path = get_engine_path(model_dir, height, width)
     return engine_path.exists()
+

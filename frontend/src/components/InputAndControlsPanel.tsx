@@ -12,10 +12,22 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Upload } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import type { InputMode } from "../types";
-import { pipelineIsMultiMode, pipelineRequiresReferenceImage } from "../data/pipelines";
+import {
+  pipelineIsMultiMode,
+  pipelineRequiresReferenceImage,
+  pipelineShowsPromptInput,
+  pipelineCanChangeReferenceWhileStreaming,
+  getPipelineReferenceImageDescription,
+} from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
@@ -192,7 +204,7 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* Reference Image upload - only show for PersonaLive */}
+        {/* Reference Image upload - only show for pipelines that require it */}
         {needsReferenceImage && (
           <div>
             <h3 className="text-sm font-medium mb-2">Reference Portrait</h3>
@@ -215,18 +227,42 @@ export function InputAndControlsPanel({
                 onChange={handleReferenceImageUpload}
                 className="hidden"
                 id="reference-image-upload"
-                disabled={isStreaming || isConnecting || isUploadingReference}
+                disabled={
+                  isUploadingReference ||
+                  ((isStreaming || isConnecting) &&
+                    !pipelineCanChangeReferenceWhileStreaming(pipelineId))
+                }
               />
-              <label
-                htmlFor="reference-image-upload"
-                className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                  isStreaming || isConnecting || isUploadingReference
-                    ? "opacity-50 cursor-not-allowed"
-                    : "hover:bg-black/70 cursor-pointer"
-                }`}
-              >
-                <Upload className="h-4 w-4 text-white" />
-              </label>
+              {/* Upload button with tooltip when disabled during streaming */}
+              {(isStreaming || isConnecting) &&
+              !pipelineCanChangeReferenceWhileStreaming(pipelineId) ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="absolute bottom-2 right-2 p-2 rounded-full bg-black/50 opacity-50 cursor-not-allowed">
+                        <Upload className="h-4 w-4 text-white" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="max-w-xs">
+                      <p className="text-xs">
+                        Reference image is processed when the pipeline loads.
+                        Stop the stream to change it.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <label
+                  htmlFor="reference-image-upload"
+                  className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                    isUploadingReference
+                      ? "opacity-50 cursor-not-allowed"
+                      : "hover:bg-black/70 cursor-pointer"
+                  }`}
+                >
+                  <Upload className="h-4 w-4 text-white" />
+                </label>
+              )}
             </div>
             {isUploadingReference && (
               <p className="text-xs text-muted-foreground mt-1">
@@ -235,8 +271,8 @@ export function InputAndControlsPanel({
             )}
             {!referenceImageUrl && (
               <p className="text-xs text-muted-foreground mt-1">
-                This pipeline animates this portrait using your webcam/video as the
-                driving source.
+                {getPipelineReferenceImageDescription(pipelineId) ||
+                  "This pipeline requires a reference image."}
               </p>
             )}
           </div>
@@ -352,8 +388,8 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* Prompts section - hide for PersonaLive (it uses image conditioning, not text) */}
-        {!needsReferenceImage && (
+        {/* Prompts section - only show for pipelines that support text prompts */}
+        {pipelineShowsPromptInput(pipelineId) && (
           <div>
             {(() => {
               // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
