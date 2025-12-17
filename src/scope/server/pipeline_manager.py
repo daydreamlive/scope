@@ -298,6 +298,15 @@ class PipelineManager:
                 }
             )
 
+            # Auto-detect VACE checkpoint if available
+            vace_model_path = models_dir / "Wan2.1-VACE-1.3B"
+            vace_checkpoint = vace_model_path / "diffusion_pytorch_model.safetensors"
+            if vace_checkpoint.exists():
+                config["vace_path"] = str(vace_checkpoint)
+                logger.info(
+                    f"_load_pipeline_implementation: Auto-detected VACE checkpoint at {vace_checkpoint}"
+                )
+
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
@@ -344,9 +353,10 @@ class PipelineManager:
 
             from .models_config import get_model_file_path, get_models_dir
 
+            models_dir = get_models_dir()
             config = OmegaConf.create(
                 {
-                    "model_dir": str(get_models_dir()),
+                    "model_dir": str(models_dir),
                     "generator_path": str(
                         get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
                     ),
@@ -363,6 +373,15 @@ class PipelineManager:
                     ),
                 }
             )
+
+            # Auto-detect VACE checkpoint if available
+            vace_model_path = models_dir / "Wan2.1-VACE-1.3B"
+            vace_checkpoint = vace_model_path / "diffusion_pytorch_model.safetensors"
+            if vace_checkpoint.exists():
+                config["vace_path"] = str(vace_checkpoint)
+                logger.info(
+                    f"_load_pipeline_implementation: Auto-detected VACE checkpoint at {vace_checkpoint}"
+                )
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
