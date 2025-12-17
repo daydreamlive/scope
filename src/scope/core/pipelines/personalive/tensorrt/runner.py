@@ -2,6 +2,8 @@
 
 This module provides a TensorRT engine runner that wraps the engine
 and handles inference with PyTorch tensor I/O.
+
+Uses CUDA device buffers (DeviceView) to avoid CPU-GPU memory transfers.
 """
 
 import logging
@@ -15,12 +17,20 @@ logger = logging.getLogger(__name__)
 
 # Check for TensorRT availability
 TRT_AVAILABLE = False
+CUDA_BUFFERS_AVAILABLE = False
 try:
     import tensorrt as trt
     from polygraphy.backend.common import BytesFromPath
     from polygraphy.backend.trt import EngineFromBytes, TrtRunner
 
     TRT_AVAILABLE = True
+
+    # Check for CUDA buffer support (polygraphy >= 0.47)
+    try:
+        from polygraphy.cuda import DeviceView
+        CUDA_BUFFERS_AVAILABLE = True
+    except ImportError:
+        logger.warning("polygraphy.cuda.DeviceView not available - using numpy path (slower)")
 except ImportError:
     pass
 
@@ -74,6 +84,11 @@ class TRTRunner:
         logger.info(f"Loading TensorRT engine from {engine_path}")
         self._load_engine()
 
+        if CUDA_BUFFERS_AVAILABLE:
+            logger.info("TensorRT runner using CUDA device buffers (zero-copy)")
+        else:
+            logger.warning("TensorRT runner using numpy path (slower - install polygraphy>=0.47 for zero-copy)")
+
     def _load_engine(self):
         """Load the TensorRT engine."""
         # Load engine bytes
@@ -92,15 +107,26 @@ class TRTRunner:
         """Pre-fill constant inputs that don't change per frame.
 
         These inputs will be automatically included in every inference call.
+        When CUDA buffers are available, keeps tensors on GPU for zero-copy inference.
 
         Args:
             **inputs: Named inputs as PyTorch tensors or numpy arrays.
         """
         for name, tensor in inputs.items():
-            if isinstance(tensor, torch.Tensor):
-                # Convert to numpy, ensuring contiguous memory
-                tensor = tensor.detach().cpu().numpy()
-            self._prefilled[name] = np.ascontiguousarray(tensor)
+            if CUDA_BUFFERS_AVAILABLE:
+                # Keep as torch tensor on GPU for zero-copy inference
+                if isinstance(tensor, np.ndarray):
+                    tensor = torch.from_numpy(tensor).to(self.device).contiguous()
+                elif isinstance(tensor, torch.Tensor):
+                    if not tensor.is_cuda:
+                        tensor = tensor.to(self.device)
+                    tensor = tensor.contiguous()
+                self._prefilled[name] = tensor
+            else:
+                # Fallback to numpy for compatibility
+                if isinstance(tensor, torch.Tensor):
+                    tensor = tensor.detach().cpu().numpy()
+                self._prefilled[name] = np.ascontiguousarray(tensor)
 
     def bind(self, output_to_input: dict[str, str]):
         """Bind output tensors to input tensors for memory reuse.
@@ -117,6 +143,46 @@ class TRTRunner:
         """Clear all pre-filled inputs."""
         self._prefilled.clear()
 
+    def _tensor_to_device_view(self, tensor: torch.Tensor):
+        """Convert PyTorch tensor to polygraphy DeviceView (zero-copy).
+
+        Args:
+            tensor: PyTorch CUDA tensor (must be contiguous).
+
+        Returns:
+            DeviceView pointing to the tensor's GPU memory.
+        """
+        if not CUDA_BUFFERS_AVAILABLE:
+            raise RuntimeError("DeviceView not available")
+
+        # Ensure tensor is contiguous and on CUDA
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+
+        if not tensor.is_cuda:
+            tensor = tensor.cuda()
+
+        # Map PyTorch dtype to numpy dtype properly
+        dtype_map = {
+            torch.float16: np.float16,
+            torch.float32: np.float32,
+            torch.float64: np.float64,
+            torch.int32: np.int32,
+            torch.int64: np.int64,
+            torch.int16: np.int16,
+            torch.int8: np.int8,
+            torch.uint8: np.uint8,
+            torch.bool: np.bool_,
+        }
+        np_dtype = dtype_map.get(tensor.dtype, np.float32)
+
+        # Create DeviceView from tensor's data pointer
+        return DeviceView(
+            ptr=tensor.data_ptr(),
+            shape=tuple(tensor.shape),
+            dtype=np_dtype,
+        )
+
     def __call__(
         self,
         output_names: list[str] | None = None,
@@ -124,6 +190,8 @@ class TRTRunner:
         **inputs: torch.Tensor | np.ndarray,
     ) -> dict[str, torch.Tensor | np.ndarray]:
         """Run inference on the TensorRT engine.
+
+        Uses CUDA device buffers when available to avoid CPU-GPU memory transfers.
 
         Args:
             output_names: List of output names to return. If None, returns all outputs.
@@ -136,8 +204,104 @@ class TRTRunner:
         if self._runner is None:
             raise RuntimeError("TensorRT runner not initialized")
 
+        # Use CUDA device buffers if available (zero-copy path)
+        if CUDA_BUFFERS_AVAILABLE and return_torch:
+            return self._call_cuda_buffers(output_names, **inputs)
+
+        # Fallback to numpy path (has CPU-GPU copy overhead)
+        return self._call_numpy(output_names, return_torch, **inputs)
+
+    def _call_cuda_buffers(
+        self,
+        output_names: list[str] | None = None,
+        **inputs: torch.Tensor | np.ndarray,
+    ) -> dict[str, torch.Tensor]:
+        """Run inference using CUDA device buffers (zero-copy).
+
+        Args:
+            output_names: List of output names to return.
+            **inputs: Named inputs as PyTorch tensors.
+
+        Returns:
+            Dictionary mapping output names to PyTorch tensors.
+        """
+        # Prepare feed dict with DeviceView wrappers
+        feed_dict = {}
+
+        # Add prefilled values (convert from numpy to DeviceView if needed)
+        for name, arr in self._prefilled.items():
+            if isinstance(arr, np.ndarray):
+                # Convert numpy prefill to torch tensor (one-time cost)
+                tensor = torch.from_numpy(arr).to(self.device).contiguous()
+                self._prefilled[name] = tensor
+                feed_dict[name] = self._tensor_to_device_view(tensor)
+            elif isinstance(arr, torch.Tensor):
+                feed_dict[name] = self._tensor_to_device_view(arr)
+            else:
+                # Already a DeviceView or compatible
+                feed_dict[name] = arr
+
+        # Add current inputs
+        for name, tensor in inputs.items():
+            if isinstance(tensor, np.ndarray):
+                tensor = torch.from_numpy(tensor).to(self.device)
+            if isinstance(tensor, torch.Tensor):
+                if not tensor.is_cuda:
+                    tensor = tensor.to(self.device)
+                feed_dict[name] = self._tensor_to_device_view(tensor.contiguous())
+
+        # Run inference
+        outputs = self._runner.infer(feed_dict=feed_dict)
+
+        # Convert outputs to PyTorch tensors (they come back as DeviceView or numpy)
+        result = {}
+        for name, output in outputs.items():
+            if hasattr(output, 'numpy'):
+                # DeviceView - create tensor from same memory
+                arr = output.numpy()
+                result[name] = torch.from_numpy(arr).to(self.device)
+            elif isinstance(output, np.ndarray):
+                result[name] = torch.from_numpy(output).to(self.device)
+            elif isinstance(output, torch.Tensor):
+                result[name] = output
+            else:
+                result[name] = output
+
+        # Update prefilled values with bound outputs
+        for output_name, input_name in self._output_bindings.items():
+            if output_name in result:
+                self._prefilled[input_name] = result[output_name]
+
+        # Filter outputs if requested
+        if output_names is not None:
+            result = {k: v for k, v in result.items() if k in output_names}
+
+        return result
+
+    def _call_numpy(
+        self,
+        output_names: list[str] | None = None,
+        return_torch: bool = True,
+        **inputs: torch.Tensor | np.ndarray,
+    ) -> dict[str, torch.Tensor | np.ndarray]:
+        """Run inference using numpy arrays (has CPU-GPU copy overhead).
+
+        Args:
+            output_names: List of output names to return.
+            return_torch: If True, return PyTorch tensors.
+            **inputs: Named inputs as PyTorch tensors or numpy arrays.
+
+        Returns:
+            Dictionary mapping output names to tensors/arrays.
+        """
         # Prepare feed dict with prefilled values
-        feed_dict = dict(self._prefilled)
+        feed_dict = {}
+
+        # Add prefilled numpy values
+        for name, arr in self._prefilled.items():
+            if isinstance(arr, torch.Tensor):
+                arr = arr.detach().cpu().numpy()
+            feed_dict[name] = np.ascontiguousarray(arr)
 
         # Add current inputs
         for name, tensor in inputs.items():
@@ -148,14 +312,15 @@ class TRTRunner:
         # Run inference
         outputs = self._runner.infer(feed_dict=feed_dict)
 
-        # Filter outputs if requested
-        if output_names is not None:
-            outputs = {k: v for k, v in outputs.items() if k in output_names}
-
-        # Update prefilled values with bound outputs
+        # Update prefilled values with bound outputs BEFORE filtering
+        # This ensures recurrent states (latents->sample) are properly updated
         for output_name, input_name in self._output_bindings.items():
             if output_name in outputs:
                 self._prefilled[input_name] = outputs[output_name]
+
+        # Filter outputs if requested (after bindings are applied)
+        if output_names is not None:
+            outputs = {k: v for k, v in outputs.items() if k in output_names}
 
         # Convert to PyTorch if requested
         if return_torch:

@@ -10,7 +10,8 @@ Supports optional TensorRT acceleration when installed:
 
 import logging
 import time
-from collections import deque
+from collections import defaultdict, deque
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,11 +42,61 @@ from .modules import (
     get_boxes,
 )
 
+
+# Profiling utilities
+_profiling_enabled = False
+_profiling_timings: dict[str, list[float]] = defaultdict(list)
+
+
+def enable_profiling():
+    """Enable pipeline profiling."""
+    global _profiling_enabled
+    _profiling_enabled = True
+    _profiling_timings.clear()
+
+
+def disable_profiling():
+    """Disable pipeline profiling."""
+    global _profiling_enabled
+    _profiling_enabled = False
+
+
+def reset_profiling():
+    """Reset profiling timings."""
+    _profiling_timings.clear()
+
+
+def get_profiling_timings() -> dict[str, list[float]]:
+    """Get profiling timings dictionary."""
+    return dict(_profiling_timings)
+
+
+@contextmanager
+def _profile_stage(name: str):
+    """Context manager to profile a pipeline stage."""
+    if not _profiling_enabled:
+        yield
+        return
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    start = time.perf_counter()
+    yield
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    elapsed = time.perf_counter() - start
+    _profiling_timings[name].append(elapsed)
+
 # TensorRT support (optional)
 try:
-    from .tensorrt import TRT_AVAILABLE, TRTRunner, get_engine_path
+    from .tensorrt import TRT_AVAILABLE, TRTRunner, get_engine_path, PYCUDA_AVAILABLE
+
+    # Import EngineModel if pycuda is available (best performance)
+    if PYCUDA_AVAILABLE:
+        from .tensorrt import EngineModel
+    else:
+        EngineModel = None
 except ImportError:
     TRT_AVAILABLE = False
+    PYCUDA_AVAILABLE = False
+    EngineModel = None
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -272,6 +323,7 @@ class PersonaLivePipeline(Pipeline):
         # TensorRT support (optional)
         self.use_tensorrt = False
         self.trt_runner = None
+        self._use_engine_model = False  # True if using pycuda EngineModel
         self._model_dir = model_dir  # Store for TensorRT path lookup
 
         if TRT_AVAILABLE:
@@ -304,9 +356,33 @@ class PersonaLivePipeline(Pipeline):
             )
             return
 
+        device_index = self.device.index if self.device.index is not None else 0
+
+        # Prefer EngineModel (pycuda-based) for best performance
+        if EngineModel is not None:
+            try:
+                self.trt_runner = EngineModel(engine_path, device_int=device_index)
+                self._use_engine_model = True
+
+                # Setup output-to-input bindings for recurrent state (zero-copy)
+                self.trt_runner.bind({
+                    "motion_hidden_states_out": "motion_hidden_states",
+                    "pose_cond_fea_out": "pose_cond_fea",
+                    "latents": "sample",
+                })
+
+                self.use_tensorrt = True
+                logger.info(f"TensorRT engine loaded with pycuda (EngineModel) from {engine_path}")
+                return
+
+            except Exception as e:
+                logger.warning(f"Failed to load EngineModel: {e}")
+                logger.info("Falling back to polygraphy TRTRunner")
+
+        # Fall back to TRTRunner (polygraphy-based)
         try:
-            device_index = self.device.index if self.device.index is not None else 0
             self.trt_runner = TRTRunner(engine_path, device=self.device)
+            self._use_engine_model = False
 
             # Setup output-to-input bindings for recurrent state
             self.trt_runner.bind({
@@ -316,13 +392,14 @@ class PersonaLivePipeline(Pipeline):
             })
 
             self.use_tensorrt = True
-            logger.info(f"TensorRT engine loaded from {engine_path}")
+            logger.info(f"TensorRT engine loaded with polygraphy (TRTRunner) from {engine_path}")
 
         except Exception as e:
             logger.warning(f"Failed to load TensorRT engine: {e}")
             logger.warning("Falling back to PyTorch inference")
             self.trt_runner = None
             self.use_tensorrt = False
+            self._use_engine_model = False
 
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements.
@@ -441,8 +518,9 @@ class PersonaLivePipeline(Pipeline):
             reference_hidden_states = self.reference_control_writer.output()
             self._reference_hidden_states = reference_hidden_states
 
-            # Prefill TensorRT runner with constant inputs
-            self.trt_runner.clear_prefill()
+            # Clear previous prefill values (TRTRunner only - EngineModel persists buffers)
+            if hasattr(self.trt_runner, 'clear_prefill'):
+                self.trt_runner.clear_prefill()
             self.trt_runner.prefill(encoder_hidden_states=self.encoder_hidden_states)
 
             # Prefill reference hidden states
@@ -487,7 +565,7 @@ class PersonaLivePipeline(Pipeline):
             r = (i + 1) * self.temporal_window_size
             self.latents_pile.append(noisy_latents_first[:, :, l:r])
 
-        # For TensorRT, also prefill initial latents
+        # For TensorRT, also prefill initial latents (using correct input name 'sample')
         if self.use_tensorrt:
             sample = torch.cat(list(self.latents_pile), dim=2)
             # Add placeholder for new latents
@@ -497,7 +575,7 @@ class PersonaLivePipeline(Pipeline):
             noise = torch.randn_like(new_latents)
             new_latents = self.scheduler.add_noise(new_latents, noise, self.timesteps[-1:])
             sample = torch.cat([sample, new_latents], dim=2)
-            self.trt_runner.prefill(latents=sample)
+            self.trt_runner.prefill(sample=sample)  # Use 'sample' (input name), not 'latents' (output name)
 
         self.reference_fused = True
         logger.info("Reference image fused successfully")
@@ -584,133 +662,162 @@ class PersonaLivePipeline(Pipeline):
         temporal_window_size = self.temporal_window_size
         temporal_adaptive_step = self.temporal_adaptive_step
 
-        # Reshape from (B, C, T, H, W) to (T, C, H, W) for processing
-        if images.dim() == 5:
-            images = images.squeeze(0).permute(1, 0, 2, 3)
+        # Input preprocessing
+        with _profile_stage("input_preprocessing"):
+            # Reshape from (B, C, T, H, W) to (T, C, H, W) for processing
+            if images.dim() == 5:
+                images = images.squeeze(0).permute(1, 0, 2, 3)
 
-        num_frames = images.shape[0]
-        if num_frames != temporal_window_size:
-            images = images[-temporal_window_size:]
+            num_frames = images.shape[0]
+            if num_frames != temporal_window_size:
+                images = images[-temporal_window_size:]
 
-        if images.min() < 0:
-            images = images / 2 + 0.5
-        images = images.clamp(0, 1)
+            if images.min() < 0:
+                images = images / 2 + 0.5
+            images = images.clamp(0, 1)
 
-        # Get keypoints using pose encoder (still PyTorch)
-        tgt_cond_tensor = self._fast_resize(images, 256, 256).clamp(0, 1)
+        # Pose encoding (keypoint extraction) - this is the FAN/MediaPipe step
+        with _profile_stage("pose_encoding"):
+            tgt_cond_tensor = self._fast_resize(images, 256, 256).clamp(0, 1)
 
+            if self.first_frame:
+                mot_bbox_param, kps_ref, kps_frame1, kps_dri = self.pose_encoder.interpolate_kps_online(
+                    self.ref_cond_tensor, tgt_cond_tensor, num_interp=12 + 1
+                )
+                self.kps_ref = kps_ref
+                self.kps_frame1 = kps_frame1
+            else:
+                mot_bbox_param, kps_dri = self.pose_encoder.get_kps(
+                    self.kps_ref, self.kps_frame1, tgt_cond_tensor
+                )
+
+        # Keypoint drawing
+        with _profile_stage("keypoint_drawing"):
+            keypoints = draw_keypoints(mot_bbox_param, device=device)
+            boxes = get_boxes(kps_dri)
+            keypoints = rearrange(keypoints.unsqueeze(2), 'f c b h w -> b c f h w')
+            keypoints = keypoints.to(device=device, dtype=self.dtype)
+
+        # Face cropping for motion input
+        with _profile_stage("face_cropping"):
+            if self.first_frame:
+                ref_box = get_boxes(mot_bbox_param[:1])
+                ref_face = self._crop_face_tensor(self.ref_image_tensor, ref_box[0])
+                motion_face = [ref_face]
+                for i, frame in enumerate(images):
+                    motion_face.append(self._crop_face_tensor(frame, boxes[i]))
+                pose_cond_tensor = torch.cat(motion_face, dim=0).transpose(0, 1)
+                pose_cond_tensor = pose_cond_tensor.unsqueeze(0)
+            else:
+                motion_face = []
+                for i, frame in enumerate(images):
+                    motion_face.append(self._crop_face_tensor(frame, boxes[i]))
+
+        # First frame initialization (motion encoder + pose guider + TRT prefill)
         if self.first_frame:
-            mot_bbox_param, kps_ref, kps_frame1, kps_dri = self.pose_encoder.interpolate_kps_online(
-                self.ref_cond_tensor, tgt_cond_tensor, num_interp=12 + 1
-            )
-            self.kps_ref = kps_ref
-            self.kps_frame1 = kps_frame1
+            with _profile_stage("first_frame_init"):
+                # For first frame, compute initial states using PyTorch motion encoder
+                motion_hidden_states = self.motion_encoder(pose_cond_tensor)
+                ref_motion = motion_hidden_states[:, :1]
+                dri_motion = motion_hidden_states[:, 1:]
+
+                init_motion_hidden_states = self._interpolate_tensors(
+                    ref_motion, dri_motion[:, :1], num=12 + 1
+                )[:, :-1]
+
+                # Compute initial pose features using PyTorch pose guider
+                pose_fea = self.pose_guider(keypoints)
+
+                # Prefill TensorRT with initial motion and pose states
+                self.trt_runner.prefill(
+                    motion_hidden_states=init_motion_hidden_states,
+                    pose_cond_fea=pose_fea[:, :, :temporal_window_size * (temporal_adaptive_step - 1)],
+                )
+
+                self.motion_bank = ref_motion
+                self.first_frame = False
+
+                # Prepare TensorRT inputs
+                pose = keypoints[:, :, -temporal_window_size:]
+                motion = torch.cat(motion_face[1:], dim=0).transpose(0, 1).unsqueeze(0)
         else:
-            mot_bbox_param, kps_dri = self.pose_encoder.get_kps(
-                self.kps_ref, self.kps_frame1, tgt_cond_tensor
+            with _profile_stage("motion_preparation"):
+                motion = torch.cat(motion_face, dim=0).transpose(0, 1).unsqueeze(0)
+                pose = keypoints
+
+        # Prepare noise
+        with _profile_stage("noise_generation"):
+            new_noise = torch.randn(
+                batch_size, 4, temporal_window_size,
+                self.height // 8, self.width // 8,
+                device=device, dtype=self.dtype
             )
 
-        keypoints = draw_keypoints(mot_bbox_param, device=device)
-        boxes = get_boxes(kps_dri)
-        keypoints = rearrange(keypoints.unsqueeze(2), 'f c b h w -> b c f h w')
-        keypoints = keypoints.to(device=device, dtype=self.dtype)
-
-        # Prepare motion input (face crops)
-        if self.first_frame:
-            ref_box = get_boxes(mot_bbox_param[:1])
-            ref_face = self._crop_face_tensor(self.ref_image_tensor, ref_box[0])
-            motion_face = [ref_face]
-            for i, frame in enumerate(images):
-                motion_face.append(self._crop_face_tensor(frame, boxes[i]))
-            pose_cond_tensor = torch.cat(motion_face, dim=0).transpose(0, 1)
-            pose_cond_tensor = pose_cond_tensor.unsqueeze(0)
-
-            # For first frame, compute initial states using PyTorch motion encoder
-            motion_hidden_states = self.motion_encoder(pose_cond_tensor)
-            ref_motion = motion_hidden_states[:, :1]
-            dri_motion = motion_hidden_states[:, 1:]
-
-            init_motion_hidden_states = self._interpolate_tensors(
-                ref_motion, dri_motion[:, :1], num=12 + 1
-            )[:, :-1]
-
-            # Compute initial pose features using PyTorch pose guider
-            pose_fea = self.pose_guider(keypoints)
-
-            # Prefill TensorRT with initial states
-            self.trt_runner.prefill(
-                motion_hidden_states_out=init_motion_hidden_states,
-                pose_cond_fea_out=pose_fea[:, :, :temporal_window_size * (temporal_adaptive_step - 1)],
-            )
-
-            self.motion_bank = ref_motion
-            self.first_frame = False
-
-            # Prepare TensorRT inputs
-            pose = keypoints[:, :, -temporal_window_size:]
-            motion = dri_motion.transpose(1, 2).unsqueeze(0)  # Reshape for TRT
-        else:
-            motion_face = []
-            for i, frame in enumerate(images):
-                motion_face.append(self._crop_face_tensor(frame, boxes[i]))
-            motion = torch.cat(motion_face, dim=0).transpose(0, 1).unsqueeze(0)
-            pose = keypoints
-
-        # Prepare new noise for next iteration
-        new_noise = torch.randn(
-            batch_size, 4, temporal_window_size,
-            self.height // 8, self.width // 8,
-            device=device, dtype=self.dtype
-        )
-
-        # Run TensorRT inference
-        outputs = self.trt_runner(
-            output_names=["pred_video", "motion_out", "latent_first"],
-            return_torch=True,
-            pose=pose,
-            motion=motion.to(self.dtype),
-            new_noise=new_noise,
-        )
+        # TensorRT inference (includes motion_encoder, pose_guider, denoising_unet, vae_decode)
+        with _profile_stage("tensorrt_inference"):
+            # EngineModel and TRTRunner have slightly different APIs
+            if self._use_engine_model:
+                outputs = self.trt_runner(
+                    output_names=["pred_video", "motion_out", "latent_first"],
+                    return_torch=True,
+                    pose=pose,
+                    motion=motion.to(self.dtype),
+                    new_noise=new_noise,
+                )
+            else:
+                outputs = self.trt_runner(
+                    output_list=["pred_video", "motion_out", "latent_first"],
+                    return_tensor=True,
+                    pose=pose,
+                    motion=motion.to(self.dtype),
+                    new_noise=new_noise,
+                )
 
         video = outputs["pred_video"]
         motion_out = outputs.get("motion_out")
 
         # Keyframe tracking
-        if motion_out is not None and self.count > 8:
-            idx_to_add, self.motion_bank, _ = self._calculate_dis(
-                self.motion_bank, motion_out.unsqueeze(0), threshold=17.0
-            )
+        with _profile_stage("keyframe_tracking"):
+            if motion_out is not None and self.count > 8:
+                # motion_out from TensorRT is already 4D [B, 1, ml, mc], matching motion_bank
+                idx_to_add, self.motion_bank, _ = self._calculate_dis(
+                    self.motion_bank, motion_out, threshold=17.0
+                )
 
-            if len(idx_to_add) > 0 and self.num_khf < 3:
-                # Update reference hidden states for keyframe
-                latent_first = outputs.get("latent_first")
-                if latent_first is not None:
-                    self.reference_control_writer.clear()
-                    self.reference_unet(
-                        latent_first.to(self.reference_unet.dtype),
-                        torch.zeros((batch_size,), dtype=self.dtype, device=device),
-                        encoder_hidden_states=self.encoder_hidden_states,
-                        return_dict=False,
-                    )
-                    new_ref_hidden = self.reference_control_writer.output()
+                if len(idx_to_add) > 0 and self.num_khf < 3:
+                    # Update reference hidden states for keyframe
+                    latent_first = outputs.get("latent_first")
+                    if latent_first is not None:
+                        self.reference_control_writer.clear()
+                        self.reference_unet(
+                            latent_first.to(self.reference_unet.dtype),
+                            torch.zeros((batch_size,), dtype=self.dtype, device=device),
+                            encoder_hidden_states=self.encoder_hidden_states,
+                            return_dict=False,
+                        )
+                        new_ref_hidden = self.reference_control_writer.output()
 
-                    # Concatenate new keyframe features
-                    ref_hidden_names = [
-                        "d00", "d01", "d10", "d11", "d20", "d21", "m",
-                        "u10", "u11", "u12", "u20", "u21", "u22", "u30", "u31", "u32"
-                    ]
-                    for name in ref_hidden_names:
-                        if name in self._reference_hidden_states and name in new_ref_hidden:
-                            self._reference_hidden_states[name] = torch.cat(
-                                [self._reference_hidden_states[name], new_ref_hidden[name]], dim=1
-                            )
-                            self.trt_runner.prefill(**{name: self._reference_hidden_states[name]})
+                        # Concatenate new keyframe features
+                        ref_hidden_names = [
+                            "d00", "d01", "d10", "d11", "d20", "d21", "m",
+                            "u10", "u11", "u12", "u20", "u21", "u22", "u30", "u31", "u32"
+                        ]
+                        for name in ref_hidden_names:
+                            if name in self._reference_hidden_states and name in new_ref_hidden:
+                                self._reference_hidden_states[name] = torch.cat(
+                                    [self._reference_hidden_states[name], new_ref_hidden[name]], dim=1
+                                )
+                                self.trt_runner.prefill(**{name: self._reference_hidden_states[name]})
 
-                    logger.debug("Added history keyframe (TensorRT)")
-                    self.num_khf += 1
+                        logger.debug("Added history keyframe (TensorRT)")
+                        self.num_khf += 1
+
+        # Output to CPU
+        with _profile_stage("output_transfer"):
+            video = video.cpu()
 
         self.count += 1
-        return video.cpu()
+        return video
 
     @torch.no_grad()
     def _process_frames_pytorch(self, images: torch.Tensor) -> torch.Tensor:

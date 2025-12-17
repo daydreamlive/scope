@@ -1,12 +1,15 @@
 """ONNX export utilities for PersonaLive models.
 
-This module provides utilities to export PersonaLive models to ONNX format
-for subsequent TensorRT conversion.
+Adapted from PersonaLive official implementation:
+PersonaLive/src/modeling/onnx_export.py
+
+Based on: https://github.com/NVIDIA/TensorRT/blob/main/demo/Diffusion/utilities.py
 """
 
 import gc
 import logging
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -14,50 +17,78 @@ import torch
 logger = logging.getLogger(__name__)
 
 
+@contextmanager
+def auto_cast_manager(enabled: bool):
+    """Context manager for autocast during ONNX export."""
+    if enabled:
+        with torch.inference_mode(), torch.autocast("cuda"):
+            yield
+    else:
+        yield
+
+
+@torch.no_grad()
 def export_onnx(
     model: torch.nn.Module,
     onnx_path: Path | str,
-    sample_inputs: dict[str, torch.Tensor],
-    input_names: list[str],
-    output_names: list[str],
-    dynamic_axes: dict[str, dict[int, str]] | None = None,
-    opset_version: int = 17,
+    opt_image_height: int,
+    opt_image_width: int,
+    opt_batch_size: int,
+    onnx_opset: int,
+    dtype: torch.dtype,
+    device: torch.device,
+    auto_cast: bool = True,
 ) -> None:
     """Export a PyTorch model to ONNX format.
 
+    This follows the official PersonaLive export approach.
+
     Args:
-        model: PyTorch model to export.
+        model: PyTorch model with get_sample_input, get_input_names,
+               get_output_names, get_dynamic_axes methods.
         onnx_path: Path to save the ONNX model.
-        sample_inputs: Sample inputs for tracing.
-        input_names: Names of input tensors.
-        output_names: Names of output tensors.
-        dynamic_axes: Dynamic axis specifications.
-        opset_version: ONNX opset version.
+        opt_image_height: Optimization image height.
+        opt_image_width: Optimization image width.
+        opt_batch_size: Optimization batch size.
+        onnx_opset: ONNX opset version.
+        dtype: Data type for sample inputs.
+        device: Target device.
+        auto_cast: Whether to use autocast during export.
     """
     onnx_path = Path(onnx_path)
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Exporting model to ONNX: {onnx_path}")
+    logger.info(f"  Resolution: {opt_image_height}x{opt_image_width}")
+    logger.info(f"  Batch size: {opt_batch_size}")
+    logger.info(f"  Opset: {onnx_opset}")
+    logger.info(f"  Auto cast: {auto_cast}")
 
-    # Prepare inputs as tuple in correct order
-    inputs = tuple(sample_inputs[name] for name in input_names)
+    with auto_cast_manager(auto_cast):
+        # Generate sample inputs
+        inputs = model.get_sample_input(
+            opt_batch_size, opt_image_height, opt_image_width, dtype, device
+        )
 
-    with torch.inference_mode(), torch.autocast("cuda"):
-        torch.onnx.export(
+        logger.info(f"Output names: {model.get_output_names()}")
+
+        # Export to ONNX - use torch.onnx.utils.export like official impl
+        torch.onnx.utils.export(
             model,
-            inputs,
+            inputs,  # Pass dict directly, not as tuple
             str(onnx_path),
             export_params=True,
-            opset_version=opset_version,
+            opset_version=onnx_opset,
             do_constant_folding=True,
-            input_names=input_names,
-            output_names=output_names,
-            dynamic_axes=dynamic_axes or {},
+            input_names=model.get_input_names(),
+            output_names=model.get_output_names(),
+            dynamic_axes=model.get_dynamic_axes(),
         )
 
     logger.info(f"ONNX model exported to {onnx_path}")
 
     # Clean up
+    del model
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -84,7 +115,7 @@ def optimize_onnx(
     onnx_opt_path = Path(onnx_opt_path)
     onnx_opt_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Optimizing ONNX model: {onnx_path} -> {onnx_opt_path}")
+    logger.info(f"Saving ONNX model with external data: {onnx_opt_path}")
 
     model = onnx.load(str(onnx_path))
     name = onnx_opt_path.stem
@@ -99,31 +130,4 @@ def optimize_onnx(
         size_threshold=1024,
     )
 
-    logger.info(f"Optimized ONNX model saved to {onnx_opt_path}")
-
-
-def verify_onnx(onnx_path: Path | str) -> bool:
-    """Verify ONNX model is valid.
-
-    Args:
-        onnx_path: Path to ONNX model.
-
-    Returns:
-        True if model is valid.
-    """
-    try:
-        import onnx
-    except ImportError:
-        logger.warning("onnx package not available, skipping verification")
-        return True
-
-    onnx_path = Path(onnx_path)
-
-    try:
-        model = onnx.load(str(onnx_path))
-        onnx.checker.check_model(model)
-        logger.info(f"ONNX model {onnx_path} is valid")
-        return True
-    except Exception as e:
-        logger.error(f"ONNX model verification failed: {e}")
-        return False
+    logger.info("ONNX optimization done.")
