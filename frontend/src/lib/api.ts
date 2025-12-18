@@ -302,6 +302,56 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   return result;
 };
 
+export interface ImageFileInfo {
+  name: string;
+  path: string;
+  size_mb: number;
+  folder?: string | null;
+}
+
+export interface ImageFilesResponse {
+  image_files: ImageFileInfo[];
+}
+
+export const listImageFiles = async (): Promise<ImageFilesResponse> => {
+  const response = await fetch("/api/v1/images/list", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `List image files failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export const uploadImage = async (file: File): Promise<ImageFileInfo> => {
+  const fileContent = await file.arrayBuffer();
+  const filename = encodeURIComponent(file.name);
+
+  const response = await fetch(`/api/v1/images/upload?filename=${filename}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+    },
+    body: fileContent,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Upload image failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
 // Pipeline schema types - matches output of get_schema_with_metadata()
 export interface PipelineSchemaProperty {
   type?: string;
