@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 # Disable hf_transfer to use standard download method
@@ -19,6 +20,42 @@ from .models_config import (
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def capture_download_output():
+    """
+    Configure huggingface_hub loggers to write to our log file handlers.
+
+    This doesn't redirect stdout/stderr so tqdm progress bars remain interactive.
+    Instead, it adds the same file handlers from the root logger to the HF loggers.
+    """
+    # Get file handlers from root logger (set up by app.py)
+    root_logger = logging.getLogger()
+    file_handlers = [
+        h for h in root_logger.handlers if isinstance(h, logging.FileHandler)
+    ]
+
+    # Configure HF loggers to also write to our file
+    hf_loggers = [
+        logging.getLogger("huggingface_hub"),
+        logging.getLogger("huggingface_hub.file_download"),
+    ]
+
+    # Add file handlers to HF loggers
+    for hf_logger in hf_loggers:
+        hf_logger.setLevel(logging.INFO)
+        for handler in file_handlers:
+            hf_logger.addHandler(handler)
+
+    try:
+        yield
+    finally:
+        # Remove file handlers from HF loggers
+        for hf_logger in hf_loggers:
+            for handler in file_handlers:
+                hf_logger.removeHandler(handler)
+
 
 # --- third-party libs ---
 try:
@@ -38,17 +75,19 @@ def download_hf_repo_excluding(
     Download an entire HF repo snapshot while excluding specific files.
     """
     local_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Downloading repo '{repo_id}' to: {local_dir}")
     # snapshot_download supports exclude via `ignore_patterns`
     # (patterns are glob-like, relative to the repo root)
-    snapshot_download(
-        repo_id=repo_id,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,  # copy files for portability
-        ignore_patterns=ignore_patterns,
-        # token is picked up automatically from HUGGINGFACE_TOKEN if set
-        # revision=None,  # optionally pin a commit/tag if you like
-    )
-    print(f"[OK] Downloaded repo '{repo_id}' to: {local_dir}")
+    with capture_download_output():
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=str(local_dir),
+            local_dir_use_symlinks=False,  # copy files for portability
+            ignore_patterns=ignore_patterns,
+            # token is picked up automatically from HUGGINGFACE_TOKEN if set
+            # revision=None,  # optionally pin a commit/tag if you like
+        )
+    logger.info(f"[OK] Downloaded repo '{repo_id}' to: {local_dir}")
 
 
 def download_hf_single_file(repo_id: str, filename: str, local_dir: Path) -> None:
@@ -56,13 +95,15 @@ def download_hf_single_file(repo_id: str, filename: str, local_dir: Path) -> Non
     Download a single file from an HF repo into a target folder.
     """
     local_dir.mkdir(parents=True, exist_ok=True)
-    out_path = hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
-    )
-    print(f"[OK] Downloaded file '{filename}' from '{repo_id}' to: {out_path}")
+    logger.info(f"Downloading file '{filename}' from '{repo_id}' to: {local_dir}")
+    with capture_download_output():
+        out_path = hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            local_dir=str(local_dir),
+            local_dir_use_symlinks=False,
+        )
+    logger.info(f"[OK] Downloaded file '{filename}' from '{repo_id}' to: {out_path}")
 
 
 def download_required_models():
@@ -105,11 +146,13 @@ def download_streamdiffusionv2_pipeline() -> None:
     )
 
     # 3) HF repo download for StreamDiffusionV2 (1.3b only)
-    snapshot_download(
-        repo_id=stream_diffusion_repo,
-        local_dir=stream_diffusion_dst,
-        allow_patterns=["wan_causal_dmd_v2v/model.pt"],
-    )
+    logger.info(f"Downloading StreamDiffusionV2 model to: {stream_diffusion_dst}")
+    with capture_download_output():
+        snapshot_download(
+            repo_id=stream_diffusion_repo,
+            local_dir=stream_diffusion_dst,
+            allow_patterns=["wan_causal_dmd_v2v/model.pt"],
+        )
 
 
 def download_longlive_pipeline() -> None:
@@ -159,11 +202,13 @@ def download_krea_realtime_video_pipeline() -> None:
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
 
     # 1) Download only krea-realtime-video
-    snapshot_download(
-        repo_id=krea_rt_repo,
-        local_dir=krea_rt_dst,
-        allow_patterns=["krea-realtime-video-14b.safetensors"],
-    )
+    logger.info(f"Downloading krea-realtime-video model to: {krea_rt_dst}")
+    with capture_download_output():
+        snapshot_download(
+            repo_id=krea_rt_repo,
+            local_dir=krea_rt_dst,
+            allow_patterns=["krea-realtime-video-14b.safetensors"],
+        )
 
     # 2) Download VAE and text encoder from Wan2.1-T2V-1.3B
     wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
@@ -172,11 +217,13 @@ def download_krea_realtime_video_pipeline() -> None:
     )
 
     # 3) Download only config.json from Wan2.1-T2V-14B (no model weights needed)
-    snapshot_download(
-        repo_id=wan_video_14b_repo,
-        local_dir=wan_video_14b_dst,
-        allow_patterns=["config.json"],
-    )
+    logger.info(f"Downloading Wan2.1-T2V-14B config to: {wan_video_14b_dst}")
+    with capture_download_output():
+        snapshot_download(
+            repo_id=wan_video_14b_repo,
+            local_dir=wan_video_14b_dst,
+            allow_patterns=["config.json"],
+        )
 
     # 4) HF single file download for UMT5 encoder
     download_hf_single_file(
@@ -201,11 +248,13 @@ def download_reward_forcing_pipeline() -> None:
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
 
     # 1) Download Reward-Forcing model
-    snapshot_download(
-        repo_id=reward_forcing_repo,
-        local_dir=reward_forcing_dst,
-        allow_patterns=["rewardforcing.pt"],
-    )
+    logger.info(f"Downloading Reward-Forcing model to: {reward_forcing_dst}")
+    with capture_download_output():
+        snapshot_download(
+            repo_id=reward_forcing_repo,
+            local_dir=reward_forcing_dst,
+            allow_patterns=["rewardforcing.pt"],
+        )
 
     # 2) HF repo download for Wan2.1-T2V-1.3B, excluding large file
     wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
@@ -248,7 +297,7 @@ def download_models(pipeline_id: str | None = None) -> None:
             f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
         )
 
-    print("\nAll downloads complete.")
+    logger.info("All downloads complete.")
 
 
 def main():
