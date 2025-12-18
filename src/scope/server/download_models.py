@@ -11,6 +11,9 @@ from pathlib import Path
 # Disable hf_transfer to use standard download method
 # This prevents errors when HF_HUB_ENABLE_HF_TRANSFER=1 is set but hf_transfer is not installed
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+# Disable xet for now because it seems to sometimes causes an issue with exiting the server after a download
+# This has not been investigated thoroughly, but disabling it seems to fix the issue for now
+os.environ["HF_HUB_ENABLE_HF_XET"] = "1"
 
 from .models_config import (
     ensure_models_dir,
@@ -41,30 +44,37 @@ _original_tqdm_update = tqdm.update
 _last_logged_progress: dict[int, float] = {}
 
 
-def _patched_tqdm_update(self, n=1):
+def _patched_tqdm_update(self, n: int = 1):
     """Patched tqdm update that logs progress every 5%."""
-    if self.n is not None and self.total is not None and self.total > 0:
-        current_progress = (self.n / self.total) * 100
+    try:
+        if self.n is not None and self.total is not None and self.total > 0:
+            current_progress = (self.n / self.total) * 100
 
-        # Skip logging at 0% progress
-        if current_progress == 0.0:
-            return _original_tqdm_update(self, n)
+            # Skip logging at 0% progress
+            if current_progress == 0.0:
+                return _original_tqdm_update(self, n)
 
-        instance_id = id(self)
-        last_logged = _last_logged_progress.get(instance_id, 0.0)
+            instance_id = id(self)
+            last_logged = _last_logged_progress.get(instance_id, 0.0)
 
-        # Only log if we've made at least PROGRESS_LOG_INTERVAL_PERCENT progress since last log
-        if current_progress >= last_logged + PROGRESS_LOG_INTERVAL_PERCENT:
-            downloaded = self.n / 1024 / 1024
-            total_size = self.total / 1024 / 1024
-            logger.info(f"Downloaded {downloaded:.2f}MB of {total_size:.2f}MB")
-            _last_logged_progress[instance_id] = current_progress
+            # Only log if we've made at least PROGRESS_LOG_INTERVAL_PERCENT progress since last log
+            if current_progress >= last_logged + PROGRESS_LOG_INTERVAL_PERCENT:
+                downloaded = self.n / 1024 / 1024
+                total_size = self.total / 1024 / 1024
+                logger.info(f"Downloaded {downloaded:.2f}MB of {total_size:.2f}MB")
+                _last_logged_progress[instance_id] = current_progress
 
-            # Clear dict entry when progress reaches 100%
-            if current_progress >= 100.0:
-                _last_logged_progress.pop(instance_id, None)
+                # Clear dict entry when progress reaches 100%
+                if current_progress >= 100.0:
+                    _last_logged_progress.pop(instance_id, None)
+    except KeyboardInterrupt:
+        # Re-raise KeyboardInterrupt to allow proper signal handling
+        raise
+    except Exception:
+        # Don't let logging errors interfere with tqdm or signal handling
+        pass
 
-    # Call original update
+    # Always call original update, even if our logging failed
     return _original_tqdm_update(self, n)
 
 
