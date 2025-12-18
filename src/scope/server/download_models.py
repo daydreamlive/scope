@@ -22,13 +22,95 @@ logger = logging.getLogger(__name__)
 
 # --- third-party libs ---
 try:
-    from huggingface_hub import hf_hub_download, snapshot_download
+    from huggingface_hub import snapshot_download
+    from tqdm.auto import tqdm
 except Exception:
     print(
-        "Error: huggingface_hub is required. Install with: pip install huggingface_hub",
+        "Error: huggingface_hub and tqdm are required. Install with: pip install huggingface_hub tqdm",
         file=sys.stderr,
     )
     raise
+
+# Ideally we would use a custom tqdm_class with HF, but the proper usage is unclear
+# Instead we monkey patch tqdm.update to log progress every 5%
+PROGRESS_LOG_INTERVAL_PERCENT = 5.0
+
+_original_tqdm_update = tqdm.update
+
+# Track last logged progress per tqdm instance (by id)
+_last_logged_progress: dict[int, float] = {}
+
+
+def _patched_tqdm_update(self, n=1):
+    """Patched tqdm update that logs progress every 5%."""
+    if self.n is not None and self.total is not None and self.total > 0:
+        current_progress = (self.n / self.total) * 100
+
+        # Skip logging at 0% progress
+        if current_progress == 0.0:
+            return _original_tqdm_update(self, n)
+
+        instance_id = id(self)
+        last_logged = _last_logged_progress.get(instance_id, 0.0)
+
+        # Only log if we've made at least PROGRESS_LOG_INTERVAL_PERCENT progress since last log
+        if current_progress >= last_logged + PROGRESS_LOG_INTERVAL_PERCENT:
+            downloaded = self.n / 1024 / 1024
+            total_size = self.total / 1024 / 1024
+            logger.info(f"Downloaded {downloaded:.2f}MB of {total_size:.2f}MB")
+            _last_logged_progress[instance_id] = current_progress
+
+            # Clear dict entry when progress reaches 100%
+            if current_progress >= 100.0:
+                _last_logged_progress.pop(instance_id, None)
+
+    # Call original update
+    return _original_tqdm_update(self, n)
+
+
+# Apply the monkey patch
+tqdm.update = _patched_tqdm_update
+
+
+def download_hf_repo(
+    repo_id: str,
+    local_dir: Path,
+    filename: str | None = None,
+    allow_patterns: list[str] | None = None,
+    ignore_patterns: list[str] | None = None,
+) -> None:
+    """
+    Download from HuggingFace repo - either a single file or repo snapshot with patterns.
+
+    Args:
+        repo_id: HuggingFace repository ID
+        local_dir: Local directory to download to
+        filename: Optional single filename to download (uses hf_hub_download)
+        allow_patterns: Optional list of patterns to include (glob-like, relative to repo root)
+        ignore_patterns: Optional list of patterns to exclude (glob-like, relative to repo root)
+    """
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    if filename:
+        # Single file download using snapshot_download with allow_patterns
+        # (hf_hub_download doesn't support tqdm_class parameter)
+        logger.info(f"Starting download of '{filename}' from '{repo_id}'")
+        allow_patterns = [filename]
+    else:
+        # Repo snapshot download
+        logger.info(f"Starting download of repo '{repo_id}' to: {local_dir}")
+
+    snapshot_download(
+        repo_id=repo_id,
+        # In previous versions, we used local_dir_use_symlinks=False to copy files for portability.
+        # However, this is not necessary anymore with snapshot_download
+        local_dir=str(local_dir),
+        allow_patterns=allow_patterns,
+        ignore_patterns=ignore_patterns,
+        # token is picked up automatically from HUGGINGFACE_TOKEN if set
+        # revision=None,  # optionally pin a commit/tag if you like
+    )
+    logger.info(f"Completed download of repo '{repo_id}' to: {local_dir}")
 
 
 def download_hf_repo_excluding(
@@ -36,33 +118,17 @@ def download_hf_repo_excluding(
 ) -> None:
     """
     Download an entire HF repo snapshot while excluding specific files.
+    This is a convenience wrapper around download_hf_repo.
     """
-    local_dir.mkdir(parents=True, exist_ok=True)
-    # snapshot_download supports exclude via `ignore_patterns`
-    # (patterns are glob-like, relative to the repo root)
-    snapshot_download(
-        repo_id=repo_id,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,  # copy files for portability
-        ignore_patterns=ignore_patterns,
-        # token is picked up automatically from HUGGINGFACE_TOKEN if set
-        # revision=None,  # optionally pin a commit/tag if you like
-    )
-    print(f"[OK] Downloaded repo '{repo_id}' to: {local_dir}")
+    download_hf_repo(repo_id, local_dir, ignore_patterns=ignore_patterns)
 
 
 def download_hf_single_file(repo_id: str, filename: str, local_dir: Path) -> None:
     """
     Download a single file from an HF repo into a target folder.
+    This is a convenience wrapper around download_hf_repo.
     """
-    local_dir.mkdir(parents=True, exist_ok=True)
-    out_path = hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
-    )
-    print(f"[OK] Downloaded file '{filename}' from '{repo_id}' to: {out_path}")
+    download_hf_repo(repo_id, local_dir, filename=filename)
 
 
 def download_required_models():
@@ -105,9 +171,9 @@ def download_streamdiffusionv2_pipeline() -> None:
     )
 
     # 3) HF repo download for StreamDiffusionV2 (1.3b only)
-    snapshot_download(
-        repo_id=stream_diffusion_repo,
-        local_dir=stream_diffusion_dst,
+    download_hf_repo(
+        stream_diffusion_repo,
+        stream_diffusion_dst,
         allow_patterns=["wan_causal_dmd_v2v/model.pt"],
     )
 
@@ -159,9 +225,9 @@ def download_krea_realtime_video_pipeline() -> None:
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
 
     # 1) Download only krea-realtime-video
-    snapshot_download(
-        repo_id=krea_rt_repo,
-        local_dir=krea_rt_dst,
+    download_hf_repo(
+        krea_rt_repo,
+        krea_rt_dst,
         allow_patterns=["krea-realtime-video-14b.safetensors"],
     )
 
@@ -172,10 +238,8 @@ def download_krea_realtime_video_pipeline() -> None:
     )
 
     # 3) Download only config.json from Wan2.1-T2V-14B (no model weights needed)
-    snapshot_download(
-        repo_id=wan_video_14b_repo,
-        local_dir=wan_video_14b_dst,
-        allow_patterns=["config.json"],
+    download_hf_repo(
+        wan_video_14b_repo, wan_video_14b_dst, allow_patterns=["config.json"]
     )
 
     # 4) HF single file download for UMT5 encoder
@@ -201,10 +265,8 @@ def download_reward_forcing_pipeline() -> None:
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
 
     # 1) Download Reward-Forcing model
-    snapshot_download(
-        repo_id=reward_forcing_repo,
-        local_dir=reward_forcing_dst,
-        allow_patterns=["rewardforcing.pt"],
+    download_hf_repo(
+        reward_forcing_repo, reward_forcing_dst, allow_patterns=["rewardforcing.pt"]
     )
 
     # 2) HF repo download for Wan2.1-T2V-1.3B, excluding large file
@@ -248,7 +310,7 @@ def download_models(pipeline_id: str | None = None) -> None:
             f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
         )
 
-    print("\nAll downloads complete.")
+    logger.info("All downloads complete.")
 
 
 def main():
