@@ -194,8 +194,14 @@ class PipelineManager:
             return True
 
         except Exception as e:
-            error_msg = f"Failed to load pipeline {pipeline_id}: {str(e)}"
-            logger.error(error_msg)
+            from .models_config import get_models_dir
+
+            models_dir = get_models_dir()
+            error_msg = f"Failed to load pipeline {pipeline_id}: {e}"
+            logger.error(
+                f"{error_msg}. If this error persists, consider removing the models "
+                f"directory '{models_dir}' and re-downloading models."
+            )
 
             # Hold lock while updating state with error
             with self._lock:
