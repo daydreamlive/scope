@@ -113,6 +113,7 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
             models_dir / "Wan2.1-T2V-1.3B" / "config.json",
             models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
             models_dir / "StreamDiffusionV2" / "wan_causal_dmd_v2v" / "model.pt",
+            models_dir / "Wan2.1-VACE-1.3B" / "diffusion_pytorch_model.safetensors",
         ]
 
     # longlive pipeline
@@ -121,6 +122,7 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
             models_dir / "Wan2.1-T2V-1.3B" / "config.json",
             models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
             models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
+            models_dir / "Wan2.1-VACE-1.3B" / "diffusion_pytorch_model.safetensors",
         ]
 
     # krea-realtime-video pipeline

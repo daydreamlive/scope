@@ -80,6 +80,22 @@ def download_required_models():
         raise
 
 
+def download_vace_model() -> None:
+    """Download VACE (Video-Aware Condition Encoding) model."""
+    vace_repo = "Wan-AI/Wan2.1-VACE-1.3B"
+
+    # Ensure models directory exists and get paths
+    models_root = ensure_models_dir()
+    vace_dst = models_root / "Wan2.1-VACE-1.3B"
+
+    # Download VACE model (only the diffusion_pytorch_model.safetensors file)
+    snapshot_download(
+        repo_id=vace_repo,
+        local_dir=vace_dst,
+        allow_patterns=["diffusion_pytorch_model.safetensors"],
+    )
+
+
 def download_streamdiffusionv2_pipeline() -> None:
     """Download models for the StreamDiffusionV2 pipeline."""
     wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
@@ -111,6 +127,9 @@ def download_streamdiffusionv2_pipeline() -> None:
         allow_patterns=["wan_causal_dmd_v2v/model.pt"],
     )
 
+    # 4) Download VACE model (required for StreamDiffusionV2)
+    download_vace_model()
+
 
 def download_longlive_pipeline() -> None:
     """Download models for the LongLive pipeline."""
@@ -138,6 +157,9 @@ def download_longlive_pipeline() -> None:
 
     # 3) HF repo download for LongLive-1.3B
     download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
+
+    # 4) Download VACE model (required for LongLive)
+    download_vace_model()
 
 
 def download_krea_realtime_video_pipeline() -> None:

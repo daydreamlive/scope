@@ -23,6 +23,8 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
+    ref_images?: string[];
+    vace_context_scale?: number;
   };
 }
 
@@ -43,6 +45,9 @@ export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  // VACE (optional reference image conditioning for text mode)
+  ref_images?: string[];
+  vace_context_scale?: number;
 }
 
 export interface LongLiveLoadParams extends PipelineLoadParams {
@@ -52,6 +57,9 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  // VACE (optional reference image conditioning)
+  ref_images?: string[];
+  vace_context_scale?: number;
 }
 
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {

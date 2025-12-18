@@ -17,6 +17,9 @@ import { pipelineIsMultiMode } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { ImageManager } from "./ImageManager";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
+import { SliderWithInput } from "./ui/slider-with-input";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -54,6 +57,13 @@ interface InputAndControlsPanelProps {
   // Input mode (text vs video) for multi-mode pipelines
   inputMode: InputMode;
   onInputModeChange: (mode: InputMode) => void;
+  // VACE-specific props
+  refImages?: string[];
+  onRefImagesChange?: (images: string[]) => void;
+  vaceContextScale?: number;
+  onVaceContextScaleChange?: (scale: number) => void;
+  onSendHint?: (imagePath: string) => void;
+  isDownloading?: boolean;
 }
 
 export function InputAndControlsPanel({
@@ -91,6 +101,12 @@ export function InputAndControlsPanel({
   onTransitionStepsChange,
   inputMode,
   onInputModeChange,
+  refImages = [],
+  onRefImagesChange,
+  vaceContextScale = 1.0,
+  onVaceContextScaleChange,
+  onSendHint,
+  isDownloading = false,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -244,6 +260,35 @@ export function InputAndControlsPanel({
             </div>
           </div>
         )}
+
+        {/* VACE Image Controls */}
+        <div className="space-y-4">
+          <ImageManager
+            images={refImages}
+            onImagesChange={onRefImagesChange || (() => {})}
+            disabled={isDownloading}
+            isStreaming={isStreaming}
+            onSendHint={onSendHint}
+          />
+
+          {refImages && refImages.length > 0 && (
+            <div className="space-y-2">
+              <LabelWithTooltip
+                label="VACE Context Scale"
+                tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
+                className="text-sm font-medium"
+              />
+              <SliderWithInput
+                value={vaceContextScale}
+                onValueChange={onVaceContextScaleChange || (() => {})}
+                min={0}
+                max={2}
+                step={0.1}
+                disabled={isDownloading}
+              />
+            </div>
+          )}
+        </div>
 
         <div>
           {(() => {

@@ -64,6 +64,9 @@ export interface SettingsState {
   loraMergeStrategy?: LoraMergeStrategy;
   // Track current input mode (text vs video)
   inputMode?: InputMode;
+  // VACE-specific settings
+  refImages?: string[];
+  vaceContextScale?: number;
 }
 
 export interface PipelineInfo {

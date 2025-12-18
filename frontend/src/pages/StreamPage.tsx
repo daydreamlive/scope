@@ -48,6 +48,21 @@ function buildLoRAParams(
   };
 }
 
+function getVaceParams(
+  refImages?: string[],
+  vaceContextScale?: number
+):
+  | { ref_images: string[]; vace_context_scale: number }
+  | Record<string, never> {
+  if (refImages && refImages.length > 0) {
+    return {
+      ref_images: refImages,
+      vace_context_scale: vaceContextScale ?? 1.0,
+    };
+  }
+  return {};
+}
+
 export function StreamPage() {
   // Use the stream state hook for settings management
   const { settings, updateSettings, getDefaults, supportsNoiseControls } =
@@ -439,6 +454,29 @@ export function StreamPage() {
     // Note: Adding/removing LoRAs requires pipeline reload
   };
 
+  const handleRefImagesChange = (images: string[]) => {
+    updateSettings({ refImages: images });
+    // Note: Changing reference images in dropdown only updates local state.
+    // Use "Send Hint" button to send hints to backend during streaming.
+  };
+
+  const handleSendHint = (imagePath: string) => {
+    // Send reference image hint to backend
+    sendParameterUpdate({
+      ref_images: [imagePath],
+    });
+  };
+
+  const handleVaceContextScaleChange = (scale: number) => {
+    updateSettings({ vaceContextScale: scale });
+    // Send VACE context scale update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        vace_context_scale: scale,
+      });
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -589,6 +627,7 @@ export function StreamPage() {
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
@@ -608,9 +647,10 @@ export function StreamPage() {
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -669,6 +709,8 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
+        ref_images?: string[];
+        vace_context_scale?: number;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -697,6 +739,16 @@ export function StreamPage() {
       if (pipelineIdToUse === "krea-realtime-video") {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
+      }
+
+      // VACE-specific parameters - backend will ignore if not supported
+      const vaceParams = getVaceParams(
+        settings.refImages,
+        settings.vaceContextScale
+      );
+      if ("ref_images" in vaceParams) {
+        initialParameters.ref_images = vaceParams.ref_images;
+        initialParameters.vace_context_scale = vaceParams.vace_context_scale;
       }
 
       // Video mode parameters - applies to all pipelines in video mode
@@ -766,6 +818,12 @@ export function StreamPage() {
             onTransitionStepsChange={setTransitionSteps}
             inputMode={settings.inputMode || "video"}
             onInputModeChange={handleInputModeChange}
+            refImages={settings.refImages || []}
+            onRefImagesChange={handleRefImagesChange}
+            vaceContextScale={settings.vaceContextScale ?? 1.0}
+            onVaceContextScaleChange={handleVaceContextScaleChange}
+            onSendHint={handleSendHint}
+            isDownloading={isDownloading}
           />
         </div>
 

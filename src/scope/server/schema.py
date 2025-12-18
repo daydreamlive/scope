@@ -97,6 +97,16 @@ class Parameters(BaseModel):
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
     )
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image file paths for VACE conditioning. Images should be located in the images directory (at the same level as the models directory).",
+    )
+    vace_context_scale: float | None = Field(
+        default=None,
+        description="Scaling factor for VACE hint injection. Higher values make reference images more influential.",
+        ge=0.0,
+        le=2.0,
+    )
 
 
 class WebRTCOfferRequest(BaseModel):
