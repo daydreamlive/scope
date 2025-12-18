@@ -95,6 +95,7 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     if pipeline_id == "streamdiffusionv2":
         return [
             models_dir / "Wan2.1-T2V-1.3B" / "config.json",
+            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
             models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
             models_dir / "StreamDiffusionV2" / "wan_causal_dmd_v2v" / "model.pt",
         ]
@@ -103,6 +104,7 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     if pipeline_id == "longlive":
         return [
             models_dir / "Wan2.1-T2V-1.3B" / "config.json",
+            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
             models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
             models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
         ]
@@ -113,12 +115,13 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
             models_dir / "krea-realtime-video" / "krea-realtime-video-14b.safetensors",
             models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
             models_dir / "Wan2.1-T2V-14B" / "config.json",
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
+            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
         ]
 
     if pipeline_id == "reward-forcing":
         return [
             models_dir / "Wan2.1-T2V-1.3B" / "config.json",
+            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
             models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
             models_dir / "Reward-Forcing-T2V-1.3B" / "rewardforcing.pt",
         ]
