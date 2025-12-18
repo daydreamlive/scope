@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -29,7 +29,12 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
-from .models_config import ensure_models_dir, get_models_dir, models_are_downloaded
+from .models_config import (
+    ensure_models_dir,
+    get_images_dir,
+    get_models_dir,
+    models_are_downloaded,
+)
 from .pipeline_manager import PipelineManager
 from .schema import (
     HardwareInfoResponse,
@@ -197,9 +202,14 @@ async def lifespan(app: FastAPI):
     logs_dir = get_logs_dir()
     logger.info(f"Logs directory: {logs_dir}")
 
-    # Ensure models directory and lora subdirectory exist
+    # Ensure models directory and subdirectories exist
     models_dir = ensure_models_dir()
     logger.info(f"Models directory: {models_dir}")
+
+    # Ensure images directory exists for VACE reference images (at same level as models)
+    images_dir = get_images_dir()
+    images_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Images directory: {images_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
     pipeline_manager = PipelineManager()
@@ -475,6 +485,111 @@ async def list_lora_files():
 
     except Exception as e:  # pragma: no cover - defensive logging
         logger.error(f"list_lora_files: Error listing LoRA files: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class ImageFileInfo(BaseModel):
+    """Metadata for an available image file on disk."""
+
+    name: str
+    path: str
+    size_mb: float
+    folder: str | None = None
+
+
+class ImageFilesResponse(BaseModel):
+    """Response containing all discoverable image files."""
+
+    image_files: list[ImageFileInfo]
+
+
+@app.get("/api/v1/images/list", response_model=ImageFilesResponse)
+async def list_image_files():
+    """List available image files in the images directory and its subdirectories."""
+
+    def process_image_file(file_path: Path, images_dir: Path) -> ImageFileInfo:
+        """Extract image file metadata."""
+        size_mb = file_path.stat().st_size / (1024 * 1024)
+        relative_path = file_path.relative_to(images_dir)
+        folder = (
+            str(relative_path.parent) if relative_path.parent != Path(".") else None
+        )
+        return ImageFileInfo(
+            name=file_path.stem,
+            path=str(file_path),
+            size_mb=round(size_mb, 2),
+            folder=folder,
+        )
+
+    try:
+        images_dir = get_images_dir()
+        image_files: list[ImageFileInfo] = []
+
+        if images_dir.exists() and images_dir.is_dir():
+            for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"):
+                for file_path in images_dir.rglob(pattern):
+                    if file_path.is_file():
+                        image_files.append(process_image_file(file_path, images_dir))
+
+        image_files.sort(key=lambda x: (x.folder or "", x.name))
+        return ImageFilesResponse(image_files=image_files)
+
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"list_image_files: Error listing image files: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/images/upload", response_model=ImageFileInfo)
+async def upload_image(request: Request, filename: str = Query(...)):
+    """Upload an image file to the images directory."""
+    try:
+        # Validate file type
+        allowed_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+        file_extension = Path(filename).suffix.lower()
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
+            )
+
+        # Ensure images directory exists
+        images_dir = get_images_dir()
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        # Read file content from request body
+        content = await request.body()
+
+        # Validate file size (50MB limit)
+        max_size = 50 * 1024 * 1024  # 50MB
+        if len(content) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
+            )
+
+        # Save file to images directory
+        file_path = images_dir / filename
+        file_path.write_bytes(content)
+
+        # Return file info matching ImageFileInfo structure
+        size_mb = len(content) / (1024 * 1024)
+        relative_path = file_path.relative_to(images_dir)
+        folder = (
+            str(relative_path.parent) if relative_path.parent != Path(".") else None
+        )
+
+        logger.info(f"upload_image: Uploaded image file: {file_path}")
+        return ImageFileInfo(
+            name=file_path.stem,
+            path=str(file_path),
+            size_mb=round(size_mb, 2),
+            folder=folder,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"upload_image: Error uploading image file: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
