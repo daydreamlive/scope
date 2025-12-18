@@ -12,13 +12,26 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Upload } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import type { InputMode } from "../types";
-import { pipelineIsMultiMode } from "../data/pipelines";
+import {
+  pipelineIsMultiMode,
+  pipelineRequiresReferenceImage,
+  pipelineShowsPromptInput,
+  pipelineCanChangeReferenceWhileStreaming,
+  getPipelineReferenceImageDescription,
+} from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { ImageIcon } from "lucide-react";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -61,6 +74,10 @@ interface InputAndControlsPanelProps {
   onInputModeChange: (mode: InputMode) => void;
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
+  // PersonaLive reference image
+  referenceImageUrl?: string | null;
+  onReferenceImageUpload?: (file: File) => void;
+  isUploadingReference?: boolean;
 }
 
 export function InputAndControlsPanel({
@@ -101,6 +118,9 @@ export function InputAndControlsPanel({
   inputMode,
   onInputModeChange,
   spoutAvailable = false,
+  referenceImageUrl = null,
+  onReferenceImageUpload,
+  isUploadingReference = false,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -116,6 +136,20 @@ export function InputAndControlsPanel({
 
   // Check if this pipeline supports multiple input modes
   const isMultiMode = pipelineIsMultiMode(pipelineId);
+
+  // Check if this pipeline requires a reference image (PersonaLive)
+  const needsReferenceImage = pipelineRequiresReferenceImage(pipelineId);
+
+  const handleReferenceImageUpload = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (file && onReferenceImageUpload) {
+      onReferenceImageUpload(file);
+    }
+    // Reset the input value so the same file can be selected again
+    event.target.value = "";
+  };
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -167,6 +201,80 @@ export function InputAndControlsPanel({
                 <SelectItem value="video">Video</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        )}
+
+        {/* Reference Image upload - only show for pipelines that require it */}
+        {needsReferenceImage && (
+          <div>
+            <h3 className="text-sm font-medium mb-2">Reference Portrait</h3>
+            <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative aspect-square max-h-48">
+              {referenceImageUrl ? (
+                <img
+                  src={referenceImageUrl}
+                  alt="Reference portrait"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="text-center text-muted-foreground text-sm p-4 flex flex-col items-center gap-2">
+                  <ImageIcon className="h-8 w-8 opacity-50" />
+                  <span>Upload a portrait image</span>
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleReferenceImageUpload}
+                className="hidden"
+                id="reference-image-upload"
+                disabled={
+                  isUploadingReference ||
+                  ((isStreaming || isConnecting) &&
+                    !pipelineCanChangeReferenceWhileStreaming(pipelineId))
+                }
+              />
+              {/* Upload button with tooltip when disabled during streaming */}
+              {(isStreaming || isConnecting) &&
+              !pipelineCanChangeReferenceWhileStreaming(pipelineId) ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="absolute bottom-2 right-2 p-2 rounded-full bg-black/50 opacity-50 cursor-not-allowed">
+                        <Upload className="h-4 w-4 text-white" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="max-w-xs">
+                      <p className="text-xs">
+                        Reference image is processed when the pipeline loads.
+                        Stop the stream to change it.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <label
+                  htmlFor="reference-image-upload"
+                  className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                    isUploadingReference
+                      ? "opacity-50 cursor-not-allowed"
+                      : "hover:bg-black/70 cursor-pointer"
+                  }`}
+                >
+                  <Upload className="h-4 w-4 text-white" />
+                </label>
+              )}
+            </div>
+            {isUploadingReference && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Uploading reference image...
+              </p>
+            )}
+            {!referenceImageUrl && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {getPipelineReferenceImageDescription(pipelineId) ||
+                  "This pipeline requires a reference image."}
+              </p>
+            )}
           </div>
         )}
 
@@ -280,67 +388,70 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        <div>
-          {(() => {
-            // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
-            const isEditMode = selectedTimelinePrompt && isVideoPaused;
+        {/* Prompts section - only show for pipelines that support text prompts */}
+        {pipelineShowsPromptInput(pipelineId) && (
+          <div>
+            {(() => {
+              // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
+              const isEditMode = selectedTimelinePrompt && isVideoPaused;
 
-            return (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium">Prompts</h3>
-                  {isEditMode && (
-                    <Badge variant="secondary" className="text-xs">
-                      Editing
-                    </Badge>
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-medium">Prompts</h3>
+                    {isEditMode && (
+                      <Badge variant="secondary" className="text-xs">
+                        Editing
+                      </Badge>
+                    )}
+                  </div>
+
+                  {selectedTimelinePrompt ? (
+                    <TimelinePromptEditor
+                      prompt={selectedTimelinePrompt}
+                      onPromptUpdate={onTimelinePromptUpdate}
+                      disabled={false}
+                      interpolationMethod={interpolationMethod}
+                      onInterpolationMethodChange={onInterpolationMethodChange}
+                      promptIndex={_timelinePrompts.findIndex(
+                        p => p.id === selectedTimelinePrompt.id
+                      )}
+                    />
+                  ) : (
+                    <PromptInput
+                      prompts={prompts}
+                      onPromptsChange={onPromptsChange}
+                      onPromptsSubmit={onPromptsSubmit}
+                      onTransitionSubmit={onTransitionSubmit}
+                      disabled={
+                        pipelineId === "passthrough" ||
+                        (_isTimelinePlaying &&
+                          !isVideoPaused &&
+                          !isAtEndOfTimeline()) ||
+                        // Disable in Append mode when paused and not at end
+                        (!selectedTimelinePrompt &&
+                          isVideoPaused &&
+                          !isAtEndOfTimeline())
+                      }
+                      interpolationMethod={interpolationMethod}
+                      onInterpolationMethodChange={onInterpolationMethodChange}
+                      temporalInterpolationMethod={temporalInterpolationMethod}
+                      onTemporalInterpolationMethodChange={
+                        onTemporalInterpolationMethodChange
+                      }
+                      isLive={isLive}
+                      onLivePromptSubmit={onLivePromptSubmit}
+                      isStreaming={isStreaming}
+                      transitionSteps={transitionSteps}
+                      onTransitionStepsChange={onTransitionStepsChange}
+                      timelinePrompts={_timelinePrompts}
+                    />
                   )}
                 </div>
-
-                {selectedTimelinePrompt ? (
-                  <TimelinePromptEditor
-                    prompt={selectedTimelinePrompt}
-                    onPromptUpdate={onTimelinePromptUpdate}
-                    disabled={false}
-                    interpolationMethod={interpolationMethod}
-                    onInterpolationMethodChange={onInterpolationMethodChange}
-                    promptIndex={_timelinePrompts.findIndex(
-                      p => p.id === selectedTimelinePrompt.id
-                    )}
-                  />
-                ) : (
-                  <PromptInput
-                    prompts={prompts}
-                    onPromptsChange={onPromptsChange}
-                    onPromptsSubmit={onPromptsSubmit}
-                    onTransitionSubmit={onTransitionSubmit}
-                    disabled={
-                      pipelineId === "passthrough" ||
-                      (_isTimelinePlaying &&
-                        !isVideoPaused &&
-                        !isAtEndOfTimeline()) ||
-                      // Disable in Append mode when paused and not at end
-                      (!selectedTimelinePrompt &&
-                        isVideoPaused &&
-                        !isAtEndOfTimeline())
-                    }
-                    interpolationMethod={interpolationMethod}
-                    onInterpolationMethodChange={onInterpolationMethodChange}
-                    temporalInterpolationMethod={temporalInterpolationMethod}
-                    onTemporalInterpolationMethodChange={
-                      onTemporalInterpolationMethodChange
-                    }
-                    isLive={isLive}
-                    onLivePromptSubmit={onLivePromptSubmit}
-                    isStreaming={isStreaming}
-                    transitionSteps={transitionSteps}
-                    onTransitionStepsChange={onTransitionStepsChange}
-                    timelinePrompts={_timelinePrompts}
-                  />
-                )}
-              </div>
-            );
-          })()}
-        </div>
+              );
+            })()}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

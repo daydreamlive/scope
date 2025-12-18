@@ -491,6 +491,38 @@ class PipelineManager:
             logger.info("RewardForcing pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "personalive":
+            from scope.core.pipelines import PersonaLivePipeline
+
+            from .models_config import get_models_dir
+
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(get_models_dir()),
+                }
+            )
+
+            # Apply load parameters (resolution, seed) to config
+            height = 512
+            width = 512
+            seed = 42
+            if load_params:
+                height = load_params.get("height", 512)
+                width = load_params.get("width", 512)
+                seed = load_params.get("seed", 42)
+
+            config["height"] = height
+            config["width"] = width
+            config["seed"] = seed
+
+            pipeline = PersonaLivePipeline(
+                config,
+                device=torch.device("cuda"),
+                dtype=torch.float16,  # PersonaLive uses fp16
+            )
+            logger.info("PersonaLive pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 

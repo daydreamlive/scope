@@ -219,6 +219,75 @@ def download_reward_forcing_pipeline() -> None:
     )
 
 
+def download_personalive_pipeline() -> None:
+    """
+    Download models for the PersonaLive portrait animation pipeline.
+
+    Downloads from three sources:
+    1. lambdalabs/sd-image-variations-diffusers - Base UNet + CLIP Image Encoder
+       (SD fine-tuned to accept CLIP image embeddings instead of text)
+    2. stabilityai/sd-vae-ft-mse - VAE (improved fine-tuned version)
+    3. huaichang/PersonaLive - PersonaLive-specific weights:
+       - denoising_unet.pth, reference_unet.pth
+       - motion_encoder.pth, motion_extractor.pth
+       - pose_guider.pth, temporal_module.pth
+    """
+    models_root = ensure_models_dir()
+    personalive_root = models_root / "PersonaLive" / "pretrained_weights"
+    personalive_root.mkdir(parents=True, exist_ok=True)
+
+    # 1. Download sd-image-variations-diffusers (base model with CLIP image encoder)
+    # This provides: image_encoder/, unet/, model_index.json
+    sd_variations_dst = personalive_root / "sd-image-variations-diffusers"
+    if not sd_variations_dst.exists():
+        print("Downloading sd-image-variations-diffusers from lambdalabs...")
+        snapshot_download(
+            repo_id="lambdalabs/sd-image-variations-diffusers",
+            local_dir=str(sd_variations_dst),
+            local_dir_use_symlinks=False,
+            revision="v2.0",  # Use v2.0 as recommended
+            ignore_patterns=["*.md", "*.txt"],
+        )
+        print(f"[OK] Downloaded sd-image-variations-diffusers to: {sd_variations_dst}")
+    else:
+        print(
+            f"[SKIP] sd-image-variations-diffusers already exists at: {sd_variations_dst}"
+        )
+
+    # 2. Download sd-vae-ft-mse (improved VAE)
+    # This provides: config.json, diffusion_pytorch_model.safetensors
+    vae_dst = personalive_root / "sd-vae-ft-mse"
+    if not vae_dst.exists():
+        print("Downloading sd-vae-ft-mse from stabilityai...")
+        snapshot_download(
+            repo_id="stabilityai/sd-vae-ft-mse",
+            local_dir=str(vae_dst),
+            local_dir_use_symlinks=False,
+            ignore_patterns=["*.md", "*.txt"],
+        )
+        print(f"[OK] Downloaded sd-vae-ft-mse to: {vae_dst}")
+    else:
+        print(f"[SKIP] sd-vae-ft-mse already exists at: {vae_dst}")
+
+    # 3. Download PersonaLive-specific weights
+    # This provides: denoising_unet.pth, reference_unet.pth, motion_encoder.pth, etc.
+    personalive_weights_dst = personalive_root / "personalive"
+    if not personalive_weights_dst.exists():
+        print("Downloading PersonaLive weights from huaichang/PersonaLive...")
+        snapshot_download(
+            repo_id="huaichang/PersonaLive",
+            local_dir=str(personalive_weights_dst),
+            local_dir_use_symlinks=False,
+            # Only download the .pth weight files, not ONNX/TRT
+            allow_patterns=["*.pth"],
+        )
+        print(f"[OK] Downloaded PersonaLive weights to: {personalive_weights_dst}")
+    else:
+        print(f"[SKIP] PersonaLive weights already exist at: {personalive_weights_dst}")
+
+    print(f"\n[OK] PersonaLive pipeline models ready at: {personalive_root}")
+
+
 def download_models(pipeline_id: str | None = None) -> None:
     """
     Download models. If pipeline_id is None, downloads all pipelines.
@@ -226,7 +295,7 @@ def download_models(pipeline_id: str | None = None) -> None:
 
     Args:
         pipeline_id: Optional pipeline ID. Supports "streamdiffusionv2", "longlive",
-                    "krea-realtime-video", or "reward-forcing".
+                    "krea-realtime-video", "reward-forcing", or "personalive".
                     If None, downloads all pipelines.
     """
     if pipeline_id is None:
@@ -235,6 +304,7 @@ def download_models(pipeline_id: str | None = None) -> None:
         download_longlive_pipeline()
         download_krea_realtime_video_pipeline()
         download_reward_forcing_pipeline()
+        download_personalive_pipeline()
     elif pipeline_id == "streamdiffusionv2":
         download_streamdiffusionv2_pipeline()
     elif pipeline_id == "longlive":
@@ -243,9 +313,11 @@ def download_models(pipeline_id: str | None = None) -> None:
         download_krea_realtime_video_pipeline()
     elif pipeline_id == "reward-forcing":
         download_reward_forcing_pipeline()
+    elif pipeline_id == "personalive":
+        download_personalive_pipeline()
     else:
         raise ValueError(
-            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
+            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing, personalive"
         )
 
     print("\nAll downloads complete.")
@@ -266,6 +338,7 @@ Examples:
   python download_models.py --pipeline longlive
   python download_models.py --pipeline krea-realtime-video
   python download_models.py --pipeline reward-forcing
+  python download_models.py --pipeline personalive
   python download_models.py -p streamdiffusionv2
         """,
     )
@@ -274,7 +347,7 @@ Examples:
         "-p",
         type=str,
         default=None,
-        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing'). If not specified, downloads all pipelines.",
+        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing', 'personalive'). If not specified, downloads all pipelines.",
     )
 
     args = parser.parse_args()

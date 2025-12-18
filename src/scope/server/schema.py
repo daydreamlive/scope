@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from scope.core.pipelines.schema import (
     KreaRealtimeVideoConfig,
     LongLiveConfig,
+    PersonaLiveConfig,
     StreamDiffusionV2Config,
 )
 from scope.core.pipelines.utils import Quantization
@@ -360,6 +361,42 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
+class PersonaLiveLoadParams(PipelineLoadParams):
+    """Load parameters for PersonaLive portrait animation pipeline.
+
+    Defaults are derived from PersonaLiveConfig to ensure consistency.
+    Note: A reference image must be uploaded via /api/v1/personalive/reference
+    before the pipeline can process driving video frames.
+    """
+
+    height: int = Field(
+        default=PersonaLiveConfig.model_fields["height"].default,
+        description="Target video height",
+        ge=256,
+        le=1024,
+    )
+    width: int = Field(
+        default=PersonaLiveConfig.model_fields["width"].default,
+        description="Target video width",
+        ge=256,
+        le=1024,
+    )
+    seed: int = Field(
+        default=42,  # Default seed from BasePipelineConfig
+        description="Random seed for generation",
+        ge=0,
+    )
+
+
+class PersonaLiveReferenceResponse(BaseModel):
+    """Response after setting PersonaLive reference image."""
+
+    success: bool = Field(
+        ..., description="Whether the reference image was set successfully"
+    )
+    message: str = Field(..., description="Status message")
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -371,6 +408,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | PersonaLiveLoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 

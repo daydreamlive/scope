@@ -63,6 +63,12 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
 }
 
+export interface PersonaLiveLoadParams extends PipelineLoadParams {
+  height?: number;
+  width?: number;
+  seed?: number;
+}
+
 export interface PipelineLoadRequest {
   pipeline_id?: string;
   load_params?:
@@ -70,6 +76,7 @@ export interface PipelineLoadRequest {
     | StreamDiffusionV2LoadParams
     | LongLiveLoadParams
     | KreaRealtimeVideoLoadParams
+    | PersonaLiveLoadParams
     | null;
 }
 
@@ -291,6 +298,37 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
     const errorText = await response.text();
     throw new Error(
       `List LoRA files failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+// PersonaLive reference image upload
+export interface PersonaLiveReferenceResponse {
+  success: boolean;
+  message: string;
+}
+
+export const uploadPersonaLiveReference = async (
+  imageFile: File | Blob
+): Promise<PersonaLiveReferenceResponse> => {
+  // Read file as array buffer
+  const arrayBuffer = await imageFile.arrayBuffer();
+
+  const response = await fetch("/api/v1/personalive/reference", {
+    method: "POST",
+    headers: {
+      "Content-Type": imageFile.type || "image/jpeg",
+    },
+    body: arrayBuffer,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `PersonaLive reference upload failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 
