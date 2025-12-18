@@ -382,6 +382,7 @@ export const getAssetUrl = (assetPath: string): string => {
   return `/api/v1/assets/${encodeURIComponent(filename)}`;
 };
 
+
 // Pipeline schema types - matches output of get_schema_with_metadata()
 export interface PipelineSchemaProperty {
   type?: string;
