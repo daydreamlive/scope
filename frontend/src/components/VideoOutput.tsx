@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { getDownloadLogs } from "../lib/api";
 
 interface VideoOutputProps {
   className?: string;
@@ -32,12 +33,43 @@ export function VideoOutput({
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
+  const [downloadLogs, setDownloadLogs] = useState<string>("");
+  const logsTextAreaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
+
+  // Poll for download logs when downloading
+  useEffect(() => {
+    if (!isDownloading) {
+      return;
+    }
+
+    const pollLogs = async () => {
+      try {
+        const response = await getDownloadLogs();
+        setDownloadLogs(response.logs);
+      } catch (error) {
+        console.error("Failed to fetch download logs:", error);
+      }
+    };
+
+    // Poll immediately and then every 500ms
+    pollLogs();
+    const interval = setInterval(pollLogs, 500);
+
+    return () => clearInterval(interval);
+  }, [isDownloading]);
+
+  // Auto-scroll logs to bottom when new content arrives
+  useEffect(() => {
+    if (logsTextAreaRef.current) {
+      logsTextAreaRef.current.scrollTop = logsTextAreaRef.current.scrollHeight;
+    }
+  }, [downloadLogs]);
 
   // Listen for video playing event to notify parent
   useEffect(() => {
@@ -160,9 +192,18 @@ export function VideoOutput({
             )}
           </div>
         ) : isDownloading ? (
-          <div className="text-center text-muted-foreground text-lg">
-            <Spinner size={24} className="mx-auto mb-3" />
-            <p>Downloading...</p>
+          <div className="flex flex-col items-center justify-center w-full h-full gap-3 p-4">
+            <div className="flex items-center gap-2 text-muted-foreground text-lg">
+              <Spinner size={20} />
+              <span>Downloading models...</span>
+            </div>
+            <textarea
+              ref={logsTextAreaRef}
+              readOnly
+              value={downloadLogs || "Waiting for download to start..."}
+              className="w-full flex-1 min-h-[120px] max-h-[300px] p-3 text-xs font-mono bg-muted/50 border border-border rounded-md resize-none text-muted-foreground overflow-y-auto"
+              style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}
+            />
           </div>
         ) : isPipelineLoading ? (
           <div className="text-center text-muted-foreground text-lg">

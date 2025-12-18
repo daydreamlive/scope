@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .download_models import download_models
+from .download_models import download_models, get_download_logs, is_download_active
 from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
@@ -510,6 +510,17 @@ async def download_pipeline_models(request: DownloadModelsRequest):
     except Exception as e:
         logger.error(f"Error starting model download: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class DownloadLogsResponse(BaseModel):
+    logs: str
+    is_active: bool
+
+
+@app.get("/api/v1/models/download-logs", response_model=DownloadLogsResponse)
+async def get_download_logs_endpoint():
+    """Get the current download logs for display in the frontend."""
+    return DownloadLogsResponse(logs=get_download_logs(), is_active=is_download_active())
 
 
 def is_spout_available() -> bool:

@@ -3,9 +3,11 @@ Cross-platform model downloader using huggingface_hub for HF repo/files.
 """
 
 import argparse
+import io
 import logging
 import os
 import sys
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -22,13 +24,109 @@ from .models_config import (
 logger = logging.getLogger(__name__)
 
 
+# Thread-safe buffer for capturing download output
+class DownloadOutputBuffer:
+    """Thread-safe buffer for capturing download output."""
+
+    def __init__(self, max_lines: int = 500):
+        self._buffer: list[str] = []
+        self._lock = threading.Lock()
+        self._max_lines = max_lines
+        self._is_active = False
+
+    def write(self, text: str) -> None:
+        """Write text to the buffer, splitting into lines."""
+        with self._lock:
+            # Handle carriage returns for progress bar updates
+            lines = text.split("\n")
+            for line in lines:
+                # Handle carriage returns within a line (tqdm uses \r for updates)
+                if "\r" in line:
+                    parts = line.split("\r")
+                    # Take the last non-empty part (latest update)
+                    for part in reversed(parts):
+                        if part.strip():
+                            line = part
+                            break
+                    else:
+                        line = parts[-1] if parts else ""
+
+                if line:  # Only add non-empty lines
+                    self._buffer.append(line)
+
+            # Trim to max lines
+            if len(self._buffer) > self._max_lines:
+                self._buffer = self._buffer[-self._max_lines :]
+
+    def get_logs(self) -> str:
+        """Get all captured logs as a single string."""
+        with self._lock:
+            return "\n".join(self._buffer)
+
+    def clear(self) -> None:
+        """Clear the buffer."""
+        with self._lock:
+            self._buffer = []
+
+    def set_active(self, active: bool) -> None:
+        """Set whether downloads are currently active."""
+        with self._lock:
+            self._is_active = active
+            if active:
+                self._buffer = []  # Clear on start
+
+    def is_active(self) -> bool:
+        """Check if downloads are currently active."""
+        with self._lock:
+            return self._is_active
+
+
+# Global download output buffer
+_download_buffer = DownloadOutputBuffer()
+
+
+def get_download_logs() -> str:
+    """Get the current download logs."""
+    return _download_buffer.get_logs()
+
+
+def is_download_active() -> bool:
+    """Check if a download is currently active."""
+    return _download_buffer.is_active()
+
+
+class TeeWriter:
+    """Writer that writes to multiple destinations."""
+
+    def __init__(self, original: io.TextIOBase, buffer: DownloadOutputBuffer):
+        self._original = original
+        self._buffer = buffer
+
+    def write(self, text: str) -> int:
+        """Write to both the original stream and the buffer."""
+        self._buffer.write(text)
+        return self._original.write(text)
+
+    def flush(self) -> None:
+        """Flush the original stream."""
+        self._original.flush()
+
+    def fileno(self) -> int:
+        """Return file descriptor of original stream."""
+        return self._original.fileno()
+
+    def isatty(self) -> bool:
+        """Check if the original stream is a tty."""
+        return self._original.isatty()
+
+
 @contextmanager
 def capture_download_output():
     """
-    Configure huggingface_hub loggers to write to our log file handlers.
+    Configure huggingface_hub loggers to write to our log file handlers
+    and capture stdout/stderr to a buffer for frontend display.
 
-    This doesn't redirect stdout/stderr so tqdm progress bars remain interactive.
-    Instead, it adds the same file handlers from the root logger to the HF loggers.
+    This captures both log messages and tqdm progress bars.
     """
     # Get file handlers from root logger (set up by app.py)
     root_logger = logging.getLogger()
@@ -48,9 +146,23 @@ def capture_download_output():
         for handler in file_handlers:
             hf_logger.addHandler(handler)
 
+    # Capture stderr (where tqdm progress bars go)
+    original_stderr = sys.stderr
+    tee_stderr = TeeWriter(original_stderr, _download_buffer)
+    sys.stderr = tee_stderr  # type: ignore
+
+    # Also capture stdout for any print statements
+    original_stdout = sys.stdout
+    tee_stdout = TeeWriter(original_stdout, _download_buffer)
+    sys.stdout = tee_stdout  # type: ignore
+
     try:
         yield
     finally:
+        # Restore original streams
+        sys.stderr = original_stderr
+        sys.stdout = original_stdout
+
         # Remove file handlers from HF loggers
         for hf_logger in hf_loggers:
             for handler in file_handlers:
@@ -278,26 +390,34 @@ def download_models(pipeline_id: str | None = None) -> None:
                     "krea-realtime-video", or "reward-forcing".
                     If None, downloads all pipelines.
     """
-    if pipeline_id is None:
-        # Download all pipelines
-        download_streamdiffusionv2_pipeline()
-        download_longlive_pipeline()
-        download_krea_realtime_video_pipeline()
-        download_reward_forcing_pipeline()
-    elif pipeline_id == "streamdiffusionv2":
-        download_streamdiffusionv2_pipeline()
-    elif pipeline_id == "longlive":
-        download_longlive_pipeline()
-    elif pipeline_id == "krea-realtime-video":
-        download_krea_realtime_video_pipeline()
-    elif pipeline_id == "reward-forcing":
-        download_reward_forcing_pipeline()
-    else:
-        raise ValueError(
-            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
-        )
+    # Mark download as active and clear previous logs
+    _download_buffer.set_active(True)
+    _download_buffer.write(f"Starting download for pipeline: {pipeline_id or 'all'}\n")
 
-    logger.info("All downloads complete.")
+    try:
+        if pipeline_id is None:
+            # Download all pipelines
+            download_streamdiffusionv2_pipeline()
+            download_longlive_pipeline()
+            download_krea_realtime_video_pipeline()
+            download_reward_forcing_pipeline()
+        elif pipeline_id == "streamdiffusionv2":
+            download_streamdiffusionv2_pipeline()
+        elif pipeline_id == "longlive":
+            download_longlive_pipeline()
+        elif pipeline_id == "krea-realtime-video":
+            download_krea_realtime_video_pipeline()
+        elif pipeline_id == "reward-forcing":
+            download_reward_forcing_pipeline()
+        else:
+            raise ValueError(
+                f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
+            )
+
+        logger.info("All downloads complete.")
+        _download_buffer.write("All downloads complete.\n")
+    finally:
+        _download_buffer.set_active(False)
 
 
 def main():

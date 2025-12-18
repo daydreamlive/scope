@@ -233,6 +233,28 @@ export const downloadPipelineModels = async (
   return result;
 };
 
+export interface DownloadLogsResponse {
+  logs: string;
+  is_active: boolean;
+}
+
+export const getDownloadLogs = async (): Promise<DownloadLogsResponse> => {
+  const response = await fetch("/api/v1/models/download-logs", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get download logs failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
 export interface HardwareInfoResponse {
   vram_gb: number | null;
   spout_available: boolean;
