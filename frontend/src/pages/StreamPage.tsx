@@ -135,6 +135,9 @@ export function StreamPage() {
     sendParameterUpdate,
   } = useWebRTC();
 
+  // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
+  const isLoading = isDownloading || isPipelineLoading || isConnecting;
+
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
     peerConnectionRef,
@@ -971,7 +974,7 @@ export function StreamPage() {
               onTimelinePromptsChange={handleTimelinePromptsChange}
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
-              isDownloading={isDownloading}
+              isLoading={isLoading}
             />
           </div>
         </div>
@@ -983,7 +986,7 @@ export function StreamPage() {
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
-            isDownloading={isDownloading}
+            isLoading={isLoading}
             resolution={
               settings.resolution || {
                 height: getDefaults(settings.pipelineId, settings.inputMode)
