@@ -93,6 +93,7 @@ jobs:
           files: |
             app/dist/*.exe
             app/dist/latest.yml
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
