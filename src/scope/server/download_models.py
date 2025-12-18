@@ -159,8 +159,11 @@ def download_streamdiffusionv2_pipeline() -> None:
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
     stream_diffusion_dst = models_root / "StreamDiffusionV2"
 
-    # 1) HF repo download excluding a large file
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    # 1) HF repo download for Wan2.1-T2V-1.3B VAE + config
+    wan_video_exclude = [
+        "models_t5_umt5-xxl-enc-bf16.pth",
+        "diffusion_pytorch_model.safetensors",
+    ]
     download_hf_repo_excluding(
         wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
     )
@@ -191,8 +194,11 @@ def download_longlive_pipeline() -> None:
     wan_video_comfy_dst = models_root / "WanVideo_comfy"
     longlive_dst = models_root / "LongLive-1.3B"
 
-    # 1) HF repo download for Wan2.1-T2V-1.3B, excluding large file
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    # 1) HF repo download for Wan2.1-T2V-1.3B VAE + config
+    wan_video_exclude = [
+        "models_t5_umt5-xxl-enc-bf16.pth",
+        "diffusion_pytorch_model.safetensors",
+    ]
     download_hf_repo_excluding(
         wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
     )
@@ -231,8 +237,11 @@ def download_krea_realtime_video_pipeline() -> None:
         allow_patterns=["krea-realtime-video-14b.safetensors"],
     )
 
-    # 2) Download VAE and text encoder from Wan2.1-T2V-1.3B
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    # 2) HF repo download for Wan2.1-T2V-1.3B VAE + config
+    wan_video_exclude = [
+        "models_t5_umt5-xxl-enc-bf16.pth",
+        "diffusion_pytorch_model.safetensors",
+    ]
     download_hf_repo_excluding(
         wan_video_1_3b_repo, wan_video_1_3b_dst, ignore_patterns=wan_video_exclude
     )
@@ -269,8 +278,11 @@ def download_reward_forcing_pipeline() -> None:
         reward_forcing_repo, reward_forcing_dst, allow_patterns=["rewardforcing.pt"]
     )
 
-    # 2) HF repo download for Wan2.1-T2V-1.3B, excluding large file
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
+    # 2) HF repo download for Wan2.1-T2V-1.3B VAE + config
+    wan_video_exclude = [
+        "models_t5_umt5-xxl-enc-bf16.pth",
+        "diffusion_pytorch_model.safetensors",
+    ]
     download_hf_repo_excluding(
         wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
     )
