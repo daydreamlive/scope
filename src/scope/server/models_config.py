@@ -73,71 +73,42 @@ def get_model_file_path(relative_path: str) -> Path:
     return models_dir / relative_path
 
 
-def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
+def get_required_model_files(pipeline_id: str) -> list[Path]:
     """
     Get the list of required model files that should exist for a given pipeline.
 
     Args:
         pipeline_id: The pipeline ID to get required models for.
-                     If None, returns models for all default pipelines.
-                     If provided, returns models specific to that pipeline.
 
     Returns:
         list[Path]: List of required model file paths
     """
     models_dir = get_models_dir()
 
-    # Passthrough doesn't need models
-    if pipeline_id == "passthrough":
+    from .pipeline_artifacts import PIPELINE_ARTIFACTS
+
+    if pipeline_id == "passthrough" or pipeline_id not in PIPELINE_ARTIFACTS:
         return []
 
-    # streamdiffusionv2 pipeline
-    if pipeline_id == "streamdiffusionv2":
-        return [
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "StreamDiffusionV2" / "wan_causal_dmd_v2v" / "model.pt",
-        ]
+    artifacts = PIPELINE_ARTIFACTS[pipeline_id]
 
-    # longlive pipeline
-    if pipeline_id == "longlive":
-        return [
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
-        ]
+    required_files = []
+    for artifact in artifacts:
+        local_dir_name = artifact.repo_id.split("/")[-1]
 
-    # krea-realtime-video pipeline
-    if pipeline_id == "krea-realtime-video":
-        return [
-            models_dir / "krea-realtime-video" / "krea-realtime-video-14b.safetensors",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "Wan2.1-T2V-14B" / "config.json",
-            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
-        ]
+        # Add each file from the artifact's files list
+        for file in artifact.files:
+            required_files.append(models_dir / local_dir_name / file)
 
-    if pipeline_id == "reward-forcing":
-        return [
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-            models_dir / "Wan2.1-T2V-1.3B" / "Wan2.1_VAE.pth",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "Reward-Forcing-T2V-1.3B" / "rewardforcing.pt",
-        ]
-
-    # Default: nothing is required
-    return []
+    return required_files
 
 
-def models_are_downloaded(pipeline_id: str | None = None) -> bool:
+def models_are_downloaded(pipeline_id: str) -> bool:
     """
     Check if all required model files are downloaded.
 
     Args:
         pipeline_id: The pipeline ID to check models for.
-                     If None, checks models for all default pipelines.
-                     If provided, checks models specific to that pipeline.
 
     Returns:
         bool: True if all required models are present, False otherwise

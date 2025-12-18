@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+from .artifacts import Artifact, HuggingfaceRepoArtifact
+
 # Disable hf_transfer to use standard download method
 # This prevents errors when HF_HUB_ENABLE_HF_TRANSFER=1 is set but hf_transfer is not installed
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
@@ -17,7 +19,6 @@ os.environ["HF_HUB_ENABLE_HF_XET"] = "1"
 
 from .models_config import (
     ensure_models_dir,
-    models_are_downloaded,
 )
 
 # Set up logger
@@ -123,216 +124,76 @@ def download_hf_repo(
     logger.info(f"Completed download of repo '{repo_id}' to: {local_dir}")
 
 
-def download_hf_repo_excluding(
-    repo_id: str, local_dir: Path, ignore_patterns: list[str]
-) -> None:
+def download_artifact(artifact: Artifact, models_root: Path) -> None:
     """
-    Download an entire HF repo snapshot while excluding specific files.
-    This is a convenience wrapper around download_hf_repo.
-    """
-    download_hf_repo(repo_id, local_dir, ignore_patterns=ignore_patterns)
+    Download an artifact to the models directory.
 
-
-def download_hf_single_file(repo_id: str, filename: str, local_dir: Path) -> None:
-    """
-    Download a single file from an HF repo into a target folder.
-    This is a convenience wrapper around download_hf_repo.
-    """
-    download_hf_repo(repo_id, local_dir, filename=filename)
-
-
-def download_required_models():
-    """Download required models if they are not already present."""
-    if models_are_downloaded():
-        logger.info("Models already downloaded, skipping download")
-        return
-
-    logger.info("Downloading required models...")
-    try:
-        download_models()
-        logger.info("Model download completed successfully")
-    except Exception as e:
-        logger.error(f"Error downloading models: {e}")
-        raise
-
-
-def download_streamdiffusionv2_pipeline() -> None:
-    """Download models for the StreamDiffusionV2 pipeline."""
-    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-    stream_diffusion_repo = "jerryfeng/StreamDiffusionV2"
-
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-    stream_diffusion_dst = models_root / "StreamDiffusionV2"
-
-    # 1) HF repo download for Wan2.1-T2V-1.3B VAE + config
-    wan_video_exclude = [
-        "models_t5_umt5-xxl-enc-bf16.pth",
-        "diffusion_pytorch_model.safetensors",
-    ]
-    download_hf_repo_excluding(
-        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
-    )
-
-    # 2) HF single file download into a folder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
-
-    # 3) HF repo download for StreamDiffusionV2 (1.3b only)
-    download_hf_repo(
-        stream_diffusion_repo,
-        stream_diffusion_dst,
-        allow_patterns=["wan_causal_dmd_v2v/model.pt"],
-    )
-
-
-def download_longlive_pipeline() -> None:
-    """Download models for the LongLive pipeline."""
-    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-    longlive_repo = "Efficient-Large-Model/LongLive-1.3B"
-
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-    longlive_dst = models_root / "LongLive-1.3B"
-
-    # 1) HF repo download for Wan2.1-T2V-1.3B VAE + config
-    wan_video_exclude = [
-        "models_t5_umt5-xxl-enc-bf16.pth",
-        "diffusion_pytorch_model.safetensors",
-    ]
-    download_hf_repo_excluding(
-        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
-    )
-
-    # 2) HF single file download for UMT5 encoder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
-
-    # 3) HF repo download for LongLive-1.3B
-    download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
-
-
-def download_krea_realtime_video_pipeline() -> None:
-    """
-    Download models for the krea-realtime-video pipeline.
-    """
-    # HuggingFace repos
-    krea_rt_repo = "krea/krea-realtime-video"
-    wan_video_1_3b_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_14b_repo = "Wan-AI/Wan2.1-T2V-14B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    krea_rt_dst = models_root / "krea-realtime-video"
-    wan_video_1_3b_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_14b_dst = models_root / "Wan2.1-T2V-14B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-
-    # 1) Download only krea-realtime-video
-    download_hf_repo(
-        krea_rt_repo,
-        krea_rt_dst,
-        allow_patterns=["krea-realtime-video-14b.safetensors"],
-    )
-
-    # 2) HF repo download for Wan2.1-T2V-1.3B VAE + config
-    wan_video_exclude = [
-        "models_t5_umt5-xxl-enc-bf16.pth",
-        "diffusion_pytorch_model.safetensors",
-    ]
-    download_hf_repo_excluding(
-        wan_video_1_3b_repo, wan_video_1_3b_dst, ignore_patterns=wan_video_exclude
-    )
-
-    # 3) Download only config.json from Wan2.1-T2V-14B (no model weights needed)
-    download_hf_repo(
-        wan_video_14b_repo, wan_video_14b_dst, allow_patterns=["config.json"]
-    )
-
-    # 4) HF single file download for UMT5 encoder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
-
-
-def download_reward_forcing_pipeline() -> None:
-    """
-    Download models for the RewardForcing pipeline.
-    """
-    # HuggingFace repos
-    reward_forcing_repo = "JaydenLu666/Reward-Forcing-T2V-1.3B"
-    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    reward_forcing_dst = models_root / "Reward-Forcing-T2V-1.3B"
-    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-
-    # 1) Download Reward-Forcing model
-    download_hf_repo(
-        reward_forcing_repo, reward_forcing_dst, allow_patterns=["rewardforcing.pt"]
-    )
-
-    # 2) HF repo download for Wan2.1-T2V-1.3B VAE + config
-    wan_video_exclude = [
-        "models_t5_umt5-xxl-enc-bf16.pth",
-        "diffusion_pytorch_model.safetensors",
-    ]
-    download_hf_repo_excluding(
-        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
-    )
-
-    # 3) HF single file download for UMT5 encoder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
-
-
-def download_models(pipeline_id: str | None = None) -> None:
-    """
-    Download models. If pipeline_id is None, downloads all pipelines.
-    If pipeline_id is specified, downloads that specific pipeline.
+    This is a generic dispatcher that routes to the appropriate download
+    function based on the artifact type.
 
     Args:
-        pipeline_id: Optional pipeline ID. Supports "streamdiffusionv2", "longlive",
-                    "krea-realtime-video", or "reward-forcing".
-                    If None, downloads all pipelines.
-    """
-    if pipeline_id is None:
-        # Download all pipelines
-        download_streamdiffusionv2_pipeline()
-        download_longlive_pipeline()
-        download_krea_realtime_video_pipeline()
-        download_reward_forcing_pipeline()
-    elif pipeline_id == "streamdiffusionv2":
-        download_streamdiffusionv2_pipeline()
-    elif pipeline_id == "longlive":
-        download_longlive_pipeline()
-    elif pipeline_id == "krea-realtime-video":
-        download_krea_realtime_video_pipeline()
-    elif pipeline_id == "reward-forcing":
-        download_reward_forcing_pipeline()
-    else:
-        raise ValueError(
-            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing"
-        )
+        artifact: The artifact to download
+        models_root: Root directory where models are stored
 
-    logger.info("All downloads complete.")
+    Raises:
+        ValueError: If artifact type is not supported
+    """
+    if isinstance(artifact, HuggingfaceRepoArtifact):
+        download_hf_artifact(artifact, models_root)
+    else:
+        raise ValueError(f"Unsupported artifact type: {type(artifact)}")
+
+
+def download_hf_artifact(
+    artifact: HuggingfaceRepoArtifact,
+    models_root: Path,
+) -> None:
+    """
+    Download a HuggingFace repository artifact.
+
+    Downloads specific files/directories from a HuggingFace repository.
+
+    Args:
+        artifact: HuggingFace repo artifact
+        models_root: Root directory where models are stored
+    """
+    local_dir = models_root / artifact.repo_id.split("/")[-1]
+
+    # Convert file/directory specifications to glob patterns
+    allow_patterns = []
+    for file in artifact.files:
+        # Add the file/directory itself
+        allow_patterns.append(file)
+        # If it's a directory, also include everything inside it
+        # This handles both "google" and "google/" formats
+        if not file.endswith(("/", ".pt", ".pth", ".safetensors", ".json")):
+            # Likely a directory, add pattern to include its contents
+            allow_patterns.append(f"{file}/*")
+            allow_patterns.append(f"{file}/**/*")
+
+    logger.info(f"Downloading from {artifact.repo_id}: {artifact.files}")
+    download_hf_repo(
+        repo_id=artifact.repo_id,
+        local_dir=local_dir,
+        allow_patterns=allow_patterns,
+    )
+
+
+def download_models(pipeline_id: str) -> None:
+    """
+    Download models for a specific pipeline.
+
+    Args:
+        pipeline_id: Pipeline ID to download models for.
+    """
+    from .pipeline_artifacts import PIPELINE_ARTIFACTS
+
+    models_root = ensure_models_dir()
+
+    logger.info(f"Downloading models for pipeline: {pipeline_id}")
+    artifacts = PIPELINE_ARTIFACTS[pipeline_id]
+    for artifact in artifacts:
+        download_artifact(artifact, models_root)
 
 
 def main():
@@ -342,9 +203,6 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Download all pipelines
-  python download_models.py
-
   # Download specific pipeline
   python download_models.py --pipeline streamdiffusionv2
   python download_models.py --pipeline longlive
@@ -358,7 +216,8 @@ Examples:
         "-p",
         type=str,
         default=None,
-        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing'). If not specified, downloads all pipelines.",
+        required=True,
+        help="Pipeline ID (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing').",
     )
 
     args = parser.parse_args()
