@@ -218,19 +218,20 @@ export function useStreamState() {
     fetchInitialData();
   }, []);
 
-  // Update inputMode when schemas load for the first time
-  // This corrects the initial fallback mode to match the pipeline's actual default mode
+  // Update inputMode when schemas load or pipeline changes
+  // This sets the correct default mode for the pipeline
   useEffect(() => {
     if (pipelineSchemas) {
       const schema = pipelineSchemas.pipelines[settings.pipelineId];
-      if (schema?.default_mode && settings.inputMode !== schema.default_mode) {
+      if (schema?.default_mode) {
         setSettings(prev => ({
           ...prev,
           inputMode: schema.default_mode,
         }));
       }
     }
-  }, [pipelineSchemas, settings.pipelineId, settings.inputMode]);
+    // Only run when schemas load or pipeline changes, NOT when inputMode changes
+  }, [pipelineSchemas, settings.pipelineId]);
 
   // Set recommended quantization when krea-realtime-video is selected
   // Reset to null when switching to other pipelines
