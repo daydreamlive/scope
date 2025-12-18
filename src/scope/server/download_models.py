@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from .artifacts import Artifact, HuggingfaceRepoArtifact
+from .download_progress_manager import download_progress_manager
 
 # Disable hf_transfer to use standard download method
 # This prevents errors when HF_HUB_ENABLE_HF_TRANSFER=1 is set but hf_transfer is not installed
@@ -23,6 +24,25 @@ from .models_config import (
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+# Current download context for tqdm callback
+_current_pipeline_id: str | None = None
+_current_artifact: str | None = None
+
+
+def set_download_context(pipeline_id: str, artifact: str):
+    """Set the current download context for progress tracking."""
+    global _current_pipeline_id, _current_artifact
+    _current_pipeline_id = pipeline_id
+    _current_artifact = artifact
+
+
+def clear_download_context():
+    """Clear the download context."""
+    global _current_pipeline_id, _current_artifact
+    _current_pipeline_id = None
+    _current_artifact = None
+
 
 # --- third-party libs ---
 try:
@@ -47,13 +67,16 @@ _last_logged_progress: dict[int, float] = {}
 
 def _patched_tqdm_update(self, n: int = 1):
     """Patched tqdm update that logs progress every 5%."""
+    # Call original update FIRST to increment self.n
+    result = _original_tqdm_update(self, n)
+
     try:
         if self.n is not None and self.total is not None and self.total > 0:
             current_progress = (self.n / self.total) * 100
 
             # Skip logging at 0% progress
             if current_progress == 0.0:
-                return _original_tqdm_update(self, n)
+                return result
 
             instance_id = id(self)
             last_logged = _last_logged_progress.get(instance_id, 0.0)
@@ -68,6 +91,19 @@ def _patched_tqdm_update(self, n: int = 1):
                 # Clear dict entry when progress reaches 100%
                 if current_progress >= 100.0:
                     _last_logged_progress.pop(instance_id, None)
+
+            # Update progress tracker for UI (now with the updated self.n value)
+            if _current_pipeline_id and _current_artifact:
+                try:
+                    download_progress_manager.update(
+                        _current_pipeline_id,
+                        _current_artifact,
+                        self.n / 1024 / 1024,
+                        self.total / 1024 / 1024,
+                    )
+                except Exception:
+                    # Don't let progress tracking interfere with download
+                    pass
     except KeyboardInterrupt:
         # Re-raise KeyboardInterrupt to allow proper signal handling
         raise
@@ -75,8 +111,7 @@ def _patched_tqdm_update(self, n: int = 1):
         # Don't let logging errors interfere with tqdm or signal handling
         pass
 
-    # Always call original update, even if our logging failed
-    return _original_tqdm_update(self, n)
+    return result
 
 
 # Apply the monkey patch
@@ -124,7 +159,7 @@ def download_hf_repo(
     logger.info(f"Completed download of repo '{repo_id}' to: {local_dir}")
 
 
-def download_artifact(artifact: Artifact, models_root: Path) -> None:
+def download_artifact(artifact: Artifact, models_root: Path, pipeline_id: str) -> None:
     """
     Download an artifact to the models directory.
 
@@ -134,19 +169,19 @@ def download_artifact(artifact: Artifact, models_root: Path) -> None:
     Args:
         artifact: The artifact to download
         models_root: Root directory where models are stored
+        pipeline_id: Optional pipeline ID for progress tracking
 
     Raises:
         ValueError: If artifact type is not supported
     """
     if isinstance(artifact, HuggingfaceRepoArtifact):
-        download_hf_artifact(artifact, models_root)
+        download_hf_artifact(artifact, models_root, pipeline_id)
     else:
         raise ValueError(f"Unsupported artifact type: {type(artifact)}")
 
 
 def download_hf_artifact(
-    artifact: HuggingfaceRepoArtifact,
-    models_root: Path,
+    artifact: HuggingfaceRepoArtifact, models_root: Path, pipeline_id: str
 ) -> None:
     """
     Download a HuggingFace repository artifact.
@@ -156,27 +191,36 @@ def download_hf_artifact(
     Args:
         artifact: HuggingFace repo artifact
         models_root: Root directory where models are stored
+        pipeline_id: Pipeline ID to download models for
     """
-    local_dir = models_root / artifact.repo_id.split("/")[-1]
+    # Set up progress tracking context
+    set_download_context(pipeline_id, artifact.repo_id)
 
-    # Convert file/directory specifications to glob patterns
-    allow_patterns = []
-    for file in artifact.files:
-        # Add the file/directory itself
-        allow_patterns.append(file)
-        # If it's a directory, also include everything inside it
-        # This handles both "google" and "google/" formats
-        if not file.endswith(("/", ".pt", ".pth", ".safetensors", ".json")):
-            # Likely a directory, add pattern to include its contents
-            allow_patterns.append(f"{file}/*")
-            allow_patterns.append(f"{file}/**/*")
+    try:
+        local_dir = models_root / artifact.repo_id.split("/")[-1]
 
-    logger.info(f"Downloading from {artifact.repo_id}: {artifact.files}")
-    download_hf_repo(
-        repo_id=artifact.repo_id,
-        local_dir=local_dir,
-        allow_patterns=allow_patterns,
-    )
+        # Convert file/directory specifications to glob patterns
+        allow_patterns = []
+        for file in artifact.files:
+            # Add the file/directory itself
+            allow_patterns.append(file)
+            # If it's a directory, also include everything inside it
+            # This handles both "google" and "google/" formats
+            if not file.endswith(("/", ".pt", ".pth", ".safetensors", ".json")):
+                # Likely a directory, add pattern to include its contents
+                allow_patterns.append(f"{file}/*")
+                allow_patterns.append(f"{file}/**/*")
+
+        logger.info(f"Downloading from {artifact.repo_id}: {artifact.files}")
+        download_hf_repo(
+            repo_id=artifact.repo_id,
+            local_dir=local_dir,
+            allow_patterns=allow_patterns,
+        )
+    finally:
+        # Always clear context after download
+        if pipeline_id:
+            clear_download_context()
 
 
 def download_models(pipeline_id: str) -> None:
@@ -192,8 +236,10 @@ def download_models(pipeline_id: str) -> None:
 
     logger.info(f"Downloading models for pipeline: {pipeline_id}")
     artifacts = PIPELINE_ARTIFACTS[pipeline_id]
+
+    # Download each artifact (progress tracking starts in set_download_context)
     for artifact in artifacts:
-        download_artifact(artifact, models_root)
+        download_artifact(artifact, models_root, pipeline_id)
 
 
 def main():

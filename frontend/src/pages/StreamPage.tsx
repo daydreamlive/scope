@@ -22,6 +22,7 @@ import type {
   PipelineId,
   LoRAConfig,
   LoraMergeStrategy,
+  DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -98,6 +99,8 @@ export function StreamPage() {
   // Download dialog state
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] =
+    useState<DownloadProgress | null>(null);
   const [pipelineNeedsModels, setPipelineNeedsModels] = useState<string | null>(
     null
   );
@@ -285,17 +288,27 @@ export function StreamPage() {
     if (!pipelineNeedsModels) return;
 
     setIsDownloading(true);
-    setShowDownloadDialog(false);
+    setDownloadProgress(null);
+    setShowDownloadDialog(true); // Keep dialog open to show progress
 
     try {
       await downloadPipelineModels(pipelineNeedsModels);
 
-      // Start polling to check when download is complete
-      const checkDownloadComplete = async () => {
+      // Enhanced polling with progress updates
+      const checkDownloadProgress = async () => {
         try {
           const status = await checkModelStatus(pipelineNeedsModels);
+
+          // Update progress state
+          if (status.progress) {
+            setDownloadProgress(status.progress);
+          }
+
           if (status.downloaded) {
+            // Download complete
             setIsDownloading(false);
+            setDownloadProgress(null);
+            setShowDownloadDialog(false);
             setPipelineNeedsModels(null);
 
             // Now update the pipeline since download is complete
@@ -345,20 +358,23 @@ export function StreamPage() {
               }
             }, 100);
           } else {
-            // Check again in 2 seconds
-            setTimeout(checkDownloadComplete, 2000);
+            setTimeout(checkDownloadProgress, 2000);
           }
         } catch (error) {
           console.error("Error checking download status:", error);
           setIsDownloading(false);
+          setDownloadProgress(null);
+          setShowDownloadDialog(false);
         }
       };
 
-      // Start checking for completion
-      setTimeout(checkDownloadComplete, 5000);
+      // Start checking
+      setTimeout(checkDownloadProgress, 5000);
     } catch (error) {
       console.error("Error downloading models:", error);
       setIsDownloading(false);
+      setDownloadProgress(null);
+      setShowDownloadDialog(false);
     }
   };
 
@@ -1045,6 +1061,8 @@ export function StreamPage() {
           pipelineId={pipelineNeedsModels as PipelineId}
           onClose={handleDialogClose}
           onDownload={handleDownloadModels}
+          isDownloading={isDownloading}
+          progress={downloadProgress}
         />
       )}
     </div>

@@ -105,18 +105,29 @@ def get_required_model_files(pipeline_id: str) -> list[Path]:
 
 def models_are_downloaded(pipeline_id: str) -> bool:
     """
-    Check if all required model files are downloaded.
+    Check if all required model files are downloaded and non-empty.
 
     Args:
         pipeline_id: The pipeline ID to check models for.
 
     Returns:
-        bool: True if all required models are present, False otherwise
+        bool: True if all required models are present and non-empty, False otherwise
     """
     required_files = get_required_model_files(pipeline_id)
 
     for file_path in required_files:
+        # Check if path exists
         if not file_path.exists():
             return False
+
+        # If it's a file, check it's non-empty
+        if file_path.is_file():
+            if file_path.stat().st_size == 0:
+                return False
+
+        # If it's a directory, check it's non-empty
+        elif file_path.is_dir():
+            if not any(file_path.iterdir()):
+                return False
 
     return True

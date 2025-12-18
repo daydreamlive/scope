@@ -92,3 +92,14 @@ export interface PipelineInfo {
   supportedModes: InputMode[];
   defaultMode: InputMode;
 }
+
+export interface DownloadProgress {
+  is_downloading: boolean;
+  percentage: number;
+  current_artifact: string | null;
+}
+
+export interface ModelStatusResponse {
+  downloaded: boolean;
+  progress: DownloadProgress | null;
+}

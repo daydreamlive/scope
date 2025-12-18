@@ -1,4 +1,8 @@
-import type { LoRAConfig, IceServersResponse } from "../types";
+import type {
+  LoRAConfig,
+  IceServersResponse,
+  ModelStatusResponse,
+} from "../types";
 
 export interface PromptItem {
   text: string;
@@ -193,7 +197,7 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
 
 export const checkModelStatus = async (
   pipelineId: string
-): Promise<{ downloaded: boolean }> => {
+): Promise<ModelStatusResponse> => {
   const response = await fetch(
     `/api/v1/models/status?pipeline_id=${pipelineId}`,
     {
