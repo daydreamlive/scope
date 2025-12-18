@@ -40,7 +40,7 @@ interface SettingsPanelProps {
   pipelineId: PipelineId;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
-  isDownloading?: boolean;
+  isLoading?: boolean;
   // Resolution is required - parent should always provide from schema defaults
   resolution: {
     height: number;
@@ -83,7 +83,7 @@ export function SettingsPanel({
   pipelineId,
   onPipelineIdChange,
   isStreaming = false,
-  isDownloading = false,
+  isLoading = false,
   resolution,
   onResolutionChange,
   seed = 42,
@@ -231,7 +231,7 @@ export function SettingsPanel({
           <Select
             value={pipelineId}
             onValueChange={handlePipelineIdChange}
-            disabled={isStreaming || isDownloading}
+            disabled={isStreaming || isLoading}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select a pipeline" />
@@ -324,7 +324,7 @@ export function SettingsPanel({
             <LoRAManager
               loras={loras}
               onLorasChange={onLorasChange}
-              disabled={isDownloading}
+              disabled={isLoading}
               isStreaming={isStreaming}
               loraMergeStrategy={loraMergeStrategy}
             />
