@@ -19,6 +19,8 @@ from ..schema import StreamDiffusionV2Config
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.vace import CausalVaceWanModel
+from ..wan2_1.vae import WanVAEWrapper
 from .components import StreamDiffusionV2WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
 from .modules.causal_model import CausalWanModel
@@ -47,6 +49,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         generator_path = getattr(config, "generator_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
+        vace_path = getattr(config, "vace_path", None)
 
         model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
@@ -55,8 +58,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             model_config, "generator_model_name", "generator"
         )
 
-        # Load generator
+        # Load generator (with VACE support via composition)
         start = time.time()
+
+        # Always create base CausalWanModel first
         generator = WanDiffusionWrapper(
             CausalWanModel,
             model_name=base_model_name,
@@ -65,8 +70,6 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             generator_model_name=generator_model_name,
             **base_model_kwargs,
         )
-
-        print(f"Loaded diffusion model in {time.time() - start:.3f}s")
 
         # Initialize optional LoRA adapters on the underlying model.
         generator.model = self._init_loras(config, generator.model)
@@ -151,6 +154,92 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
 
+        # Lazy loading infrastructure for VACE
+        self.vace_path = vace_path
+        self.vace_enabled = False
+        self.vace_in_dim = (
+            base_model_kwargs.get("vace_in_dim", 96) if base_model_kwargs else 96
+        )
+        self._stored_model_dir = model_dir
+        self._stored_base_model_name = base_model_name
+        self._stored_device = device
+        self._stored_dtype = dtype
+
+    def _needs_vace(self, kwargs: dict) -> bool:
+        """_needs_vace: Check if VACE is needed for this generation call.
+
+        VACE is needed when:
+        - ref_images is present and non-empty, OR
+        - input_frames is present (for depth/flow/pose conditioning)
+
+        Args:
+            kwargs: Generation kwargs
+
+        Returns:
+            bool: True if VACE is needed
+        """
+        ref_images = kwargs.get("ref_images")
+        input_frames = kwargs.get("input_frames")
+
+        has_ref_images = ref_images is not None and len(ref_images) > 0
+        has_input_frames = input_frames is not None
+
+        return has_ref_images or has_input_frames
+
+    def _enable_vace(self):
+        """_enable_vace: Enable VACE by wrapping model and loading weights.
+
+        This is called lazily on first use when VACE is needed.
+
+        Note: For StreamDiffusionV2, vace_vae is ALWAYS needed when ref_images are used
+        because the main VAE uses streaming with caching that requires specific temporal
+        dimensions. Reference images only have 1-2 frames which is too small for the
+        streaming encoder's 3D convolutions.
+
+        Raises:
+            RuntimeError: If VACE is needed but vace_path is None
+        """
+        if self.vace_enabled:
+            return
+
+        if self.vace_path is None:
+            raise RuntimeError(
+                "_enable_vace: VACE is required but vace_path is None. "
+                "This should not happen - VACE should be configured during pipeline initialization."
+            )
+
+        # Wrap model with VACE
+        self.components.generator.model = CausalVaceWanModel(
+            self.components.generator.model, vace_in_dim=self.vace_in_dim
+        )
+
+        # Move VACE-specific components to correct device/dtype
+        # The wrapped model's VACE components (vace_patch_embedding, vace_blocks) were created
+        # on CPU with default dtype. We need to move them to match the base model.
+        self.components.generator.model.vace_patch_embedding.to(
+            device=self._stored_device, dtype=self._stored_dtype
+        )
+        self.components.generator.model.vace_blocks.to(
+            device=self._stored_device, dtype=self._stored_dtype
+        )
+
+        # Load VACE weights
+        from ..wan2_1.vace import load_vace_weights_only
+
+        load_vace_weights_only(self.components.generator.model, self.vace_path)
+
+        # Load separate vace_vae for VACE encoding
+        # StreamDiffusionV2's main VAE uses streaming with caching that requires
+        # specific temporal dimensions. Reference images only have 1-2 frames,
+        # which is too small for the streaming encoder's 3D convolutions.
+        vace_vae = WanVAEWrapper(
+            model_dir=self._stored_model_dir, model_name=self._stored_base_model_name
+        )
+        vace_vae = vace_vae.to(device=self._stored_device, dtype=self._stored_dtype)
+        self.components.add("vace_vae", vace_vae)
+
+        self.vace_enabled = True
+
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
         return prepare_for_mode(self.__class__, self.components.config, kwargs)
@@ -162,6 +251,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        # Lazy load VACE if needed
+        if self._needs_vace(kwargs) and not self.vace_enabled:
+            self._enable_vace()
+
         # Handle runtime LoRA scale updates before writing into state.
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:
@@ -178,6 +271,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
             self.state.set("transition", None)
+
+        # Clear ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "ref_images" not in kwargs:
+            self.state.set("ref_images", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

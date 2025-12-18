@@ -287,6 +287,18 @@ class StreamDiffusionV2Config(BasePipelineConfig):
         description="Expected input video frame count",
     )
 
+    # VACE (optional reference image conditioning for text mode)
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning in text mode",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
+    )
+
     @classmethod
     def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
         """StreamDiffusionV2 mode-specific defaults."""

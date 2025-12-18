@@ -21,7 +21,9 @@ import math
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
 # change to default for other models
-flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune")
+
+#TODO: benchmark vs max-autotune. If perf dictates, we could make the mode conditional based on use vace.
+flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
