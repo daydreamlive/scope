@@ -128,6 +128,17 @@ export class ScopeElectronAppService {
         position: relative !important;
         margin-right: 0 !important;
       }
+      /* Adjust #root to account for the title bar padding */
+      #root {
+        height: 100% !important;
+        max-height: 100% !important;
+        overflow: hidden !important;
+      }
+      /* Adjust the main content container to fit within available space */
+      #root > div {
+        height: 100% !important;
+        max-height: 100% !important;
+      }
       /* Make interactive elements non-draggable */
       button, input, textarea, select, a,
       [role="button"], [role="textbox"], [role="combobox"],
