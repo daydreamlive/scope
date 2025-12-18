@@ -105,7 +105,7 @@ class Parameters(BaseModel):
         default=None,
         description="Spout input configuration for receiving frames from external apps",
     )
-    ref_images: list[str] | None = Field(
+    vace_ref_images: list[str] | None = Field(
         default=None,
         description="List of reference image file paths for VACE conditioning. Images should be located in the assets directory (at the same level as the models directory).",
     )
