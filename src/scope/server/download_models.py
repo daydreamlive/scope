@@ -153,6 +153,8 @@ def download_hf_repo(
         local_dir=str(local_dir),
         allow_patterns=allow_patterns,
         ignore_patterns=ignore_patterns,
+        # TODO: Remove this once we can support progress tracking when there are multiple workers
+        max_workers=1,
         # token is picked up automatically from HUGGINGFACE_TOKEN if set
         # revision=None,  # optionally pin a commit/tag if you like
     )
