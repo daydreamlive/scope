@@ -14,7 +14,15 @@ exports.default = async function afterPack(context) {
 
   // Determine resources path based on platform
   if (electronPlatformName === 'darwin') {
-    resourcesPath = path.join(appOutDir, 'DaydreamScope.app', 'Contents', 'Resources');
+    // Find the .app bundle dynamically (handles different app names and architectures)
+    // This is more reliable than hardcoding the app name
+    const entries = fs.readdirSync(appOutDir);
+    const appBundle = entries.find(entry => entry.endsWith('.app'));
+    if (!appBundle) {
+      throw new Error(`Could not find .app bundle in ${appOutDir}`);
+    }
+    resourcesPath = path.join(appOutDir, appBundle, 'Contents', 'Resources');
+    console.log(`Found app bundle: ${appBundle}`);
   } else if (electronPlatformName === 'win32') {
     resourcesPath = path.join(appOutDir, 'resources');
   } else {
