@@ -631,7 +631,7 @@ dependencies = [
     { name = "flash-attn", version = "2.8.3", source = { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "ftfy" },
     { name = "httpx" },
-    { name = "huggingface-hub", extra = ["hf-xet"] },
+    { name = "huggingface-hub" },
     { name = "kernels" },
     { name = "lmdb" },
     { name = "omegaconf" },
@@ -677,7 +677,7 @@ requires-dist = [
     { name = "flash-attn", marker = "sys_platform == 'win32'", url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl" },
     { name = "ftfy", specifier = ">=6.3.1" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "huggingface-hub", extras = ["hf-xet"], specifier = ">=0.25.0" },
+    { name = "huggingface-hub", specifier = ">=0.25.0" },
     { name = "kernels", specifier = ">=0.10.4" },
     { name = "lmdb", specifier = ">=1.7.3" },
     { name = "omegaconf", specifier = ">=2.3.0" },
@@ -1130,11 +1130,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/98/63/4910c5fa9128fdadf6a9c5ac138e8b1b6cee4ca44bf7915bbfbce4e355ee/huggingface_hub-0.36.0.tar.gz", hash = "sha256:47b3f0e2539c39bf5cde015d63b72ec49baff67b6931c3d97f3f84532e2b8d25", size = 463358, upload-time = "2025-10-23T12:12:01.413Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/bd/1a875e0d592d447cbc02805fd3fe0f497714d6a2583f59d14fa9ebad96eb/huggingface_hub-0.36.0-py3-none-any.whl", hash = "sha256:7bcc9ad17d5b3f07b57c78e79d527102d08313caa278a641993acddcb894548d", size = 566094, upload-time = "2025-10-23T12:11:59.557Z" },
-]
-
-[package.optional-dependencies]
-hf-xet = [
-    { name = "hf-xet" },
 ]
 
 [[package]]

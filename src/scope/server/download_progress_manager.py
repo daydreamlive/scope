@@ -62,6 +62,4 @@ class DownloadProgressManager:
 
 
 # Global singleton instance
-# The main reason for using a singleton is because we also need access to this in the patched tqdm update
-# in download_models.py which is operating at a global level
 download_progress_manager = DownloadProgressManager()
