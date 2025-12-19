@@ -1,6 +1,7 @@
 # Modified from notes/VACE/vace/models/wan/modules/model.py
 # Adapted for causal/autoregressive generation with factory pattern
 # Pipeline-agnostic using duck typing - works with any CausalWanModel
+import logging
 import math
 
 import torch
@@ -10,6 +11,8 @@ from .attention_blocks import (
     create_base_attention_block_class,
     create_vace_attention_block_class,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # TODO: Consolidate this with other pipeline implementations into a shared wan2_1/utils module.
@@ -282,7 +285,26 @@ class CausalVaceWanModel(nn.Module):
         current_start=0,
         **block_kwargs,
     ):
-        """Forward pass with optional VACE conditioning."""
+        """
+        Forward pass with optional VACE conditioning.
+
+        Reference-to-Video (R2V) Sink Token Architecture:
+        -------------------------------------------------
+        On first chunk (current_start==0), reference images are injected as sink tokens
+        that persist in KV cache across all subsequent chunks. This provides continuous
+        reference appearance conditioning to combat temporal drift.
+
+        Key design decisions:
+        1. Reference spatial tokens preserved and tiled to fill one frame (frame_seqlen tokens)
+        2. Reference "frame" prepended to sequence, integrated into frame structure (seq_lens updated)
+        3. Hints inject only on video tokens, not reference prefix
+        4. Reference tokens stripped before unpatchify (only video frames decoded)
+        5. With sink_size mechanism, reference tokens never evicted from cache
+
+        This combines two conditioning paths:
+        - Persistent: Reference tokens in KV cache with spatial structure (always visible via attention)
+        - Ephemeral: VACE hints (injected per denoising step, chunk-dependent)
+        """
         if self.model_type == "i2v":
             assert clip_fea is not None and y is not None
 
@@ -303,16 +325,130 @@ class CausalVaceWanModel(nn.Module):
         assert seq_lens.max() <= seq_len
         x = torch.cat(x)
 
+        # Reference frame injection as sink tokens (first chunk only)
+        # This makes reference appearance persistently available in KV cache across all chunks
+        reference_prefix_length = 0
+        if current_start == 0 and vace_context is not None and kv_cache is not None:
+            # Calculate frame_seqlen from video tokens to ensure proper frame alignment
+            # e.g., for 3 frames with 1024 tokens/frame: frame_seqlen = 1024
+            frame_seqlen = x.size(1) // t.shape[1]
+
+            # Encode reference tokens with full spatial structure and tile to frame_seqlen
+            # This preserves spatial information from reference images for better conditioning
+            # vace_context is a list of tensors, each with shape [C, num_refs, H, W]
+            ref_latents = []
+            for ref_ctx in vace_context:
+                # ref_ctx shape: [C, num_refs, H, W] where C=96 (vace_in_dim)
+
+                # Use VACE patch embedding (trained for 96-channel VACE context)
+                # This is critical - vace_patch_embedding was trained to extract features
+                # from the full 96-channel reference context (VAE latent + depth + edges + etc)
+                ref_embedded = self.vace_patch_embedding(ref_ctx.unsqueeze(0))
+                # ref_embedded shape: [1, dim, num_refs, h, w]
+
+                # Flatten spatial dimensions: [1, dim, num_refs, h, w] -> [1, dim, num_refs*h*w]
+                ref_embedded = ref_embedded.flatten(2)
+
+                # Transpose: [1, dim, num_tokens] -> [1, num_tokens, dim]
+                ref_embedded = ref_embedded.transpose(1, 2)
+
+                # Tile/repeat reference tokens to fill frame_seqlen
+                # This preserves spatial structure while maintaining frame alignment
+                num_ref_tokens = ref_embedded.size(1)
+                if num_ref_tokens < frame_seqlen:
+                    # Repeat tokens cyclically to fill frame_seqlen
+                    num_repeats = (frame_seqlen + num_ref_tokens - 1) // num_ref_tokens
+                    ref_tiled = ref_embedded.repeat(1, num_repeats, 1)[
+                        :, :frame_seqlen, :
+                    ]
+                elif num_ref_tokens > frame_seqlen:
+                    # Downsample if too many tokens (interpolate to preserve all spatial info)
+                    ref_tiled = torch.nn.functional.interpolate(
+                        ref_embedded.transpose(1, 2),
+                        size=frame_seqlen,
+                        mode="linear",
+                        align_corners=False,
+                    ).transpose(1, 2)
+                else:
+                    ref_tiled = ref_embedded
+
+                ref_latents.append(ref_tiled)
+
+            # Concatenate across batch: list of [1, frame_seqlen, dim] -> [batch_size, frame_seqlen, dim]
+            ref_tokens = torch.cat(ref_latents, dim=0)
+            reference_prefix_length = ref_tokens.size(1)  # Should equal frame_seqlen
+
+            # Diagnostic: Check token distribution statistics
+            logger.info(
+                f"_forward_inference: Reference token statistics - "
+                f"mean: {ref_tokens.mean().item():.4f}, "
+                f"std: {ref_tokens.std().item():.4f}, "
+                f"min: {ref_tokens.min().item():.4f}, "
+                f"max: {ref_tokens.max().item():.4f}"
+            )
+            logger.info(
+                f"_forward_inference: Video token statistics - "
+                f"mean: {x.mean().item():.4f}, "
+                f"std: {x.std().item():.4f}, "
+                f"min: {x.min().item():.4f}, "
+                f"max: {x.max().item():.4f}"
+            )
+
+            logger.info(
+                f"_forward_inference: Injecting {reference_prefix_length} reference tokens as 1 reference frame "
+                f"(batch_size={ref_tokens.size(0)}, dim={ref_tokens.size(2)}, frame_seqlen={frame_seqlen}, "
+                f"spatial_structure_preserved=True)"
+            )
+
+            # Amplify reference signal to prevent it from being drowned out during denoising
+            # Video tokens undergo large variance changes (std grows ~2.6x during transformer)
+            # Scale reference tokens to maintain influence throughout denoising process
+            reference_amplification = 2.0
+            ref_tokens = ref_tokens * reference_amplification
+            logger.info(
+                f"_forward_inference: Amplified reference tokens by {reference_amplification}x to combat signal dilution"
+            )
+
+            # Prepend reference tokens to sequence as sink tokens (one reference "frame")
+            # x: [batch_size, num_frames*frame_seqlen, dim], ref_tokens: [batch_size, frame_seqlen, dim]
+            # Result: [batch_size, (num_frames+1)*frame_seqlen, dim]
+            x = torch.cat([ref_tokens, x], dim=1)
+
+            # Update seq_lens to reflect the additional reference "frame"
+            # This maintains proper frame structure for unflatten operations
+            seq_lens = seq_lens + reference_prefix_length
+
+            # Save original grid_sizes for forward_vace (VACE context has different spatial dims)
+            grid_sizes_original = grid_sizes.clone()
+
+            # Update grid_sizes to reflect additional reference frame
+            # grid_sizes shape: [B, 3] where columns are (F, H, W)
+            # Increment frame count by 1 for the reference frame
+            grid_sizes = grid_sizes.clone()
+            grid_sizes[:, 0] += 1  # Add 1 to frame count
+
         # Time embeddings
+        # Save original t for head operation later
+        t_original = t
+
+        # If reference frame was added, prepend a time embedding for it (timestep = 0)
+        if reference_prefix_length > 0:
+            # Create time embedding for reference frame (timestep = 0)
+            ref_timestep = torch.zeros((t.shape[0], 1), dtype=t.dtype, device=t.device)
+            # Concatenate: [ref_timestep, video_timesteps]
+            t_with_ref = torch.cat([ref_timestep, t], dim=1)
+        else:
+            t_with_ref = t
+
         e = self.causal_wan_model.time_embedding(
             sinusoidal_embedding_1d(
-                self.causal_wan_model.freq_dim, t.flatten()
+                self.causal_wan_model.freq_dim, t_with_ref.flatten()
             ).type_as(x)
         )
         e0 = (
             self.causal_wan_model.time_projection(e)
             .unflatten(1, (6, self.dim))
-            .unflatten(dim=0, sizes=t.shape)
+            .unflatten(dim=0, sizes=t_with_ref.shape)
         )
 
         # Context
@@ -338,15 +474,23 @@ class CausalVaceWanModel(nn.Module):
             context = torch.concat([context_clip, context], dim=1)
 
         # Generate VACE hints
+        # Hints are generated from VACE context, independent of reference token injection
         hints = None
         if vace_context is not None and vace_regenerate_hints:
+            # Extract video tokens for forward_vace (skip reference prefix if present)
+            x_for_vace = (
+                x[:, reference_prefix_length:, :] if reference_prefix_length > 0 else x
+            )
+
             hints = self.forward_vace(
-                x,
+                x_for_vace,
                 vace_context,
                 seq_len,
                 e0,
-                seq_lens,
-                grid_sizes,
+                seq_lens - reference_prefix_length,  # Use original video seq_lens
+                grid_sizes_original
+                if reference_prefix_length > 0
+                else grid_sizes,  # Use original grid_sizes
                 self.causal_wan_model.freqs,
                 context,
                 context_lens,
@@ -365,6 +509,7 @@ class CausalVaceWanModel(nn.Module):
             "block_mask": self.causal_wan_model.block_mask,
             "hints": hints,
             "context_scale": vace_context_scale,
+            "reference_prefix_length": reference_prefix_length,
         }
 
         def create_custom_forward(module):
@@ -414,10 +559,53 @@ class CausalVaceWanModel(nn.Module):
         if kv_cache is not None and cache_update_infos:
             self.causal_wan_model._apply_cache_updates(kv_cache, cache_update_infos)
 
+        # Strip reference frame before output processing (only actual video frames should be decoded)
+        if reference_prefix_length > 0:
+            # Diagnostic: Check how tokens changed after transformer blocks
+            ref_final = x[:, :reference_prefix_length, :]
+            video_final = x[:, reference_prefix_length:, :]
+
+            logger.info(
+                f"_forward_inference: Reference tokens after transformer blocks - "
+                f"mean: {ref_final.mean().item():.4f}, "
+                f"std: {ref_final.std().item():.4f}, "
+                f"min: {ref_final.min().item():.4f}, "
+                f"max: {ref_final.max().item():.4f}"
+            )
+            logger.info(
+                f"_forward_inference: Video tokens after transformer blocks - "
+                f"mean: {video_final.mean().item():.4f}, "
+                f"std: {video_final.std().item():.4f}, "
+                f"min: {video_final.min().item():.4f}, "
+                f"max: {video_final.max().item():.4f}"
+            )
+
+            logger.debug(
+                f"_forward_inference: Stripping {reference_prefix_length} reference tokens from output "
+                f"(x.shape before: {x.shape})"
+            )
+            x = x[:, reference_prefix_length:, :]
+
+            # Also strip reference frame from grid_sizes for unpatchify
+            # These operations expect only video frames
+            grid_sizes_video = grid_sizes.clone()
+            grid_sizes_video[:, 0] -= 1  # Remove reference frame from count
+
+            # For head, we need e in original shape (before projection to e0)
+            # Recompute e for video frames only using t_original
+            e_video = self.causal_wan_model.time_embedding(
+                sinusoidal_embedding_1d(
+                    self.causal_wan_model.freq_dim, t_original.flatten()
+                ).type_as(x)
+            )
+        else:
+            grid_sizes_video = grid_sizes
+            e_video = e
+
         x = self.causal_wan_model.head(
-            x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2)
+            x, e_video.unflatten(dim=0, sizes=t_original.shape).unsqueeze(2)
         )
-        x = self.causal_wan_model.unpatchify(x, grid_sizes)
+        x = self.causal_wan_model.unpatchify(x, grid_sizes_video)
         return torch.stack(x)
 
     def forward(self, *args, **kwargs):

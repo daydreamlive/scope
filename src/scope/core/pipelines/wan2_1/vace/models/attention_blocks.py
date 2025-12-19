@@ -141,6 +141,7 @@ def create_base_attention_block_class(base_attention_block_class):
             block_mask,
             hints=None,
             context_scale=1.0,
+            reference_prefix_length=0,
             **kwargs,
         ):
             """
@@ -149,9 +150,11 @@ def create_base_attention_block_class(base_attention_block_class):
             Args:
                 hints: List of VACE hints, one per injection layer
                 context_scale: Scaling factor for hint injection
+                reference_prefix_length: Number of tokens in reference "frame" (for hint alignment)
                 **kwargs: Pipeline-specific parameters (kv_cache, crossattn_cache, etc.)
             """
             # Standard forward pass
+            # Reference tokens are now a proper "frame" so they go through normally
             result = super().forward(
                 x,
                 e,
@@ -172,13 +175,30 @@ def create_base_attention_block_class(base_attention_block_class):
                 cache_update_info = None
 
             # Inject VACE hint if this block has one
+            # Hints apply to video tokens only (skip reference prefix)
             if hints is not None and self.block_id is not None:
                 hint = hints[self.block_id]
-                # Slice hint to match x's sequence length (x is unpadded, hint may be padded)
-                if hint.shape[1] > x.shape[1]:
-                    hint = hint[:, : x.shape[1], :]
 
-                x = x + hint * context_scale
+                # Extract video portion (skip reference prefix)
+                if reference_prefix_length > 0:
+                    video_tokens = x[:, reference_prefix_length:, :]
+                else:
+                    video_tokens = x
+
+                # Slice hint to match video token count (x is unpadded, hint may be padded)
+                if hint.shape[1] > video_tokens.shape[1]:
+                    hint = hint[:, : video_tokens.shape[1], :]
+
+                # Apply hint injection to video tokens
+                video_tokens = video_tokens + hint * context_scale
+
+                # Reconstruct sequence
+                if reference_prefix_length > 0:
+                    x = torch.cat(
+                        [x[:, :reference_prefix_length, :], video_tokens], dim=1
+                    )
+                else:
+                    x = video_tokens
 
             # Return with cache info if applicable
             if cache_update_info is not None:
