@@ -4,31 +4,33 @@ import { app } from 'electron';
 export const getPaths = () => {
   const userDataPath = app.getPath('userData');
 
-  // In packaged mode, the Python project should be in resourcesPath (source files)
-  // but we'll work in userData (writable location)
-  // In dev mode, use the actual project root
+  // Architecture:
+  // - projectRoot: Where Python source code lives (read-only in packaged mode)
+  // - venvPath: Where .venv is created (writable, in userData)
+  //
+  // This separation ensures:
+  // 1. Updates automatically get new Python/frontend code (in resources)
+  // 2. The .venv persists in userData (no re-download unless deps change)
+  // 3. No need to copy source files on update
   let projectRoot: string;
-  let resourcesRoot: string;
 
   if (app.isPackaged) {
-    // When packaged, source files are in resourcesPath
-    resourcesRoot = process.resourcesPath || path.dirname(app.getPath('exe'));
-    // But we work in userData for write permissions
-    projectRoot = path.join(userDataPath, 'python-project');
+    // When packaged, source files are in resourcesPath (read-only)
+    projectRoot = process.resourcesPath || path.dirname(app.getPath('exe'));
   } else {
     // In development, go up from app/src/utils to the project root
     projectRoot = path.resolve(__dirname, '../../..');
-    resourcesRoot = projectRoot;
   }
+
+  // Virtual environment always lives in userData (writable)
+  const venvPath = path.join(userDataPath, '.venv');
 
   return {
     userData: userDataPath,
     uvBin: path.join(userDataPath, 'uv', process.platform === 'win32' ? 'uv.exe' : 'uv'),
     projectRoot,
-    resourcesRoot,
-    frontendDist: app.isPackaged
-      ? path.join(resourcesRoot, 'frontend', 'dist')
-      : path.resolve(projectRoot, 'frontend/dist'),
+    venvPath,
+    frontendDist: path.join(projectRoot, 'frontend', 'dist'),
   };
 };
 
