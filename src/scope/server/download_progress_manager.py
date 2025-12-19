@@ -33,20 +33,15 @@ class DownloadProgressManager:
             if not data["artifacts"]:
                 return None
 
-            # The current artifact is the last one in the dict
-            *_, (current_artifact, current_data) = data["artifacts"].items()
-
-            # Calculate percentage for current artifact
-            current_percentage = 0
-            if current_data["total_mb"] > 0:
-                current_percentage = (
-                    current_data["downloaded_mb"] / current_data["total_mb"] * 100
-                )
+            # Calculate total downloaded MB across all artifacts
+            total_downloaded_mb = sum(
+                artifact_data["downloaded_mb"]
+                for artifact_data in data["artifacts"].values()
+            )
 
             return {
                 "is_downloading": data["is_downloading"],
-                "percentage": round(current_percentage, 1),
-                "current_artifact": current_artifact,
+                "total_downloaded_mb": round(total_downloaded_mb, 2),
             }
 
     def mark_complete(self, pipeline_id: str):
@@ -62,6 +57,4 @@ class DownloadProgressManager:
 
 
 # Global singleton instance
-# The main reason for using a singleton is because we also need access to this in the patched tqdm update
-# in download_models.py which is operating at a global level
 download_progress_manager = DownloadProgressManager()

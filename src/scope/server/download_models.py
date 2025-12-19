@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 from .artifacts import Artifact, HuggingfaceRepoArtifact
@@ -25,97 +26,100 @@ from .models_config import (
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Current download context for tqdm callback
-_current_pipeline_id: str | None = None
-_current_artifact: str | None = None
-
-
-def set_download_context(pipeline_id: str, artifact: str):
-    """Set the current download context for progress tracking."""
-    global _current_pipeline_id, _current_artifact
-    _current_pipeline_id = pipeline_id
-    _current_artifact = artifact
-
-
-def clear_download_context():
-    """Clear the download context."""
-    global _current_pipeline_id, _current_artifact
-    _current_pipeline_id = None
-    _current_artifact = None
-
 
 # --- third-party libs ---
 try:
     from huggingface_hub import snapshot_download
-    from tqdm.auto import tqdm
 except Exception:
     print(
-        "Error: huggingface_hub and tqdm are required. Install with: pip install huggingface_hub tqdm",
+        "Error: huggingface_hub is required. Install with: pip install huggingface_hub",
         file=sys.stderr,
     )
     raise
 
-# Ideally we would use a custom tqdm_class with HF, but the proper usage is unclear
-# Instead we monkey patch tqdm.update to log progress every 5%
-PROGRESS_LOG_INTERVAL_PERCENT = 5.0
 
-_original_tqdm_update = tqdm.update
-
-# Track last logged progress per tqdm instance (by id)
-_last_logged_progress: dict[int, float] = {}
-
-
-def _patched_tqdm_update(self, n: int = 1):
-    """Patched tqdm update that logs progress every 5%."""
-    # Call original update FIRST to increment self.n
-    result = _original_tqdm_update(self, n)
-
-    try:
-        if self.n is not None and self.total is not None and self.total > 0:
-            current_progress = (self.n / self.total) * 100
-
-            # Skip logging at 0% progress
-            if current_progress == 0.0:
-                return result
-
-            instance_id = id(self)
-            last_logged = _last_logged_progress.get(instance_id, 0.0)
-
-            # Only log if we've made at least PROGRESS_LOG_INTERVAL_PERCENT progress since last log
-            if current_progress >= last_logged + PROGRESS_LOG_INTERVAL_PERCENT:
-                downloaded = self.n / 1024 / 1024
-                total_size = self.total / 1024 / 1024
-                logger.info(f"Downloaded {downloaded:.2f}MB of {total_size:.2f}MB")
-                _last_logged_progress[instance_id] = current_progress
-
-                # Clear dict entry when progress reaches 100%
-                if current_progress >= 100.0:
-                    _last_logged_progress.pop(instance_id, None)
-
-            # Update progress tracker for UI (now with the updated self.n value)
-            if _current_pipeline_id and _current_artifact:
+def get_directory_size(path: Path) -> int:
+    """Get total size of a directory in bytes."""
+    total = 0
+    logger.info(f"Getting directory size of {path}")
+    if path.exists():
+        if path.is_file():
+            return path.stat().st_size
+        for item in path.rglob("*"):
+            if item.is_file():
                 try:
-                    download_progress_manager.update(
-                        _current_pipeline_id,
-                        _current_artifact,
-                        self.n / 1024 / 1024,
-                        self.total / 1024 / 1024,
-                    )
-                except Exception:
-                    # Don't let progress tracking interfere with download
+                    total += item.stat().st_size
+                except (OSError, FileNotFoundError):
+                    # File may have been moved/deleted during iteration
                     pass
-    except KeyboardInterrupt:
-        # Re-raise KeyboardInterrupt to allow proper signal handling
-        raise
-    except Exception:
-        # Don't let logging errors interfere with tqdm or signal handling
-        pass
-
-    return result
+    return total
 
 
-# Apply the monkey patch
-tqdm.update = _patched_tqdm_update
+class DownloadProgressLogger:
+    """Background thread that logs directory sizes every 5 seconds during downloads."""
+
+    def __init__(
+        self,
+        pipeline_id: str,
+        directories: list[tuple[str, Path]],
+        interval: float = 5.0,
+    ):
+        """
+        Args:
+            pipeline_id: Pipeline ID for progress tracking
+            directories: List of (artifact_name, directory_path) tuples to monitor
+            interval: Logging interval in seconds
+        """
+        self._pipeline_id = pipeline_id
+        self._directories = directories
+        self._interval = interval
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self):
+        """Start the background logging thread."""
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._log_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        """Stop the background logging thread."""
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+
+    def _log_loop(self):
+        """Background loop that logs directory sizes."""
+        while not self._stop_event.is_set():
+            try:
+                for artifact_name, dir_path in self._directories:
+                    size_bytes = get_directory_size(dir_path)
+                    size_mb = size_bytes / (1024 * 1024)
+                    logger.info(f"[{artifact_name}] Downloaded: {size_mb:.2f} MB")
+
+                    # Update progress manager for UI
+                    # Note: We don't know the total size, so we just report current size
+                    # The UI will show the current downloaded size
+                    download_progress_manager.update(
+                        self._pipeline_id,
+                        artifact_name,
+                        size_mb,
+                        0,  # Total unknown when using directory size monitoring
+                    )
+            except Exception as e:
+                logger.debug(f"Error logging directory sizes: {e}")
+
+            # Wait for interval or until stopped
+            self._stop_event.wait(self._interval)
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+        return False
 
 
 def download_hf_repo(
@@ -161,7 +165,7 @@ def download_hf_repo(
     logger.info(f"Completed download of repo '{repo_id}' to: {local_dir}")
 
 
-def download_artifact(artifact: Artifact, models_root: Path, pipeline_id: str) -> None:
+def download_artifact(artifact: Artifact, models_root: Path) -> None:
     """
     Download an artifact to the models directory.
 
@@ -171,19 +175,18 @@ def download_artifact(artifact: Artifact, models_root: Path, pipeline_id: str) -
     Args:
         artifact: The artifact to download
         models_root: Root directory where models are stored
-        pipeline_id: Optional pipeline ID for progress tracking
 
     Raises:
         ValueError: If artifact type is not supported
     """
     if isinstance(artifact, HuggingfaceRepoArtifact):
-        download_hf_artifact(artifact, models_root, pipeline_id)
+        download_hf_artifact(artifact, models_root)
     else:
         raise ValueError(f"Unsupported artifact type: {type(artifact)}")
 
 
 def download_hf_artifact(
-    artifact: HuggingfaceRepoArtifact, models_root: Path, pipeline_id: str
+    artifact: HuggingfaceRepoArtifact, models_root: Path
 ) -> None:
     """
     Download a HuggingFace repository artifact.
@@ -193,36 +196,27 @@ def download_hf_artifact(
     Args:
         artifact: HuggingFace repo artifact
         models_root: Root directory where models are stored
-        pipeline_id: Pipeline ID to download models for
     """
-    # Set up progress tracking context
-    set_download_context(pipeline_id, artifact.repo_id)
+    local_dir = models_root / artifact.repo_id.split("/")[-1]
 
-    try:
-        local_dir = models_root / artifact.repo_id.split("/")[-1]
+    # Convert file/directory specifications to glob patterns
+    allow_patterns = []
+    for file in artifact.files:
+        # Add the file/directory itself
+        allow_patterns.append(file)
+        # If it's a directory, also include everything inside it
+        # This handles both "google" and "google/" formats
+        if not file.endswith(("/", ".pt", ".pth", ".safetensors", ".json")):
+            # Likely a directory, add pattern to include its contents
+            allow_patterns.append(f"{file}/*")
+            allow_patterns.append(f"{file}/**/*")
 
-        # Convert file/directory specifications to glob patterns
-        allow_patterns = []
-        for file in artifact.files:
-            # Add the file/directory itself
-            allow_patterns.append(file)
-            # If it's a directory, also include everything inside it
-            # This handles both "google" and "google/" formats
-            if not file.endswith(("/", ".pt", ".pth", ".safetensors", ".json")):
-                # Likely a directory, add pattern to include its contents
-                allow_patterns.append(f"{file}/*")
-                allow_patterns.append(f"{file}/**/*")
-
-        logger.info(f"Downloading from {artifact.repo_id}: {artifact.files}")
-        download_hf_repo(
-            repo_id=artifact.repo_id,
-            local_dir=local_dir,
-            allow_patterns=allow_patterns,
-        )
-    finally:
-        # Always clear context after download
-        if pipeline_id:
-            clear_download_context()
+    logger.info(f"Downloading from {artifact.repo_id}: {artifact.files}")
+    download_hf_repo(
+        repo_id=artifact.repo_id,
+        local_dir=local_dir,
+        allow_patterns=allow_patterns,
+    )
 
 
 def download_models(pipeline_id: str) -> None:
@@ -239,9 +233,17 @@ def download_models(pipeline_id: str) -> None:
     logger.info(f"Downloading models for pipeline: {pipeline_id}")
     artifacts = PIPELINE_ARTIFACTS[pipeline_id]
 
-    # Download each artifact (progress tracking starts in set_download_context)
+    # Build list of directories to monitor for progress logging
+    directories_to_monitor: list[tuple[str, Path]] = []
     for artifact in artifacts:
-        download_artifact(artifact, models_root, pipeline_id)
+        if isinstance(artifact, HuggingfaceRepoArtifact):
+            local_dir = models_root / artifact.repo_id.split("/")[-1]
+            directories_to_monitor.append((artifact.repo_id, local_dir))
+
+    # Start background progress logger and download all artifacts
+    with DownloadProgressLogger(pipeline_id, directories_to_monitor):
+        for artifact in artifacts:
+            download_artifact(artifact, models_root)
 
 
 def main():

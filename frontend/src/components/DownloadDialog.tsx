@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { Progress } from "./ui/progress";
 import { PIPELINES } from "../data/pipelines";
 import type { PipelineId, DownloadProgress } from "../types";
 
@@ -59,27 +58,17 @@ export function DownloadDialog({
         )}
 
         {/* Progress UI */}
-        {isDownloading && progress && progress.current_artifact && (
-          <div className="">
-            <div className="text-sm text-muted-foreground"></div>
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-muted-foreground font-sm">
-                  {progress.current_artifact}{" "}
-                </span>
-                <span className="text-muted-foreground">
-                  {progress.percentage.toFixed(1)}%
-                </span>
-              </div>
-              <Progress value={progress.percentage} />
+        {isDownloading && (
+          <div className="flex flex-col items-center justify-center py-6 gap-4">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <div className="text-center">
+              <p className="text-lg font-medium">
+                {progress
+                  ? `${(progress.total_downloaded_mb / 1024).toFixed(2)} GB`
+                  : "Starting..."}
+              </p>
+              <p className="text-sm text-muted-foreground">Total Downloaded</p>
             </div>
-          </div>
-        )}
-
-        {/* Loading State (no progress data yet) */}
-        {isDownloading && !progress && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         )}
 

@@ -95,8 +95,7 @@ export interface PipelineInfo {
 
 export interface DownloadProgress {
   is_downloading: boolean;
-  percentage: number;
-  current_artifact: string | null;
+  total_downloaded_mb: number;
 }
 
 export interface ModelStatusResponse {
