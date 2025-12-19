@@ -418,6 +418,22 @@ class PassthroughConfig(BasePipelineConfig):
     )
 
 
+class VibeVoiceConfig(BasePipelineConfig):
+    """Configuration for VibeVoice text-to-speech pipeline."""
+
+    pipeline_id: ClassVar[str] = "vibevoice"
+    pipeline_name: ClassVar[str] = "VibeVoice"
+    pipeline_description: ClassVar[str] = "Streamed text-to-speech generation"
+
+    # Text-only pipeline
+    supported_modes: ClassVar[list[InputMode]] = ["text"]
+    default_mode: ClassVar[InputMode] = "text"
+
+    # Keep minimal defaults (not used for audio generation but required by base model)
+    height: int = Field(default=256, ge=1, description="Placeholder height")
+    width: int = Field(default=256, ge=1, description="Placeholder width")
+
+
 # Registry of pipeline config classes
 PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "longlive": LongLiveConfig,
@@ -425,6 +441,7 @@ PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "krea-realtime-video": KreaRealtimeVideoConfig,
     "reward-forcing": RewardForcingConfig,
     "passthrough": PassthroughConfig,
+    "vibevoice": VibeVoiceConfig,
 }
 
 

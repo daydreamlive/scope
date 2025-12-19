@@ -14,6 +14,7 @@ interface VideoOutputProps {
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
   onVideoPlaying?: () => void;
+  isAudioOnly?: boolean;
 }
 
 export function VideoOutput({
@@ -27,17 +28,60 @@ export function VideoOutput({
   onPlayPauseToggle,
   onStartStream,
   onVideoPlaying,
+  isAudioOnly = false,
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (videoRef.current && remoteStream) {
+    if (!isAudioOnly && videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream]);
+  }, [remoteStream, isAudioOnly]);
+
+  useEffect(() => {
+    if (isAudioOnly && audioRef.current && remoteStream) {
+      audioRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, isAudioOnly]);
+
+  // Notify when audio starts playing (parity with video)
+  useEffect(() => {
+    if (!isAudioOnly) return;
+    const audio = audioRef.current;
+    if (!audio || !remoteStream) return;
+
+    const handlePlaying = () => {
+      setIsAudioPlaying(true);
+      onVideoPlaying?.();
+    };
+
+    const handlePause = () => {
+      setIsAudioPlaying(false);
+    };
+
+    const handleEnded = () => {
+      setIsAudioPlaying(false);
+    };
+
+    if (!audio.paused && audio.currentTime > 0 && !audio.ended) {
+      setIsAudioPlaying(true);
+      setTimeout(() => onVideoPlaying?.(), 0);
+    }
+
+    audio.addEventListener("playing", handlePlaying);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handleEnded);
+    return () => {
+      audio.removeEventListener("playing", handlePlaying);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handleEnded);
+    };
+  }, [isAudioOnly, onVideoPlaying, remoteStream]);
 
   // Listen for video playing event to notify parent
   useEffect(() => {
@@ -132,7 +176,50 @@ export function VideoOutput({
         <CardTitle className="text-base font-medium">Video Output</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
-        {remoteStream ? (
+        {remoteStream && isAudioOnly ? (
+          <div className="w-full h-full flex flex-col items-center justify-center">
+            {/* Hidden audio element for actual playback */}
+            <audio
+              ref={audioRef}
+              className="hidden"
+              autoPlay
+              playsInline
+            />
+            {/* Audio visualization */}
+            <div className="relative flex items-center justify-center mb-6">
+              {/* Animated concentric circles */}
+              {isAudioPlaying && (
+                <>
+                  <div className="absolute w-32 h-32 rounded-full border-2 border-purple-500/30 animate-ping" />
+                  <div className="absolute w-40 h-40 rounded-full border-2 border-blue-500/20 animate-ping" style={{ animationDelay: "0.2s" }} />
+                  <div className="absolute w-48 h-48 rounded-full border-2 border-purple-500/10 animate-ping" style={{ animationDelay: "0.4s" }} />
+                </>
+              )}
+              {/* Speaker icon */}
+              <div className="relative z-10 w-24 h-24 flex items-center justify-center">
+                <svg
+                  className="w-full h-full text-white"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19.114 5.636a9 9 0 010 12.728M16.463 8.289a5 5 0 010 7.072M12 3v18M8 8l-4-4v12l4-4"
+                  />
+                </svg>
+              </div>
+            </div>
+            {/* Status text */}
+            <div className="text-center">
+              <p className="text-lg font-medium text-foreground">
+                {isAudioPlaying ? "Playing audio..." : "Audio ready"}
+              </p>
+            </div>
+          </div>
+        ) : remoteStream ? (
           <div
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}

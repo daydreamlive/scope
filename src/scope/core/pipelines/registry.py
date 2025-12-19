@@ -73,6 +73,7 @@ def _register_pipelines():
     from .passthrough.pipeline import PassthroughPipeline
     from .reward_forcing.pipeline import RewardForcingPipeline
     from .streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
+    from .vibevoice.pipeline import VibeVoicePipeline
 
     # Register each pipeline with its ID from its config class
     for pipeline_class in [
@@ -81,6 +82,7 @@ def _register_pipelines():
         StreamDiffusionV2Pipeline,
         PassthroughPipeline,
         RewardForcingPipeline,
+        VibeVoicePipeline,
     ]:
         config_class = pipeline_class.get_config_class()
         PipelineRegistry.register(config_class.pipeline_id, pipeline_class)

@@ -27,6 +27,7 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
+    text?: string;
   };
 }
 
@@ -67,6 +68,11 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
 }
 
+export interface VibeVoiceLoadParams extends PipelineLoadParams {
+  audio_path?: string;
+  chunk_size?: number;
+}
+
 export interface PipelineLoadRequest {
   pipeline_id?: string;
   load_params?:
@@ -74,6 +80,7 @@ export interface PipelineLoadRequest {
     | StreamDiffusionV2LoadParams
     | LongLiveLoadParams
     | KreaRealtimeVideoLoadParams
+    | VibeVoiceLoadParams
     | null;
 }
 

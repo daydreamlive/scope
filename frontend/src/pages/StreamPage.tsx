@@ -741,6 +741,7 @@ export function StreamPage() {
         kv_cache_attention_bias?: number;
         spout_sender?: { enabled: boolean; name: string };
         spout_receiver?: { enabled: boolean; name: string };
+        text?: string;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -785,11 +786,15 @@ export function StreamPage() {
         initialParameters.spout_receiver = settings.spoutReceiver;
       }
 
+      if (pipelineIdToUse === "vibevoice") {
+        initialParameters.text = promptItems[0]?.text ?? "";
+      }
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
       // Pipeline is loaded, now start WebRTC stream
-      startStream(initialParameters, streamToSend);
+      startStream(initialParameters, streamToSend, pipelineIdToUse);
 
       return true; // Stream started successfully
     } catch (error) {
@@ -868,6 +873,7 @@ export function StreamPage() {
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
               isDownloading={isDownloading}
+              isAudioOnly={settings.pipelineId === "vibevoice"}
               onPlayPauseToggle={() => {
                 // Use timeline's play/pause handler instead of direct video toggle
                 if (timelinePlayPauseRef.current) {
