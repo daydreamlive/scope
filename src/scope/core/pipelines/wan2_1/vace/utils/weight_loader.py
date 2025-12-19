@@ -97,23 +97,23 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
             )
 
     # Load full VACE checkpoint
-    state_dict = load_state_dict(vace_checkpoint_path)
-
-    # Filter to only VACE-specific keys
-    vace_keys = [
+    # For sharded models, we can filter by key prefixes to save memory
+    vace_key_prefixes = [
         "vace_blocks.",
         "vace_patch_embedding.",
     ]
+    state_dict = load_state_dict(vace_checkpoint_path, key_prefixes=vace_key_prefixes)
 
+    # Filter to only VACE-specific keys (redundant if key_prefixes worked, but safe fallback)
     vace_state_dict = {}
     for key, value in state_dict.items():
-        if any(key.startswith(prefix) for prefix in vace_keys):
+        if any(key.startswith(prefix) for prefix in vace_key_prefixes):
             vace_state_dict[key] = value
 
     if not vace_state_dict:
         raise ValueError(
             f"load_vace_weights_only: No VACE-specific weights found in checkpoint. "
-            f"Expected keys starting with: {vace_keys}"
+            f"Expected keys starting with: {vace_key_prefixes}"
         )
 
     logger.info(
@@ -139,7 +139,9 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
 
     # Filter out expected missing keys (all the base model weights)
     actual_missing = [
-        k for k in missing_keys if any(k.startswith(prefix) for prefix in vace_keys)
+        k
+        for k in missing_keys
+        if any(k.startswith(prefix) for prefix in vace_key_prefixes)
     ]
 
     if actual_missing:
