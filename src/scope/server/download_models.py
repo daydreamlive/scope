@@ -3,6 +3,7 @@ Cross-platform model downloader using huggingface_hub for HF repo/files.
 """
 
 import argparse
+import io
 import logging
 import os
 import sys
@@ -48,6 +49,7 @@ def clear_download_context():
 try:
     from huggingface_hub import snapshot_download
     from tqdm.auto import tqdm
+    from tqdm.std import tqdm as tqdm_std
 except Exception:
     print(
         "Error: huggingface_hub and tqdm are required. Install with: pip install huggingface_hub tqdm",
@@ -114,8 +116,36 @@ def _patched_tqdm_update(self, n: int = 1):
     return result
 
 
-# Apply the monkey patch
+# Store original tqdm __init__ method
+_original_tqdm_init = tqdm_std.__init__
+
+# Create a null writer to suppress tqdm's visual output
+# We only need the internal progress tracking, not the terminal display
+_null_file = io.StringIO()
+
+
+def _patched_tqdm_init(self, *args, **kwargs):
+    """Patched tqdm __init__ that forces disable=False for progress tracking.
+
+    In non-interactive environments (like Electron production mode without a TTY),
+    tqdm auto-disables. We force it to stay enabled so our update tracking works.
+
+    We also redirect output to a null file to prevent tqdm from writing
+    progress bar text to stderr, which would create noisy output in Electron.
+    """
+    # Only apply patch when there's no interactive TTY available
+    if not sys.stderr.isatty():
+        # Force disable=False to ensure progress tracking works without a TTY
+        kwargs["disable"] = False
+        # Redirect tqdm output to null to prevent visual output
+        # We only need the internal self.n / self.total tracking, not the display
+        kwargs["file"] = _null_file
+    return _original_tqdm_init(self, *args, **kwargs)
+
+
+# Apply the monkey patches
 tqdm.update = _patched_tqdm_update
+tqdm_std.__init__ = _patched_tqdm_init
 
 
 def download_hf_repo(
