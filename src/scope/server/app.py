@@ -591,8 +591,10 @@ async def get_current_logs():
             )
 
         # Read the entire file into memory to avoid Content-Length issues
-        # with actively written log files
-        log_content = log_file_path.read_text(encoding="utf-8")
+        # with actively written log files.
+        # Use errors='replace' to handle non-UTF-8 bytes gracefully (e.g., Windows-1252
+        # characters from subprocess output or exception messages on Windows).
+        log_content = log_file_path.read_text(encoding="utf-8", errors="replace")
 
         # Return as a text response with proper headers for download
         return Response(
