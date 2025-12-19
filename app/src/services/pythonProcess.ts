@@ -80,6 +80,7 @@ export class ScopePythonProcessService implements PythonProcessService {
       env: {
         ...process.env,
         PATH: enhancedPath,
+        PYTHONUNBUFFERED: '1',
       },
     });
 
