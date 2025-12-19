@@ -456,7 +456,7 @@ export class ScopeElectronAppService {
     contextMenu.popup();
   }
 
-  private reloadLogsWindow(): void {
+  private updateLogsContent(): void {
     if (!this.logsWindow || this.logsWindow.isDestroyed()) {
       return;
     }
@@ -464,14 +464,16 @@ export class ScopeElectronAppService {
     const logPath = getLogPath();
     const logContent = this.readLogFile();
 
-    const logViewerPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', '.vite', 'build', 'renderer', 'LogViewer.html')
-      : path.join(__dirname, '../../src/components/LogViewer.html');
+    // Escape the content for safe injection into JavaScript
+    const escapedPath = JSON.stringify(logPath);
+    const escapedContent = JSON.stringify(logContent);
 
-    this.logsWindow.loadFile(logViewerPath, {
-      query: { content: logContent, path: logPath },
-    }).catch((err) => {
-      logger.error('Failed to reload log viewer:', err);
+    // Update the logs content via executeJavaScript instead of reloading the page
+    // This avoids URL length limits when log content is large
+    this.logsWindow.webContents.executeJavaScript(
+      `if (window.updateLogs) { window.updateLogs(${escapedPath}, ${escapedContent}); }`
+    ).catch(() => {
+      // Silently ignore errors - expected when window is closed or page is still loading
     });
   }
 
@@ -498,13 +500,25 @@ export class ScopeElectronAppService {
 
     this.setupDevToolsSecurity(this.logsWindow);
 
-    // Initial load
-    this.reloadLogsWindow();
+    // Load the log viewer HTML file (without query params to avoid URL length limits)
+    const logViewerPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app', '.vite', 'build', 'renderer', 'LogViewer.html')
+      : path.join(__dirname, '../../src/components/LogViewer.html');
 
-    // Set up auto-refresh: reload logs every 2 seconds
-    this.logsRefreshInterval = setInterval(() => {
-      this.reloadLogsWindow();
-    }, 2000);
+    this.logsWindow.loadFile(logViewerPath).catch((err) => {
+      logger.error('Failed to load log viewer:', err);
+    });
+
+    // Once the page is loaded, start updating the content
+    this.logsWindow.webContents.once('did-finish-load', () => {
+      // Initial content update
+      this.updateLogsContent();
+
+      // Set up auto-refresh: update logs every 2 seconds
+      this.logsRefreshInterval = setInterval(() => {
+        this.updateLogsContent();
+      }, 2000);
+    });
 
     this.logsWindow.on('closed', () => {
       if (this.logsRefreshInterval) {
