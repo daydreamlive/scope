@@ -12,102 +12,10 @@ export class ScopeSetupService implements SetupService {
     const paths = getPaths();
     const uvExists = fs.existsSync(paths.uvBin);
     const projectExists = fs.existsSync(path.join(paths.projectRoot, 'pyproject.toml'));
+
+    // We no longer need to check for venv existence here - uv sync will handle it
+    // and will be fast if dependencies haven't changed
     return !uvExists || !projectExists;
-  }
-
-  async copyPythonProject(): Promise<void> {
-    const { app } = await import('electron');
-
-    // Only needed in packaged mode
-    if (!app.isPackaged) {
-      logger.info('Running in dev mode, skipping Python project copy');
-      return;
-    }
-
-    const paths = getPaths();
-    const sourceRoot = paths.resourcesRoot;
-    const destRoot = paths.projectRoot;
-
-    logger.info(`Copying Python project from ${sourceRoot} to ${destRoot}...`);
-
-    // Files and directories to copy
-    const itemsToCopy = [
-      'src',
-      'pyproject.toml',
-      'uv.lock',
-      '.python-version',
-      'README.md',
-      'LICENSE.md',
-      'frontend/dist',
-    ];
-
-    // Create destination directory if it doesn't exist
-    if (!fs.existsSync(destRoot)) {
-      fs.mkdirSync(destRoot, { recursive: true });
-    }
-
-    // Copy each item
-    for (const item of itemsToCopy) {
-      const srcPath = path.join(sourceRoot, item);
-      const destPath = path.join(destRoot, item);
-
-      try {
-        if (!fs.existsSync(srcPath)) {
-          logger.warn(`Source not found, skipping: ${srcPath}`);
-          continue;
-        }
-
-        const stat = fs.statSync(srcPath);
-
-        if (stat.isDirectory()) {
-          // Copy directory recursively
-          this.copyDirectorySync(srcPath, destPath);
-          logger.info(`Copied directory: ${item}`);
-        } else {
-          // Copy file
-          const destDir = path.dirname(destPath);
-          if (!fs.existsSync(destDir)) {
-            fs.mkdirSync(destDir, { recursive: true });
-          }
-          fs.copyFileSync(srcPath, destPath);
-          logger.info(`Copied file: ${item}`);
-        }
-      } catch (err) {
-        logger.error(`Failed to copy ${item}:`, err);
-        throw err;
-      }
-    }
-
-    logger.info('Python project copied successfully');
-  }
-
-  private copyDirectorySync(src: string, dest: string): void {
-    // Create destination directory
-    if (!fs.existsSync(dest)) {
-      fs.mkdirSync(dest, { recursive: true });
-    }
-
-    // Read source directory
-    const entries = fs.readdirSync(src, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
-
-      if (entry.isDirectory()) {
-        // Skip .venv and __pycache__ directories
-        if (entry.name === '.venv' || entry.name === '__pycache__' || entry.name === '.git') {
-          continue;
-        }
-        this.copyDirectorySync(srcPath, destPath);
-      } else {
-        // Skip .pyc and other compiled files
-        if (entry.name.endsWith('.pyc') || entry.name.endsWith('.pyo')) {
-          continue;
-        }
-        fs.copyFileSync(srcPath, destPath);
-      }
-    }
   }
 
   async checkUvInstalled(): Promise<boolean> {
@@ -226,6 +134,7 @@ export class ScopeSetupService implements SetupService {
   async runUvSync(): Promise<void> {
     const paths = getPaths();
     const projectRoot = paths.projectRoot;
+    const venvPath = paths.venvPath;
 
     // Use local uv if available, otherwise try system uv
     let uvCommand = paths.uvBin;
@@ -234,6 +143,7 @@ export class ScopeSetupService implements SetupService {
     }
 
     logger.info(`Running uv sync in ${projectRoot}...`);
+    logger.info(`Virtual environment path: ${venvPath}`);
 
     return new Promise((resolve, reject) => {
       const proc = spawn(uvCommand, ['sync'], {
@@ -243,6 +153,9 @@ export class ScopeSetupService implements SetupService {
         env: {
           ...process.env,
           PATH: getEnhancedPath(),
+          // Use UV_PROJECT_ENVIRONMENT to place .venv in userData (writable)
+          // while keeping source code in resources (read-only)
+          UV_PROJECT_ENVIRONMENT: venvPath,
         },
       });
 

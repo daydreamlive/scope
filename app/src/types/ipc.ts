@@ -17,7 +17,6 @@ export const IPC_CHANNELS = {
 
 export const SETUP_STATUS = {
   INITIALIZING: 'initializing',
-  COPYING_PROJECT: 'copying-project',
   CHECKING_UV: 'checking-uv',
   DOWNLOADING_UV: 'downloading-uv',
   INSTALLING_UV: 'installing-uv',

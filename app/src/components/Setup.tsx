@@ -45,13 +45,9 @@ const Setup: React.FC<SetupProps> = ({ onComplete }) => {
         displayStatus = 'Initializing...';
         newProgress = 0;
         break;
-      case 'copying-project':
-        displayStatus = 'Preparing Python environment...';
-        newProgress = 5;
-        break;
       case 'checking-uv':
         displayStatus = 'Checking for uv...';
-        newProgress = 15;
+        newProgress = 10;
         break;
       case 'downloading-uv':
         displayStatus = 'Downloading uv...';
@@ -63,7 +59,7 @@ const Setup: React.FC<SetupProps> = ({ onComplete }) => {
         break;
       case 'running-uv-sync':
         displayStatus = 'Installing dependencies';
-        newProgress = 65;
+        newProgress = 60;
         break;
       case 'setup-done':
         displayStatus = 'Setup complete!';
