@@ -22,7 +22,7 @@ PIPELINE_ARTIFACTS = {
         UMT5_ENCODER_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="jerryfeng/StreamDiffusionV2",
-            files=["wan_causal_dmd_v2v"],
+            files=["wan_causal_dmd_v2v/model.pt"],
         ),
     ],
     "longlive": [
@@ -30,7 +30,7 @@ PIPELINE_ARTIFACTS = {
         UMT5_ENCODER_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="Efficient-Large-Model/LongLive-1.3B",
-            files=["models"],
+            files=["models/longlive_base.pt", "models/lora.pt"],
         ),
     ],
     "krea-realtime-video": [
