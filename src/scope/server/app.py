@@ -269,10 +269,18 @@ async def root():
     if not frontend_dist.exists():
         return {"message": "Scope API - Frontend not built"}
 
-    # Serve the frontend index.html
+    # Serve the frontend index.html with no-cache headers
+    # This ensures clients like Electron alway fetch the latest HTML (which references hashed assets)
     index_file = frontend_dist / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     return {"message": "Scope API - Frontend index.html not found"}
 
@@ -616,9 +624,17 @@ async def serve_frontend(request: Request, path: str):
         return FileResponse(file_path)
 
     # Fallback to index.html for SPA routing
+    # This ensures clients like Electron alway fetch the latest HTML (which references hashed assets)
     index_file = frontend_dist / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     raise HTTPException(status_code=404, detail="Frontend index.html not found")
 
