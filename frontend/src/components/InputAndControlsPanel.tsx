@@ -12,7 +12,7 @@ import { Badge } from "./ui/badge";
 import { Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import type { InputMode } from "../types";
+import type { InputMode, ImageConditioningItem, ImageConditioningMode } from "../types";
 import { pipelineIsMultiMode } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
@@ -57,12 +57,12 @@ interface InputAndControlsPanelProps {
   // Input mode (text vs video) for multi-mode pipelines
   inputMode: InputMode;
   onInputModeChange: (mode: InputMode) => void;
-  // VACE-specific props
-  refImages?: string[];
-  onRefImagesChange?: (images: string[]) => void;
+  // Image conditioning props
+  imageConditioningItems?: ImageConditioningItem[];
+  onImageConditioningItemsChange?: (items: ImageConditioningItem[]) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
-  onSendHint?: (imagePath: string) => void;
+  onSendHint?: (mode: ImageConditioningMode, imagePath: string) => void;
   isDownloading?: boolean;
 }
 
@@ -101,8 +101,8 @@ export function InputAndControlsPanel({
   onTransitionStepsChange,
   inputMode,
   onInputModeChange,
-  refImages = [],
-  onRefImagesChange,
+  imageConditioningItems = [],
+  onImageConditioningItemsChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
   onSendHint,
@@ -261,17 +261,22 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* VACE Image Controls */}
+        {/* Image Conditioning Controls */}
         <div className="space-y-4">
           <ImageManager
-            images={refImages}
-            onImagesChange={onRefImagesChange || (() => {})}
+            images={imageConditioningItems}
+            onImagesChange={(images) => {
+              if (onImageConditioningItemsChange) {
+                onImageConditioningItemsChange(images as ImageConditioningItem[]);
+              }
+            }}
             disabled={isDownloading}
             isStreaming={isStreaming}
             onSendHint={onSendHint}
+            supportsModeSelection={true}
           />
 
-          {refImages && refImages.length > 0 && (
+          {imageConditioningItems.length > 0 && (
             <div className="space-y-2">
               <LabelWithTooltip
                 label="VACE Context Scale"

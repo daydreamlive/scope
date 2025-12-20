@@ -44,10 +44,10 @@ from .pipeline import LongLivePipeline
 
 CONFIG = {
     # ===== MODE SELECTION =====
-    "use_r2v": False,  # Reference-to-Video: condition on reference images
+    "use_r2v": True,  # Reference-to-Video: condition on reference images
     "use_depth": False,  # Depth guidance: structural control via depth maps
     "use_inpainting": False,  # Inpainting: masked video-to-video generation
-    "use_extension": True,  # Extension mode: temporal generation (firstframe/lastframe/firstlastframe)
+    "use_extension": False,  # Extension mode: temporal generation (firstframe/lastframe/firstlastframe)
     # ===== INPUT PATHS =====
     # R2V: List of reference image paths (condition entire video, don't appear in output)
     "ref_images": [

@@ -46,6 +46,13 @@ export interface LoRAConfig {
   mergeMode?: LoraMergeStrategy;
 }
 
+export type ImageConditioningMode = "r2v" | "firstframe" | "lastframe";
+
+export interface ImageConditioningItem {
+  mode: ImageConditioningMode;
+  imagePath: string;
+}
+
 export interface SettingsState {
   pipelineId: PipelineId;
   resolution?: {
@@ -64,8 +71,8 @@ export interface SettingsState {
   loraMergeStrategy?: LoraMergeStrategy;
   // Track current input mode (text vs video)
   inputMode?: InputMode;
-  // VACE-specific settings
-  refImages?: string[];
+  // Image conditioning settings
+  imageConditioningItems?: ImageConditioningItem[];
   vaceContextScale?: number;
 }
 

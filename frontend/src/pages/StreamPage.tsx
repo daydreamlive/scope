@@ -22,6 +22,7 @@ import type {
   PipelineId,
   LoRAConfig,
   LoraMergeStrategy,
+  ImageConditioningItem,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
@@ -49,18 +50,63 @@ function buildLoRAParams(
 }
 
 function getVaceParams(
-  refImages?: string[],
+  imageConditioningItems?: { mode: string; imagePath: string }[],
   vaceContextScale?: number
 ):
-  | { ref_images: string[]; vace_context_scale: number }
+  | {
+      ref_images?: string[];
+      vace_context_scale?: number;
+      extension_mode?: "firstframe" | "lastframe";
+      first_frame_image?: string;
+      last_frame_image?: string;
+    }
   | Record<string, never> {
-  if (refImages && refImages.length > 0) {
-    return {
-      ref_images: refImages,
-      vace_context_scale: vaceContextScale ?? 1.0,
-    };
+  const params: Record<string, unknown> = {};
+
+  if (!imageConditioningItems || imageConditioningItems.length === 0) {
+    return params;
   }
-  return {};
+
+  // Separate items by mode
+  const r2vItems = imageConditioningItems.filter(
+    item => item.mode === "r2v" && item.imagePath
+  );
+  const firstFrameItem = imageConditioningItems.find(
+    item => item.mode === "firstframe" && item.imagePath
+  );
+  const lastFrameItem = imageConditioningItems.find(
+    item => item.mode === "lastframe" && item.imagePath
+  );
+
+  // Add R2V images
+  if (r2vItems.length > 0) {
+    params.ref_images = r2vItems.map(item => item.imagePath);
+    params.vace_context_scale = vaceContextScale ?? 1.0;
+  }
+
+  // Add extension mode parameters
+  if (firstFrameItem && lastFrameItem) {
+    params.extension_mode = "firstlastframe";
+    params.first_frame_image = firstFrameItem.imagePath;
+    params.last_frame_image = lastFrameItem.imagePath;
+    if (!params.vace_context_scale) {
+      params.vace_context_scale = vaceContextScale ?? 1.0;
+    }
+  } else if (firstFrameItem) {
+    params.extension_mode = "firstframe";
+    params.first_frame_image = firstFrameItem.imagePath;
+    if (!params.vace_context_scale) {
+      params.vace_context_scale = vaceContextScale ?? 1.0;
+    }
+  } else if (lastFrameItem) {
+    params.extension_mode = "lastframe";
+    params.last_frame_image = lastFrameItem.imagePath;
+    if (!params.vace_context_scale) {
+      params.vace_context_scale = vaceContextScale ?? 1.0;
+    }
+  }
+
+  return params;
 }
 
 export function StreamPage() {
@@ -454,17 +500,30 @@ export function StreamPage() {
     // Note: Adding/removing LoRAs requires pipeline reload
   };
 
-  const handleRefImagesChange = (images: string[]) => {
-    updateSettings({ refImages: images });
-    // Note: Changing reference images in dropdown only updates local state.
-    // Use "Send Hint" button to send hints to backend during streaming.
+  const handleImageConditioningItemsChange = (items: ImageConditioningItem[]) => {
+    updateSettings({ imageConditioningItems: items });
   };
 
-  const handleSendHint = (imagePath: string) => {
-    // Send reference image hint to backend
-    sendParameterUpdate({
-      ref_images: [imagePath],
-    });
+  const handleSendHint = (
+    mode: "r2v" | "firstframe" | "lastframe",
+    imagePath: string
+  ) => {
+    // Send appropriate hint to backend based on mode
+    if (mode === "r2v") {
+      sendParameterUpdate({
+        ref_images: [imagePath],
+      });
+    } else if (mode === "firstframe") {
+      sendParameterUpdate({
+        extension_mode: "firstframe",
+        first_frame_image: imagePath,
+      });
+    } else if (mode === "lastframe") {
+      sendParameterUpdate({
+        extension_mode: "lastframe",
+        last_frame_image: imagePath,
+      });
+    }
   };
 
   const handleVaceContextScaleChange = (scale: number) => {
@@ -627,7 +686,10 @@ export function StreamPage() {
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
+          ...getVaceParams(
+            settings.imageConditioningItems,
+            settings.vaceContextScale
+          ),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
@@ -647,7 +709,10 @@ export function StreamPage() {
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
+          ...getVaceParams(
+            settings.imageConditioningItems,
+            settings.vaceContextScale
+          ),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
@@ -711,6 +776,9 @@ export function StreamPage() {
         kv_cache_attention_bias?: number;
         ref_images?: string[];
         vace_context_scale?: number;
+        extension_mode?: "firstframe" | "lastframe" | "firstlastframe";
+        first_frame_image?: string;
+        last_frame_image?: string;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -743,12 +811,27 @@ export function StreamPage() {
 
       // VACE-specific parameters - backend will ignore if not supported
       const vaceParams = getVaceParams(
-        settings.refImages,
+        settings.imageConditioningItems,
         settings.vaceContextScale
       );
       if ("ref_images" in vaceParams) {
         initialParameters.ref_images = vaceParams.ref_images;
         initialParameters.vace_context_scale = vaceParams.vace_context_scale;
+      }
+      if ("extension_mode" in vaceParams) {
+        initialParameters.extension_mode = vaceParams.extension_mode as
+          | "firstframe"
+          | "lastframe"
+          | "firstlastframe";
+        if (vaceParams.first_frame_image) {
+          initialParameters.first_frame_image = vaceParams.first_frame_image as string;
+        }
+        if (vaceParams.last_frame_image) {
+          initialParameters.last_frame_image = vaceParams.last_frame_image as string;
+        }
+        if (!initialParameters.vace_context_scale) {
+          initialParameters.vace_context_scale = vaceParams.vace_context_scale as number;
+        }
       }
 
       // Video mode parameters - applies to all pipelines in video mode
@@ -818,8 +901,8 @@ export function StreamPage() {
             onTransitionStepsChange={setTransitionSteps}
             inputMode={settings.inputMode || "video"}
             onInputModeChange={handleInputModeChange}
-            refImages={settings.refImages || []}
-            onRefImagesChange={handleRefImagesChange}
+            imageConditioningItems={settings.imageConditioningItems || []}
+            onImageConditioningItemsChange={handleImageConditioningItemsChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
             onSendHint={handleSendHint}

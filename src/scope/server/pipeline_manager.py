@@ -223,7 +223,7 @@ class PipelineManager:
         """Configure VACE support for a pipeline.
 
         Adds vace_path to config and optionally extracts VACE-specific parameters
-        from load_params (ref_images, vace_context_scale).
+        from load_params (ref_images, vace_context_scale, extension_mode, etc.).
 
         Args:
             config: Pipeline configuration dict to modify
@@ -244,6 +244,27 @@ class PipelineManager:
                     f"_configure_vace: VACE parameters from load_params: "
                     f"ref_images count={len(ref_images)}, "
                     f"vace_context_scale={config.get('vace_context_scale', 1.0)}"
+                )
+
+            # Extension mode parameters
+            extension_mode = load_params.get("extension_mode")
+            if extension_mode:
+                config["extension_mode"] = extension_mode
+                first_frame = load_params.get("first_frame_image")
+                last_frame = load_params.get("last_frame_image")
+                if first_frame:
+                    config["first_frame_image"] = first_frame
+                if last_frame:
+                    config["last_frame_image"] = last_frame
+                if not config.get("vace_context_scale"):
+                    config["vace_context_scale"] = load_params.get(
+                        "vace_context_scale", 1.0
+                    )
+                logger.info(
+                    f"_configure_vace: Extension mode parameters: "
+                    f"mode={extension_mode}, "
+                    f"first_frame={'set' if first_frame else 'none'}, "
+                    f"last_frame={'set' if last_frame else 'none'}"
                 )
 
     def _apply_load_params(

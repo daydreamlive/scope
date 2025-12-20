@@ -101,7 +101,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             ),
             InputParam(
                 "use_dummy_frames",
-                default=False,
+                default=True,
                 type_hint=bool,
                 description="For ref_images only mode: whether to use dummy (zero) frames as temporal placeholder. If False, only ref images are encoded. Including them results in different behavior per original VACE implementation.",
             ),

@@ -107,6 +107,18 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    extension_mode: Literal["firstframe", "lastframe", "firstlastframe"] | None = Field(
+        default=None,
+        description="Extension mode for temporal generation: 'firstframe' (ref at start, generate after), 'lastframe' (generate before, ref at end), or 'firstlastframe' (refs at both ends).",
+    )
+    first_frame_image: str | None = Field(
+        default=None,
+        description="Path to first frame reference image for extension mode (used with 'firstframe' or 'firstlastframe').",
+    )
+    last_frame_image: str | None = Field(
+        default=None,
+        description="Path to last frame reference image for extension mode (used with 'lastframe' or 'firstlastframe').",
+    )
 
 
 class WebRTCOfferRequest(BaseModel):

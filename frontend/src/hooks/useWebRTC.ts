@@ -299,6 +299,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       paused?: boolean;
       ref_images?: string[];
       vace_context_scale?: number;
+      extension_mode?: "firstframe" | "lastframe" | "firstlastframe";
+      first_frame_image?: string;
+      last_frame_image?: string;
     }) => {
       if (
         dataChannelRef.current &&

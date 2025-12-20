@@ -379,6 +379,21 @@ class FrameProcessor:
             if "ref_images" in call_params and "ref_images" in self.parameters:
                 self.parameters.pop("ref_images", None)
 
+            # Clear extension mode parameters after use (same reason as ref_images)
+            # These should only be sent when explicitly provided in parameter updates
+            if "extension_mode" in call_params and "extension_mode" in self.parameters:
+                self.parameters.pop("extension_mode", None)
+            if (
+                "first_frame_image" in call_params
+                and "first_frame_image" in self.parameters
+            ):
+                self.parameters.pop("first_frame_image", None)
+            if (
+                "last_frame_image" in call_params
+                and "last_frame_image" in self.parameters
+            ):
+                self.parameters.pop("last_frame_image", None)
+
             # Clear transition when complete (blocks signal completion via _transition_active)
             # Contract: Modular pipelines manage prompts internally; frame_processor manages lifecycle
             if "transition" in call_params and "transition" in self.parameters:

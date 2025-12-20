@@ -25,6 +25,9 @@ export interface WebRTCOfferRequest {
     kv_cache_attention_bias?: number;
     ref_images?: string[];
     vace_context_scale?: number;
+    extension_mode?: "firstframe" | "lastframe" | "firstlastframe";
+    first_frame_image?: string;
+    last_frame_image?: string;
   };
 }
 
@@ -48,6 +51,9 @@ export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
   // VACE (optional reference image conditioning for text mode)
   ref_images?: string[];
   vace_context_scale?: number;
+  extension_mode?: "firstframe" | "lastframe" | "firstlastframe";
+  first_frame_image?: string;
+  last_frame_image?: string;
 }
 
 export interface LongLiveLoadParams extends PipelineLoadParams {
@@ -60,6 +66,9 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   // VACE (optional reference image conditioning)
   ref_images?: string[];
   vace_context_scale?: number;
+  extension_mode?: "firstframe" | "lastframe" | "firstlastframe";
+  first_frame_image?: string;
+  last_frame_image?: string;
 }
 
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
