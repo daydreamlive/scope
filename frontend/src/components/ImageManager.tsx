@@ -12,7 +12,11 @@ import {
   SelectValue,
 } from "./ui/select";
 
-export type ImageConditioningMode = "r2v" | "firstframe" | "lastframe";
+export type ImageConditioningMode =
+  | "r2v"
+  | "firstframe"
+  | "lastframe"
+  | "lastframe_firstframe";
 
 export interface ImageConditioningItem {
   mode: ImageConditioningMode;
@@ -45,12 +49,19 @@ export function ImageManager({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Helper to check if images array contains conditioning items
-  const isConditioningMode = supportsModeSelection && images.length > 0 && typeof images[0] === 'object' && 'mode' in images[0];
+  const isConditioningMode =
+    supportsModeSelection &&
+    images.length > 0 &&
+    typeof images[0] === "object" &&
+    "mode" in images[0];
 
   // Get typed images based on mode
   const imageItems: ImageConditioningItem[] = isConditioningMode
     ? (images as ImageConditioningItem[])
-    : (images as string[]).map(imagePath => ({ mode: 'r2v' as ImageConditioningMode, imagePath }));
+    : (images as string[]).map(imagePath => ({
+        mode: "r2v" as ImageConditioningMode,
+        imagePath,
+      }));
 
   const loadAvailableImages = async () => {
     setIsLoadingImages(true);
@@ -143,7 +154,10 @@ export function ImageManager({
         handleImageChange(uploadTargetIndex, uploadedFile.path);
       } else {
         if (supportsModeSelection) {
-          onImagesChange([...imageItems, { mode: "r2v", imagePath: uploadedFile.path }]);
+          onImagesChange([
+            ...imageItems,
+            { mode: "r2v", imagePath: uploadedFile.path },
+          ]);
         } else {
           onImagesChange([...(images as string[]), uploadedFile.path]);
         }
@@ -168,6 +182,8 @@ export function ImageManager({
         return "First Frame";
       case "lastframe":
         return "Last Frame";
+      case "lastframe_firstframe":
+        return "Last+First Frame";
     }
   };
 
@@ -179,6 +195,8 @@ export function ImageManager({
         return "Set the first frame of the video generation. The model will generate subsequent frames starting from this image.";
       case "lastframe":
         return "Set the target last frame of the video generation. The model will generate frames leading to this image.";
+      case "lastframe_firstframe":
+        return "Send image as last frame of current chunk, then immediately as first frame of next chunk. Creates smooth transitions between chunks.";
     }
   };
 
@@ -186,10 +204,14 @@ export function ImageManager({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <LabelWithTooltip
-          label={supportsModeSelection ? "Image Conditioning" : "Reference Images"}
-          tooltip={supportsModeSelection
-            ? "Condition video generation using reference images or frame anchors. Each image can have its own mode."
-            : "Select reference images for VACE conditioning. Images will guide the video generation style and content."}
+          label={
+            supportsModeSelection ? "Image Conditioning" : "Reference Images"
+          }
+          tooltip={
+            supportsModeSelection
+              ? "Condition video generation using reference images or frame anchors. Each image can have its own mode."
+              : "Select reference images for VACE conditioning. Images will guide the video generation style and content."
+          }
           className="text-sm font-medium"
         />
         <div className="flex items-center gap-2">
@@ -261,6 +283,9 @@ export function ImageManager({
                         </SelectItem>
                         <SelectItem value="lastframe">
                           {getModeLabel("lastframe")}
+                        </SelectItem>
+                        <SelectItem value="lastframe_firstframe">
+                          {getModeLabel("lastframe_firstframe")}
                         </SelectItem>
                       </SelectContent>
                     </Select>

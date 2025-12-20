@@ -12,7 +12,11 @@ import { Badge } from "./ui/badge";
 import { Upload } from "lucide-react";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import type { InputMode, ImageConditioningItem, ImageConditioningMode } from "../types";
+import type {
+  InputMode,
+  ImageConditioningItem,
+  ImageConditioningMode,
+} from "../types";
 import { pipelineIsMultiMode } from "../data/pipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
@@ -265,9 +269,11 @@ export function InputAndControlsPanel({
         <div className="space-y-4">
           <ImageManager
             images={imageConditioningItems}
-            onImagesChange={(images) => {
+            onImagesChange={images => {
               if (onImageConditioningItemsChange) {
-                onImageConditioningItemsChange(images as ImageConditioningItem[]);
+                onImageConditioningItemsChange(
+                  images as ImageConditioningItem[]
+                );
               }
             }}
             disabled={isDownloading}

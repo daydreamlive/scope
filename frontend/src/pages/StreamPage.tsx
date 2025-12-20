@@ -500,15 +500,16 @@ export function StreamPage() {
     // Note: Adding/removing LoRAs requires pipeline reload
   };
 
-  const handleImageConditioningItemsChange = (items: ImageConditioningItem[]) => {
+  const handleImageConditioningItemsChange = (
+    items: ImageConditioningItem[]
+  ) => {
     updateSettings({ imageConditioningItems: items });
   };
 
   const handleSendHint = (
-    mode: "r2v" | "firstframe" | "lastframe",
+    mode: "r2v" | "firstframe" | "lastframe" | "lastframe_firstframe",
     imagePath: string
   ) => {
-    // Send appropriate hint to backend based on mode
     if (mode === "r2v") {
       sendParameterUpdate({
         ref_images: [imagePath],
@@ -523,6 +524,17 @@ export function StreamPage() {
         extension_mode: "lastframe",
         last_frame_image: imagePath,
       });
+    } else if (mode === "lastframe_firstframe") {
+      sendParameterUpdate({
+        extension_mode: "lastframe",
+        last_frame_image: imagePath,
+      });
+      setTimeout(() => {
+        sendParameterUpdate({
+          extension_mode: "firstframe",
+          first_frame_image: imagePath,
+        });
+      }, 100);
     }
   };
 
@@ -824,13 +836,16 @@ export function StreamPage() {
           | "lastframe"
           | "firstlastframe";
         if (vaceParams.first_frame_image) {
-          initialParameters.first_frame_image = vaceParams.first_frame_image as string;
+          initialParameters.first_frame_image =
+            vaceParams.first_frame_image as string;
         }
         if (vaceParams.last_frame_image) {
-          initialParameters.last_frame_image = vaceParams.last_frame_image as string;
+          initialParameters.last_frame_image =
+            vaceParams.last_frame_image as string;
         }
         if (!initialParameters.vace_context_scale) {
-          initialParameters.vace_context_scale = vaceParams.vace_context_scale as number;
+          initialParameters.vace_context_scale =
+            vaceParams.vace_context_scale as number;
         }
       }
 

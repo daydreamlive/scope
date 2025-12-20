@@ -46,7 +46,11 @@ export interface LoRAConfig {
   mergeMode?: LoraMergeStrategy;
 }
 
-export type ImageConditioningMode = "r2v" | "firstframe" | "lastframe";
+export type ImageConditioningMode =
+  | "r2v"
+  | "firstframe"
+  | "lastframe"
+  | "lastframe_firstframe";
 
 export interface ImageConditioningItem {
   mode: ImageConditioningMode;
