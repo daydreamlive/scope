@@ -44,17 +44,17 @@ def get_model_file_path(relative_path: str) -> Path:
     return models_dir / relative_path
 
 
-def get_images_dir() -> Path:
+def get_assets_dir() -> Path:
     """
-    Get the images directory path (at the same level as models directory).
+    Get the assets directory path (at the same level as models directory).
 
-    If DAYDREAM_SCOPE_MODELS_DIR is set, images directory will be at the same level.
-    Otherwise, defaults to ~/.daydream-scope/images
+    If DAYDREAM_SCOPE_MODELS_DIR is set, assets directory will be at the same level.
+    Otherwise, defaults to ~/.daydream-scope/assets
 
     Returns:
-        Path: Absolute path to the images directory
+        Path: Absolute path to the assets directory
     """
     models_dir = get_models_dir()
-    # Get the parent directory (e.g., ~/.daydream-scope) and create images directory there
-    images_dir = models_dir.parent / "images"
-    return images_dir
+    # Get the parent directory (e.g., ~/.daydream-scope) and create assets directory there
+    assets_dir = models_dir.parent / "assets"
+    return assets_dir

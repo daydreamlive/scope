@@ -32,7 +32,7 @@ from .logs_config import (
 )
 from .models_config import (
     ensure_models_dir,
-    get_images_dir,
+    get_assets_dir,
     get_models_dir,
     models_are_downloaded,
 )
@@ -207,10 +207,10 @@ async def lifespan(app: FastAPI):
     models_dir = ensure_models_dir()
     logger.info(f"Models directory: {models_dir}")
 
-    # Ensure images directory exists for VACE reference images (at same level as models)
-    images_dir = get_images_dir()
-    images_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Images directory: {images_dir}")
+    # Ensure assets directory exists for VACE reference images and other media (at same level as models)
+    assets_dir = get_assets_dir()
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Assets directory: {assets_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
     pipeline_manager = PipelineManager()
@@ -497,63 +497,90 @@ async def list_lora_files():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-class ImageFileInfo(BaseModel):
-    """Metadata for an available image file on disk."""
+class AssetFileInfo(BaseModel):
+    """Metadata for an available asset file on disk."""
 
     name: str
     path: str
     size_mb: float
     folder: str | None = None
+    type: str  # "image" or "video"
+    created_at: float  # Unix timestamp
 
 
-class ImageFilesResponse(BaseModel):
-    """Response containing all discoverable image files."""
+class AssetsResponse(BaseModel):
+    """Response containing all discoverable asset files."""
 
-    image_files: list[ImageFileInfo]
+    assets: list[AssetFileInfo]
 
 
-@app.get("/api/v1/images/list", response_model=ImageFilesResponse)
-async def list_image_files():
-    """List available image files in the images directory and its subdirectories."""
+@app.get("/api/v1/assets", response_model=AssetsResponse)
+async def list_assets(
+    type: str | None = Query(None, description="Filter by asset type (image, video)"),
+):
+    """List available asset files in the assets directory and its subdirectories."""
 
-    def process_image_file(file_path: Path, images_dir: Path) -> ImageFileInfo:
-        """Extract image file metadata."""
+    def process_asset_file(
+        file_path: Path, assets_dir: Path, asset_type: str
+    ) -> AssetFileInfo:
+        """Extract asset file metadata."""
         size_mb = file_path.stat().st_size / (1024 * 1024)
-        relative_path = file_path.relative_to(images_dir)
+        created_at = file_path.stat().st_ctime
+        relative_path = file_path.relative_to(assets_dir)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
-        return ImageFileInfo(
+        return AssetFileInfo(
             name=file_path.stem,
             path=str(file_path),
             size_mb=round(size_mb, 2),
             folder=folder,
+            type=asset_type,
+            created_at=created_at,
         )
 
     try:
-        images_dir = get_images_dir()
-        image_files: list[ImageFileInfo] = []
+        assets_dir = get_assets_dir()
+        asset_files: list[AssetFileInfo] = []
 
-        if images_dir.exists() and images_dir.is_dir():
-            for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"):
-                for file_path in images_dir.rglob(pattern):
-                    if file_path.is_file():
-                        image_files.append(process_image_file(file_path, images_dir))
+        if assets_dir.exists() and assets_dir.is_dir():
+            # Define patterns based on type filter
+            if type == "image" or type is None:
+                image_patterns = ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp")
+                for pattern in image_patterns:
+                    for file_path in assets_dir.rglob(pattern):
+                        if file_path.is_file():
+                            asset_files.append(
+                                process_asset_file(file_path, assets_dir, "image")
+                            )
 
-        image_files.sort(key=lambda x: (x.folder or "", x.name))
-        return ImageFilesResponse(image_files=image_files)
+            if type == "video" or type is None:
+                video_patterns = ("*.mp4", "*.avi", "*.mov", "*.mkv", "*.webm")
+                for pattern in video_patterns:
+                    for file_path in assets_dir.rglob(pattern):
+                        if file_path.is_file():
+                            asset_files.append(
+                                process_asset_file(file_path, assets_dir, "video")
+                            )
+
+        # Sort by created_at (most recent first), then by folder and name
+        asset_files.sort(key=lambda x: (-x.created_at, x.folder or "", x.name))
+        return AssetsResponse(assets=asset_files)
 
     except Exception as e:  # pragma: no cover - defensive logging
-        logger.error(f"list_image_files: Error listing image files: {e}")
+        logger.error(f"list_assets: Error listing asset files: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.post("/api/v1/images/upload", response_model=ImageFileInfo)
-async def upload_image(request: Request, filename: str = Query(...)):
-    """Upload an image file to the images directory."""
+@app.post("/api/v1/assets", response_model=AssetFileInfo)
+async def upload_asset(request: Request, filename: str = Query(...)):
+    """Upload an asset file (image or video) to the assets directory."""
     try:
-        # Validate file type
-        allowed_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+        # Validate file type - support both images and videos
+        allowed_image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+        allowed_video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+        allowed_extensions = allowed_image_extensions | allowed_video_extensions
+
         file_extension = Path(filename).suffix.lower()
         if file_extension not in allowed_extensions:
             raise HTTPException(
@@ -561,9 +588,15 @@ async def upload_image(request: Request, filename: str = Query(...)):
                 detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
             )
 
-        # Ensure images directory exists
-        images_dir = get_images_dir()
-        images_dir.mkdir(parents=True, exist_ok=True)
+        # Determine asset type
+        if file_extension in allowed_image_extensions:
+            asset_type = "image"
+        else:
+            asset_type = "video"
+
+        # Ensure assets directory exists
+        assets_dir = get_assets_dir()
+        assets_dir.mkdir(parents=True, exist_ok=True)
 
         # Read file content from request body
         content = await request.body()
@@ -576,29 +609,76 @@ async def upload_image(request: Request, filename: str = Query(...)):
                 detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
             )
 
-        # Save file to images directory
-        file_path = images_dir / filename
+        # Save file to assets directory
+        file_path = assets_dir / filename
         file_path.write_bytes(content)
 
-        # Return file info matching ImageFileInfo structure
+        # Return file info matching AssetFileInfo structure
         size_mb = len(content) / (1024 * 1024)
-        relative_path = file_path.relative_to(images_dir)
+        created_at = file_path.stat().st_ctime
+        relative_path = file_path.relative_to(assets_dir)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
 
-        logger.info(f"upload_image: Uploaded image file: {file_path}")
-        return ImageFileInfo(
+        logger.info(f"upload_asset: Uploaded {asset_type} file: {file_path}")
+        return AssetFileInfo(
             name=file_path.stem,
             path=str(file_path),
             size_mb=round(size_mb, 2),
             folder=folder,
+            type=asset_type,
+            created_at=created_at,
         )
 
     except HTTPException:
         raise
     except Exception as e:  # pragma: no cover - defensive logging
-        logger.error(f"upload_image: Error uploading image file: {e}")
+        logger.error(f"upload_asset: Error uploading asset file: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/assets/{asset_path:path}")
+async def serve_asset(asset_path: str):
+    """Serve an asset file (for thumbnails/previews)."""
+    try:
+        assets_dir = get_assets_dir()
+        file_path = assets_dir / asset_path
+
+        # Security check: ensure the path is within assets directory
+        try:
+            file_path = file_path.resolve()
+            assets_dir_resolved = assets_dir.resolve()
+            if not str(file_path).startswith(str(assets_dir_resolved)):
+                raise HTTPException(status_code=403, detail="Access denied")
+        except Exception:
+            raise HTTPException(status_code=403, detail="Invalid path") from None
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Asset not found")
+
+        # Determine media type based on extension
+        file_extension = file_path.suffix.lower()
+        media_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".mp4": "video/mp4",
+            ".avi": "video/x-msvideo",
+            ".mov": "video/quicktime",
+            ".mkv": "video/x-matroska",
+            ".webm": "video/webm",
+        }
+        media_type = media_types.get(file_extension, "application/octet-stream")
+
+        return FileResponse(file_path, media_type=media_type)
+
+    except HTTPException:
+        raise
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"serve_asset: Error serving asset file: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

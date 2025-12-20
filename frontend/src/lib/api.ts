@@ -302,26 +302,31 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   return result;
 };
 
-export interface ImageFileInfo {
+export interface AssetFileInfo {
   name: string;
   path: string;
   size_mb: number;
   folder?: string | null;
+  type: string; // "image" or "video"
+  created_at: number; // Unix timestamp
 }
 
-export interface ImageFilesResponse {
-  image_files: ImageFileInfo[];
+export interface AssetsResponse {
+  assets: AssetFileInfo[];
 }
 
-export const listImageFiles = async (): Promise<ImageFilesResponse> => {
-  const response = await fetch("/api/v1/images/list", {
+export const listAssets = async (
+  type?: "image" | "video"
+): Promise<AssetsResponse> => {
+  const url = type ? `/api/v1/assets?type=${type}` : "/api/v1/assets";
+  const response = await fetch(url, {
     method: "GET",
   });
 
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `List image files failed: ${response.status} ${response.statusText}: ${errorText}`
+      `List assets failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 
@@ -329,11 +334,11 @@ export const listImageFiles = async (): Promise<ImageFilesResponse> => {
   return result;
 };
 
-export const uploadImage = async (file: File): Promise<ImageFileInfo> => {
+export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
   const fileContent = await file.arrayBuffer();
   const filename = encodeURIComponent(file.name);
 
-  const response = await fetch(`/api/v1/images/upload?filename=${filename}`, {
+  const response = await fetch(`/api/v1/assets?filename=${filename}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/octet-stream",
@@ -344,12 +349,37 @@ export const uploadImage = async (file: File): Promise<ImageFileInfo> => {
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `Upload image failed: ${response.status} ${response.statusText}: ${errorText}`
+      `Upload asset failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 
   const result = await response.json();
   return result;
+};
+
+export const getAssetUrl = (assetPath: string): string => {
+  // The backend returns full absolute paths, but we need to extract the relative path
+  // from the assets directory for the serving endpoint
+  // Example: C:\Users\...\assets\myimage.png -> myimage.png
+  // or: C:\Users\...\assets\subfolder\myimage.png -> subfolder/myimage.png
+
+  const pathParts = assetPath.split(/[/\\]/);
+  const assetsIndex = pathParts.findIndex(
+    part => part === "assets" || part === ".daydream-scope"
+  );
+
+  if (assetsIndex >= 0 && assetsIndex < pathParts.length - 1) {
+    // Find the assets directory and take everything after it
+    const assetsPos = pathParts.findIndex(part => part === "assets");
+    if (assetsPos >= 0) {
+      const relativePath = pathParts.slice(assetsPos + 1).join("/");
+      return `/api/v1/assets/${relativePath}`;
+    }
+  }
+
+  // Fallback: just use the filename
+  const filename = pathParts[pathParts.length - 1];
+  return `/api/v1/assets/${encodeURIComponent(filename)}`;
 };
 
 // Pipeline schema types - matches output of get_schema_with_metadata()
