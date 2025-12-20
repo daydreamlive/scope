@@ -188,7 +188,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
 
         VACE is needed when:
         - ref_images is present and non-empty, OR
-        - input_frames is present (for depth/flow/pose conditioning)
+        - input_frames is present (for depth/flow/pose conditioning), OR
+        - extension_mode is present (for firstframe/lastframe/firstlastframe)
 
         Args:
             kwargs: Generation kwargs
@@ -198,11 +199,23 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         """
         ref_images = kwargs.get("ref_images")
         input_frames = kwargs.get("input_frames")
+        extension_mode = kwargs.get("extension_mode")
 
         has_ref_images = ref_images is not None and len(ref_images) > 0
         has_input_frames = input_frames is not None
+        has_extension_mode = extension_mode is not None
 
-        return has_ref_images or has_input_frames
+        print(
+            f"_needs_vace: ref_images={ref_images}, input_frames={input_frames is not None}, extension_mode={extension_mode}"
+        )
+        print(
+            f"_needs_vace: has_ref_images={has_ref_images}, has_input_frames={has_input_frames}, has_extension_mode={has_extension_mode}"
+        )
+        print(
+            f"_needs_vace: returning {has_ref_images or has_input_frames or has_extension_mode}"
+        )
+
+        return has_ref_images or has_input_frames or has_extension_mode
 
     def _enable_vace(self):
         """_enable_vace: Enable VACE by wrapping model and loading weights.
@@ -231,7 +244,9 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         Raises:
             RuntimeError: If VACE is needed but vace_path is None
         """
+        print(f"_enable_vace: Called, vace_enabled={self.vace_enabled}")
         if self.vace_enabled:
+            print("_enable_vace: Already enabled, returning early")
             return
 
         if self.vace_path is None:
@@ -350,9 +365,16 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        print(f"_generate: vace_enabled={self.vace_enabled}")
+        print("_generate: Checking if VACE is needed...")
         # Lazy load VACE if needed
         if self._needs_vace(kwargs) and not self.vace_enabled:
+            print("_generate: VACE is needed and not enabled, calling _enable_vace")
             self._enable_vace()
+        else:
+            print(
+                f"_generate: Skipping VACE enablement (needs_vace={self._needs_vace(kwargs)}, vace_enabled={self.vace_enabled})"
+            )
 
         # Handle runtime LoRA scale updates before writing into state.
         lora_scales = kwargs.get("lora_scales")
@@ -385,6 +407,14 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         # Clear ref_images from state if not provided to prevent encoding on chunks where they weren't sent
         if "ref_images" not in kwargs:
             self.state.set("ref_images", None)
+
+        # Clear extension mode parameters from state if not provided to prevent reuse on non-extension chunks
+        if "extension_mode" not in kwargs:
+            self.state.set("extension_mode", None)
+        if "first_frame_image" not in kwargs:
+            self.state.set("first_frame_image", None)
+        if "last_frame_image" not in kwargs:
+            self.state.set("last_frame_image", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

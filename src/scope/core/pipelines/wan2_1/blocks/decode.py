@@ -55,7 +55,29 @@ class DecodeBlock(ModularPipelineBlocks):
 
         # Decode to pixel space
         latents = block_state.latents
+        print(f"DecodeBlock: Starting decode, latents shape={latents.shape}")
+        print(
+            f"DecodeBlock: Input latents value range=[{latents.min():.3f}, {latents.max():.3f}]"
+        )
+        print(f"DecodeBlock: Input latents mean={latents.mean():.3f}")
+
         video = components.vae.decode_to_pixel(latents, use_cache=True)
+
+        print(f"DecodeBlock: Decoded video shape={video.shape}")
+        print(f"DecodeBlock: Video value range=[{video.min():.3f}, {video.max():.3f}]")
+        print(f"DecodeBlock: Video mean={video.mean():.3f}")
+
+        # Diagnostic: Check individual frame statistics
+        if video.shape[0] == 1:  # Batch dimension
+            num_frames = video.shape[1]
+            print(
+                f"DecodeBlock: Frame-by-frame statistics (total {num_frames} frames):"
+            )
+            for frame_idx in [0, num_frames - 1]:  # First and last frame
+                frame = video[0, frame_idx]
+                print(
+                    f"DecodeBlock:   Frame {frame_idx}: mean={frame.mean():.3f}, range=[{frame.min():.3f}, {frame.max():.3f}]"
+                )
 
         # Note: VACE reference frames are NOT prepended to latents in this implementation.
         # They are only used for VACE context conditioning, so we don't need to strip them.

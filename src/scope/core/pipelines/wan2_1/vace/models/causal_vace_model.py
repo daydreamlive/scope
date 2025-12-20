@@ -233,9 +233,22 @@ class CausalVaceWanModel(nn.Module):
         crossattn_cache,
     ):
         """Process VACE context to generate hints."""
-        # Embed VACE context
-        c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
+        print("forward_vace: Starting hint generation")
+        print(f"forward_vace: x shape={x.shape}, seq_len={seq_len}")
+        print(f"forward_vace: vace_context has {len(vace_context)} elements")
+
+        # Get target dtype from vace_patch_embedding parameters
+        target_dtype = next(self.vace_patch_embedding.parameters()).dtype
+        print(f"forward_vace: Converting vace_context to dtype={target_dtype}")
+
+        # Embed VACE context (convert to model dtype first)
+        c = [
+            self.vace_patch_embedding(u.unsqueeze(0).to(dtype=target_dtype))
+            for u in vace_context
+        ]
         c = [u.flatten(2).transpose(1, 2) for u in c]
+
+        print(f"forward_vace: After embedding, c[0] shape={c[0].shape}")
 
         # Pad to seq_len
         c = torch.cat(
@@ -245,6 +258,10 @@ class CausalVaceWanModel(nn.Module):
                 )
                 for u in c
             ]
+        )
+
+        print(
+            f"forward_vace: After padding, c shape={c.shape} (padded to seq_len={seq_len})"
         )
 
         # Process through VACE blocks
@@ -264,6 +281,13 @@ class CausalVaceWanModel(nn.Module):
 
         # Extract hints
         hints = torch.unbind(c)[:-1]
+        print(f"forward_vace: Generated {len(hints)} hints")
+        if len(hints) > 0:
+            print(f"forward_vace: hints[0] shape={hints[0].shape}")
+            print(
+                f"forward_vace: hints[0] value range=[{hints[0].min():.3f}, {hints[0].max():.3f}]"
+            )
+            print(f"forward_vace: hints[0] mean={hints[0].mean():.3f}")
         return hints
 
     def _forward_inference(
@@ -338,8 +362,14 @@ class CausalVaceWanModel(nn.Module):
             context = torch.concat([context_clip, context], dim=1)
 
         # Generate VACE hints
+        print("_forward_inference: Checking VACE hint generation")
+        print(
+            f"_forward_inference: vace_context={'present' if vace_context is not None else 'None'}"
+        )
+        print(f"_forward_inference: vace_regenerate_hints={vace_regenerate_hints}")
         hints = None
         if vace_context is not None and vace_regenerate_hints:
+            print("_forward_inference: Condition met, calling forward_vace")
             hints = self.forward_vace(
                 x,
                 vace_context,
@@ -353,6 +383,8 @@ class CausalVaceWanModel(nn.Module):
                 self.causal_wan_model.block_mask,
                 crossattn_cache,
             )
+        else:
+            print("_forward_inference: Condition NOT met, skipping forward_vace")
 
         # Arguments for transformer blocks
         kwargs = {

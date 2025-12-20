@@ -2,9 +2,13 @@
 Unified test script for LongLive pipeline with VACE integration.
 
 Supports multiple modes:
-- R2V: Reference-to-Video generation using reference images
+- R2V: Reference-to-Video generation using reference images (condition only)
 - Depth guidance: Structural guidance using depth maps
 - Inpainting: Masked video-to-video generation
+- Extension: Temporal extension with reference frames in output
+  * firstframe: first_frame_image at start of first chunk, generate continuation
+  * lastframe: Generate lead-up, last_frame_image at end of last chunk
+  * firstlastframe: first_frame_image at start AND last_frame_image at end
 
 Modes can be combined:
 - R2V + Depth
@@ -12,10 +16,15 @@ Modes can be combined:
 - Depth only
 - Inpainting only
 - R2V only
+- Extension only
+
+Key distinction - R2V vs Extension:
+- R2V (ref_images): Reference images condition the entire video but DON'T appear in output
+- Extension (first_frame_image/last_frame_image): Reference frames ARE in output video
 
 Usage:
     Edit the CONFIG dictionary below to enable/disable modes and set paths.
-    python -m scope.core.pipelines.longlive.test_unified
+    python -m scope.core.pipelines.longlive.test_vace
 """
 
 import time
@@ -35,11 +44,12 @@ from .pipeline import LongLivePipeline
 
 CONFIG = {
     # ===== MODE SELECTION =====
-    "use_r2v": True,  # Reference-to-Video: condition on reference images
+    "use_r2v": False,  # Reference-to-Video: condition on reference images
     "use_depth": False,  # Depth guidance: structural control via depth maps
     "use_inpainting": False,  # Inpainting: masked video-to-video generation
+    "use_extension": True,  # Extension mode: temporal generation (firstframe/lastframe/firstlastframe)
     # ===== INPUT PATHS =====
-    # R2V: List of reference image paths
+    # R2V: List of reference image paths (condition entire video, don't appear in output)
     "ref_images": [
         "frontend/public/assets/example.png",  # path/to/image.png
     ],
@@ -48,16 +58,21 @@ CONFIG = {
     # Inpainting: Input video and mask video paths
     "input_video": "frontend/public/assets/test.mp4",  # path/to/input_video.mp4
     "mask_video": "vace_tests/circle_mask.mp4",  # path/to/mask_video.mp4
+    # Extension: Frame images (appear in output video as actual frames)
+    "first_frame_image": "frontend/public/assets/woman3.png",  # For firstframe or firstlastframe modes
+    "last_frame_image": "frontend/public/assets/woman4.png",  # For lastframe or firstlastframe modes
+    "extension_mode": "firstlastframe",  # "firstframe", "lastframe", or "firstlastframe"
     # ===== GENERATION PARAMETERS =====
     "prompt": None,  # Set to override mode-specific prompts, or None to use defaults
     "prompt_r2v": "",  # Default prompt for R2V mode
     "prompt_depth": "a cat walking towards the camera",  # Default prompt for depth mode
     "prompt_inpainting": "a fireball",  # Default prompt for inpainting mode
-    "num_chunks": 3,  # Number of generation chunks
+    "prompt_extension": "",  # Default prompt for extension mode
+    "num_chunks": 2,  # Number of generation chunks
     "frames_per_chunk": 12,  # Frames per chunk (12 = 3 latent * 4 temporal upsample)
     "height": 512,
     "width": 512,
-    "vace_context_scale": 0.7,  # VACE conditioning strength (0.0-1.0)
+    "vace_context_scale": 1.5,  # VACE conditioning strength
     # ===== INPAINTING SPECIFIC =====
     "mask_threshold": 0.5,  # Threshold for binarizing mask (0-1)
     "mask_value": 127,  # Gray value for masked regions (0-255)
@@ -429,18 +444,27 @@ def main():
     use_r2v = config["use_r2v"]
     use_depth = config["use_depth"]
     use_inpainting = config["use_inpainting"]
+    use_extension = config["use_extension"]
 
     # Validate mode selection
     if use_depth and use_inpainting:
         raise ValueError("Cannot use both depth and inpainting modes simultaneously")
 
-    if not (use_r2v or use_depth or use_inpainting):
+    if use_extension and (use_depth or use_inpainting):
+        raise ValueError(
+            "Extension mode cannot be combined with depth or inpainting modes"
+        )
+
+    if not (use_r2v or use_depth or use_inpainting or use_extension):
         raise ValueError("At least one mode must be enabled")
 
     # Select appropriate prompt based on mode
     if config["prompt"] is not None:
         # User override
         prompt = config["prompt"]
+    elif use_extension:
+        # Extension mode
+        prompt = config["prompt_extension"]
     elif use_inpainting:
         # Inpainting takes priority
         prompt = config["prompt_inpainting"]
@@ -455,6 +479,9 @@ def main():
     print(f"  R2V: {use_r2v}")
     print(f"  Depth Guidance: {use_depth}")
     print(f"  Inpainting: {use_inpainting}")
+    print(f"  Extension: {use_extension}")
+    if use_extension:
+        print(f"    Mode: {config['extension_mode']}")
     print(f"  Prompt: '{prompt}'")
     print(f"  Chunks: {config['num_chunks']} x {config['frames_per_chunk']} frames")
     print(f"  Resolution: {config['height']}x{config['width']}")
@@ -487,7 +514,7 @@ def main():
             ),
             "lora_path": str(get_model_file_path("LongLive-1.3B/models/lora.pt")),
             "vace_path": vace_path
-            if (use_r2v or use_depth or use_inpainting)
+            if (use_r2v or use_depth or use_inpainting or use_extension)
             else None,
             "text_encoder_path": str(
                 get_model_file_path(
@@ -503,8 +530,8 @@ def main():
         }
     )
 
-    # Set vace_in_dim for depth/inpainting modes
-    if use_depth or use_inpainting:
+    # Set vace_in_dim for depth/inpainting/extension modes (all use masked encoding: 32 + 64 = 96 channels)
+    if use_depth or use_inpainting or use_extension:
         pipeline_config.model_config.base_model_kwargs = (
             pipeline_config.model_config.base_model_kwargs or {}
         )
@@ -517,6 +544,8 @@ def main():
     total_frames = config["num_chunks"] * config["frames_per_chunk"]
 
     ref_images = None
+    first_frame_image = None
+    last_frame_image = None
     depth_video = None
     input_video_tensor = None
     mask_tensor = None
@@ -540,6 +569,35 @@ def main():
         else:
             print("  No valid reference images found, disabling R2V")
             use_r2v = False
+        print()
+
+    # Load frame images for Extension mode
+    if use_extension:
+        print("=== Preparing Extension Inputs ===")
+        extension_mode = config["extension_mode"]
+
+        # Load first_frame_image if needed
+        if extension_mode in ["firstframe", "firstlastframe"]:
+            first_frame_path = resolve_path(config["first_frame_image"], project_root)
+            if first_frame_path.exists():
+                first_frame_image = str(first_frame_path)
+                print(f"  First frame image: {first_frame_path}")
+            else:
+                raise FileNotFoundError(
+                    f"First frame image not found: {first_frame_path}"
+                )
+
+        # Load last_frame_image if needed
+        if extension_mode in ["lastframe", "firstlastframe"]:
+            last_frame_path = resolve_path(config["last_frame_image"], project_root)
+            if last_frame_path.exists():
+                last_frame_image = str(last_frame_path)
+                print(f"  Last frame image: {last_frame_path}")
+            else:
+                raise FileNotFoundError(
+                    f"Last frame image not found: {last_frame_path}"
+                )
+
         print()
 
     # Load depth video
@@ -644,10 +702,38 @@ def main():
             "vace_context_scale": config["vace_context_scale"],
         }
 
-        # Add R2V reference images (first chunk only)
+        # Add R2V reference images (first chunk only, R2V conditions entire video)
         if use_r2v and is_first_chunk and ref_images:
             kwargs["ref_images"] = ref_images
             print(f"Chunk {chunk_index}: Using {len(ref_images)} reference image(s)")
+
+        # Add Extension mode parameters
+        # Extension applies per-chunk: first chunk for firstframe/firstlastframe, last for lastframe/firstlastframe
+        if use_extension:
+            extension_mode = config["extension_mode"]
+            is_last_chunk = chunk_index == config["num_chunks"] - 1
+
+            # Determine if we should apply extension for this chunk
+            apply_extension = False
+            if extension_mode == "firstframe" and is_first_chunk:
+                apply_extension = True
+            elif extension_mode == "lastframe" and is_last_chunk:
+                apply_extension = True
+            elif extension_mode == "firstlastframe" and (
+                is_first_chunk or is_last_chunk
+            ):
+                apply_extension = True
+
+            if apply_extension:
+                kwargs["extension_mode"] = extension_mode
+                if first_frame_image is not None:
+                    kwargs["first_frame_image"] = first_frame_image
+                if last_frame_image is not None:
+                    kwargs["last_frame_image"] = last_frame_image
+                print(
+                    f"Chunk {chunk_index}: Extension mode={extension_mode}, "
+                    f"chunk={'first' if is_first_chunk else 'last' if is_last_chunk else 'middle'}"
+                )
 
         # Add depth guidance
         if use_depth:
@@ -723,6 +809,47 @@ def main():
 
     print(f"\nFinal output shape: {output_video.shape}")
 
+    # DIAGNOSTIC: Check final frames in extension mode
+    if use_extension:
+        print("\n=== Extension Mode Diagnostics ===")
+        extension_mode = config["extension_mode"]
+        print(f"Extension mode: {extension_mode}")
+
+        if extension_mode == "firstframe" or extension_mode == "firstlastframe":
+            print(
+                f"First frame value range: [{output_video[0].min():.3f}, {output_video[0].max():.3f}]"
+            )
+            print(f"First frame mean: {output_video[0].mean():.3f}")
+
+        if extension_mode == "lastframe" or extension_mode == "firstlastframe":
+            last_frame_idx = output_video.shape[0] - 1
+            print(
+                f"Last frame (index {last_frame_idx}) value range: [{output_video[last_frame_idx].min():.3f}, {output_video[last_frame_idx].max():.3f}]"
+            )
+            print(f"Last frame mean: {output_video[last_frame_idx].mean():.3f}")
+
+        # Compare with reference image if available
+        if extension_mode == "lastframe" and last_frame_image:
+            print(f"\nLoading reference image for comparison: {last_frame_image}")
+            from PIL import Image
+
+            ref_img = Image.open(last_frame_image).convert("RGB")
+            ref_img_resized = ref_img.resize((config["width"], config["height"]))
+            ref_np = np.array(ref_img_resized).astype(np.float32) / 255.0
+            print(
+                f"Reference image value range: [{ref_np.min():.3f}, {ref_np.max():.3f}]"
+            )
+            print(f"Reference image mean: {ref_np.mean():.3f}")
+
+            # Compare last frame with reference
+            last_frame_np = output_video[last_frame_idx].numpy()
+            diff = np.abs(last_frame_np - ref_np)
+            print("Absolute difference between last frame and reference:")
+            print(f"  Mean: {diff.mean():.3f}")
+            print(f"  Max: {diff.max():.3f}")
+            print(f"  Min: {diff.min():.3f}")
+        print()
+
     # Save output video
     output_video_np = output_video.contiguous().numpy()
     output_video_np = np.clip(output_video_np, 0.0, 1.0)
@@ -734,6 +861,8 @@ def main():
         mode_suffix.append("depth")
     if use_inpainting:
         mode_suffix.append("inpainting")
+    if use_extension:
+        mode_suffix.append(f"extension_{config['extension_mode']}")
 
     output_filename = f"output_{'_'.join(mode_suffix)}.mp4"
     output_path = output_dir / output_filename
@@ -808,6 +937,15 @@ def main():
         print("Used depth maps for structural guidance")
     if use_inpainting:
         print("Used spatial masks for inpainting control")
+    if use_extension:
+        extension_info = []
+        if first_frame_image:
+            extension_info.append("first frame")
+        if last_frame_image:
+            extension_info.append("last frame")
+        print(
+            f"Used extension mode '{config['extension_mode']}' with {' and '.join(extension_info)}"
+        )
 
 
 if __name__ == "__main__":

@@ -133,6 +133,25 @@ class DenoiseBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
+        print("DenoiseBlock: Starting denoising")
+        print(
+            f"DenoiseBlock: vace_context={'present' if block_state.vace_context is not None else 'None'}"
+        )
+        if block_state.vace_context is not None:
+            print(f"DenoiseBlock: vace_context type={type(block_state.vace_context)}")
+            if isinstance(block_state.vace_context, list):
+                print(
+                    f"DenoiseBlock: vace_context is list with {len(block_state.vace_context)} elements"
+                )
+                if len(block_state.vace_context) > 0:
+                    print(
+                        f"DenoiseBlock: vace_context[0] shape={block_state.vace_context[0].shape}"
+                    )
+                    print(
+                        f"DenoiseBlock: vace_context[0] value range=[{block_state.vace_context[0].min():.3f}, {block_state.vace_context[0].max():.3f}]"
+                    )
+        print(f"DenoiseBlock: vace_context_scale={block_state.vace_context_scale}")
+
         scale_size = (
             components.config.vae_spatial_downsample_factor
             * components.config.patch_embedding_spatial_downsample_factor
@@ -161,6 +180,9 @@ class DenoiseBlock(ModularPipelineBlocks):
 
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
+            print(
+                f"DenoiseBlock: Denoising step {index}/{len(denoising_step_list)-1}, timestep={current_timestep}"
+            )
             timestep = (
                 torch.ones(
                     [batch_size, num_frames],
@@ -180,6 +202,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                 )
                 vace_regenerate_hints = has_input_frames or (
                     block_state.vace_context is not None
+                )
+                print(
+                    f"DenoiseBlock: Calling generator with vace_context={'present' if block_state.vace_context else 'None'}, vace_regenerate_hints={vace_regenerate_hints}"
                 )
 
                 _, denoised_pred = components.generator(
@@ -226,6 +251,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                 vace_regenerate_hints = has_input_frames or (
                     block_state.vace_context is not None
                 )
+                print(
+                    f"DenoiseBlock: Final step - Calling generator with vace_context={'present' if block_state.vace_context else 'None'}, vace_regenerate_hints={vace_regenerate_hints}"
+                )
 
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
@@ -240,6 +268,18 @@ class DenoiseBlock(ModularPipelineBlocks):
                     vace_context_scale=block_state.vace_context_scale,
                     vace_regenerate_hints=vace_regenerate_hints,
                 )
+
+        print(
+            f"DenoiseBlock: Denoising complete, denoised_pred shape={denoised_pred.shape}"
+        )
+        print(
+            f"DenoiseBlock: Final denoised_pred value range=[{denoised_pred.min():.3f}, {denoised_pred.max():.3f}]"
+        )
+        print(f"DenoiseBlock: Final denoised_pred mean={denoised_pred.mean():.3f}")
+        if block_state.vace_context is not None:
+            print("DenoiseBlock: VACE context was present during denoising")
+        else:
+            print("DenoiseBlock: No VACE context during denoising")
 
         block_state.latents = denoised_pred
 

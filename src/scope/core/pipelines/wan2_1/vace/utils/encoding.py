@@ -17,7 +17,9 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 
 
-def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
+def vace_encode_frames(
+    vae, frames, ref_images, masks=None, pad_to_96=True, use_cache=True
+):
     """
     Encode frames and reference images via VAE for VACE conditioning.
 
@@ -28,6 +30,7 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
                    Each element is a list of reference images [C, 1, H, W]
         masks: Optional list of masks [B, 1, F, H, W] for masked video generation
         pad_to_96: Whether to pad to 96 channels (default True). Set False when masks will be added later.
+        use_cache: Whether to use VAE streaming cache (default True). Set False for per-chunk encoding.
 
     Returns:
         List of concatenated latents [ref_latents + frame_latents]
@@ -46,8 +49,8 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
         # Stack list of [C, F, H, W] -> [B, C, F, H, W]
         frames_stacked = torch.stack(frames, dim=0)
         frames_stacked = frames_stacked.to(dtype=vae_dtype)
-        # Use cache=True to share temporal state with video encoding for consistency
-        latents_out = vae.encode_to_latent(frames_stacked, use_cache=True)
+        # Use cache parameter to control temporal state sharing
+        latents_out = vae.encode_to_latent(frames_stacked, use_cache=use_cache)
         # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
         latents = [lat.permute(1, 0, 2, 3) for lat in latents_out]
     else:
@@ -56,10 +59,11 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
-        # Use cache=True for inactive portion to share temporal state with video encoding
-        # This ensures the unmasked portion has consistent temporal encoding across chunks
-        inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=True)
-        # Reactive portion can use cache=False since it's masked (will be inpainted)
+        # Use cache parameter for inactive portion
+        # When use_cache=True: shares temporal state with video encoding for consistency
+        # When use_cache=False: independent per-chunk encoding (e.g., extension mode)
+        inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=use_cache)
+        # Reactive portion always uses cache=False since it's masked (will be inpainted)
         reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=False)
         # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
         inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]

@@ -174,11 +174,40 @@ def create_base_attention_block_class(base_attention_block_class):
             # Inject VACE hint if this block has one
             if hints is not None and self.block_id is not None:
                 hint = hints[self.block_id]
+
+                if self.block_id == 0:
+                    print(
+                        f"BaseWanAttentionBlock: Injecting hint (block_id={self.block_id})"
+                    )
+                    print(f"BaseWanAttentionBlock: x shape={x.shape}")
+                    print(
+                        f"BaseWanAttentionBlock: hint shape (before slice)={hint.shape}"
+                    )
+                    print(f"BaseWanAttentionBlock: context_scale={context_scale}")
+
                 # Slice hint to match x's sequence length (x is unpadded, hint may be padded)
                 if hint.shape[1] > x.shape[1]:
                     hint = hint[:, : x.shape[1], :]
 
+                if self.block_id == 0:
+                    print(
+                        f"BaseWanAttentionBlock: hint shape (after slice)={hint.shape}"
+                    )
+                    print(
+                        f"BaseWanAttentionBlock: hint value range=[{hint.min():.3f}, {hint.max():.3f}]"
+                    )
+                    print(f"BaseWanAttentionBlock: hint mean={hint.mean():.3f}")
+                    print(
+                        f"BaseWanAttentionBlock: x value range before injection=[{x.min():.3f}, {x.max():.3f}]"
+                    )
+
                 x = x + hint * context_scale
+
+                if self.block_id == 0:
+                    print(
+                        f"BaseWanAttentionBlock: x value range after injection=[{x.min():.3f}, {x.max():.3f}]"
+                    )
+                    print("BaseWanAttentionBlock: Injection complete")
 
             # Return with cache info if applicable
             if cache_update_info is not None:

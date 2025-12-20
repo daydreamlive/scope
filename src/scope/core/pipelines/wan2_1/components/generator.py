@@ -196,6 +196,22 @@ class WanDiffusionWrapper(torch.nn.Module):
         accepted = {
             name: value for name, value in kwargs.items() if name in sig.parameters
         }
+
+        # Debug: Check if VACE params are being accepted
+        vace_params = {"vace_context", "vace_context_scale", "vace_regenerate_hints"}
+        vace_provided = vace_params & set(kwargs.keys())
+        vace_accepted = vace_params & set(accepted.keys())
+        if vace_provided:
+            print(f"_call_model: VACE params provided: {vace_provided}")
+            print(f"_call_model: VACE params accepted: {vace_accepted}")
+            print(
+                f"_call_model: VACE params filtered out: {vace_provided - vace_accepted}"
+            )
+            if "vace_context" in accepted:
+                print(
+                    f"_call_model: vace_context={'present' if accepted['vace_context'] is not None else 'None'}"
+                )
+
         return self.model(*args, **accepted)
 
     def forward(
