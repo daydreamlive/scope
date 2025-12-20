@@ -581,7 +581,6 @@ async def upload_asset(request: Request, filename: str = Query(...)):
         allowed_video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
         allowed_extensions = allowed_image_extensions | allowed_video_extensions
 
-
         file_extension = Path(filename).suffix.lower()
         if file_extension not in allowed_extensions:
             raise HTTPException(
