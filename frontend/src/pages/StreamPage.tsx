@@ -923,11 +923,8 @@ export function StreamPage() {
               settings.vaceEnabled ??
               (settings.inputMode === "video" ? false : true)
             }
-            onVaceEnabledChange={handleVaceEnabledChange}
             refImages={settings.refImages || []}
             onRefImagesChange={handleRefImagesChange}
-            vaceContextScale={settings.vaceContextScale ?? 1.0}
-            onVaceContextScaleChange={handleVaceContextScaleChange}
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
           />
@@ -1124,6 +1121,13 @@ export function StreamPage() {
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}
+            vaceEnabled={
+              settings.vaceEnabled ??
+              (settings.inputMode === "video" ? false : true)
+            }
+            onVaceEnabledChange={handleVaceEnabledChange}
+            vaceContextScale={settings.vaceContextScale ?? 1.0}
+            onVaceContextScaleChange={handleVaceContextScaleChange}
           />
         </div>
       </div>
