@@ -25,9 +25,15 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
         return [
             InputParam(
                 "video",
-                required=True,
-                type_hint=list[torch.Tensor] | torch.Tensor,
+                default=None,
+                type_hint=list[torch.Tensor] | torch.Tensor | None,
                 description="Input video to convert into noisy latents",
+            ),
+            InputParam(
+                "vace_input_frames",
+                default=None,
+                type_hint=list[torch.Tensor] | torch.Tensor | None,
+                description="Input frames for VACE conditioning",
             ),
             InputParam(
                 "height",
@@ -57,9 +63,20 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
-        if isinstance(block_state.video, list):
+        if block_state.video is not None and isinstance(block_state.video, list):
             block_state.video = preprocess_chunk(
                 block_state.video,
+                components.config.device,
+                components.config.dtype,
+                height=block_state.height,
+                width=block_state.width,
+            )
+
+        if block_state.vace_input_frames is not None and isinstance(
+            block_state.vace_input_frames, list
+        ):
+            block_state.vace_input_frames = preprocess_chunk(
+                block_state.vace_input_frames,
                 components.config.device,
                 components.config.dtype,
                 height=block_state.height,

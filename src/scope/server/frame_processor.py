@@ -717,27 +717,12 @@ class FrameProcessor:
                 call_params["lora_scales"] = lora_scales
 
             # Route video input based on VACE status
-            # When VACE is enabled, incoming video frames should go to vace_input_frames
-            # for VACE conditioning. When disabled, they go to video for regular V2V.
+            # We do not support combining normal V2V (denoising from noisy video latents) and VACE V2V editing
             if video_input is not None:
                 vace_enabled = getattr(pipeline, "vace_enabled", False)
                 if vace_enabled:
-                    # VACE mode: route to vace_input_frames for conditioning
-                    # video_input is list[torch.Tensor] from prepare_chunk where each is (1, H, W, C)
-                    # Need to convert to [B, C, F, H, W] format expected by VACE encoding block
-                    from scope.core.pipelines.process import preprocess_chunk
-
-                    vace_input_tensor = preprocess_chunk(
-                        video_input,
-                        device=pipeline.components.config.device,
-                        dtype=pipeline.components.config.dtype,
-                        height=self.parameters.get("height"),
-                        width=self.parameters.get("width"),
-                    )
-                    call_params["vace_input_frames"] = vace_input_tensor
-                    logger.debug(
-                        f"process_chunk: Routing video to vace_input_frames (VACE enabled), shape: {vace_input_tensor.shape}"
-                    )
+                    # VACE V2V editing mode: route to vace_input_frames
+                    call_params["vace_input_frames"] = video_input
                 else:
                     # Normal V2V mode: route to video
                     call_params["video"] = video_input
