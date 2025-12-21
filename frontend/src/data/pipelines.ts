@@ -30,7 +30,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     docsUrl:
       "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/streamdiffusionv2/docs/usage.md",
     about:
-      "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support streaming. Includes VACE (Video-Aware Condition Encoding) for reference image conditioning and structural guidance (depth, flow, pose).",
+      "A streaming pipeline and autoregressive video diffusion model from the creators of the original StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support streaming. Includes VACE (All-In-One Video Creation and Editing) for reference image conditioning and structural guidance (depth, flow, pose).",
     modified: true,
     estimatedVram: 20,
     requiresModels: true,
@@ -46,7 +46,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     docsUrl:
       "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md",
     about:
-      "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt switching and improved quality over longer time periods while maintaining fast generation. Includes VACE (Video-Aware Condition Encoding) for reference image conditioning and structural guidance (depth, flow, pose).",
+      "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt switching and improved quality over longer time periods while maintaining fast generation. Includes VACE (All-In-One Video Creation and Editing) for reference image conditioning and structural guidance (depth, flow, pose).",
     modified: true,
     estimatedVram: 20,
     requiresModels: true,
