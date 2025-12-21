@@ -271,19 +271,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         batch_size, channels, num_frames, height, width = input_frames_data.shape
 
-        # Validate frame count: should be 12 (output frames per chunk)
-        expected_output_frames = (
-            components.config.num_frame_per_block
-            * components.config.vae_temporal_downsample_factor
-        )
-        if num_frames != expected_output_frames:
-            raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: Expected {expected_output_frames} frames "
-                f"(num_frame_per_block={components.config.num_frame_per_block} * "
-                f"vae_temporal_downsample_factor={components.config.vae_temporal_downsample_factor}), "
-                f"got {num_frames} frames at chunk {current_start}"
-            )
-
         # Validate resolution
         if height != block_state.height or width != block_state.width:
             raise ValueError(
@@ -388,22 +375,5 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         # z = vace_latent(z0, m0)
         z = vace_latent(z0, m0)
-
-        # Validate latent frame count
-        # When reference images are combined with conditioning, they are concatenated
-        # along the frame dimension, so we need to account for them
-        expected_latent_frames = components.config.num_frame_per_block
-        if has_ref_images:
-            # Reference images are concatenated to frame latents in vace_encode_frames
-            # Each reference image adds 1 latent frame
-            expected_latent_frames += len(ref_image_paths)
-        actual_latent_frames = z[0].shape[1]
-        if actual_latent_frames != expected_latent_frames:
-            raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: Expected {expected_latent_frames} latent frames "
-                f"({components.config.num_frame_per_block} from conditioning frames"
-                f"{f' + {len(ref_image_paths)} from reference images' if has_ref_images else ''}), "
-                f"got {actual_latent_frames} after VAE encoding"
-            )
 
         return z, prepared_refs

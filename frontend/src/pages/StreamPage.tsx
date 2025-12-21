@@ -692,13 +692,8 @@ export function StreamPage() {
       const resolution = settings.resolution || videoResolution;
 
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
-        // VACE not available for StreamDiffusion in video mode
-        // For text mode, disabled by default but can be enabled
-        const vaceDefault = currentMode === "video" ? false : false;
-        const vaceEnabled =
-          currentMode === "video"
-            ? false
-            : (settings.vaceEnabled ?? vaceDefault);
+        // VACE disabled by default but can be enabled
+        const vaceEnabled = settings.vaceEnabled ?? false;
         loadParams = {
           height: resolution.height,
           width: resolution.width,

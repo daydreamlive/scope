@@ -333,9 +333,8 @@ export function SettingsPanel({
         )}
 
         {/* VACE Toggle */}
-        {/* VACE available for LongLive always, and StreamDiffusion only in text mode */}
-        {(pipelineId === "longlive" ||
-          (pipelineId === "streamdiffusionv2" && inputMode === "text")) && (
+        {/* VACE available for LongLive and StreamDiffusion */}
+        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip

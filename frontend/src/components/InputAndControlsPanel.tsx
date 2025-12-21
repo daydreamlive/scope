@@ -294,10 +294,9 @@ export function InputAndControlsPanel({
         )}
 
         {/* VACE Reference Images - only show when VACE is enabled */}
-        {/* VACE available for LongLive always, and StreamDiffusion only in text mode */}
+        {/* VACE available for LongLive and StreamDiffusion */}
         {vaceEnabled &&
-          (pipelineId === "longlive" ||
-            (pipelineId === "streamdiffusionv2" && inputMode === "text")) && (
+          (pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
             <div>
               <ImageManager
                 images={refImages}
