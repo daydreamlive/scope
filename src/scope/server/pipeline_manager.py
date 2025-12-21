@@ -236,7 +236,7 @@ class PipelineManager:
             load_params: Optional load parameters containing VACE settings
         """
         config["vace_path"] = self._get_vace_checkpoint_path()
-        logger.info(f"_configure_vace: Using VACE checkpoint at {config['vace_path']}")
+        logger.debug(f"_configure_vace: Using VACE checkpoint at {config['vace_path']}")
 
         # Extract VACE-specific parameters from load_params if present
         if load_params:
