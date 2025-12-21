@@ -34,14 +34,16 @@ export function ImageManager({
       />
 
       <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={() => setIsMediaPickerOpen(true)}
-          disabled={disabled}
-          className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center hover:bg-accent hover:border-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <Plus className="h-6 w-6 mb-1 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">Add Image</span>
-        </button>
+        {images.length === 0 && (
+          <button
+            onClick={() => setIsMediaPickerOpen(true)}
+            disabled={disabled}
+            className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center hover:bg-accent hover:border-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Plus className="h-6 w-6 mb-1 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Add Image</span>
+          </button>
+        )}
 
         {images.map((imagePath, index) => (
           <div
