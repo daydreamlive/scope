@@ -478,10 +478,13 @@ export function StreamPage() {
     // Note: Adding/removing LoRAs requires pipeline reload
   };
 
+  const handleVaceEnabledChange = (enabled: boolean) => {
+    updateSettings({ vaceEnabled: enabled });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
   const handleRefImagesChange = (images: string[]) => {
     updateSettings({ refImages: images });
-    // Note: Changing reference images in dropdown only updates local state.
-    // Use "Send Hint" button to send hints to backend during streaming.
   };
 
   const handleSendHints = (imagePaths: string[]) => {
@@ -689,11 +692,19 @@ export function StreamPage() {
       const resolution = settings.resolution || videoResolution;
 
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
+        // VACE not available for StreamDiffusion in video mode
+        // For text mode, disabled by default but can be enabled
+        const vaceDefault = currentMode === "video" ? false : false;
+        const vaceEnabled =
+          currentMode === "video"
+            ? false
+            : (settings.vaceEnabled ?? vaceDefault);
         loadParams = {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
           ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
@@ -709,11 +720,14 @@ export function StreamPage() {
           `Loading with resolution: ${resolution.width}x${resolution.height}`
         );
       } else if (pipelineIdToUse === "longlive" && resolution) {
+        // VACE disabled by default for video mode, enabled by default for text mode
+        const vaceDefault = currentMode === "video" ? false : true;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: settings.vaceEnabled ?? vaceDefault,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
           ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
@@ -905,6 +919,11 @@ export function StreamPage() {
             }
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
+            vaceEnabled={
+              settings.vaceEnabled ??
+              (settings.inputMode === "video" ? false : true)
+            }
+            onVaceEnabledChange={handleVaceEnabledChange}
             refImages={settings.refImages || []}
             onRefImagesChange={handleRefImagesChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}

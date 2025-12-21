@@ -343,8 +343,16 @@ class PipelineManager:
                 }
             )
 
-            # Configure VACE support (required for StreamDiffusionV2)
-            self._configure_vace(config, load_params)
+            # Configure VACE support if enabled in load_params (default: True)
+            # Note: VACE is not available for StreamDiffusion in video mode (enforced by frontend)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
@@ -413,8 +421,15 @@ class PipelineManager:
                 }
             )
 
-            # Configure VACE support (required for LongLive)
-            self._configure_vace(config, load_params)
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(

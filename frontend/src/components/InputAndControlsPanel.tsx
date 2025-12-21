@@ -22,6 +22,7 @@ import type { TimelinePrompt } from "./PromptTimeline";
 import { ImageManager } from "./ImageManager";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Button } from "./ui/button";
+import { Toggle } from "./ui/toggle";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -65,6 +66,8 @@ interface InputAndControlsPanelProps {
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
   // VACE-specific props
+  vaceEnabled?: boolean;
+  onVaceEnabledChange?: (enabled: boolean) => void;
   refImages?: string[];
   onRefImagesChange?: (images: string[]) => void;
   vaceContextScale?: number;
@@ -111,6 +114,8 @@ export function InputAndControlsPanel({
   inputMode,
   onInputModeChange,
   spoutAvailable = false,
+  vaceEnabled = true,
+  onVaceEnabledChange,
   refImages = [],
   onRefImagesChange,
   vaceContextScale = 1.0,
@@ -297,51 +302,77 @@ export function InputAndControlsPanel({
         )}
 
         {/* VACE Image Controls */}
-        <div className="space-y-4">
-          <ImageManager
-            images={refImages}
-            onImagesChange={onRefImagesChange || (() => {})}
-            disabled={isDownloading}
-          />
-
-          {refImages && refImages.length > 0 && (
-            <div className="space-y-2">
+        {/* VACE available for LongLive always, and StreamDiffusion only in text mode */}
+        {(pipelineId === "longlive" ||
+          (pipelineId === "streamdiffusionv2" && inputMode === "text")) && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
-                label="VACE Context Scale"
-                tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
+                label="VACE"
+                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding. Requires pipeline reload to take effect."
                 className="text-sm font-medium"
               />
-              <SliderWithInput
-                value={vaceContextScale}
-                onValueChange={onVaceContextScaleChange || (() => {})}
-                min={0}
-                max={2}
-                step={0.1}
-                disabled={isDownloading}
-              />
-              {onSendHints && (
-                <div className="flex items-center justify-end">
-                  <Button
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      onSendHints(refImages.filter(img => img));
-                    }}
-                    disabled={isDownloading || !isStreaming}
-                    size="sm"
-                    className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={
-                      !isStreaming
-                        ? "Start streaming to send hints"
-                        : "Submit all reference images"
-                    }
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
+              <Toggle
+                pressed={vaceEnabled}
+                onPressedChange={onVaceEnabledChange || (() => {})}
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={isStreaming || isDownloading}
+              >
+                {vaceEnabled ? "ON" : "OFF"}
+              </Toggle>
             </div>
-          )}
-        </div>
+
+            {vaceEnabled && (
+              <>
+                <ImageManager
+                  images={refImages}
+                  onImagesChange={onRefImagesChange || (() => {})}
+                  disabled={isDownloading}
+                />
+
+                {refImages && refImages.length > 0 && (
+                  <div className="space-y-2">
+                    <LabelWithTooltip
+                      label="VACE Context Scale"
+                      tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
+                      className="text-sm font-medium"
+                    />
+                    <SliderWithInput
+                      value={vaceContextScale}
+                      onValueChange={onVaceContextScaleChange || (() => {})}
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      disabled={isDownloading}
+                    />
+                    {onSendHints && (
+                      <div className="flex items-center justify-end">
+                        <Button
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            onSendHints(refImages.filter(img => img));
+                          }}
+                          disabled={isDownloading || !isStreaming}
+                          size="sm"
+                          className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={
+                            !isStreaming
+                              ? "Start streaming to send hints"
+                              : "Submit all reference images"
+                          }
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         <div>
           {(() => {

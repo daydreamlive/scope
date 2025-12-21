@@ -74,6 +74,7 @@ export interface SettingsState {
     name: string;
   };
   // VACE-specific settings
+  vaceEnabled?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
 }
