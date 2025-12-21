@@ -3,6 +3,7 @@ import torch
 from einops import rearrange
 from torchvision.transforms import v2
 
+
 def load_video(
     path: str,
     num_frames: int = None,
