@@ -108,6 +108,9 @@ dev = [
     "freezegun>=1.5.5",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py310"
