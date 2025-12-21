@@ -50,6 +50,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         lora_path = getattr(config, "lora_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
         tokenizer_path = getattr(config, "tokenizer_path", None)
+        vace_path = getattr(config, "vace_path", None)
 
         model_config = load_model_config(config, __file__)
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
@@ -177,6 +178,164 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
 
+        # Lazy loading infrastructure for VACE
+        self.vace_path = vace_path
+        self.vace_enabled = False
+        self.vace_in_dim = (
+            base_model_kwargs.get("vace_in_dim", 96) if base_model_kwargs else 96
+        )
+        self._stored_model_dir = model_dir
+        self._stored_base_model_name = base_model_name
+        self._stored_device = device
+        self._stored_dtype = dtype
+
+    def _needs_vace(self, kwargs: dict) -> bool:
+        """_needs_vace: Check if VACE is needed for this generation call.
+
+        VACE is needed when:
+        - ref_images is present and non-empty, OR
+        - input_frames is present (for depth/flow/pose conditioning)
+
+        Args:
+            kwargs: Generation kwargs
+
+        Returns:
+            bool: True if VACE is needed
+        """
+        ref_images = kwargs.get("vace_ref_images")
+        input_frames = kwargs.get("vace_input_frames")
+
+        has_ref_images = ref_images is not None and len(ref_images) > 0
+        has_input_frames = input_frames is not None
+
+        return has_ref_images or has_input_frames
+
+    def _enable_vace(self):
+        """_enable_vace: Enable VACE by wrapping model and loading weights.
+
+        This is called lazily when VACE is first needed (ref_images or input_frames provided).
+
+        Model Composition Strategy:
+        Supports two scenarios:
+        1. PEFT-wrapped model (LongLive LoRA or runtime PEFT LoRAs active):
+           - Save LoRA adapter configuration and weights
+           - Unwrap PEFT (without merging - keep base weights pure)
+           - Wrap pure base model with VACE and load VACE weights
+           - Reapply LoRA adapter structure on top of VACE
+           - Restore LoRA adapter weights
+           This produces: PeftModel(CausalVaceWanModel(CausalWanModel))
+
+        2. Non-PEFT model (permanent merge LoRAs or no LoRAs):
+           - Wrap base model with VACE directly and load VACE weights
+           This produces: CausalVaceWanModel(CausalWanModel)
+
+        In both cases, loads separate VACE VAE for encoding.
+
+        The PEFT unwrap/rewrap ensures correct ordering: LoRA must be on top of VACE,
+        not underneath it, to avoid the model devolving into noise.
+
+        Raises:
+            RuntimeError: If VACE is needed but vace_path is None
+        """
+        if self.vace_enabled:
+            return
+
+        if self.vace_path is None:
+            raise RuntimeError(
+                "_enable_vace: VACE is required but vace_path is None. "
+                "This should not happen - VACE should be configured during pipeline initialization."
+            )
+
+        logger.info(
+            f"_enable_vace: Lazy loading VACE support (vace_in_dim={self.vace_in_dim})"
+        )
+
+        current_model = self.components.generator.model
+
+        # Check if model is PEFT-wrapped (LongLive LoRA or runtime PEFT LoRAs)
+        is_peft_wrapped = hasattr(current_model, "peft_config")
+
+        if is_peft_wrapped:
+            from peft import (
+                get_peft_model,
+                get_peft_model_state_dict,
+                set_peft_model_state_dict,
+            )
+
+            logger.info("_enable_vace: Model is PEFT-wrapped, will preserve LoRA state")
+
+            # Step 1: Save LoRA adapter configuration and weights
+            adapter_state_dict = get_peft_model_state_dict(current_model)
+            peft_config = dict(current_model.peft_config)
+            active_adapters = (
+                list(current_model.active_adapters)
+                if hasattr(current_model, "active_adapters")
+                else None
+            )
+            logger.info(
+                f"_enable_vace: Saved {len(adapter_state_dict)} LoRA parameters "
+                f"from adapters: {list(peft_config.keys())}"
+            )
+
+            # Step 2: Unwrap PEFT without merging (keep base weights pure)
+            start = time.time()
+            base_model = current_model.unload()
+            logger.info(
+                f"_enable_vace: Unwrapped PEFT (no merge) in {time.time() - start:.3f}s"
+            )
+        else:
+            logger.info(
+                "_enable_vace: Model is not PEFT-wrapped (LoRAs permanently merged or none loaded)"
+            )
+            base_model = current_model
+
+        # Step 3: Wrap with VACE and load weights
+        start = time.time()
+        vace_wrapped_model = CausalVaceWanModel(
+            base_model, vace_in_dim=self.vace_in_dim
+        )
+        vace_wrapped_model.vace_patch_embedding.to(
+            device=self._stored_device, dtype=self._stored_dtype
+        )
+        vace_wrapped_model.vace_blocks.to(
+            device=self._stored_device, dtype=self._stored_dtype
+        )
+        logger.info(f"_enable_vace: Wrapped with VACE in {time.time() - start:.3f}s")
+
+        start = time.time()
+        from ..wan2_1.vace import load_vace_weights_only
+
+        load_vace_weights_only(vace_wrapped_model, self.vace_path)
+        logger.info(f"_enable_vace: Loaded VACE weights in {time.time() - start:.3f}s")
+
+        # Step 4 & 5: Reapply LoRA (only if model was PEFT-wrapped)
+        if is_peft_wrapped:
+            start = time.time()
+            for adapter_name, config in peft_config.items():
+                vace_wrapped_model = get_peft_model(
+                    vace_wrapped_model, config, adapter_name=adapter_name
+                )
+                logger.info(f"_enable_vace: Reapplied PEFT adapter '{adapter_name}'")
+
+            # Restore LoRA adapter weights
+            set_peft_model_state_dict(vace_wrapped_model, adapter_state_dict)
+            logger.info(
+                f"_enable_vace: Restored LoRA weights in {time.time() - start:.3f}s"
+            )
+
+            # Restore active adapters
+            if active_adapters is not None:
+                adapter_name = (
+                    active_adapters[0] if len(active_adapters) == 1 else active_adapters
+                )
+                vace_wrapped_model.set_adapter(adapter_name)
+                logger.info(f"_enable_vace: Restored active adapter(s): {adapter_name}")
+
+        self.components.generator.model = vace_wrapped_model
+
+        self.vace_enabled = True
+        logger.info("_enable_vace: VACE enabled successfully")
+
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
         return prepare_for_mode(self.__class__, self.components.config, kwargs)
@@ -188,6 +347,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        # Lazy load VACE if needed
+        if self._needs_vace(kwargs) and not self.vace_enabled:
+            self._enable_vace()
+
         # Handle runtime LoRA scale updates before writing into state.
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:

@@ -15,13 +15,12 @@ Modes can be combined:
 
 Usage:
     Edit the CONFIG dictionary below to enable/disable modes and set paths.
-    python -m scope.core.pipelines.longlive.test_unified
+    python -m scope.core.pipelines.longlive.test_vace
 """
 
 import time
 from pathlib import Path
 
-import cv2
 import numpy as np
 import torch
 from diffusers.utils import export_to_video
@@ -29,6 +28,7 @@ from omegaconf import OmegaConf
 
 from scope.core.config import get_model_file_path, get_models_dir
 
+from ..video import load_video
 from .pipeline import LongLivePipeline
 
 # ============================= CONFIGURATION =============================
@@ -175,36 +175,23 @@ def load_video_frames(
     """
     print(f"load_video_frames: Loading {video_path}")
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise ValueError(f"load_video_frames: Failed to open {video_path}")
+    # Use load_video which returns [C, T, H, W] tensor in [0, 255] when normalize=False
+    video_tensor = load_video(
+        str(video_path),
+        num_frames=max_frames,
+        resize_hw=(target_height, target_width),
+        normalize=False,
+    )
 
-    frames = []
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    # Convert from [C, T, H, W] to [F, H, W, C]
+    video_tensor = video_tensor.permute(1, 2, 3, 0)
 
-        # Convert BGR to RGB
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # Convert to numpy uint8
+    frames_array = video_tensor.numpy().astype(np.uint8)
 
-        # Resize if needed
-        if frame.shape[0] != target_height or frame.shape[1] != target_width:
-            frame = cv2.resize(frame, (target_width, target_height))
-
-        frames.append(frame)
-
-        if max_frames and len(frames) >= max_frames:
-            break
-
-    cap.release()
-
-    if len(frames) == 0:
-        raise ValueError(f"load_video_frames: No frames loaded from {video_path}")
-
-    frames_array = np.stack(frames, axis=0)
+    num_frames = frames_array.shape[0]
     print(
-        f"load_video_frames: Loaded {len(frames)} frames at {target_height}x{target_width}"
+        f"load_video_frames: Loaded {num_frames} frames at {target_height}x{target_width}"
     )
     return frames_array
 
