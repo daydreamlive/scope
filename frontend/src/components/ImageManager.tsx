@@ -30,7 +30,7 @@ export function ImageManager({
       <LabelWithTooltip
         label="Reference Images"
         tooltip="Select reference images for VACE conditioning. Images will guide the video generation style and content."
-        className="text-sm font-medium mb-2"
+        className="text-sm font-medium mb-2 block"
       />
 
       <div className="grid grid-cols-2 gap-2">

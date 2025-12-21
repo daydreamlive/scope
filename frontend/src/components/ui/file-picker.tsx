@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronRight, ChevronDown, Upload } from "lucide-react";
+import { ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export interface FileInfo {
@@ -16,8 +16,6 @@ interface FilePickerProps {
   disabled?: boolean;
   placeholder?: string;
   emptyMessage?: string;
-  onUpload?: () => void;
-  isUploading?: boolean;
 }
 
 export function FilePicker({
@@ -27,8 +25,6 @@ export function FilePicker({
   disabled,
   placeholder = "Select file",
   emptyMessage = "No files found",
-  onUpload,
-  isUploading = false,
 }: FilePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -110,30 +106,12 @@ export function FilePicker({
 
       {isOpen && (
         <div className="absolute z-50 mt-1 w-full max-h-80 overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md">
-          {groupedFiles.length === 0 && !onUpload ? (
+          {groupedFiles.length === 0 ? (
             <div className="p-2 text-xs text-muted-foreground">
               {emptyMessage}
             </div>
           ) : (
             <div className="p-1">
-              {onUpload && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onUpload();
-                    setIsOpen(false);
-                  }}
-                  disabled={disabled || isUploading}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs",
-                    "hover:bg-accent hover:text-accent-foreground",
-                    "disabled:cursor-not-allowed disabled:opacity-50"
-                  )}
-                >
-                  <Upload className="h-3 w-3 shrink-0" />
-                  <span>Upload image...</span>
-                </button>
-              )}
               {groupedFiles.map(([folder, folderFiles]) => {
                 const isExpanded = expandedFolders.has(folder);
                 return (

@@ -38,6 +38,8 @@ from .models_config import (
 )
 from .pipeline_manager import PipelineManager
 from .schema import (
+    AssetFileInfo,
+    AssetsResponse,
     HardwareInfoResponse,
     HealthResponse,
     IceCandidateRequest,
@@ -495,23 +497,6 @@ async def list_lora_files():
     except Exception as e:  # pragma: no cover - defensive logging
         logger.error(f"list_lora_files: Error listing LoRA files: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-class AssetFileInfo(BaseModel):
-    """Metadata for an available asset file on disk."""
-
-    name: str
-    path: str
-    size_mb: float
-    folder: str | None = None
-    type: str  # "image" or "video"
-    created_at: float  # Unix timestamp
-
-
-class AssetsResponse(BaseModel):
-    """Response containing all discoverable asset files."""
-
-    assets: list[AssetFileInfo]
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
