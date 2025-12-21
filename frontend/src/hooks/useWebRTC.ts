@@ -17,7 +17,7 @@ interface InitialParameters {
   noise_controller?: boolean;
   manage_cache?: boolean;
   kv_cache_attention_bias?: number;
-  ref_images?: string[];
+  vace_ref_images?: string[];
   vace_context_scale?: number;
 }
 
@@ -299,7 +299,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       paused?: boolean;
       spout_sender?: { enabled: boolean; name: string };
       spout_receiver?: { enabled: boolean; name: string };
-      ref_images?: string[];
+      vace_ref_images?: string[];
       vace_context_scale?: number;
     }) => {
       if (

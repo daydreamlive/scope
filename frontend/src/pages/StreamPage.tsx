@@ -53,11 +53,11 @@ function getVaceParams(
   refImages?: string[],
   vaceContextScale?: number
 ):
-  | { ref_images: string[]; vace_context_scale: number }
+  | { vace_ref_images: string[]; vace_context_scale: number }
   | Record<string, never> {
   if (refImages && refImages.length > 0) {
     return {
-      ref_images: refImages,
+      vace_ref_images: refImages,
       vace_context_scale: vaceContextScale ?? 1.0,
     };
   }
@@ -487,7 +487,7 @@ export function StreamPage() {
   const handleSendHints = (imagePaths: string[]) => {
     // Send all reference images together to backend
     sendParameterUpdate({
-      ref_images: imagePaths,
+      vace_ref_images: imagePaths,
     });
   };
 
@@ -781,7 +781,7 @@ export function StreamPage() {
         kv_cache_attention_bias?: number;
         spout_sender?: { enabled: boolean; name: string };
         spout_receiver?: { enabled: boolean; name: string };
-        ref_images?: string[];
+        vace_ref_images?: string[];
         vace_context_scale?: number;
       } = {
         // Signal the intended input mode to the backend so it doesn't
@@ -818,8 +818,8 @@ export function StreamPage() {
         settings.refImages,
         settings.vaceContextScale
       );
-      if ("ref_images" in vaceParams) {
-        initialParameters.ref_images = vaceParams.ref_images;
+      if ("vace_ref_images" in vaceParams) {
+        initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         initialParameters.vace_context_scale = vaceParams.vace_context_scale;
       }
 
