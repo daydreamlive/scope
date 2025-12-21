@@ -73,6 +73,10 @@ export interface SettingsState {
     enabled: boolean;
     name: string;
   };
+  // VACE-specific settings
+  vaceEnabled?: boolean;
+  refImages?: string[];
+  vaceContextScale?: number;
 }
 
 export interface PipelineInfo {

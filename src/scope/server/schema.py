@@ -109,8 +109,8 @@ class Parameters(BaseModel):
         default=None,
         description="List of reference image file paths for VACE conditioning. Images should be located in the assets directory (at the same level as the models directory).",
     )
-    vace_context_scale: float | None = Field(
-        default=None,
+    vace_context_scale: float = Field(
+        default=1.0,
         description="Scaling factor for VACE hint injection. Higher values make reference images more influential.",
         ge=0.0,
         le=2.0,
@@ -304,6 +304,10 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
         default=None,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
     )
+    vace_enabled: bool = Field(
+        default=True,
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -338,6 +342,10 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     quantization: Quantization | None = Field(
         default=None,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    vace_enabled: bool = Field(
+        default=True,
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
     )
 
 

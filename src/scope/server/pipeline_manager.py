@@ -213,6 +213,45 @@ class PipelineManager:
 
             return False
 
+    def _get_vace_checkpoint_path(self) -> str:
+        """Get the path to the VACE checkpoint (required for streamdiffusionv2 and longlive).
+
+        Returns:
+            str: Path to VACE checkpoint file
+        """
+        from .models_config import get_model_file_path
+
+        return str(
+            get_model_file_path("Wan2.1-VACE-1.3B/diffusion_pytorch_model.safetensors")
+        )
+
+    def _configure_vace(self, config: dict, load_params: dict | None = None) -> None:
+        """Configure VACE support for a pipeline.
+
+        Adds vace_path to config and optionally extracts VACE-specific parameters
+        from load_params (ref_images, vace_context_scale).
+
+        Args:
+            config: Pipeline configuration dict to modify
+            load_params: Optional load parameters containing VACE settings
+        """
+        config["vace_path"] = self._get_vace_checkpoint_path()
+        logger.info(f"_configure_vace: Using VACE checkpoint at {config['vace_path']}")
+
+        # Extract VACE-specific parameters from load_params if present
+        if load_params:
+            ref_images = load_params.get("ref_images", [])
+            if ref_images:
+                config["ref_images"] = ref_images
+                config["vace_context_scale"] = load_params.get(
+                    "vace_context_scale", 1.0
+                )
+                logger.info(
+                    f"_configure_vace: VACE parameters from load_params: "
+                    f"ref_images count={len(ref_images)}, "
+                    f"vace_context_scale={config.get('vace_context_scale', 1.0)}"
+                )
+
     def _apply_load_params(
         self,
         config: dict,
@@ -304,6 +343,17 @@ class PipelineManager:
                 }
             )
 
+            # Configure VACE support if enabled in load_params (default: True)
+            # Note: VACE is not available for StreamDiffusion in video mode (enforced by frontend)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
+
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
@@ -350,9 +400,10 @@ class PipelineManager:
 
             from .models_config import get_model_file_path, get_models_dir
 
+            models_dir = get_models_dir()
             config = OmegaConf.create(
                 {
-                    "model_dir": str(get_models_dir()),
+                    "model_dir": str(models_dir),
                     "generator_path": str(
                         get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
                     ),
@@ -369,6 +420,16 @@ class PipelineManager:
                     ),
                 }
             )
+
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(

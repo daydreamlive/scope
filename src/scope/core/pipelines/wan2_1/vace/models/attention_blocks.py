@@ -178,7 +178,9 @@ def create_base_attention_block_class(base_attention_block_class):
                 if hint.shape[1] > x.shape[1]:
                     hint = hint[:, : x.shape[1], :]
 
-                x = x + hint * context_scale
+                # Apply context scale (default to 1.0 if None for safety)
+                scale = context_scale if context_scale is not None else 1.0
+                x = x + hint * scale
 
             # Return with cache info if applicable
             if cache_update_info is not None:

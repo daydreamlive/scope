@@ -49,6 +49,21 @@ function buildLoRAParams(
   };
 }
 
+function getVaceParams(
+  refImages?: string[],
+  vaceContextScale?: number
+):
+  | { vace_ref_images: string[]; vace_context_scale: number }
+  | Record<string, never> {
+  if (refImages && refImages.length > 0) {
+    return {
+      vace_ref_images: refImages,
+      vace_context_scale: vaceContextScale ?? 1.0,
+    };
+  }
+  return {};
+}
+
 export function StreamPage() {
   // Use the stream state hook for settings management
   const {
@@ -463,6 +478,32 @@ export function StreamPage() {
     // Note: Adding/removing LoRAs requires pipeline reload
   };
 
+  const handleVaceEnabledChange = (enabled: boolean) => {
+    updateSettings({ vaceEnabled: enabled });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
+  const handleRefImagesChange = (images: string[]) => {
+    updateSettings({ refImages: images });
+  };
+
+  const handleSendHints = (imagePaths: string[]) => {
+    // Send all reference images together to backend
+    sendParameterUpdate({
+      vace_ref_images: imagePaths,
+    });
+  };
+
+  const handleVaceContextScaleChange = (scale: number) => {
+    updateSettings({ vaceContextScale: scale });
+    // Send VACE context scale update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        vace_context_scale: scale,
+      });
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -651,12 +692,21 @@ export function StreamPage() {
       const resolution = settings.resolution || videoResolution;
 
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
+        // VACE not available for StreamDiffusion in video mode
+        // For text mode, disabled by default but can be enabled
+        const vaceDefault = currentMode === "video" ? false : false;
+        const vaceEnabled =
+          currentMode === "video"
+            ? false
+            : (settings.vaceEnabled ?? vaceDefault);
         loadParams = {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
@@ -670,15 +720,19 @@ export function StreamPage() {
           `Loading with resolution: ${resolution.width}x${resolution.height}`
         );
       } else if (pipelineIdToUse === "longlive" && resolution) {
+        // VACE disabled by default for video mode, enabled by default for text mode
+        const vaceDefault = currentMode === "video" ? false : true;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: settings.vaceEnabled ?? vaceDefault,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
         );
       } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
         loadParams = {
@@ -741,6 +795,8 @@ export function StreamPage() {
         kv_cache_attention_bias?: number;
         spout_sender?: { enabled: boolean; name: string };
         spout_receiver?: { enabled: boolean; name: string };
+        vace_ref_images?: string[];
+        vace_context_scale?: number;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -769,6 +825,16 @@ export function StreamPage() {
       if (pipelineIdToUse === "krea-realtime-video") {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
+      }
+
+      // VACE-specific parameters - backend will ignore if not supported
+      const vaceParams = getVaceParams(
+        settings.refImages,
+        settings.vaceContextScale
+      );
+      if ("vace_ref_images" in vaceParams) {
+        initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+        initialParameters.vace_context_scale = vaceParams.vace_context_scale;
       }
 
       // Video mode parameters - applies to all pipelines in video mode
@@ -853,6 +919,17 @@ export function StreamPage() {
             }
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
+            vaceEnabled={
+              settings.vaceEnabled ??
+              (settings.inputMode === "video" ? false : true)
+            }
+            onVaceEnabledChange={handleVaceEnabledChange}
+            refImages={settings.refImages || []}
+            onRefImagesChange={handleRefImagesChange}
+            vaceContextScale={settings.vaceContextScale ?? 1.0}
+            onVaceContextScaleChange={handleVaceContextScaleChange}
+            onSendHints={handleSendHints}
+            isDownloading={isDownloading}
           />
         </div>
 
