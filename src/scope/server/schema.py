@@ -421,3 +421,20 @@ class PipelineSchemasResponse(BaseModel):
     """
 
     pipelines: dict = Field(..., description="Pipeline schemas keyed by pipeline ID")
+
+
+class AssetFileInfo(BaseModel):
+    """Metadata for an available asset file on disk."""
+
+    name: str
+    path: str
+    size_mb: float
+    folder: str | None = None
+    type: str  # "image" or "video"
+    created_at: float  # Unix timestamp
+
+
+class AssetsResponse(BaseModel):
+    """Response containing all discoverable asset files."""
+
+    assets: list[AssetFileInfo]

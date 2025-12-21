@@ -692,13 +692,8 @@ export function StreamPage() {
       const resolution = settings.resolution || videoResolution;
 
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
-        // VACE not available for StreamDiffusion in video mode
-        // For text mode, disabled by default but can be enabled
-        const vaceDefault = currentMode === "video" ? false : false;
-        const vaceEnabled =
-          currentMode === "video"
-            ? false
-            : (settings.vaceEnabled ?? vaceDefault);
+        // VACE disabled by default but can be enabled
+        const vaceEnabled = settings.vaceEnabled ?? false;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
@@ -923,11 +918,8 @@ export function StreamPage() {
               settings.vaceEnabled ??
               (settings.inputMode === "video" ? false : true)
             }
-            onVaceEnabledChange={handleVaceEnabledChange}
             refImages={settings.refImages || []}
             onRefImagesChange={handleRefImagesChange}
-            vaceContextScale={settings.vaceContextScale ?? 1.0}
-            onVaceContextScaleChange={handleVaceContextScaleChange}
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
           />
@@ -1124,6 +1116,13 @@ export function StreamPage() {
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}
+            vaceEnabled={
+              settings.vaceEnabled ??
+              (settings.inputMode === "video" ? false : true)
+            }
+            onVaceEnabledChange={handleVaceEnabledChange}
+            vaceContextScale={settings.vaceContextScale ?? 1.0}
+            onVaceContextScaleChange={handleVaceContextScaleChange}
           />
         </div>
       </div>

@@ -34,7 +34,7 @@ class NoOpBlock(ModularPipelineBlocks):
         return components, state
 
 
-class VideoPreprocessingWorkflow(SequentialPipelineBlocks):
+class V2VPreprocessingWorkflow(SequentialPipelineBlocks):
     """Video preprocessing workflow for V2V mode.
 
     Preprocesses input video and applies motion-aware noise control.
@@ -55,28 +55,29 @@ class VideoPreprocessingWorkflow(SequentialPipelineBlocks):
 class AutoPreprocessVideoBlock(AutoPipelineBlocks):
     """Auto-routing block for video preprocessing.
 
-    Routes to video preprocessing workflow when 'video' input is provided,
-    otherwise skips (AutoPipelineBlocks auto-skips when no trigger matches).
     This runs BEFORE SetupCachesBlock.
     """
 
     block_classes = [
-        VideoPreprocessingWorkflow,
+        V2VPreprocessingWorkflow,
+        PreprocessVideoBlock,
         NoOpBlock,
     ]
 
     block_names = [
-        "video_preprocessing",
+        "v2v_preprocessing",
+        "preprocess_video",
         "noop",
     ]
 
-    block_trigger_inputs = ["video", None]
+    block_trigger_inputs = ["video", "vace_input_frames", None]
 
     @property
     def description(self):
         return (
             "AutoPreprocessVideoBlock: Routes video preprocessing before cache setup:\n"
-            " - Routes to video preprocessing when 'video' input is provided\n"
+            " - Routes to V2VPreprocessingWorkflow when 'video' input is provided\n"
+            " - Routes to PreprocessVideoBlock when 'vace_input_frames' input is provided\n"
             " - Skips preprocessing when no 'video' input is provided\n"
         )
 

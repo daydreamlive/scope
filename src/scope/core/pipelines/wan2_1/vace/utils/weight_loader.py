@@ -42,7 +42,7 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
     actual_model = model
     model_type_name = type(model).__name__
 
-    logger.info(f"load_vace_weights_only: Input model type: {model_type_name}")
+    logger.debug(f"load_vace_weights_only: Input model type: {model_type_name}")
 
     # Check if this is a CausalVaceWanModel (directly or indirectly)
     is_vace_model = model_type_name == "CausalVaceWanModel" or (
@@ -116,7 +116,7 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
             f"Expected keys starting with: {vace_keys}"
         )
 
-    logger.info(
+    logger.debug(
         f"load_vace_weights_only: Found {len(vace_state_dict)} VACE-specific parameters"
     )
 
@@ -180,4 +180,4 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
             "VACE weight loading failed - vace_patch_embedding weights are all zeros"
         )
 
-    logger.info("load_vace_weights_only: Successfully loaded VACE weights")
+    logger.debug("load_vace_weights_only: Successfully loaded VACE weights")

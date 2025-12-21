@@ -160,7 +160,7 @@ export function MediaPicker({
                 </span>
               </button>
 
-              {images.map((image, index) => (
+              {images.map(image => (
                 <button
                   key={image.path}
                   onClick={() => handleSelectImage(image.path)}
@@ -174,9 +174,6 @@ export function MediaPicker({
                     className="w-full h-full object-cover"
                     loading="lazy"
                   />
-                  <div className="absolute top-1 left-1 bg-black/50 text-white text-xs px-1 rounded">
-                    {index + 1}
-                  </div>
                 </button>
               ))}
 

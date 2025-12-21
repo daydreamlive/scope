@@ -76,6 +76,11 @@ interface SettingsPanelProps {
   onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
+  // VACE settings
+  vaceEnabled?: boolean;
+  onVaceEnabledChange?: (enabled: boolean) => void;
+  vaceContextScale?: number;
+  onVaceContextScaleChange?: (scale: number) => void;
 }
 
 export function SettingsPanel({
@@ -110,12 +115,20 @@ export function SettingsPanel({
   spoutSender,
   onSpoutSenderChange,
   spoutAvailable = false,
+  vaceEnabled = true,
+  onVaceEnabledChange,
+  vaceContextScale = 1.0,
+  onVaceContextScaleChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
     onKvCacheAttentionBiasChange
+  );
+  const vaceContextScaleSlider = useLocalSliderValue(
+    vaceContextScale,
+    onVaceContextScaleChange
   );
 
   // Validation error states
@@ -317,6 +330,55 @@ export function SettingsPanel({
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {/* VACE Toggle */}
+        {/* VACE available for LongLive and StreamDiffusion */}
+        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label="VACE"
+                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding. Requires pipeline reload to take effect."
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={vaceEnabled}
+                onPressedChange={onVaceEnabledChange || (() => {})}
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={isStreaming || isLoading}
+              >
+                {vaceEnabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {vaceEnabled && (
+              <div className="rounded-lg border bg-card p-3">
+                <div className="flex items-center gap-2">
+                  <LabelWithTooltip
+                    label="Scale:"
+                    tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
+                    className="text-xs text-muted-foreground w-16"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <SliderWithInput
+                      value={vaceContextScaleSlider.localValue}
+                      onValueChange={vaceContextScaleSlider.handleValueChange}
+                      onValueCommit={vaceContextScaleSlider.handleValueCommit}
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      incrementAmount={0.1}
+                      valueFormatter={vaceContextScaleSlider.formatValue}
+                      inputParser={v => parseFloat(v) || 1.0}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {pipelineSupportsLoRA(pipelineId) && (

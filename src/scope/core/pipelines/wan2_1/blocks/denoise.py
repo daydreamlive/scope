@@ -113,18 +113,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="VACE context that provides visual conditioning",
             ),
             InputParam(
-                "input_frames",
-                default=None,
-                type_hint=torch.Tensor | None,
-                description="Input frames for video generation",
-            ),
-            InputParam(
-                "vace_input_frames",
-                default=None,
-                type_hint=torch.Tensor | None,
-                description="VACE conditioning input frames (depth, flow, pose, etc.) for per-chunk guidance",
-            ),
-            InputParam(
                 "vace_context_scale",
                 default=1.0,
                 type_hint=float,

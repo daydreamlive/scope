@@ -93,14 +93,16 @@ class VACEEnabledPipeline:
             logger.info("_init_vace: No vace_path provided, VACE disabled")
             return model
 
-        logger.info(
+        logger.debug(
             f"_init_vace: Loading VACE support upfront (vace_in_dim={vace_in_dim})"
         )
 
         # Wrap model with VACE
         start = time.time()
         vace_wrapped_model = CausalVaceWanModel(model, vace_in_dim=vace_in_dim)
-        logger.info(f"_init_vace: Wrapped with VACE in {time.time() - start:.3f}s")
+        logger.info(
+            f"_init_vace: Wrapped model with VACE in {time.time() - start:.3f}s"
+        )
 
         # Move VACE-specific components to correct device/dtype
         # The wrapped model's VACE components (vace_patch_embedding, vace_blocks) were created
