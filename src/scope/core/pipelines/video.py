@@ -1,6 +1,6 @@
+import imageio.v3 as iio
 import torch
 from einops import rearrange
-from torchcodec.decoders import VideoDecoder
 from torchvision.transforms import v2
 
 
@@ -13,15 +13,17 @@ def load_video(
     """
     Loads a video as a CTHW tensor
     """
-    decoder = VideoDecoder(path)
+    # Read video frames as numpy array (THWC format)
+    video = iio.imread(path, plugin="pyav")
 
-    total_frames = len(decoder)
-    video = decoder.get_frames_in_range(
-        0, num_frames if num_frames is not None else total_frames
-    ).data
+    if num_frames is not None:
+        video = video[:num_frames]
+
+    # Convert to torch tensor and rearrange from THWC to TCHW
+    video = torch.from_numpy(video).permute(0, 3, 1, 2)
 
     height, width = video.shape[2:]
-    if resize_hw is not None and height != resize_hw[0] or width != resize_hw[1]:
+    if resize_hw is not None and (height != resize_hw[0] or width != resize_hw[1]):
         video = v2.Resize(resize_hw, antialias=True)(video)
 
     video = video.float()
@@ -30,6 +32,7 @@ def load_video(
         # Normalize to [-1, 1]
         video = video / 127.5 - 1.0
 
+    # Rearrange to CTHW
     video = rearrange(video, "T C H W -> C T H W")
 
     return video
