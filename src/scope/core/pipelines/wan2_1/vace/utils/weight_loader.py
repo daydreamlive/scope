@@ -1,9 +1,9 @@
 """
-Utility for selectively loading VACE-specific weights into LongLive model.
+Utility for selectively loading VACE-specific weights into a Wan2.1 based causal model.
 
 This module extracts only VACE components (vace_blocks, vace_patch_embedding)
 from a VACE checkpoint and loads them into a CausalVaceWanModel that's already
-been initialized with LongLive weights.
+been initialized with Wan2.1 based causal model weights.
 """
 
 import logging
@@ -21,10 +21,10 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
     - vace_blocks.* (VACE attention blocks for hint generation)
     - vace_patch_embedding.* (Conv3D for encoding reference images)
 
-    Skips all base model weights since those come from LongLive.
+    Skips all base model weights since those come from the causal model.
 
     Args:
-        model: CausalVaceWanModel instance (already has LongLive base weights)
+        model: CausalVaceWanModel instance (already has causal model base weights)
                 May be wrapped by PEFT, in which case we unwrap to access base_model.
                 Typically called before PEFT wrapping to avoid unwrapping issues.
         vace_checkpoint_path: Path to VACE safetensors checkpoint
@@ -128,9 +128,13 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
             f"load_vace_weights_only: Checkpoint shape: {ckpt_shape}, Model shape: {model_shape}"
         )
         if ckpt_shape != model_shape:
-            logger.error(
-                "load_vace_weights_only: SHAPE MISMATCH! Cannot load vace_patch_embedding weights"
+            error_msg = (
+                f"load_vace_weights_only: Shape mismatch for vace_patch_embedding.weight! "
+                f"Checkpoint shape {ckpt_shape} != Model shape {model_shape}. "
+                f"Cannot load incompatible VACE weights."
             )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
     # Load into actual model (not PEFT wrapper)
     missing_keys, unexpected_keys = actual_model.load_state_dict(
@@ -143,9 +147,13 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
     ]
 
     if actual_missing:
-        logger.warning(
-            f"load_vace_weights_only: Missing VACE keys (first 20): {actual_missing[:20]}"
+        error_msg = (
+            f"load_vace_weights_only: Missing expected VACE keys in model. "
+            f"This indicates the model structure doesn't match the checkpoint. "
+            f"Missing keys (first 20): {actual_missing[:20]}"
         )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
     if unexpected_keys:
         logger.warning(

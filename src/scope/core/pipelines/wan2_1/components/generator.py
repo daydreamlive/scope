@@ -215,7 +215,6 @@ class WanDiffusionWrapper(torch.nn.Module):
         kv_cache_attention_bias: float = 1.0,
         vace_context: torch.Tensor | None = None,
         vace_context_scale: float = 1.0,
-        vace_regenerate_hints: bool = True,
     ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
 
@@ -241,7 +240,6 @@ class WanDiffusionWrapper(torch.nn.Module):
                 kv_cache_attention_bias=kv_cache_attention_bias,
                 vace_context=vace_context,
                 vace_context_scale=vace_context_scale,
-                vace_regenerate_hints=vace_regenerate_hints,
             ).permute(0, 2, 1, 3, 4)
         else:
             if clean_x is not None:
@@ -255,7 +253,6 @@ class WanDiffusionWrapper(torch.nn.Module):
                     aug_t=aug_t,
                     vace_context=vace_context,
                     vace_context_scale=vace_context_scale,
-                    vace_regenerate_hints=vace_regenerate_hints,
                 ).permute(0, 2, 1, 3, 4)
             else:
                 if classify_mode:

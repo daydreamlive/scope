@@ -1,13 +1,13 @@
 """
 VACE encoding utilities for reference image conditioning.
 
-Adapted from notes/VACE/vace/models/wan/wan_vace.py
+Adapted from https://github.com/ali-vilab/VACE/blob/48eb44f1c4be87cc65a98bff985a26976841e9f3/vace/models/wan/wan_vace.py
 
 For conditioning modes (following original VACE architecture):
 - Conditioning maps (depth, flow, pose, etc.) are 3-channel RGB from annotators
-- Treated as input_frames through standard encoding path
-- input_masks defaults to ones (all white) when not provided - goes through masking path
-- ref_images = optional (can be combined with conditioning for style + structure)
+- Treated as vace_input_frames through standard encoding path
+- vace_input_masks defaults to ones (all white) when not provided - goes through masking path
+- vace_ref_images = optional (can be combined with conditioning for style + structure)
 - Standard path: vace_encode_frames -> vace_encode_masks -> vace_latent
 """
 
@@ -17,7 +17,9 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 
 
-def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
+def vace_encode_frames(
+    vae, frames, ref_images, masks=None, pad_to_96=True, use_cache=True
+):
     """
     Encode frames and reference images via VAE for VACE conditioning.
 
@@ -28,6 +30,8 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
                    Each element is a list of reference images [C, 1, H, W]
         masks: Optional list of masks [B, 1, F, H, W] for masked video generation
         pad_to_96: Whether to pad to 96 channels (default True). Set False when masks will be added later.
+        use_cache: Whether to use streaming encode cache for frames (default True).
+                   Set False for one-off encoding (e.g., reference images only mode).
 
     Returns:
         List of concatenated latents [ref_latents + frame_latents]
@@ -46,8 +50,8 @@ def vace_encode_frames(vae, frames, ref_images, masks=None, pad_to_96=True):
         # Stack list of [C, F, H, W] -> [B, C, F, H, W]
         frames_stacked = torch.stack(frames, dim=0)
         frames_stacked = frames_stacked.to(dtype=vae_dtype)
-        # Use cache=True to share temporal state with video encoding for consistency
-        latents_out = vae.encode_to_latent(frames_stacked, use_cache=True)
+        # Use provided cache setting (use_cache=False for reference-only mode with dummy frames)
+        latents_out = vae.encode_to_latent(frames_stacked, use_cache=use_cache)
         # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
         latents = [lat.permute(1, 0, 2, 3) for lat in latents_out]
     else:
@@ -235,110 +239,3 @@ def load_and_prepare_reference_images(
         prepared_refs.append(ref_img)
 
     return prepared_refs
-
-
-def decode_vace_latent(vae, zs, ref_images=None):
-    """
-    Decode VAE latents, removing reference image frames.
-
-    Args:
-        vae: VAE model wrapper
-        zs: List of latent tensors (may include reference frames)
-        ref_images: List of reference image lists (to determine trim length)
-
-    Returns:
-        Decoded video frames
-    """
-    if ref_images is None:
-        ref_images = [None] * len(zs)
-    else:
-        assert len(zs) == len(ref_images)
-
-    # Trim reference frames
-    trimmed_zs = []
-    for z, refs in zip(zs, ref_images, strict=False):
-        if refs is not None:
-            # Remove reference frames from latent
-            z = z[:, len(refs) :, :, :]
-        trimmed_zs.append(z)
-
-    return vae.decode(trimmed_zs)
-
-
-def preprocess_depth_frames(depth_frames, target_height, target_width, device):
-    """
-    Preprocess depth frames for VACE depth encoding.
-
-    Following original VACE architecture (notes/VACE/vace/annotators/depth.py line 37):
-    - Depth maps must be 3-channel RGB format for VAE encoding
-    - This matches how depth annotators output depth maps
-
-    Args:
-        depth_frames: Depth frames tensor [F, H, W] or [F, C, H, W]
-        target_height: Target video height
-        target_width: Target video width
-        device: Target device
-
-    Returns:
-        Preprocessed depth frames [1, 3, F, H, W] (3-channel RGB, batch dim added)
-    """
-    import torch.nn.functional as F
-
-    # Add channel dimension if needed
-    if depth_frames.dim() == 3:
-        # [F, H, W] -> [F, 1, H, W]
-        depth_frames = depth_frames.unsqueeze(1)
-
-    # Ensure single channel first (take first channel if already RGB)
-    if depth_frames.shape[1] > 1:
-        depth_frames = depth_frames[:, :1, :, :]
-
-    # Resize if needed
-    _, _, curr_h, curr_w = depth_frames.shape
-    if curr_h != target_height or curr_w != target_width:
-        depth_frames = F.interpolate(
-            depth_frames,
-            size=(target_height, target_width),
-            mode="bilinear",
-            align_corners=False,
-        )
-
-    # Normalize to [-1, 1] if not already
-    if depth_frames.min() >= 0:
-        depth_frames = depth_frames * 2.0 - 1.0
-
-    # Convert grayscale to 3-channel RGB (matching original VACE depth annotator output)
-    # [F, 1, H, W] -> [F, 3, H, W]
-    depth_frames = depth_frames.repeat(1, 3, 1, 1)
-
-    # Move to device and add batch dimension: [F, 3, H, W] -> [1, 3, F, H, W]
-    depth_frames = depth_frames.to(device)
-    depth_frames = depth_frames.unsqueeze(0).permute(0, 2, 1, 3, 4)
-
-    return depth_frames
-
-
-def extract_depth_chunk(depth_video, chunk_index, num_frames_per_chunk):
-    """
-    Extract a chunk of depth frames from full depth video.
-
-    Args:
-        depth_video: Full depth video [1, C, F, H, W]
-        chunk_index: Chunk index (0-based)
-        num_frames_per_chunk: Number of frames per chunk (typically 12)
-
-    Returns:
-        Depth chunk [1, C, num_frames_per_chunk, H, W]
-    """
-    start_frame = chunk_index * num_frames_per_chunk
-    end_frame = start_frame + num_frames_per_chunk
-
-    batch_size, channels, num_frames, height, width = depth_video.shape
-
-    if end_frame > num_frames:
-        raise ValueError(
-            f"extract_depth_chunk: Chunk {chunk_index} exceeds video length. "
-            f"Requested frames {start_frame}-{end_frame}, but video has only {num_frames} frames."
-        )
-
-    return depth_video[:, :, start_frame:end_frame, :, :]

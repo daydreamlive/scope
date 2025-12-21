@@ -1,4 +1,4 @@
-# Modified from notes/VACE/vace/models/wan/modules/model.py
+# Modified from https://github.com/ali-vilab/VACE/blob/48eb44f1c4be87cc65a98bff985a26976841e9f3/vace/models/wan/modules/model.py
 # Adapted for causal/autoregressive generation with factory pattern
 # Pipeline-agnostic using duck typing - works with any CausalWanModel
 import math
@@ -101,7 +101,7 @@ class CausalVaceWanModel(nn.Module):
         # Create VACE blocks (parallel processing path for reference images)
         self._create_vace_blocks()
 
-        # VACE patch embedding (separate encoder for reference images)
+        # VACE patch embedding
         self.vace_patch_embedding = nn.Conv3d(
             self.vace_in_dim,
             self.dim,
@@ -276,7 +276,6 @@ class CausalVaceWanModel(nn.Module):
         y=None,
         vace_context=None,
         vace_context_scale=1.0,
-        vace_regenerate_hints=True,
         kv_cache=None,
         crossattn_cache=None,
         current_start=0,
@@ -339,7 +338,7 @@ class CausalVaceWanModel(nn.Module):
 
         # Generate VACE hints
         hints = None
-        if vace_context is not None and vace_regenerate_hints:
+        if vace_context is not None:
             hints = self.forward_vace(
                 x,
                 vace_context,

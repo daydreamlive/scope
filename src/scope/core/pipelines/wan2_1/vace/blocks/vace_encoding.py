@@ -10,8 +10,8 @@ the denoising block. Supports flexible combinations:
 The mode is implicit based on what inputs are provided - no explicit mode parameter needed.
 
 For conditioning inputs (depth, flow, etc.), follows original VACE architecture:
-- input_frames = conditioning maps (3-channel RGB from annotators)
-- input_masks = spatial control masks (ones for full-frame, regional for masked areas)
+- vace_input_frames = source RGB video frames OR conditioning maps (3-channel RGB from annotators)
+- vace_input_masks = spatial control masks (ones for full-frame, regional for masked areas)
 - Standard path: vace_encode_frames -> vace_encode_masks -> vace_latent
 """
 
@@ -45,7 +45,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     1. Single Operation: All paths perform the same conceptual operation (VACE encoding)
        with shared logic (VAE selection, reference image loading, validation).
 
-    2. OR Condition: Block should run if EITHER ref_images OR input_frames is provided.
+    2. OR Condition: Block should run if EITHER vace_ref_images OR vace_input_frames is provided.
        AutoPipelineBlock uses sequential first-match logic, making OR conditions awkward
        (would require duplicate block instances with different triggers).
 
@@ -61,7 +61,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     def expected_components(self) -> list[ComponentSpec]:
         return [
             ComponentSpec("vae", torch.nn.Module),
-            ComponentSpec("vace_vae", torch.nn.Module, required=False),
         ]
 
     @property
@@ -80,25 +79,22 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "ref_images",
+                "vace_ref_images",
                 default=None,
-                description="List of reference image paths for style/character consistency (can be combined with input_frames)",
+                type_hint=list[str] | None,
+                description="List of reference image paths for style/character consistency (can be combined with vace_input_frames)",
             ),
             InputParam(
-                "input_frames",
+                "vace_input_frames",
                 default=None,
-                description="VACE conditioning input frames [B, C, F, H, W]: depth, flow, pose, scribble maps, etc. (12 frames per chunk, can be combined with ref_images)",
+                type_hint=torch.Tensor | None,
+                description="VACE conditioning input frames [B, C, F, H, W]: source RGB video frames OR conditioning maps (depth, flow, pose, scribble, etc.). 12 frames per chunk, can be combined with vace_ref_images",
             ),
             InputParam(
-                "input_masks",
+                "vace_input_masks",
                 default=None,
-                description="Spatial control masks [B, 1, F, H, W]: defines WHERE to apply conditioning (white=generate, black=preserve). Defaults to ones (all white) when None. Works with any input_frames type.",
-            ),
-            InputParam(
-                "use_dummy_frames",
-                default=False,
-                type_hint=bool,
-                description="For ref_images only mode: whether to use dummy (zero) frames as temporal placeholder. If False, only ref images are encoded. Including them results in different behavior per original VACE implementation.",
+                type_hint=torch.Tensor | None,
+                description="Spatial control masks [B, 1, F, H, W]: defines WHERE to apply conditioning (white=generate, black=preserve). Defaults to ones (all white) when None. Works with any vace_input_frames type.",
             ),
             InputParam(
                 "height",
@@ -137,20 +133,22 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
-        ref_images = block_state.ref_images
-        input_frames = block_state.input_frames
+        vace_ref_images = block_state.vace_ref_images
+        vace_input_frames = block_state.vace_input_frames
         current_start = block_state.current_start_frame
 
         # If neither input is provided, skip VACE conditioning
-        if (ref_images is None or len(ref_images) == 0) and input_frames is None:
+        if (
+            vace_ref_images is None or len(vace_ref_images) == 0
+        ) and vace_input_frames is None:
             block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
             return components, state
 
         # Determine encoding path based on what's provided (implicit mode detection)
-        has_ref_images = ref_images is not None and len(ref_images) > 0
-        has_input_frames = input_frames is not None
+        has_ref_images = vace_ref_images is not None and len(vace_ref_images) > 0
+        has_input_frames = vace_input_frames is not None
 
         if has_input_frames:
             # Standard VACE path: conditioning input (depth, flow, pose, etc.)
@@ -170,24 +168,24 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
     def _encode_reference_only(self, components, block_state, current_start):
         """
-        Encode reference images only (R2V mode) following original VACE pattern.
+        Encode reference images only (R2V mode) using direct encoding.
 
-        R2V characteristics (from notes/VACE/vace/models/wan/wan_vace.py lines 127-155):
+        This implementation encodes reference images directly without dummy frames.
+        See design.md for rationale on design differences from original VACE.
+
+        R2V characteristics:
         - Static reference images (1-3 frames)
         - Encoded fresh each chunk (application layer manages reuse)
-        - Optionally uses dummy frames as 'frames' parameter to vace_encode_frames()
-        - Refs passed as 'ref_images' parameter (prepended temporally inside vace_encode_frames)
-        - masks=None (no masking path for R2V)
-        - Uses vace_in_dim=96 (padded inside vace_encode_frames with pad_to_96=True)
+        - Direct encoding via VAE with use_cache=False
+        - Padded to 96 channels for VACE compatibility
+        - No masking path (masks=None)
         """
-        ref_image_paths = block_state.ref_images
+        ref_image_paths = block_state.vace_ref_images
         if ref_image_paths is None or len(ref_image_paths) == 0:
             logger.warning(
-                "VaceEncodingBlock._encode_reference_only: No ref_images provided"
+                "VaceEncodingBlock._encode_reference_only: No vace_ref_images provided"
             )
             return None, None
-
-        use_dummy_frames = block_state.use_dummy_frames
 
         # Load and prepare reference images
         prepared_refs = load_and_prepare_reference_images(
@@ -197,106 +195,59 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             components.config.device,
         )
 
-        # CRITICAL: Use vace_vae for encoding reference images.
-        # Reference images (1-2 frames) are too small for streaming VAE encoders that
-        # use 3D convolutions with temporal caching. Pipelines with streaming VAEs
-        # MUST provide a separate standard WanVAE as vace_vae for VACE encoding.
-        if hasattr(components, "vace_vae") and components.vace_vae is not None:
-            vace_vae = components.vace_vae
-        else:
-            # Fallback to main VAE only for pipelines with standard (non-streaming) VAEs
-            # This will fail for pipelines with streaming VAEs
-            vace_vae = components.vae
-            logger.warning(
-                "VaceEncodingBlock._encode_reference_only: Using main VAE for VACE context encoding. "
-                "If the main VAE is a streaming VAE, this will fail with temporal dimension errors."
+        # Use main VAE with use_cache=False for encoding reference images.
+        # use_cache=False creates a temporary one-off cache for normal encoding without
+        # invoking the streaming encode implementation, avoiding temporal dimension issues
+        # with small numbers of reference frames (1-2 frames).
+        vae = components.vae
+
+        # Encode only reference images (no dummy frames)
+        # Stack refs: list of [C, 1, H, W] -> [1, C, num_refs, H, W]
+        prepared_refs_stacked = torch.cat(prepared_refs, dim=1).unsqueeze(0)
+        # Convert to VAE's dtype (typically bfloat16)
+        vae_dtype = next(vae.parameters()).dtype
+        prepared_refs_stacked = prepared_refs_stacked.to(dtype=vae_dtype)
+        # Reference images are static, so use_cache=False to avoid affecting video cache
+        ref_latents_out = vae.encode_to_latent(prepared_refs_stacked, use_cache=False)
+
+        # Convert [1, num_refs, C, H, W] -> [C, num_refs, H, W] (transpose to channel-first)
+        ref_latent_batch = ref_latents_out[0].permute(1, 0, 2, 3)
+
+        # Pad to 96 channels for VACE compatibility
+        # VACE was trained with 96 channels (16 base * 6 for masked video generation)
+        # For R2V mode without masks, we pad with zeros
+        current_channels = ref_latent_batch.shape[0]
+        if current_channels < 96:
+            pad_channels = 96 - current_channels
+            padding = torch.zeros(
+                (
+                    pad_channels,
+                    ref_latent_batch.shape[1],
+                    ref_latent_batch.shape[2],
+                    ref_latent_batch.shape[3],
+                ),
+                dtype=ref_latent_batch.dtype,
+                device=ref_latent_batch.device,
             )
+            ref_latent_batch = torch.cat([ref_latent_batch, padding], dim=0)
 
-        # Import vace_utils for R2V encoding path
-        from ..utils.encoding import vace_encode_frames
+        # VACE context is just the reference images (no dummy frames for R2V)
+        vace_context = [ref_latent_batch]
 
-        # Calculate number of frames for dummy input (should match chunk size)
-        num_frames = (
-            components.config.num_frame_per_block
-            * components.config.vae_temporal_downsample_factor
-        )
-
-        # Create dummy frames or encode refs-only based on use_dummy_frames flag
-        if use_dummy_frames:
-            # Original VACE pattern: dummy frames as temporal placeholder
-            # Following notes/VACE/vace/models/wan/wan_vace.py lines 339-341
-            dummy_frames = [
-                torch.zeros(
-                    (3, num_frames, block_state.height, block_state.width),
-                    device=components.config.device,
-                    dtype=next(vace_vae.parameters()).dtype,
-                )
-            ]
-
-            # Encode with ref_images passed as parameter (R2V path)
-            # Original VACE pattern: vace_encode_frames(frames, ref_images, masks=None)
-            # - dummy_frames as 'frames' (full chunk)
-            # - prepared_refs as 'ref_images' (wrapped in list for batch dimension)
-            # - masks=None (no masking for R2V)
-            # - pad_to_96=True (pads to 96 channels for VACE compatibility)
-            vace_context = vace_encode_frames(
-                vace_vae,
-                dummy_frames,
-                ref_images=[prepared_refs],
-                masks=None,
-                pad_to_96=True,
-            )
-        else:
-            # Alternative: Encode only reference images (no dummy frames at all)
-            # This prevents reference images from appearing in the output video
-
-            # Stack refs: list of [C, 1, H, W] -> [1, C, num_refs, H, W]
-            prepared_refs_stacked = torch.cat(prepared_refs, dim=1).unsqueeze(0)
-            # Convert to VAE's dtype (typically bfloat16)
-            vae_dtype = next(vace_vae.parameters()).dtype
-            prepared_refs_stacked = prepared_refs_stacked.to(dtype=vae_dtype)
-            # Reference images are static, so cache doesn't matter, but use False to avoid affecting video cache
-            ref_latents_out = vace_vae.encode_to_latent(
-                prepared_refs_stacked, use_cache=False
-            )
-
-            # Convert [1, num_refs, C, H, W] -> [C, num_refs, H, W] (transpose to channel-first)
-            ref_latent_batch = ref_latents_out[0].permute(1, 0, 2, 3)
-
-            # Pad to 96 channels for VACE compatibility
-            # VACE was trained with 96 channels (16 base * 6 for masked video generation)
-            # For R2V mode without masks, we pad with zeros
-            current_channels = ref_latent_batch.shape[0]
-            if current_channels < 96:
-                pad_channels = 96 - current_channels
-                padding = torch.zeros(
-                    (
-                        pad_channels,
-                        ref_latent_batch.shape[1],
-                        ref_latent_batch.shape[2],
-                        ref_latent_batch.shape[3],
-                    ),
-                    dtype=ref_latent_batch.dtype,
-                    device=ref_latent_batch.device,
-                )
-                ref_latent_batch = torch.cat([ref_latent_batch, padding], dim=0)
-
-            # VACE context is just the reference images (no dummy frames for R2V)
-            vace_context = [ref_latent_batch]
-
-        return vace_context, prepared_refs
+        # Return original paths, not tensors, so they can be reused in subsequent chunks
+        return vace_context, ref_image_paths
 
     def _encode_with_conditioning(self, components, block_state, current_start):
         """
         Encode VACE input using the standard VACE path, with optional reference images.
 
         Supports any type of conditioning input (depth, flow, pose, scribble, etc.) following
-        original VACE approach from notes/VACE/vace/models/wan/wan_vace.py:
-        - input_frames = conditioning maps (3-channel RGB from annotators)
-        - input_masks = spatial control masks (defaults to ones if None)
-        - ref_images = optional (for combined style + structural guidance)
-        - Standard encoding: z0 = vace_encode_frames(input_frames, ref_images, masks=input_masks)
-                           m0 = vace_encode_masks(input_masks, ref_images)
+        original VACE approach from https://github.com/ali-vilab/VACE/blob/48eb44f1c4be87cc65a98bff985a26976841e9f3/vace/models/wan/wan_vace.py:
+        - vace_input_frames = conditioning maps (3-channel RGB from annotators)
+        - vace_input_masks = spatial control masks (defaults to ones if None)
+        - vace_ref_images = optional (for combined style + structural guidance)
+        - Standard encoding: z0 = vace_encode_frames(vace_input_frames, ref_images, masks=vace_input_masks)
+                           m0 = vace_encode_masks(vace_input_masks, ref_images)
                            z = vace_latent(z0, m0)
 
         Characteristics:
@@ -306,16 +257,16 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         - Uses standard VACE path with masking (produces 96 channels: 32 masked + 64 mask_encoding)
         - Can be combined with reference images for style + structure guidance
         """
-        input_frames_data = block_state.input_frames
+        input_frames_data = block_state.vace_input_frames
         if input_frames_data is None:
             raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: input_frames required at chunk {current_start}"
+                f"VaceEncodingBlock._encode_with_conditioning: vace_input_frames required at chunk {current_start}"
             )
 
-        # Validate input_frames shape
+        # Validate vace_input_frames shape
         if input_frames_data.dim() != 5:
             raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: input_frames must be [B, C, F, H, W], got shape {input_frames_data.shape}"
+                f"VaceEncodingBlock._encode_with_conditioning: vace_input_frames must be [B, C, F, H, W], got shape {input_frames_data.shape}"
             )
 
         batch_size, channels, num_frames, height, width = input_frames_data.shape
@@ -341,17 +292,13 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             )
 
         # Check if we have reference images too (for combined guidance)
-        ref_image_paths = block_state.ref_images
+        ref_image_paths = block_state.vace_ref_images
         has_ref_images = ref_image_paths is not None and len(ref_image_paths) > 0
 
-        # Use vace_vae if available (for pipelines with streaming VAEs that can't handle
-        # conditioning frame batches), otherwise use main VAE for consistency with video encoding.
-        # Main VAE is preferred when available since it ensures temporal consistency in inpainting
-        # mode where unmasked portions are encoded in both VACE context and video latents.
-        if hasattr(components, "vace_vae") and components.vace_vae is not None:
-            vace_vae = components.vace_vae
-        else:
-            vace_vae = components.vae
+        # Use main VAE for consistency with video encoding.
+        # This ensures temporal consistency in inpainting mode where unmasked portions
+        # are encoded in both VACE context and video latents.
+        vae = components.vae
 
         # Import vace_utils for standard encoding path
         from ..utils.encoding import vace_encode_frames, vace_encode_masks, vace_latent
@@ -364,14 +311,14 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 f"VaceEncodingBlock._encode_with_conditioning: Expected 1 or 3 channels, got {channels}"
             )
 
-        vae_dtype = next(vace_vae.parameters()).dtype
+        vae_dtype = next(vae.parameters()).dtype
         input_frames_data = input_frames_data.to(dtype=vae_dtype)
 
         # Convert to list of [C, F, H, W] for vace_encode_frames
         input_frames_list = [input_frames_data[b] for b in range(batch_size)]
 
-        # Get input_masks from block_state or default to ones (all white)
-        input_masks_data = block_state.input_masks
+        # Get vace_input_masks from block_state or default to ones (all white)
+        input_masks_data = block_state.vace_input_masks
         if input_masks_data is None:
             # Default to ones (all white) - apply conditioning everywhere
             input_masks_list = [
@@ -383,10 +330,10 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 for _ in range(batch_size)
             ]
         else:
-            # Validate input_masks shape
+            # Validate vace_input_masks shape
             if input_masks_data.dim() != 5:
                 raise ValueError(
-                    f"VaceEncodingBlock._encode_with_conditioning: input_masks must be [B, 1, F, H, W], got shape {input_masks_data.shape}"
+                    f"VaceEncodingBlock._encode_with_conditioning: vace_input_masks must be [B, 1, F, H, W], got shape {input_masks_data.shape}"
                 )
 
             mask_batch, mask_channels, mask_frames, mask_height, mask_width = (
@@ -394,7 +341,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             )
             if mask_channels != 1:
                 raise ValueError(
-                    f"VaceEncodingBlock._encode_with_conditioning: input_masks must have 1 channel, got {mask_channels}"
+                    f"VaceEncodingBlock._encode_with_conditioning: vace_input_masks must have 1 channel, got {mask_channels}"
                 )
             if (
                 mask_frames != num_frames
@@ -402,7 +349,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 or mask_width != width
             ):
                 raise ValueError(
-                    f"VaceEncodingBlock._encode_with_conditioning: input_masks shape mismatch: "
+                    f"VaceEncodingBlock._encode_with_conditioning: vace_input_masks shape mismatch: "
                     f"expected [B, 1, {num_frames}, {height}, {width}], got [B, 1, {mask_frames}, {mask_height}, {mask_width}]"
                 )
 
@@ -426,10 +373,10 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             ref_images = [prepared_refs]
 
         # Standard VACE encoding path (matching wan_vace.py lines 339-341)
-        # z0 = vace_encode_frames(input_frames, ref_images, masks=input_masks)
+        # z0 = vace_encode_frames(vace_input_frames, vace_ref_images, masks=vace_input_masks)
         # When masks are provided, set pad_to_96=False because mask encoding (64 channels) will be added later
         z0 = vace_encode_frames(
-            vace_vae,
+            vae,
             input_frames_list,
             ref_images,
             masks=input_masks_list,

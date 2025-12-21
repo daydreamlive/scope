@@ -109,7 +109,20 @@ class DenoiseBlock(ModularPipelineBlocks):
             InputParam(
                 "vace_context",
                 default=None,
-                description="VACE context for reference image conditioning",
+                type_hint=torch.Tensor | None,
+                description="VACE context that provides visual conditioning",
+            ),
+            InputParam(
+                "input_frames",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="Input frames for video generation",
+            ),
+            InputParam(
+                "vace_input_frames",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="VACE conditioning input frames (depth, flow, pose, etc.) for per-chunk guidance",
             ),
             InputParam(
                 "vace_context_scale",
@@ -171,17 +184,6 @@ class DenoiseBlock(ModularPipelineBlocks):
             )
 
             if index < len(denoising_step_list) - 1:
-                # Determine if we should regenerate VACE hints:
-                # - If input_frames exists: per-chunk conditioning -> regenerate every chunk
-                # - If vace_context exists: reference images provided -> regenerate to apply them
-                # This allows ref_images to be sent at any time, not just first chunk
-                has_input_frames = (
-                    getattr(block_state, "input_frames", None) is not None
-                )
-                vace_regenerate_hints = has_input_frames or (
-                    block_state.vace_context is not None
-                )
-
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
@@ -193,7 +195,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
-                    vace_regenerate_hints=vace_regenerate_hints,
                 )
 
                 next_timestep = denoising_step_list[index + 1]
@@ -216,17 +217,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                     ),
                 ).unflatten(0, denoised_pred.shape[:2])
             else:
-                # Determine if we should regenerate VACE hints (same logic as above)
-                # - If input_frames exists: per-chunk conditioning -> regenerate every chunk
-                # - If vace_context exists: reference images provided -> regenerate to apply them
-                # This allows ref_images to be sent at any time, not just first chunk
-                has_input_frames = (
-                    getattr(block_state, "input_frames", None) is not None
-                )
-                vace_regenerate_hints = has_input_frames or (
-                    block_state.vace_context is not None
-                )
-
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
                     conditional_dict=conditional_dict,
@@ -238,7 +228,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
-                    vace_regenerate_hints=vace_regenerate_hints,
                 )
 
         block_state.latents = denoised_pred

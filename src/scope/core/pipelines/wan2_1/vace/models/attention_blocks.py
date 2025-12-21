@@ -1,4 +1,4 @@
-# Modified from notes/VACE/vace/models/wan/modules/model.py
+# Modified from https://github.com/ali-vilab/VACE/blob/48eb44f1c4be87cc65a98bff985a26976841e9f3/vace/models/wan/modules/model.py
 # Adapted for causal/autoregressive generation
 # Pipeline-agnostic using duck typing with factory pattern
 
