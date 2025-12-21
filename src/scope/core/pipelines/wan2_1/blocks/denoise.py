@@ -106,6 +106,30 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float | None,
                 description="Amount of noise added to video",
             ),
+            InputParam(
+                "vace_context",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="VACE context that provides visual conditioning",
+            ),
+            InputParam(
+                "input_frames",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="Input frames for video generation",
+            ),
+            InputParam(
+                "vace_input_frames",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="VACE conditioning input frames (depth, flow, pose, etc.) for per-chunk guidance",
+            ),
+            InputParam(
+                "vace_context_scale",
+                default=1.0,
+                type_hint=float,
+                description="Scaling factor for VACE hint injection",
+            ),
         ]
 
     @property
@@ -169,7 +193,10 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    vace_context=block_state.vace_context,
+                    vace_context_scale=block_state.vace_context_scale,
                 )
+
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
                 flattened_pred = denoised_pred.flatten(0, 1)
@@ -199,6 +226,8 @@ class DenoiseBlock(ModularPipelineBlocks):
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
+                    vace_context=block_state.vace_context,
+                    vace_context_scale=block_state.vace_context_scale,
                 )
 
         block_state.latents = denoised_pred
