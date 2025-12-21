@@ -11,7 +11,7 @@ def load_video(
     normalize: bool = True,
 ) -> torch.Tensor:
     """
-    Loads a video as a CTHW tensor
+    Loads a video as a CTHW tensor.
     """
     # Read video frames as numpy array (THWC format)
     video = iio.imread(path, plugin="pyav")
