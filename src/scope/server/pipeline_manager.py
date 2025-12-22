@@ -214,7 +214,7 @@ class PipelineManager:
             return False
 
     def _get_vace_checkpoint_path(self) -> str:
-        """Get the path to the VACE checkpoint (required for streamdiffusionv2 and longlive).
+        """Get the path to the VACE checkpoint.
 
         Returns:
             str: Path to VACE checkpoint file
@@ -535,6 +535,16 @@ class PipelineManager:
                     ),
                 }
             )
+
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(

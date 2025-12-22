@@ -26,7 +26,7 @@ logger = diffusers_logging.get_logger(__name__)
 # Main pipeline blocks with multi-mode support (text-to-video and video-to-video)
 # AutoPreprocessVideoBlock: Routes to video preprocessing when 'video' input provided
 # AutoPrepareLatentsBlock: Routes to PrepareVideoLatentsBlock or PrepareLatentsBlock
-# VaceEncodingBlock: Encodes VACE context (R2V or depth) for conditioning
+# VaceEncodingBlock: Encodes VACE context for conditioning
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),

@@ -386,7 +386,7 @@ class RewardForcingConfig(BasePipelineConfig):
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
     default_mode: ClassVar[InputMode] = "text"
 
-    # LongLive defaults (text mode baseline)
+    # RewardForcing defaults (text mode baseline)
     height: int = Field(default=320, ge=1, description="Output height in pixels")
     width: int = Field(default=576, ge=1, description="Output width in pixels")
     denoising_steps: list[int] | None = Field(
@@ -397,6 +397,18 @@ class RewardForcingConfig(BasePipelineConfig):
     noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
         default=None,
         description="Amount of noise to add during video generation (video mode only)",
+    )
+
+    # VACE (optional reference image conditioning)
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
     )
 
     @classmethod

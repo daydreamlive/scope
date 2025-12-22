@@ -16,6 +16,7 @@ import {
   PIPELINES,
   getPipelineDefaultMode,
   getDefaultPromptForMode,
+  pipelineSupportsVACE,
 } from "../data/pipelines";
 import type {
   InputMode,
@@ -691,9 +692,12 @@ export function StreamPage() {
       // Use settings.resolution if available, otherwise fall back to videoResolution
       const resolution = settings.resolution || videoResolution;
 
+      // Compute VACE enabled state once - enabled by default for text mode on VACE-supporting pipelines
+      const vaceEnabled =
+        settings.vaceEnabled ??
+        (pipelineSupportsVACE(pipelineIdToUse) && currentMode !== "video");
+
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
-        // VACE disabled by default but can be enabled
-        const vaceEnabled = settings.vaceEnabled ?? false;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
@@ -715,21 +719,19 @@ export function StreamPage() {
           `Loading with resolution: ${resolution.width}x${resolution.height}`
         );
       } else if (pipelineIdToUse === "longlive" && resolution) {
-        // VACE disabled by default for video mode, enabled by default for text mode
-        const vaceDefault = currentMode === "video" ? false : true;
         loadParams = {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
-          vace_enabled: settings.vaceEnabled ?? vaceDefault,
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
           ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
         );
-      } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
+      } else if (pipelineIdToUse === "krea-realtime-video" && resolution) {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
@@ -749,7 +751,9 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
@@ -916,7 +920,8 @@ export function StreamPage() {
             spoutAvailable={spoutAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
-              (settings.inputMode === "video" ? false : true)
+              (pipelineSupportsVACE(settings.pipelineId) &&
+                settings.inputMode !== "video")
             }
             refImages={settings.refImages || []}
             onRefImagesChange={handleRefImagesChange}
@@ -1118,7 +1123,8 @@ export function StreamPage() {
             spoutAvailable={spoutAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
-              (settings.inputMode === "video" ? false : true)
+              (pipelineSupportsVACE(settings.pipelineId) &&
+                settings.inputMode !== "video")
             }
             onVaceEnabledChange={handleVaceEnabledChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
