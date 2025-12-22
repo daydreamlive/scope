@@ -13,11 +13,9 @@ import {
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
-import { getPipelineDefaultMode } from "../data/pipelines";
 
 // Generic fallback defaults used before schemas are loaded.
-// Resolution and denoising steps use conservative values; mode-specific
-// values are derived from pipelines.ts when possible.
+// Resolution and denoising steps use conservative values.
 const BASE_FALLBACK = {
   height: 512,
   width: 512,
@@ -26,9 +24,9 @@ const BASE_FALLBACK = {
 };
 
 // Get fallback defaults for a pipeline before schemas are loaded
-// Derives mode from pipelines.ts to stay in sync with frontend definitions
-function getFallbackDefaults(pipelineId: PipelineId, mode?: InputMode) {
-  const effectiveMode = mode ?? getPipelineDefaultMode(pipelineId);
+function getFallbackDefaults(mode?: InputMode) {
+  // Default to text mode if no mode specified (will be corrected when schemas load)
+  const effectiveMode = mode ?? "text";
   const isVideoMode = effectiveMode === "video";
 
   // Video mode gets noise controls, text mode doesn't
@@ -107,8 +105,7 @@ export function useStreamState() {
         };
       }
       // Fallback to derived defaults if schemas not loaded
-      // Mode is derived from pipelines.ts to stay in sync
-      return getFallbackDefaults(pipelineId, mode);
+      return getFallbackDefaults(mode);
     },
     [pipelineSchemas]
   );
@@ -137,7 +134,7 @@ export function useStreamState() {
   );
 
   // Get initial defaults (use fallback since schemas haven't loaded yet)
-  const initialDefaults = getFallbackDefaults("streamdiffusionv2");
+  const initialDefaults = getFallbackDefaults();
 
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
@@ -177,7 +174,27 @@ export function useStreamState() {
         ]);
 
         if (schemasResult.status === "fulfilled") {
-          setPipelineSchemas(schemasResult.value);
+          const schemas = schemasResult.value;
+          setPipelineSchemas(schemas);
+
+          // Check if the default pipeline (streamdiffusionv2) is available
+          // If not, switch to the first available pipeline
+          const availablePipelines = Object.keys(schemas.pipelines);
+          const preferredPipeline = "streamdiffusionv2";
+
+          if (
+            !availablePipelines.includes(preferredPipeline) &&
+            availablePipelines.length > 0
+          ) {
+            const firstPipelineId = availablePipelines[0] as PipelineId;
+            const firstPipelineSchema = schemas.pipelines[firstPipelineId];
+
+            setSettings(prev => ({
+              ...prev,
+              pipelineId: firstPipelineId,
+              inputMode: firstPipelineSchema.default_mode,
+            }));
+          }
         } else {
           console.error(
             "useStreamState: Failed to fetch pipeline schemas:",
@@ -200,6 +217,21 @@ export function useStreamState() {
 
     fetchInitialData();
   }, []);
+
+  // Update inputMode when schemas load or pipeline changes
+  // This sets the correct default mode for the pipeline
+  useEffect(() => {
+    if (pipelineSchemas) {
+      const schema = pipelineSchemas.pipelines[settings.pipelineId];
+      if (schema?.default_mode) {
+        setSettings(prev => ({
+          ...prev,
+          inputMode: schema.default_mode,
+        }));
+      }
+    }
+    // Only run when schemas load or pipeline changes, NOT when inputMode changes
+  }, [pipelineSchemas, settings.pipelineId]);
 
   // Set recommended quantization when krea-realtime-video is selected
   // Reset to null when switching to other pipelines

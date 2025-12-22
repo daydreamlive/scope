@@ -158,7 +158,7 @@ interface PromptTimelineProps {
   onSettingsImport?: (settings: Partial<SettingsState>) => void;
   onScrollToTime?: (scrollFn: (time: number) => void) => void;
   isStreaming?: boolean;
-  isDownloading?: boolean;
+  isLoading?: boolean;
 }
 
 export function PromptTimeline({
@@ -184,7 +184,7 @@ export function PromptTimeline({
   onSettingsImport,
   onScrollToTime,
   isStreaming = false,
-  isDownloading = false,
+  isLoading = false,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -641,7 +641,7 @@ export function PromptTimeline({
           <div className="flex items-center gap-2">
             <Button
               onClick={onPlayPause}
-              disabled={disabled || isDownloading}
+              disabled={disabled || isLoading}
               size="sm"
               variant="outline"
             >
@@ -653,7 +653,7 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onReset}
-              disabled={disabled || isDownloading}
+              disabled={disabled || isLoading}
               size="sm"
               variant="outline"
               title="Reset timeline"
@@ -662,7 +662,7 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onClear}
-              disabled={disabled || isPlaying || isStreaming || isDownloading}
+              disabled={disabled || isPlaying || isStreaming || isLoading}
               size="sm"
               variant="outline"
               title="Clear timeline"
@@ -673,11 +673,11 @@ export function PromptTimeline({
           <div className="flex items-center gap-2">
             <Button
               onClick={handleExport}
-              disabled={disabled || isDownloading}
+              disabled={disabled || isLoading}
               size="sm"
               variant="outline"
             >
-              <Download className="h-4 w-4 mr-1" />
+              <Upload className="h-4 w-4 mr-1" />
               Export
             </Button>
             <div className="relative">
@@ -686,14 +686,14 @@ export function PromptTimeline({
                 accept=".json"
                 onChange={handleImport}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={disabled || isStreaming || isDownloading}
+                disabled={disabled || isStreaming || isLoading}
               />
               <Button
                 size="sm"
                 variant="outline"
-                disabled={disabled || isStreaming || isDownloading}
+                disabled={disabled || isStreaming || isLoading}
               >
-                <Upload className="h-4 w-4 mr-1" />
+                <Download className="h-4 w-4 mr-1" />
                 Import
               </Button>
             </div>
@@ -701,7 +701,7 @@ export function PromptTimeline({
               onClick={() => onCollapseToggle?.(!isCollapsed)}
               size="sm"
               variant="outline"
-              disabled={isDownloading}
+              disabled={isLoading}
               title={isCollapsed ? "Expand timeline" : "Collapse timeline"}
             >
               {isCollapsed ? (

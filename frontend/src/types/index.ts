@@ -74,6 +74,10 @@ export interface SettingsState {
     enabled: boolean;
     name: string;
   };
+  // VACE-specific settings
+  vaceEnabled?: boolean;
+  refImages?: string[];
+  vaceContextScale?: number;
 }
 
 // UI capability flags - controls which UI elements are shown for each pipeline
@@ -95,13 +99,14 @@ export interface PipelineInfo {
   about: string;
   projectUrl?: string;
   docsUrl?: string;
-  modified?: boolean;
   defaultPrompt?: string;
   estimatedVram?: number;
   requiresModels?: boolean;
   defaultTemporalInterpolationMethod?: "linear" | "slerp";
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
+  supportsVACE?: boolean;
+  supportsPrompts?: boolean;
   requiresReferenceImage?: boolean; // Whether this pipeline requires a reference image (e.g. PersonaLive)
   referenceImageDescription?: string; // Description of what the reference image is for
 
@@ -111,4 +116,15 @@ export interface PipelineInfo {
 
   // UI capabilities - controls which settings/controls are shown
   ui?: PipelineUICapabilities;
+}
+
+export interface DownloadProgress {
+  is_downloading: boolean;
+  percentage: number;
+  current_artifact: string | null;
+}
+
+export interface ModelStatusResponse {
+  downloaded: boolean;
+  progress: DownloadProgress | null;
 }

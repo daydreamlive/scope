@@ -73,121 +73,77 @@ def get_model_file_path(relative_path: str) -> Path:
     return models_dir / relative_path
 
 
+def get_assets_dir() -> Path:
+    """
+    Get the assets directory path (at the same level as models directory).
+
+    If DAYDREAM_SCOPE_MODELS_DIR is set, assets directory will be at the same level.
+    Otherwise, defaults to ~/.daydream-scope/assets
+
+    Returns:
+        Path: Absolute path to the assets directory
+    """
+    models_dir = get_models_dir()
+    # Get the parent directory (e.g., ~/.daydream-scope) and create assets directory there
+    assets_dir = models_dir.parent / "assets"
+    return assets_dir
+
+
 def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     """
     Get the list of required model files that should exist for a given pipeline.
 
     Args:
         pipeline_id: The pipeline ID to get required models for.
-                     If None, returns models for all default pipelines.
-                     If provided, returns models specific to that pipeline.
 
     Returns:
         list[Path]: List of required model file paths
     """
     models_dir = get_models_dir()
 
-    # Passthrough doesn't need models
-    if pipeline_id == "passthrough":
+    from .pipeline_artifacts import PIPELINE_ARTIFACTS
+
+    if pipeline_id == "passthrough" or pipeline_id not in PIPELINE_ARTIFACTS:
         return []
 
-    # streamdiffusionv2 pipeline
-    if pipeline_id == "streamdiffusionv2":
-        return [
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "StreamDiffusionV2" / "wan_causal_dmd_v2v" / "model.pt",
-        ]
+    artifacts = PIPELINE_ARTIFACTS[pipeline_id]
 
-    # longlive pipeline
-    if pipeline_id == "longlive":
-        return [
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "LongLive-1.3B" / "models" / "longlive_base.pt",
-        ]
+    required_files = []
+    for artifact in artifacts:
+        local_dir_name = artifact.repo_id.split("/")[-1]
 
-    # krea-realtime-video pipeline
-    if pipeline_id == "krea-realtime-video":
-        return [
-            models_dir / "krea-realtime-video" / "krea-realtime-video-14b.safetensors",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "Wan2.1-T2V-14B" / "config.json",
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-        ]
+        # Add each file from the artifact's files list
+        for file in artifact.files:
+            required_files.append(models_dir / local_dir_name / file)
 
-    if pipeline_id == "reward-forcing":
-        return [
-            models_dir / "Wan2.1-T2V-1.3B" / "config.json",
-            models_dir / "WanVideo_comfy" / "umt5-xxl-enc-fp8_e4m3fn.safetensors",
-            models_dir / "Reward-Forcing-T2V-1.3B" / "rewardforcing.pt",
-        ]
-
-    # personalive pipeline
-    if pipeline_id == "personalive":
-        return [
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "personalive"
-            / "denoising_unet.pth",
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "personalive"
-            / "reference_unet.pth",
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "personalive"
-            / "motion_encoder.pth",
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "personalive"
-            / "motion_extractor.pth",
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "personalive"
-            / "pose_guider.pth",
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "personalive"
-            / "temporal_module.pth",
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "sd-image-variations-diffusers"
-            / "model_index.json",
-            models_dir
-            / "PersonaLive"
-            / "pretrained_weights"
-            / "sd-vae-ft-mse"
-            / "config.json",
-        ]
-
-    # Default: nothing is required
-    return []
+    return required_files
 
 
-def models_are_downloaded(pipeline_id: str | None = None) -> bool:
+def models_are_downloaded(pipeline_id: str) -> bool:
     """
-    Check if all required model files are downloaded.
+    Check if all required model files are downloaded and non-empty.
 
     Args:
         pipeline_id: The pipeline ID to check models for.
-                     If None, checks models for all default pipelines.
-                     If provided, checks models specific to that pipeline.
 
     Returns:
-        bool: True if all required models are present, False otherwise
+        bool: True if all required models are present and non-empty, False otherwise
     """
     required_files = get_required_model_files(pipeline_id)
 
     for file_path in required_files:
+        # Check if path exists
         if not file_path.exists():
             return False
+
+        # If it's a file, check it's non-empty
+        if file_path.is_file():
+            if file_path.stat().st_size == 0:
+                return False
+
+        # If it's a directory, check it's non-empty
+        elif file_path.is_dir():
+            if not any(file_path.iterdir()):
+                return False
 
     return True

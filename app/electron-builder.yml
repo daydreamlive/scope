@@ -1,0 +1,157 @@
+appId: live.daydream.scope
+productName: Daydream Scope
+copyright: Copyright © 2025 Daydream
+
+# Directories
+directories:
+  output: dist
+  buildResources: assets
+
+# Files to include/exclude
+files:
+  - .vite/**/*
+  - package.json
+  - node_modules/**/*
+  - assets/**/*
+  - src/components/LogViewer.html
+  - "!node_modules/**/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!node_modules/**/{test,__tests__,tests,powered-test,example,examples}"
+  - "!node_modules/**/*.d.ts"
+  - "!node_modules/.bin"
+  - "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
+  - "!.editorconfig"
+  - "!**/._*"
+  - "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}"
+  - "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}"
+  - "!**/{appveyor.yml,.travis.yml,circle.yml}"
+  - "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+
+# Asar configuration - disabled to allow Python file access
+# Note: ASAR is intentionally disabled because the app needs to:
+# 1. Execute Python scripts from the filesystem
+# 2. Allow uv package manager to access Python project files
+# 3. Enable dynamic loading of Python modules
+# Trade-off: Slightly less secure but necessary for Python interop
+# Mitigation: Strong CSP, sandboxing, and code signing are enabled
+asar: false
+
+# Build hooks
+afterPack: build/afterPack.js
+
+# Publishing configuration for auto-updates
+publish:
+  - provider: github
+    owner: daydreamlive
+    repo: scope
+    private: false
+
+# macOS configuration
+mac:
+  category: public.app-category.utilities
+  icon: assets/icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/mac/entitlements.mac.plist
+  entitlementsInherit: build/mac/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 380
+
+# Windows configuration - NSIS installer (best practice)
+win:
+  icon: assets/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  publisherName: Livepeer Inc.
+  verifyUpdateCodeSignature: true
+  sign: false # Skip code signing (disable to avoid privilege errors on Windows)
+  signDlls: false # Skip DLL signing
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false # Per-user installation (best practice - no admin required)
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Daydream Scope
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  deleteAppDataOnUninstall: false # Ask user about data deletion
+  allowElevation: true # Allow elevation if needed, but don't require it
+  displayLanguageSelector: false
+  menuCategory: false
+  runAfterFinish: true
+  artifactName: Daydream.Scope-Setup-${version}-${arch}.${ext}
+  include: build/win/installer.nsh # Custom script for UV installation during setup
+  differentialPackage: false # Disable differential updates (no blockmap generation)
+
+# Linux configuration
+linux:
+  icon: assets/icon.png
+  category: Utility
+  target:
+    - target: deb
+      arch:
+        - x64
+  executableName: daydream-scope
+  desktop: build/linux/daydream-scope.desktop
+  synopsis: A tool for running and customizing real-time, interactive generative AI pipelines and models
+  description: >
+    A tool for running and customizing real-time, interactive generative AI pipelines and models
+  maintainer: Daydream <info@daydream.live>
+
+# Debian package configuration
+deb:
+  depends:
+    - libnotify4 | libnotify-bin
+    - libayatana-appindicator3-1 | libappindicator3-1
+    - libxtst6
+    - libnss3
+  afterInstall: build/linux/after-install.sh
+  afterRemove: build/linux/after-remove.sh
+
+# AppImage configuration (disabled - not building AppImage)
+# appImage:
+#   license: LICENSE.md
+
+# RPM package configuration (disabled - not building RPM)
+# rpm:
+#   depends:
+#     - libXScrnSaver
+#     - libappindicator
+#   afterInstall: build/linux/after-install.sh
+#   afterRemove: build/linux/after-remove.sh
+
+# Snap configuration (disabled - not building Snap)
+# snap:
+#   grade: stable
+#   confinement: classic
+#   environment:
+#     DISABLE_WAYLAND: "1"
+
+# Compression
+compression: normal
+
+# Artifact naming
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}

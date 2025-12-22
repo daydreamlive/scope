@@ -1,4 +1,8 @@
-import type { LoRAConfig, IceServersResponse } from "../types";
+import type {
+  LoRAConfig,
+  IceServersResponse,
+  ModelStatusResponse,
+} from "../types";
 
 export interface PromptItem {
   text: string;
@@ -23,6 +27,8 @@ export interface WebRTCOfferRequest {
     noise_controller?: boolean;
     manage_cache?: boolean;
     kv_cache_attention_bias?: number;
+    vace_ref_images?: string[];
+    vace_context_scale?: number;
   };
 }
 
@@ -43,6 +49,9 @@ export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  // VACE (optional reference image conditioning for text mode)
+  vace_ref_images?: string[];
+  vace_context_scale?: number;
 }
 
 export interface LongLiveLoadParams extends PipelineLoadParams {
@@ -52,6 +61,9 @@ export interface LongLiveLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  // VACE (optional reference image conditioning)
+  vace_ref_images?: string[];
+  vace_context_scale?: number;
 }
 
 export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
@@ -200,7 +212,7 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
 
 export const checkModelStatus = async (
   pipelineId: string
-): Promise<{ downloaded: boolean }> => {
+): Promise<ModelStatusResponse> => {
   const response = await fetch(
     `/api/v1/models/status?pipeline_id=${pipelineId}`,
     {
@@ -336,6 +348,86 @@ export const uploadPersonaLiveReference = async (
   return result;
 };
 
+export interface AssetFileInfo {
+  name: string;
+  path: string;
+  size_mb: number;
+  folder?: string | null;
+  type: string; // "image" or "video"
+  created_at: number; // Unix timestamp
+}
+
+export interface AssetsResponse {
+  assets: AssetFileInfo[];
+}
+
+export const listAssets = async (
+  type?: "image" | "video"
+): Promise<AssetsResponse> => {
+  const url = type ? `/api/v1/assets?type=${type}` : "/api/v1/assets";
+  const response = await fetch(url, {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `List assets failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
+  const fileContent = await file.arrayBuffer();
+  const filename = encodeURIComponent(file.name);
+
+  const response = await fetch(`/api/v1/assets?filename=${filename}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+    },
+    body: fileContent,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Upload asset failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export const getAssetUrl = (assetPath: string): string => {
+  // The backend returns full absolute paths, but we need to extract the relative path
+  // from the assets directory for the serving endpoint
+  // Example: C:\Users\...\assets\myimage.png -> myimage.png
+  // or: C:\Users\...\assets\subfolder\myimage.png -> subfolder/myimage.png
+
+  const pathParts = assetPath.split(/[/\\]/);
+  const assetsIndex = pathParts.findIndex(
+    part => part === "assets" || part === ".daydream-scope"
+  );
+
+  if (assetsIndex >= 0 && assetsIndex < pathParts.length - 1) {
+    // Find the assets directory and take everything after it
+    const assetsPos = pathParts.findIndex(part => part === "assets");
+    if (assetsPos >= 0) {
+      const relativePath = pathParts.slice(assetsPos + 1).join("/");
+      return `/api/v1/assets/${relativePath}`;
+    }
+  }
+
+  // Fallback: just use the filename
+  const filename = pathParts[pathParts.length - 1];
+  return `/api/v1/assets/${encodeURIComponent(filename)}`;
+};
+
 // Pipeline schema types - matches output of get_schema_with_metadata()
 export interface PipelineSchemaProperty {
   type?: string;
@@ -369,10 +461,20 @@ export interface PipelineSchemaInfo {
   name: string;
   description: string;
   version: string;
+  docs_url: string | null;
+  estimated_vram_gb: number | null;
+  requires_models: boolean;
+  supports_lora: boolean;
+  supports_vace: boolean;
+  // Pipeline config schema
   config_schema: PipelineConfigSchema;
   // Mode support - comes from config class
   supported_modes: ("text" | "video")[];
   default_mode: "text" | "video";
+  // Prompt and temporal interpolation support
+  supports_prompts: boolean;
+  default_temporal_interpolation_method: "linear" | "slerp";
+  default_temporal_interpolation_steps: number;
   // Mode-specific default overrides (optional)
   mode_defaults?: Record<"text" | "video", ModeDefaults>;
 }

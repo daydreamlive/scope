@@ -10,7 +10,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Upload } from "lucide-react";
+import { Upload, ArrowUp } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import {
   Tooltip,
@@ -21,8 +21,8 @@ import {
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import type { InputMode } from "../types";
+import type { PipelineInfo } from "../hooks/usePipelines";
 import {
-  pipelineIsMultiMode,
   pipelineRequiresReferenceImage,
   pipelineShowsPromptInput,
   pipelineCanChangeReferenceWhileStreaming,
@@ -31,10 +31,13 @@ import {
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { ImageManager } from "./ImageManager";
+import { Button } from "./ui/button";
 import { ImageIcon } from "lucide-react";
 
 interface InputAndControlsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
@@ -78,10 +81,17 @@ interface InputAndControlsPanelProps {
   referenceImageUrl?: string | null;
   onReferenceImageUpload?: (file: File) => void;
   isUploadingReference?: boolean;
+  // VACE reference images (only shown when VACE is enabled)
+  vaceEnabled?: boolean;
+  refImages?: string[];
+  onRefImagesChange?: (images: string[]) => void;
+  onSendHints?: (imagePaths: string[]) => void;
+  isLoading?: boolean;
 }
 
 export function InputAndControlsPanel({
   className = "",
+  pipelines,
   localStream,
   isInitializing,
   error,
@@ -121,6 +131,11 @@ export function InputAndControlsPanel({
   referenceImageUrl = null,
   onReferenceImageUpload,
   isUploadingReference = false,
+  vaceEnabled = true,
+  refImages = [],
+  onRefImagesChange,
+  onSendHints,
+  isLoading = false,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -135,7 +150,8 @@ export function InputAndControlsPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Check if this pipeline supports multiple input modes
-  const isMultiMode = pipelineIsMultiMode(pipelineId);
+  const pipeline = pipelines?.[pipelineId];
+  const isMultiMode = (pipeline?.supportedModes?.length ?? 0) > 1;
 
   // Check if this pipeline requires a reference image (PersonaLive)
   const needsReferenceImage = pipelineRequiresReferenceImage(pipelineId);
@@ -388,12 +404,48 @@ export function InputAndControlsPanel({
           </div>
         )}
 
+        {/* VACE Reference Images - only show when VACE is enabled */}
+        {vaceEnabled && (
+          <div>
+            <ImageManager
+              images={refImages}
+              onImagesChange={onRefImagesChange || (() => {})}
+              disabled={isLoading}
+            />
+            {onSendHints && refImages && refImages.length > 0 && (
+              <div className="flex items-center justify-end mt-2">
+                <Button
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    onSendHints(refImages.filter(img => img));
+                  }}
+                  disabled={isLoading || !isStreaming}
+                  size="sm"
+                  className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !isStreaming
+                      ? "Start streaming to send hints"
+                      : "Submit all reference images"
+                  }
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Prompts section - only show for pipelines that support text prompts */}
         {pipelineShowsPromptInput(pipelineId) && (
           <div>
             {(() => {
               // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
               const isEditMode = selectedTimelinePrompt && isVideoPaused;
+
+              // Hide prompts section if pipeline doesn't support prompts
+              if (pipeline?.supportsPrompts === false) {
+                return null;
+              }
 
               return (
                 <div>
@@ -425,6 +477,7 @@ export function InputAndControlsPanel({
                       onTransitionSubmit={onTransitionSubmit}
                       disabled={
                         pipelineId === "passthrough" ||
+                        pipelineId === "personalive" ||
                         (_isTimelinePlaying &&
                           !isVideoPaused &&
                           !isAtEndOfTimeline()) ||

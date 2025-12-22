@@ -19,9 +19,9 @@ from ..schema import StreamDiffusionV2Config
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.vace import VACEEnabledPipeline
 from .components import StreamDiffusionV2WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
-from .modules.causal_model import CausalWanModel
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [750, 250]
 
 
-class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
+class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return StreamDiffusionV2Config
@@ -43,6 +43,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        from .modules.causal_model import CausalWanModel
+
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
@@ -55,8 +57,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             model_config, "generator_model_name", "generator"
         )
 
-        # Load generator
+        # Load generator with VACE support via upfront loading
         start = time.time()
+
+        # Always create base CausalWanModel first
         generator = WanDiffusionWrapper(
             CausalWanModel,
             model_name=base_model_name,
@@ -66,7 +70,11 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
             **base_model_kwargs,
         )
 
-        print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+        # Apply VACE wrapper if vace_path is configured (upfront loading)
+        # This must happen before LoRA to get correct ordering: LoRA -> VACE -> Base
+        generator.model = self._init_vace(
+            config, generator.model, device=device, dtype=dtype
+        )
 
         # Initialize optional LoRA adapters on the underlying model.
         generator.model = self._init_loras(config, generator.model)
@@ -182,6 +190,10 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline):
         # Clear video from state if not provided to prevent stale video data
         if "video" not in kwargs:
             self.state.set("video", None)
+
+        # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "vace_ref_images" not in kwargs:
+            self.state.set("vace_ref_images", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

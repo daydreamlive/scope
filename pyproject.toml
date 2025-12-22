@@ -1,6 +1,6 @@
 [project]
 name = "daydream-scope"
-version = "0.1.0a8"
+version = "0.1.0a12"
 description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
 requires-python = ">=3.10.12"
@@ -47,8 +47,9 @@ dependencies = [
     "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
+    "pluggy>=1.5.0",
+    "click>=8.3.1",
     "peft>=0.17.1",
-    "torchcodec==0.7.0",
     "torchao==0.13.0",
     "kernels>=0.10.4",
     "triton==3.4.0; sys_platform == 'linux'",
@@ -56,7 +57,7 @@ dependencies = [
     "SpoutGL>=0.1.1; sys_platform == 'win32'",
     "PyOpenGL>=3.1.10; sys_platform == 'win32'",
     # PersonaLive dependencies
-    "mediapipe>=0.10.11",
+    "mediapipe==0.10.14",
     "xformers>=0.0.32.post2",
 ]
 
@@ -80,6 +81,9 @@ convert-personalive-trt = "scope.core.pipelines.personalive.tensorrt.convert:mai
 Homepage = "https://github.com/daydreamlive/scope"
 Repository = "https://github.com/daydreamlive/scope"
 Issues = "https://github.com/daydreamlive/scope/issues"
+
+[tool.uv]
+preview = true
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true, marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
@@ -122,6 +126,9 @@ dev = [
     "pytest>=8.4.2",
     "freezegun>=1.5.5",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88

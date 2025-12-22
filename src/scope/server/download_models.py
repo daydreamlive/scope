@@ -1,338 +1,402 @@
 """
-Cross-platform model downloader using huggingface_hub for HF repo/files.
+Cross-platform model downloader
 """
 
 import argparse
+import http
 import logging
 import os
+import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
-# Disable hf_transfer to use standard download method
-# This prevents errors when HF_HUB_ENABLE_HF_TRANSFER=1 is set but hf_transfer is not installed
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+import httpx
 
-from .models_config import (
-    ensure_models_dir,
-    models_are_downloaded,
-)
+from .artifacts import Artifact, HuggingfaceRepoArtifact
+from .download_progress_manager import download_progress_manager
+from .models_config import ensure_models_dir
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# --- third-party libs ---
-try:
-    from huggingface_hub import hf_hub_download, snapshot_download
-except Exception:
-    print(
-        "Error: huggingface_hub is required. Install with: pip install huggingface_hub",
-        file=sys.stderr,
-    )
-    raise
+# Download settings
+CHUNK_SIZE = 10 * 1024 * 1024  # 10MB chunks
+PROGRESS_LOG_INTERVAL_PERCENT = 5.0
+DOWNLOAD_TIMEOUT = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
 
 
-def download_hf_repo_excluding(
-    repo_id: str, local_dir: Path, ignore_patterns: list[str]
+def get_repo_files(
+    repo_id: str,
+    allow_patterns: list[str] | None = None,
+    ignore_patterns: list[str] | None = None,
+) -> list[dict]:
+    """
+    Get list of files in a HuggingFace repo with their metadata.
+
+    Args:
+        repo_id: HuggingFace repository ID
+        allow_patterns: Optional list of glob patterns to include
+        ignore_patterns: Optional list of glob patterns to exclude
+
+    Returns:
+        List of dicts with 'path', 'size', and 'url' keys
+    """
+    from fnmatch import fnmatch
+
+    from huggingface_hub import HfApi, hf_hub_url
+
+    api = HfApi()
+
+    # Get all file paths first (fast operation)
+    all_paths = api.list_repo_files(repo_id)
+
+    # Filter paths by patterns
+    filtered_paths = []
+    for path in all_paths:
+        # Apply allow patterns filter
+        if allow_patterns:
+            if not any(fnmatch(path, pattern) for pattern in allow_patterns):
+                continue
+
+        # Apply ignore patterns filter
+        if ignore_patterns:
+            if any(fnmatch(path, pattern) for pattern in ignore_patterns):
+                continue
+
+        filtered_paths.append(path)
+
+    if not filtered_paths:
+        return []
+
+    # Get file info (including sizes) only for filtered files
+    paths_info = api.get_paths_info(repo_id, filtered_paths)
+
+    files = []
+    for info in paths_info:
+        url = hf_hub_url(repo_id, info.path)
+        files.append(
+            {
+                "path": info.path,
+                "size": info.size,
+                "url": url,
+            }
+        )
+
+    return files
+
+
+def http_get(
+    url: str,
+    dest_path: Path,
+    expected_size: int | None = None,
+    on_progress: Callable[[int], None] | None = None,
 ) -> None:
     """
-    Download an entire HF repo snapshot while excluding specific files.
+    Download a file using httpx with streaming and resume support.
+
+    Downloads to a temp file (.incomplete suffix) and moves to final location when complete.
+    If a partial file exists, attempts to resume from where it left off.
+
+    Args:
+        url: URL to download from
+        dest_path: Final destination path for the file
+        expected_size: Expected file size in bytes (for progress tracking)
+        on_progress: Optional callback(downloaded_bytes) for progress updates
     """
-    local_dir.mkdir(parents=True, exist_ok=True)
-    # snapshot_download supports exclude via `ignore_patterns`
-    # (patterns are glob-like, relative to the repo root)
-    snapshot_download(
-        repo_id=repo_id,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,  # copy files for portability
-        ignore_patterns=ignore_patterns,
-        # token is picked up automatically from HUGGINGFACE_TOKEN if set
-        # revision=None,  # optionally pin a commit/tag if you like
-    )
-    print(f"[OK] Downloaded repo '{repo_id}' to: {local_dir}")
+    temp_path = dest_path.with_suffix(dest_path.suffix + ".incomplete")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Check if we already have the complete file
+    if dest_path.exists():
+        if expected_size is None or dest_path.stat().st_size == expected_size:
+            logger.debug(f"File for {url} already exists: {dest_path}")
+            if on_progress and expected_size:
+                on_progress(expected_size)
+            return
 
-def download_hf_single_file(repo_id: str, filename: str, local_dir: Path) -> None:
-    """
-    Download a single file from an HF repo into a target folder.
-    """
-    local_dir.mkdir(parents=True, exist_ok=True)
-    out_path = hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
-    )
-    print(f"[OK] Downloaded file '{filename}' from '{repo_id}' to: {out_path}")
+    # Check for existing partial download to resume
+    resume_from = 0
+    if temp_path.exists():
+        resume_from = temp_path.stat().st_size
+        logger.info(
+            f"Resuming download for {url} from {resume_from / 1024 / 1024:.2f}MB"
+        )
 
+    headers = {}
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
-def download_required_models():
-    """Download required models if they are not already present."""
-    if models_are_downloaded():
-        logger.info("Models already downloaded, skipping download")
-        return
+    # Add Range header for resuming
+    if resume_from > 0:
+        headers["Range"] = f"bytes={resume_from}-"
 
-    logger.info("Downloading required models...")
     try:
-        download_models()
-        logger.info("Model download completed successfully")
+        with httpx.stream(
+            "GET", url, headers=headers, timeout=DOWNLOAD_TIMEOUT, follow_redirects=True
+        ) as response:
+            # Handle resume response
+            if (
+                resume_from > 0
+                and response.status_code
+                == http.HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE
+            ):
+                # Range not satisfiable - file might be complete or changed
+                logger.warning("Resume not supported or file changed, starting fresh")
+                temp_path.unlink(missing_ok=True)
+                resume_from = 0
+                # Retry without Range header
+                headers.pop("Range", None)
+                with httpx.stream(
+                    "GET",
+                    url,
+                    headers=headers,
+                    timeout=DOWNLOAD_TIMEOUT,
+                    follow_redirects=True,
+                ) as retry_response:
+                    retry_response.raise_for_status()
+                    _write_stream_to_file(
+                        retry_response, temp_path, 0, expected_size, on_progress
+                    )
+            elif response.status_code == http.HTTPStatus.PARTIAL_CONTENT:
+                # Partial content - resume successful
+                response.raise_for_status()
+                _write_stream_to_file(
+                    response, temp_path, resume_from, expected_size, on_progress
+                )
+            else:
+                # Full download (200 OK)
+                response.raise_for_status()
+                # If we got a 200 when expecting to resume, start fresh
+                if resume_from > 0:
+                    temp_path.unlink(missing_ok=True)
+                    resume_from = 0
+                _write_stream_to_file(
+                    response, temp_path, 0, expected_size, on_progress
+                )
+
+        # Move temp file to final location
+        shutil.move(str(temp_path), str(dest_path))
+        logger.debug(f"Download for {url} complete: {dest_path}")
+
+    except KeyboardInterrupt:
+        logger.info(f"Download interrupted, partial file for {url} saved for resume")
+        raise
     except Exception as e:
-        logger.error(f"Error downloading models: {e}")
+        logger.error(f"Download failed for {url}: {e}")
         raise
 
 
-def download_streamdiffusionv2_pipeline() -> None:
-    """Download models for the StreamDiffusionV2 pipeline."""
-    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-    stream_diffusion_repo = "jerryfeng/StreamDiffusionV2"
+def _write_stream_to_file(
+    response: httpx.Response,
+    temp_path: Path,
+    resume_from: int,
+    expected_size: int | None,
+    on_progress: Callable[[int], None] | None,
+) -> None:
+    """Write streaming response to file with progress tracking."""
+    downloaded = resume_from
+    last_logged_percent = 0.0
 
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-    stream_diffusion_dst = models_root / "StreamDiffusionV2"
+    # Open in append mode if resuming, write mode otherwise
+    mode = "ab" if resume_from > 0 else "wb"
 
-    # 1) HF repo download excluding a large file
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
-    download_hf_repo_excluding(
-        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
-    )
+    with open(temp_path, mode) as f:
+        for chunk in response.iter_bytes(chunk_size=CHUNK_SIZE):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
 
-    # 2) HF single file download into a folder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
+                # Progress logging
+                if expected_size and expected_size > 0:
+                    percent = (downloaded / expected_size) * 100
 
-    # 3) HF repo download for StreamDiffusionV2 (1.3b only)
-    snapshot_download(
-        repo_id=stream_diffusion_repo,
-        local_dir=stream_diffusion_dst,
-        allow_patterns=["wan_causal_dmd_v2v/model.pt"],
-    )
+                    # Log every PROGRESS_LOG_INTERVAL_PERCENT
+                    if percent >= last_logged_percent + PROGRESS_LOG_INTERVAL_PERCENT:
+                        logger.info(
+                            f"Downloaded {downloaded / 1024 / 1024:.2f}MB of "
+                            f"{expected_size / 1024 / 1024:.2f}MB ({percent:.1f}%)"
+                        )
+                        last_logged_percent = percent
 
-
-def download_longlive_pipeline() -> None:
-    """Download models for the LongLive pipeline."""
-    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-    longlive_repo = "Efficient-Large-Model/LongLive-1.3B"
-
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-    longlive_dst = models_root / "LongLive-1.3B"
-
-    # 1) HF repo download for Wan2.1-T2V-1.3B, excluding large file
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
-    download_hf_repo_excluding(
-        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
-    )
-
-    # 2) HF single file download for UMT5 encoder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
-
-    # 3) HF repo download for LongLive-1.3B
-    download_hf_repo_excluding(longlive_repo, longlive_dst, ignore_patterns=[])
+                    # Call progress callback
+                    if on_progress:
+                        on_progress(downloaded)
 
 
-def download_krea_realtime_video_pipeline() -> None:
+def download_hf_repo(
+    repo_id: str,
+    local_dir: Path,
+    allow_patterns: list[str] | None = None,
+    ignore_patterns: list[str] | None = None,
+    pipeline_id: str | None = None,
+) -> None:
     """
-    Download models for the krea-realtime-video pipeline.
-    """
-    # HuggingFace repos
-    krea_rt_repo = "krea/krea-realtime-video"
-    wan_video_1_3b_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_14b_repo = "Wan-AI/Wan2.1-T2V-14B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    krea_rt_dst = models_root / "krea-realtime-video"
-    wan_video_1_3b_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_14b_dst = models_root / "Wan2.1-T2V-14B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-
-    # 1) Download only krea-realtime-video
-    snapshot_download(
-        repo_id=krea_rt_repo,
-        local_dir=krea_rt_dst,
-        allow_patterns=["krea-realtime-video-14b.safetensors"],
-    )
-
-    # 2) Download VAE and text encoder from Wan2.1-T2V-1.3B
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
-    download_hf_repo_excluding(
-        wan_video_1_3b_repo, wan_video_1_3b_dst, ignore_patterns=wan_video_exclude
-    )
-
-    # 3) Download only config.json from Wan2.1-T2V-14B (no model weights needed)
-    snapshot_download(
-        repo_id=wan_video_14b_repo,
-        local_dir=wan_video_14b_dst,
-        allow_patterns=["config.json"],
-    )
-
-    # 4) HF single file download for UMT5 encoder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
-
-
-def download_reward_forcing_pipeline() -> None:
-    """
-    Download models for the RewardForcing pipeline.
-    """
-    # HuggingFace repos
-    reward_forcing_repo = "JaydenLu666/Reward-Forcing-T2V-1.3B"
-    wan_video_repo = "Wan-AI/Wan2.1-T2V-1.3B"
-    wan_video_comfy_repo = "Kijai/WanVideo_comfy"
-    wan_video_comfy_file = "umt5-xxl-enc-fp8_e4m3fn.safetensors"
-
-    # Ensure models directory exists and get paths
-    models_root = ensure_models_dir()
-    reward_forcing_dst = models_root / "Reward-Forcing-T2V-1.3B"
-    wan_video_dst = models_root / "Wan2.1-T2V-1.3B"
-    wan_video_comfy_dst = models_root / "WanVideo_comfy"
-
-    # 1) Download Reward-Forcing model
-    snapshot_download(
-        repo_id=reward_forcing_repo,
-        local_dir=reward_forcing_dst,
-        allow_patterns=["rewardforcing.pt"],
-    )
-
-    # 2) HF repo download for Wan2.1-T2V-1.3B, excluding large file
-    wan_video_exclude = ["models_t5_umt5-xxl-enc-bf16.pth"]
-    download_hf_repo_excluding(
-        wan_video_repo, wan_video_dst, ignore_patterns=wan_video_exclude
-    )
-
-    # 3) HF single file download for UMT5 encoder
-    download_hf_single_file(
-        wan_video_comfy_repo, wan_video_comfy_file, wan_video_comfy_dst
-    )
-
-
-def download_personalive_pipeline() -> None:
-    """
-    Download models for the PersonaLive portrait animation pipeline.
-
-    Downloads from three sources:
-    1. lambdalabs/sd-image-variations-diffusers - Base UNet + CLIP Image Encoder
-       (SD fine-tuned to accept CLIP image embeddings instead of text)
-    2. stabilityai/sd-vae-ft-mse - VAE (improved fine-tuned version)
-    3. huaichang/PersonaLive - PersonaLive-specific weights:
-       - denoising_unet.pth, reference_unet.pth
-       - motion_encoder.pth, motion_extractor.pth
-       - pose_guider.pth, temporal_module.pth
-    """
-    models_root = ensure_models_dir()
-    personalive_root = models_root / "PersonaLive" / "pretrained_weights"
-    personalive_root.mkdir(parents=True, exist_ok=True)
-
-    # 1. Download sd-image-variations-diffusers (base model with CLIP image encoder)
-    # This provides: image_encoder/, unet/, model_index.json
-    sd_variations_dst = personalive_root / "sd-image-variations-diffusers"
-    if not sd_variations_dst.exists():
-        print("Downloading sd-image-variations-diffusers from lambdalabs...")
-        snapshot_download(
-            repo_id="lambdalabs/sd-image-variations-diffusers",
-            local_dir=str(sd_variations_dst),
-            local_dir_use_symlinks=False,
-            revision="v2.0",  # Use v2.0 as recommended
-            ignore_patterns=["*.md", "*.txt"],
-        )
-        print(f"[OK] Downloaded sd-image-variations-diffusers to: {sd_variations_dst}")
-    else:
-        print(
-            f"[SKIP] sd-image-variations-diffusers already exists at: {sd_variations_dst}"
-        )
-
-    # 2. Download sd-vae-ft-mse (improved VAE)
-    # This provides: config.json, diffusion_pytorch_model.safetensors
-    vae_dst = personalive_root / "sd-vae-ft-mse"
-    if not vae_dst.exists():
-        print("Downloading sd-vae-ft-mse from stabilityai...")
-        snapshot_download(
-            repo_id="stabilityai/sd-vae-ft-mse",
-            local_dir=str(vae_dst),
-            local_dir_use_symlinks=False,
-            ignore_patterns=["*.md", "*.txt"],
-        )
-        print(f"[OK] Downloaded sd-vae-ft-mse to: {vae_dst}")
-    else:
-        print(f"[SKIP] sd-vae-ft-mse already exists at: {vae_dst}")
-
-    # 3. Download PersonaLive-specific weights
-    # This provides: denoising_unet.pth, reference_unet.pth, motion_encoder.pth, etc.
-    personalive_weights_dst = personalive_root / "personalive"
-    if not personalive_weights_dst.exists():
-        print("Downloading PersonaLive weights from huaichang/PersonaLive...")
-        snapshot_download(
-            repo_id="huaichang/PersonaLive",
-            local_dir=str(personalive_weights_dst),
-            local_dir_use_symlinks=False,
-            # Only download the .pth weight files, not ONNX/TRT
-            allow_patterns=["*.pth"],
-        )
-        print(f"[OK] Downloaded PersonaLive weights to: {personalive_weights_dst}")
-    else:
-        print(f"[SKIP] PersonaLive weights already exist at: {personalive_weights_dst}")
-
-    print(f"\n[OK] PersonaLive pipeline models ready at: {personalive_root}")
-
-
-def download_models(pipeline_id: str | None = None) -> None:
-    """
-    Download models. If pipeline_id is None, downloads all pipelines.
-    If pipeline_id is specified, downloads that specific pipeline.
+    Download from HuggingFace repo - either a single file or repo snapshot with patterns.
 
     Args:
-        pipeline_id: Optional pipeline ID. Supports "streamdiffusionv2", "longlive",
-                    "krea-realtime-video", "reward-forcing", or "personalive".
-                    If None, downloads all pipelines.
+        repo_id: HuggingFace repository ID
+        local_dir: Local directory to download to
+        allow_patterns: Optional list of patterns to include (glob-like, relative to repo root)
+        ignore_patterns: Optional list of patterns to exclude (glob-like, relative to repo root)
+        pipeline_id: Optional pipeline ID for progress tracking
     """
-    if pipeline_id is None:
-        # Download all pipelines
-        download_streamdiffusionv2_pipeline()
-        download_longlive_pipeline()
-        download_krea_realtime_video_pipeline()
-        download_reward_forcing_pipeline()
-        download_personalive_pipeline()
-    elif pipeline_id == "streamdiffusionv2":
-        download_streamdiffusionv2_pipeline()
-    elif pipeline_id == "longlive":
-        download_longlive_pipeline()
-    elif pipeline_id == "krea-realtime-video":
-        download_krea_realtime_video_pipeline()
-    elif pipeline_id == "reward-forcing":
-        download_reward_forcing_pipeline()
-    elif pipeline_id == "personalive":
-        download_personalive_pipeline()
-    else:
-        raise ValueError(
-            f"Unknown pipeline: {pipeline_id}. Supported pipelines: streamdiffusionv2, longlive, krea-realtime-video, reward-forcing, personalive"
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Starting download of repo '{repo_id}' to: {local_dir}")
+
+    # Get list of files to download
+    files = get_repo_files(repo_id, allow_patterns, ignore_patterns)
+
+    if not files:
+        logger.warning(f"No files matched patterns in {repo_id}")
+        return
+
+    # Calculate total size for progress tracking
+    total_size = sum(f["size"] for f in files)
+    total_downloaded = 0
+
+    logger.info(
+        f"Downloading {len(files)} files ({total_size / 1024 / 1024:.2f}MB total)"
+    )
+
+    def make_progress_callback(downloaded_offset: int):
+        """Create a progress callback that accounts for already-downloaded files."""
+
+        def on_progress(downloaded: int):
+            total_downloaded = downloaded_offset + downloaded
+
+            # Update progress manager for UI
+            if pipeline_id:
+                try:
+                    download_progress_manager.update(
+                        pipeline_id,
+                        repo_id,
+                        total_downloaded / 1024 / 1024,
+                        total_size / 1024 / 1024,
+                    )
+                except Exception:
+                    pass
+
+        return on_progress
+
+    # Download each file
+    for i, file_info in enumerate(files, 1):
+        file_path = file_info["path"]
+        file_size = file_info["size"]
+        file_url = file_info["url"]
+        dest_path = local_dir / file_path
+
+        logger.info(
+            f"[{i}/{len(files)}] Downloading: {file_path} ({file_size / 1024 / 1024:.2f}MB)"
         )
 
-    print("\nAll downloads complete.")
+        http_get(
+            url=file_url,
+            dest_path=dest_path,
+            expected_size=file_size,
+            on_progress=make_progress_callback(total_downloaded),
+        )
+
+        total_downloaded += file_size
+
+    logger.info(f"Completed download of repo '{repo_id}' to: {local_dir}")
+
+
+def download_artifact(artifact: Artifact, models_root: Path, pipeline_id: str) -> None:
+    """
+    Download an artifact to the models directory.
+
+    This is a generic dispatcher that routes to the appropriate download
+    function based on the artifact type.
+
+    Args:
+        artifact: The artifact to download
+        models_root: Root directory where models are stored
+        pipeline_id: Optional pipeline ID for progress tracking
+
+    Raises:
+        ValueError: If artifact type is not supported
+    """
+    if isinstance(artifact, HuggingfaceRepoArtifact):
+        download_hf_artifact(artifact, models_root, pipeline_id)
+    else:
+        raise ValueError(f"Unsupported artifact type: {type(artifact)}")
+
+
+def download_hf_artifact(
+    artifact: HuggingfaceRepoArtifact, models_root: Path, pipeline_id: str
+) -> None:
+    """
+    Download a HuggingFace repository artifact.
+
+    Downloads specific files/directories from a HuggingFace repository.
+
+    Args:
+        artifact: HuggingFace repo artifact
+        models_root: Root directory where models are stored
+        pipeline_id: Pipeline ID to download models for
+    """
+    # Use custom local_dir if specified, otherwise default to repo name
+    if artifact.local_dir:
+        local_dir = models_root / artifact.local_dir
+    else:
+        local_dir = models_root / artifact.repo_id.split("/")[-1]
+
+    # Convert file/directory specifications to glob patterns
+    allow_patterns = []
+    for file in artifact.files:
+        # Add the file/directory itself
+        allow_patterns.append(file)
+        # If it's a directory, also include everything inside it
+        # This handles both "google" and "google/" formats
+        if not file.endswith(("/", ".pt", ".pth", ".safetensors", ".json")):
+            # Likely a directory, add pattern to include its contents
+            allow_patterns.append(f"{file}/*")
+            allow_patterns.append(f"{file}/**/*")
+
+    logger.info(f"Downloading from {artifact.repo_id}: {artifact.files}")
+    download_hf_repo(
+        repo_id=artifact.repo_id,
+        local_dir=local_dir,
+        allow_patterns=allow_patterns,
+        pipeline_id=pipeline_id,
+    )
+
+
+def download_models(pipeline_id: str) -> None:
+    """
+    Download models for a specific pipeline.
+
+    Args:
+        pipeline_id: Pipeline ID to download models for.
+    """
+    from .pipeline_artifacts import PIPELINE_ARTIFACTS
+
+    models_root = ensure_models_dir()
+
+    logger.info(f"Downloading models for pipeline: {pipeline_id}")
+    artifacts = PIPELINE_ARTIFACTS[pipeline_id]
+
+    # Download each artifact (progress tracking starts in set_download_context)
+    for artifact in artifacts:
+        download_artifact(artifact, models_root, pipeline_id)
 
 
 def main():
     """Main entry point for the download_models script."""
+    # Configure logging for standalone execution
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
     parser = argparse.ArgumentParser(
         description="Download models for Daydream Scope pipelines",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Download all pipelines
-  python download_models.py
-
   # Download specific pipeline
   python download_models.py --pipeline streamdiffusionv2
   python download_models.py --pipeline longlive
@@ -347,7 +411,8 @@ Examples:
         "-p",
         type=str,
         default=None,
-        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing', 'personalive'). If not specified, downloads all pipelines.",
+        required=True,
+        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing', 'personalive').",
     )
 
     args = parser.parse_args()

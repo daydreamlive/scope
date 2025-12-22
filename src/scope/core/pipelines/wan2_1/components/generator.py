@@ -29,6 +29,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         model_dir: str | None = None,
         generator_path: str | None = None,
         generator_model_name: str | None = None,
+        **model_kwargs,
     ):
         super().__init__()
 
@@ -42,6 +43,8 @@ class WanDiffusionWrapper(torch.nn.Module):
                 config = json.load(f)
 
             config.update({"local_attn_size": local_attn_size, "sink_size": sink_size})
+            # Merge in additional model-specific kwargs (e.g., vace_in_dim for VACE models)
+            config.update(model_kwargs)
 
             state_dict = load_state_dict(generator_path)
             # Handle case where the dict with required keys is nested under a specific key
@@ -69,7 +72,8 @@ class WanDiffusionWrapper(torch.nn.Module):
             # Move model to CPU first to materialize all buffers and parameters
             self.model = self.model.to_empty(device="cpu")
             # Then load the state dict weights
-            self.model.load_state_dict(state_dict, assign=True)
+            # Use strict=False to allow partial loading (e.g., VACE model with non-VACE checkpoint)
+            self.model.load_state_dict(state_dict, assign=True, strict=False)
 
             # HACK!
             # Reinitialize self.freqs properly on CPU (it's not in state_dict)
@@ -99,11 +103,17 @@ class WanDiffusionWrapper(torch.nn.Module):
                     dim=1,
                 )
         else:
+            from_pretrained_config = {
+                "local_attn_size": local_attn_size,
+                "sink_size": sink_size,
+            }
+            # Merge in additional model-specific kwargs (e.g., vace_in_dim for VACE models)
+            from_pretrained_config.update(model_kwargs)
             self.model = causal_model_cls.from_pretrained(
                 model_path,
                 **filter_causal_model_cls_config(
                     causal_model_cls,
-                    {"local_attn_size": local_attn_size, "sink_size": sink_size},
+                    from_pretrained_config,
                 ),
             )
 
@@ -203,6 +213,8 @@ class WanDiffusionWrapper(torch.nn.Module):
         aug_t: torch.Tensor | None = None,
         cache_start: int | None = None,
         kv_cache_attention_bias: float = 1.0,
+        vace_context: torch.Tensor | None = None,
+        vace_context_scale: float = 1.0,
     ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
 
@@ -226,6 +238,8 @@ class WanDiffusionWrapper(torch.nn.Module):
                 current_end=current_end,
                 cache_start=cache_start,
                 kv_cache_attention_bias=kv_cache_attention_bias,
+                vace_context=vace_context,
+                vace_context_scale=vace_context_scale,
             ).permute(0, 2, 1, 3, 4)
         else:
             if clean_x is not None:
@@ -237,6 +251,8 @@ class WanDiffusionWrapper(torch.nn.Module):
                     seq_len=self.seq_len,
                     clean_x=clean_x.permute(0, 2, 1, 3, 4),
                     aug_t=aug_t,
+                    vace_context=vace_context,
+                    vace_context_scale=vace_context_scale,
                 ).permute(0, 2, 1, 3, 4)
             else:
                 if classify_mode:
@@ -250,6 +266,8 @@ class WanDiffusionWrapper(torch.nn.Module):
                         cls_pred_branch=self._cls_pred_branch,
                         gan_ca_blocks=self._gan_ca_blocks,
                         concat_time_embeddings=concat_time_embeddings,
+                        vace_context=vace_context,
+                        vace_context_scale=vace_context_scale,
                     )
                     flow_pred = flow_pred.permute(0, 2, 1, 3, 4)
                 else:
@@ -258,6 +276,8 @@ class WanDiffusionWrapper(torch.nn.Module):
                         t=input_timestep,
                         context=prompt_embeds,
                         seq_len=self.seq_len,
+                        vace_context=vace_context,
+                        vace_context_scale=vace_context_scale,
                     ).permute(0, 2, 1, 3, 4)
 
         pred_x0 = self._convert_flow_pred_to_x0(

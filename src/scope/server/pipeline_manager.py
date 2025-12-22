@@ -194,8 +194,14 @@ class PipelineManager:
             return True
 
         except Exception as e:
-            error_msg = f"Failed to load pipeline {pipeline_id}: {str(e)}"
-            logger.error(error_msg)
+            from .models_config import get_models_dir
+
+            models_dir = get_models_dir()
+            error_msg = f"Failed to load pipeline {pipeline_id}: {e}"
+            logger.error(
+                f"{error_msg}. If this error persists, consider removing the models "
+                f"directory '{models_dir}' and re-downloading models."
+            )
 
             # Hold lock while updating state with error
             with self._lock:
@@ -206,6 +212,47 @@ class PipelineManager:
                 self._load_params = None
 
             return False
+
+    def _get_vace_checkpoint_path(self) -> str:
+        """Get the path to the VACE module checkpoint.
+
+        Returns:
+            str: Path to VACE module checkpoint file (contains only VACE weights)
+        """
+        from .models_config import get_model_file_path
+
+        return str(
+            get_model_file_path(
+                "WanVideo_comfy/Wan2_1-VACE_module_1_3B_bf16.safetensors"
+            )
+        )
+
+    def _configure_vace(self, config: dict, load_params: dict | None = None) -> None:
+        """Configure VACE support for a pipeline.
+
+        Adds vace_path to config and optionally extracts VACE-specific parameters
+        from load_params (ref_images, vace_context_scale).
+
+        Args:
+            config: Pipeline configuration dict to modify
+            load_params: Optional load parameters containing VACE settings
+        """
+        config["vace_path"] = self._get_vace_checkpoint_path()
+        logger.debug(f"_configure_vace: Using VACE checkpoint at {config['vace_path']}")
+
+        # Extract VACE-specific parameters from load_params if present
+        if load_params:
+            ref_images = load_params.get("ref_images", [])
+            if ref_images:
+                config["ref_images"] = ref_images
+                config["vace_context_scale"] = load_params.get(
+                    "vace_context_scale", 1.0
+                )
+                logger.info(
+                    f"_configure_vace: VACE parameters from load_params: "
+                    f"ref_images count={len(ref_images)}, "
+                    f"vace_context_scale={config.get('vace_context_scale', 1.0)}"
+                )
 
     def _apply_load_params(
         self,
@@ -271,6 +318,28 @@ class PipelineManager:
         self, pipeline_id: str, load_params: dict | None = None
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        # Check if pipeline is in registry
+        pipeline_class = PipelineRegistry.get(pipeline_id)
+
+        # List of built-in pipelines with custom initialization
+        BUILTIN_PIPELINES = {
+            "streamdiffusionv2",
+            "passthrough",
+            "longlive",
+            "krea-realtime-video",
+            "reward-forcing",
+            "personalive",
+        }
+
+        if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
+            # Plugin pipeline - instantiate generically with load_params
+            logger.info(f"Loading plugin pipeline: {pipeline_id}")
+            load_params = load_params or {}
+            return pipeline_class(**load_params)
+
+        # Fall through to built-in pipeline initialization
         if pipeline_id == "streamdiffusionv2":
             from scope.core.pipelines import (
                 StreamDiffusionV2Pipeline,
@@ -297,6 +366,17 @@ class PipelineManager:
                     ),
                 }
             )
+
+            # Configure VACE support if enabled in load_params (default: True)
+            # Note: VACE is not available for StreamDiffusion in video mode (enforced by frontend)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
@@ -344,9 +424,10 @@ class PipelineManager:
 
             from .models_config import get_model_file_path, get_models_dir
 
+            models_dir = get_models_dir()
             config = OmegaConf.create(
                 {
-                    "model_dir": str(get_models_dir()),
+                    "model_dir": str(models_dir),
                     "generator_path": str(
                         get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
                     ),
@@ -363,6 +444,16 @@ class PipelineManager:
                     ),
                 }
             )
+
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
@@ -468,6 +559,16 @@ class PipelineManager:
                     ),
                 }
             )
+
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(

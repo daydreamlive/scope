@@ -12,9 +12,8 @@ import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
+import { usePipelines } from "../hooks/usePipelines";
 import {
-  PIPELINES,
-  getPipelineDefaultMode,
   getDefaultPromptForMode,
   pipelineRequiresReferenceImage,
   pipelineShowsTimeline,
@@ -24,6 +23,7 @@ import type {
   PipelineId,
   LoRAConfig,
   LoraMergeStrategy,
+  DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import {
@@ -55,7 +55,30 @@ function buildLoRAParams(
   };
 }
 
+function getVaceParams(
+  refImages?: string[],
+  vaceContextScale?: number
+):
+  | { vace_ref_images: string[]; vace_context_scale: number }
+  | Record<string, never> {
+  if (refImages && refImages.length > 0) {
+    return {
+      vace_ref_images: refImages,
+      vace_context_scale: vaceContextScale ?? 1.0,
+    };
+  }
+  return {};
+}
+
 export function StreamPage() {
+  // Fetch available pipelines dynamically
+  const { pipelines } = usePipelines();
+
+  // Helper to get default mode for a pipeline
+  const getPipelineDefaultMode = (pipelineId: string): InputMode => {
+    return pipelines?.[pipelineId]?.defaultMode ?? "text";
+  };
+
   // Use the stream state hook for settings management
   const { settings, updateSettings, getDefaults, spoutAvailable } =
     useStreamState();
@@ -100,6 +123,8 @@ export function StreamPage() {
   // Download dialog state
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] =
+    useState<DownloadProgress | null>(null);
   const [pipelineNeedsModels, setPipelineNeedsModels] = useState<string | null>(
     null
   );
@@ -143,6 +168,9 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
   } = useWebRTC();
+
+  // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
+  const isLoading = isDownloading || isPipelineLoading || isConnecting;
 
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
@@ -247,7 +275,7 @@ export function StreamPage() {
     // Clear reference image when switching pipelines
     clearReferenceImage();
 
-    const newPipeline = PIPELINES[pipelineId];
+    const newPipeline = pipelines?.[pipelineId];
     const modeToUse = newPipeline?.defaultMode || "text";
     const currentMode = settings.inputMode || "text";
 
@@ -298,17 +326,27 @@ export function StreamPage() {
     if (!pipelineNeedsModels) return;
 
     setIsDownloading(true);
-    setShowDownloadDialog(false);
+    setDownloadProgress(null);
+    setShowDownloadDialog(true); // Keep dialog open to show progress
 
     try {
       await downloadPipelineModels(pipelineNeedsModels);
 
-      // Start polling to check when download is complete
-      const checkDownloadComplete = async () => {
+      // Enhanced polling with progress updates
+      const checkDownloadProgress = async () => {
         try {
           const status = await checkModelStatus(pipelineNeedsModels);
+
+          // Update progress state
+          if (status.progress) {
+            setDownloadProgress(status.progress);
+          }
+
           if (status.downloaded) {
+            // Download complete
             setIsDownloading(false);
+            setDownloadProgress(null);
+            setShowDownloadDialog(false);
             setPipelineNeedsModels(null);
 
             // Now update the pipeline since download is complete
@@ -321,25 +359,23 @@ export function StreamPage() {
             setSelectedTimelinePrompt(null);
             setExternalSelectedPromptId(null);
 
-            // Get defaults for the pipeline's default mode
-            const newPipeline = PIPELINES[pipelineId];
-            const defaultMode = newPipeline?.defaultMode || "text";
-            const defaults = getDefaults(pipelineId, defaultMode);
-
-            // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
-            setPromptItems([
-              { text: getDefaultPromptForMode(defaultMode), weight: 100 },
-            ]);
+            // Preserve the current input mode that the user selected before download
+            // Only fall back to pipeline's default mode if no mode is currently set
+            const newPipeline = pipelines?.[pipelineId];
+            const currentMode =
+              settings.inputMode || newPipeline?.defaultMode || "text";
+            const defaults = getDefaults(pipelineId, currentMode);
 
             // Use custom video resolution if mode is video and one exists
             const resolution =
-              defaultMode === "video" && customVideoResolution
+              currentMode === "video" && customVideoResolution
                 ? customVideoResolution
                 : { height: defaults.height, width: defaults.width };
 
+            // Only update pipeline-related settings, preserving current input mode and prompts
             updateSettings({
               pipelineId,
-              inputMode: defaultMode,
+              inputMode: currentMode,
               denoisingSteps: defaults.denoisingSteps,
               resolution,
               noiseScale: defaults.noiseScale,
@@ -358,20 +394,23 @@ export function StreamPage() {
               }
             }, 100);
           } else {
-            // Check again in 2 seconds
-            setTimeout(checkDownloadComplete, 2000);
+            setTimeout(checkDownloadProgress, 2000);
           }
         } catch (error) {
           console.error("Error checking download status:", error);
           setIsDownloading(false);
+          setDownloadProgress(null);
+          setShowDownloadDialog(false);
         }
       };
 
-      // Start checking for completion
-      setTimeout(checkDownloadComplete, 5000);
+      // Start checking
+      setTimeout(checkDownloadProgress, 5000);
     } catch (error) {
       console.error("Error downloading models:", error);
       setIsDownloading(false);
+      setDownloadProgress(null);
+      setShowDownloadDialog(false);
     }
   };
 
@@ -458,6 +497,32 @@ export function StreamPage() {
       );
     }
     // Note: Adding/removing LoRAs requires pipeline reload
+  };
+
+  const handleVaceEnabledChange = (enabled: boolean) => {
+    updateSettings({ vaceEnabled: enabled });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
+  const handleRefImagesChange = (images: string[]) => {
+    updateSettings({ refImages: images });
+  };
+
+  const handleSendHints = (imagePaths: string[]) => {
+    // Send all reference images together to backend
+    sendParameterUpdate({
+      vace_ref_images: imagePaths,
+    });
+  };
+
+  const handleVaceContextScaleChange = (scale: number) => {
+    updateSettings({ vaceContextScale: scale });
+    // Send VACE context scale update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        vace_context_scale: scale,
+      });
+    }
   };
 
   const handleResetCache = () => {
@@ -586,9 +651,9 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
-  // Update temporal interpolation defaults when pipeline changes
+  // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
-    const pipeline = PIPELINES[settings.pipelineId];
+    const pipeline = pipelines?.[settings.pipelineId];
     if (pipeline) {
       const defaultMethod =
         pipeline.defaultTemporalInterpolationMethod || "slerp";
@@ -596,8 +661,13 @@ export function StreamPage() {
 
       setTemporalInterpolationMethod(defaultMethod);
       setTransitionSteps(defaultSteps);
+
+      // Clear prompts if pipeline doesn't support them
+      if (pipeline.supportsPrompts === false) {
+        setPromptItems([{ text: "", weight: 1.0 }]);
+      }
     }
-  }, [settings.pipelineId]);
+  }, [settings.pipelineId, pipelines]);
 
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
@@ -642,7 +712,7 @@ export function StreamPage() {
 
     try {
       // Check if models are needed but not downloaded
-      const pipelineInfo = PIPELINES[pipelineIdToUse];
+      const pipelineInfo = pipelines?.[pipelineIdToUse];
       if (pipelineInfo?.requiresModels) {
         try {
           const status = await checkModelStatus(pipelineIdToUse);
@@ -671,13 +741,20 @@ export function StreamPage() {
       // Use settings.resolution if available, otherwise fall back to videoResolution
       const resolution = settings.resolution || videoResolution;
 
+      // Compute VACE enabled state once - enabled by default for text mode on VACE-supporting pipelines
+      const vaceEnabled =
+        settings.vaceEnabled ??
+        (pipelines?.[pipelineIdToUse]?.supportsVACE && currentMode !== "video");
+
       if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
@@ -696,12 +773,14 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
         );
-      } else if (settings.pipelineId === "krea-realtime-video" && resolution) {
+      } else if (pipelineIdToUse === "krea-realtime-video" && resolution) {
         loadParams = {
           height: resolution.height,
           width: resolution.width,
@@ -721,7 +800,9 @@ export function StreamPage() {
           width: resolution.width,
           seed: settings.seed ?? 42,
           quantization: settings.quantization ?? null,
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
@@ -796,6 +877,8 @@ export function StreamPage() {
         kv_cache_attention_bias?: number;
         spout_sender?: { enabled: boolean; name: string };
         spout_receiver?: { enabled: boolean; name: string };
+        vace_ref_images?: string[];
+        vace_context_scale?: number;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -806,7 +889,8 @@ export function StreamPage() {
       // PersonaLive and Passthrough don't use text prompts
       if (
         pipelineIdToUse !== "passthrough" &&
-        pipelineIdToUse !== "personalive"
+        pipelineIdToUse !== "personalive" &&
+        pipelineInfo?.supportsPrompts !== false
       ) {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
@@ -828,6 +912,16 @@ export function StreamPage() {
       if (pipelineIdToUse === "krea-realtime-video") {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
+      }
+
+      // VACE-specific parameters - backend will ignore if not supported
+      const vaceParams = getVaceParams(
+        settings.refImages,
+        settings.vaceContextScale
+      );
+      if ("vace_ref_images" in vaceParams) {
+        initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+        initialParameters.vace_context_scale = vaceParams.vace_context_scale;
       }
 
       // Video mode parameters - applies to all pipelines in video mode
@@ -868,6 +962,7 @@ export function StreamPage() {
         <div className="w-1/5">
           <InputAndControlsPanel
             className="h-full"
+            pipelines={pipelines}
             localStream={localStream}
             isInitializing={isInitializing}
             error={videoSourceError}
@@ -921,6 +1016,15 @@ export function StreamPage() {
             referenceImageUrl={referenceImageUrl}
             onReferenceImageUpload={handleReferenceImageUpload}
             isUploadingReference={isUploadingReference}
+            vaceEnabled={
+              settings.vaceEnabled ??
+              (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                settings.inputMode !== "video")
+            }
+            refImages={settings.refImages || []}
+            onRefImagesChange={handleRefImagesChange}
+            onSendHints={handleSendHints}
+            isLoading={isLoading}
           />
         </div>
 
@@ -1072,7 +1176,7 @@ export function StreamPage() {
                 onTimelinePromptsChange={handleTimelinePromptsChange}
                 onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
                 onTimelinePlayingChange={handleTimelinePlayingChange}
-                isDownloading={isDownloading}
+                isLoading={isLoading}
               />
             </div>
           )}
@@ -1082,10 +1186,11 @@ export function StreamPage() {
         <div className="w-1/5">
           <SettingsPanel
             className="h-full"
+            pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
-            isDownloading={isDownloading}
+            isLoading={isLoading}
             resolution={
               settings.resolution || {
                 height: getDefaults(settings.pipelineId, settings.inputMode)
@@ -1129,6 +1234,14 @@ export function StreamPage() {
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}
+            vaceEnabled={
+              settings.vaceEnabled ??
+              (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                settings.inputMode !== "video")
+            }
+            onVaceEnabledChange={handleVaceEnabledChange}
+            vaceContextScale={settings.vaceContextScale ?? 1.0}
+            onVaceContextScaleChange={handleVaceContextScaleChange}
           />
         </div>
       </div>
@@ -1140,9 +1253,12 @@ export function StreamPage() {
       {pipelineNeedsModels && (
         <DownloadDialog
           open={showDownloadDialog}
+          pipelines={pipelines}
           pipelineId={pipelineNeedsModels as PipelineId}
           onClose={handleDialogClose}
           onDownload={handleDownloadModels}
+          isDownloading={isDownloading}
+          progress={downloadProgress}
         />
       )}
     </div>

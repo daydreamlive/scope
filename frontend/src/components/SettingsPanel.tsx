@@ -19,10 +19,8 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
+import { Info, Minus, Plus, RotateCcw } from "lucide-react";
 import {
-  PIPELINES,
-  pipelineSupportsLoRA,
   pipelineShowsResolutionControl,
   pipelineShowsSeedControl,
   pipelineShowsDenoisingSteps,
@@ -41,16 +39,18 @@ import type {
   SettingsState,
   InputMode,
 } from "../types";
+import type { PipelineInfo } from "../hooks/usePipelines";
 import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
 
 interface SettingsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   pipelineId: PipelineId;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
-  isDownloading?: boolean;
+  isLoading?: boolean;
   // Resolution is required - parent should always provide from schema defaults
   resolution: {
     height: number;
@@ -84,14 +84,20 @@ interface SettingsPanelProps {
   onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
+  // VACE settings
+  vaceEnabled?: boolean;
+  onVaceEnabledChange?: (enabled: boolean) => void;
+  vaceContextScale?: number;
+  onVaceContextScaleChange?: (scale: number) => void;
 }
 
 export function SettingsPanel({
   className = "",
+  pipelines,
   pipelineId,
   onPipelineIdChange,
   isStreaming = false,
-  isDownloading = false,
+  isLoading = false,
   resolution,
   onResolutionChange,
   seed = 42,
@@ -117,12 +123,20 @@ export function SettingsPanel({
   spoutSender,
   onSpoutSenderChange,
   spoutAvailable = false,
+  vaceEnabled = true,
+  onVaceEnabledChange,
+  vaceContextScale = 1.0,
+  onVaceContextScaleChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
     onKvCacheAttentionBiasChange
+  );
+  const vaceContextScaleSlider = useLocalSliderValue(
+    vaceContextScale,
+    onVaceContextScaleChange
   );
 
   // Validation error states
@@ -131,7 +145,7 @@ export function SettingsPanel({
   const [seedError, setSeedError] = useState<string | null>(null);
 
   const handlePipelineIdChange = (value: string) => {
-    if (value in PIPELINES) {
+    if (pipelines && value in pipelines) {
       onPipelineIdChange?.(value as PipelineId);
     }
   };
@@ -225,7 +239,7 @@ export function SettingsPanel({
     handleSeedChange(newValue);
   };
 
-  const currentPipeline = PIPELINES[pipelineId];
+  const currentPipeline = pipelines?.[pipelineId];
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
@@ -238,17 +252,18 @@ export function SettingsPanel({
           <Select
             value={pipelineId}
             onValueChange={handlePipelineIdChange}
-            disabled={isStreaming || isDownloading}
+            disabled={isStreaming || isLoading}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select a pipeline" />
             </SelectTrigger>
             <SelectContent>
-              {Object.keys(PIPELINES).map(id => (
-                <SelectItem key={id} value={id}>
-                  {id}
-                </SelectItem>
-              ))}
+              {pipelines &&
+                Object.keys(pipelines).map(id => (
+                  <SelectItem key={id} value={id}>
+                    {id}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -263,9 +278,7 @@ export function SettingsPanel({
               </div>
 
               <div>
-                {(currentPipeline.about ||
-                  currentPipeline.docsUrl ||
-                  currentPipeline.modified) && (
+                {(currentPipeline.about || currentPipeline.docsUrl) && (
                   <div className="flex items-stretch gap-1 h-6">
                     {currentPipeline.about && (
                       <TooltipProvider>
@@ -280,26 +293,6 @@ export function SettingsPanel({
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs">
                             <p className="text-xs">{currentPipeline.about}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                    {currentPipeline.modified && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="outline"
-                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
-                            >
-                              <Hammer className="h-3.5 w-3.5" />
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>
-                              This pipeline contains modifications based on the
-                              original project.
-                            </p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -326,12 +319,60 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {pipelineSupportsLoRA(pipelineId) && (
+        {/* VACE Toggle */}
+        {currentPipeline?.supportsVACE && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label="VACE"
+                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding. Requires pipeline reload to take effect."
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={vaceEnabled}
+                onPressedChange={onVaceEnabledChange || (() => {})}
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={isStreaming || isLoading}
+              >
+                {vaceEnabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {vaceEnabled && (
+              <div className="rounded-lg border bg-card p-3">
+                <div className="flex items-center gap-2">
+                  <LabelWithTooltip
+                    label="Scale:"
+                    tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
+                    className="text-xs text-muted-foreground w-16"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <SliderWithInput
+                      value={vaceContextScaleSlider.localValue}
+                      onValueChange={vaceContextScaleSlider.handleValueChange}
+                      onValueCommit={vaceContextScaleSlider.handleValueCommit}
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      incrementAmount={0.1}
+                      valueFormatter={vaceContextScaleSlider.formatValue}
+                      inputParser={v => parseFloat(v) || 1.0}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentPipeline?.supportsLoRA && (
           <div className="space-y-4">
             <LoRAManager
               loras={loras}
               onLorasChange={onLorasChange}
-              disabled={isDownloading}
+              disabled={isLoading}
               isStreaming={isStreaming}
               loraMergeStrategy={loraMergeStrategy}
             />

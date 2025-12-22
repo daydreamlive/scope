@@ -1,7 +1,6 @@
 import type { InputMode } from "../types";
 
-// Unified default prompts by mode (not per-pipeline)
-// These are used across all pipelines for consistency
+// Default prompts by mode - used across all pipelines for consistency
 export const DEFAULT_PROMPTS: Record<InputMode, string> = {
   text: "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.",
   video:
@@ -9,6 +8,7 @@ export const DEFAULT_PROMPTS: Record<InputMode, string> = {
 };
 
 // UI capability flags - controls which UI elements are shown for each pipeline
+// NOTE: These are used as fallbacks when pipeline info is not available from backend
 export interface PipelineUICapabilities {
   showTimeline?: boolean; // Show prompt timeline (default: true)
   showPromptInput?: boolean; // Show prompt input controls (default: true)
@@ -32,6 +32,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
   supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
+  supportsVACE?: boolean; // Whether this pipeline supports VACE
   requiresReferenceImage?: boolean; // Whether this pipeline requires a reference image (e.g. PersonaLive)
   referenceImageDescription?: string; // Description of what the reference image is for
 
@@ -43,6 +44,7 @@ export interface PipelineInfo {
   ui?: PipelineUICapabilities;
 }
 
+// Static fallback pipeline info - used when backend is not available
 export const PIPELINES: Record<string, PipelineInfo> = {
   streamdiffusionv2: {
     name: "StreamDiffusionV2",
@@ -56,6 +58,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
     supportsLoRA: true,
+    supportsVACE: true,
     supportedModes: ["text", "video"],
     defaultMode: "video",
     ui: {
@@ -81,6 +84,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
     supportsLoRA: true,
+    supportsVACE: true,
     supportedModes: ["text", "video"],
     defaultMode: "text",
     ui: {
@@ -132,6 +136,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
     supportsLoRA: true,
+    supportsVACE: true,
     supportedModes: ["text", "video"],
     defaultMode: "text",
     ui: {
@@ -188,26 +193,6 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     },
   },
 };
-
-export function pipelineSupportsLoRA(pipelineId: string): boolean {
-  return PIPELINES[pipelineId]?.supportsLoRA === true;
-}
-
-export function pipelineSupportsMode(
-  pipelineId: string,
-  mode: InputMode
-): boolean {
-  return PIPELINES[pipelineId]?.supportedModes?.includes(mode) ?? false;
-}
-
-export function pipelineIsMultiMode(pipelineId: string): boolean {
-  const modes = PIPELINES[pipelineId]?.supportedModes ?? [];
-  return modes.length > 1;
-}
-
-export function getPipelineDefaultMode(pipelineId: string): InputMode {
-  return PIPELINES[pipelineId]?.defaultMode ?? "text";
-}
 
 export function getDefaultPromptForMode(mode: InputMode): string {
   return DEFAULT_PROMPTS[mode];

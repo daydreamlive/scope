@@ -716,11 +716,26 @@ class FrameProcessor:
             if lora_scales is not None:
                 call_params["lora_scales"] = lora_scales
 
-            # Pass video input to pipeline
+            # Route video input based on VACE status
+            # We do not support combining normal V2V (denoising from noisy video latents) and VACE V2V editing
             if video_input is not None:
-                call_params["video"] = video_input
+                vace_enabled = getattr(pipeline, "vace_enabled", False)
+                if vace_enabled:
+                    # VACE V2V editing mode: route to vace_input_frames
+                    call_params["vace_input_frames"] = video_input
+                else:
+                    # Normal V2V mode: route to video
+                    call_params["video"] = video_input
 
             output = pipeline(**call_params)
+
+            # Clear vace_ref_images from parameters after use to prevent sending them on subsequent chunks
+            # vace_ref_images should only be sent when explicitly provided in parameter updates
+            if (
+                "vace_ref_images" in call_params
+                and "vace_ref_images" in self.parameters
+            ):
+                self.parameters.pop("vace_ref_images", None)
 
             # Clear transition when complete (blocks signal completion via _transition_active)
             # Contract: Modular pipelines manage prompts internally; frame_processor manages lifecycle
