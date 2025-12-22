@@ -6,7 +6,21 @@
 
 Scope is a tool for running and customizing real-time, interactive generative AI pipelines and models.
 
-🚧 Here be dragons! This project is currently in **alpha**. 🚧
+🚧 This project is currently in **beta**. 🚧
+
+## Table of Contents
+
+- [Features](#features)
+- [System Requirements](#system-requirements)
+- [Quick Start](#quick-start)
+- [Install](#install)
+  - [Manual Installation](#manual-installation)
+  - [Runpod](#runpod)
+- [First Generation](#first-generation)
+- [Firewalls](#firewalls)
+- [Contributing](#contributing)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ## Features
 
@@ -35,11 +49,21 @@ The following models currently have more restrictive requirements:
 
 **Krea Realtime Video**
 
-- Requires a Nvidia GPU with >= 32 GB VRAM
+- Requires a Nvidia GPU with >= 32 GB VRAM and we recommend > 40GB VRAM GPU in order to get better results
 - At the default resolution of 320x576, a 32 GB VRAM GPU (eg RTX 5090) can run the model with fp8 quantization
 - If you want to use a higher resolution like 480x832, we suggest using a > 40GB VRAM GPU (eg H100, RTX 6000 Pro)
 
 If you do not have access to a GPU with these specs then we recommend installing on [Runpod](#runpod).
+
+## Quick Start
+
+The easiest way to get started with Scope is to download the latest version of the desktop app.
+
+> [!IMPORTANT]
+> The desktop app is only available on Windows right now. See the [Install](#install) section for manual and cloud based install options.
+
+1. Download the `.exe` file under "Assets" from the [releases](https://github.com/daydreamlive/scope/releases) page.
+2. Double click the `.exe` file which runs the installer that will walk you through the installation process.
 
 ## Install
 
