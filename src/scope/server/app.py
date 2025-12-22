@@ -329,6 +329,7 @@ async def set_personalive_reference(
     starting video streaming.
     """
     from io import BytesIO
+
     from PIL import Image
 
     try:

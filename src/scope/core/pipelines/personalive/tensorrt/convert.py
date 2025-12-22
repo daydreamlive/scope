@@ -327,7 +327,7 @@ def main():
     # TRT engine is built at target resolution with dynamic shapes
     onnx_height, onnx_width = 256, 256
 
-    logger.info(f"Converting PersonaLive models to TensorRT")
+    logger.info("Converting PersonaLive models to TensorRT")
     logger.info(f"  Model directory: {args.model_dir}")
     logger.info(f"  Target resolution: {args.height}x{args.width}")
     logger.info(

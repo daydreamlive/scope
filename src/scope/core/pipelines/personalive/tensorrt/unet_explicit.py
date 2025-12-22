@@ -8,11 +8,9 @@ Ported from PersonaLive official implementation:
 PersonaLive/src/models/unet_3d_explicit_reference.py
 """
 
-from collections import OrderedDict
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -51,27 +49,27 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
         self,
-        sample_size: Optional[int] = None,
+        sample_size: int | None = None,
         in_channels: int = 4,
         out_channels: int = 4,
         center_input_sample: bool = False,
         flip_sin_to_cos: bool = True,
         freq_shift: int = 0,
-        down_block_types: Tuple[str] = (
+        down_block_types: tuple[str] = (
             "CrossAttnDownBlock3D",
             "CrossAttnDownBlock3D",
             "CrossAttnDownBlock3D",
             "DownBlock3D",
         ),
         mid_block_type: str = "UNetMidBlock3DCrossAttn",
-        up_block_types: Tuple[str] = (
+        up_block_types: tuple[str] = (
             "UpBlock3D",
             "CrossAttnUpBlock3D",
             "CrossAttnUpBlock3D",
             "CrossAttnUpBlock3D",
         ),
-        only_cross_attention: Union[bool, Tuple[bool]] = False,
-        block_out_channels: Tuple[int] = (320, 640, 1280, 1280),
+        only_cross_attention: bool | tuple[bool] = False,
+        block_out_channels: tuple[int] = (320, 640, 1280, 1280),
         layers_per_block: int = 2,
         downsample_padding: int = 1,
         mid_block_scale_factor: float = 1,
@@ -79,11 +77,11 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
         norm_num_groups: int = 32,
         norm_eps: float = 1e-5,
         cross_attention_dim: int = 1280,
-        attention_head_dim: Union[int, Tuple[int]] = 8,
+        attention_head_dim: int | tuple[int] = 8,
         dual_cross_attention: bool = False,
         use_linear_projection: bool = False,
-        class_embed_type: Optional[str] = None,
-        num_class_embeds: Optional[int] = None,
+        class_embed_type: str | None = None,
+        num_class_embeds: int | None = None,
         upcast_attention: bool = False,
         resnet_time_scale_shift: str = "default",
         use_inflated_groupnorm=False,
@@ -95,12 +93,16 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
         motion_module_decoder_only=False,
         motion_module_type=None,
         temporal_module_type=None,
-        motion_module_kwargs={},
-        temporal_module_kwargs={},
+        motion_module_kwargs=None,
+        temporal_module_kwargs=None,
         unet_use_cross_frame_attention=None,
         unet_use_temporal_attention=None,
     ):
         super().__init__()
+        if motion_module_kwargs is None:
+            motion_module_kwargs = {}
+        if temporal_module_kwargs is None:
+            temporal_module_kwargs = {}
 
         self.sample_size = sample_size
         time_embed_dim = block_out_channels[0] * 4
@@ -283,14 +285,14 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
         )
 
     @property
-    def attn_processors(self) -> Dict[str, AttentionProcessor]:
+    def attn_processors(self) -> dict[str, AttentionProcessor]:
         """Returns attention processors."""
         processors = {}
 
         def fn_recursive_add_processors(
             name: str,
             module: torch.nn.Module,
-            processors: Dict[str, AttentionProcessor],
+            processors: dict[str, AttentionProcessor],
         ):
             if hasattr(module, "set_processor"):
                 processors[f"{name}.processor"] = module.processor
@@ -308,7 +310,7 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
         return processors
 
     def set_attn_processor(
-        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]
+        self, processor: AttentionProcessor | dict[str, AttentionProcessor]
     ):
         """Sets the attention processor."""
         count = len(self.attn_processors.keys())
@@ -335,7 +337,7 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
     def forward(
         self,
         sample: torch.FloatTensor,
-        timestep: Union[torch.Tensor, float, int],
+        timestep: torch.Tensor | float | int,
         encoder_hidden_states: torch.Tensor,
         pose_cond_fea: torch.Tensor,
         # Explicit reference hidden states for TensorRT
@@ -355,13 +357,13 @@ class UNet3DConditionModelExplicit(ModelMixin, ConfigMixin):
         u30: torch.Tensor,
         u31: torch.Tensor,
         u32: torch.Tensor,
-        class_labels: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        down_block_additional_residuals: Optional[Tuple[torch.Tensor]] = None,
-        mid_block_additional_residual: Optional[torch.Tensor] = None,
+        class_labels: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        down_block_additional_residuals: tuple[torch.Tensor] | None = None,
+        mid_block_additional_residual: torch.Tensor | None = None,
         return_dict: bool = True,
         skip_mm: bool = False,
-    ) -> Union[UNet3DConditionOutput, Tuple]:
+    ) -> UNet3DConditionOutput | tuple:
         """Forward pass with explicit reference hidden states.
 
         Args:

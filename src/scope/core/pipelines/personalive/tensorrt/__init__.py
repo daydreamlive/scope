@@ -37,8 +37,8 @@ try:
 
     # Check for pycuda (best performance)
     try:
-        import pycuda.driver  # noqa: F401
         import pycuda.autoinit  # noqa: F401
+        import pycuda.driver  # noqa: F401
 
         PYCUDA_AVAILABLE = True
     except ImportError:

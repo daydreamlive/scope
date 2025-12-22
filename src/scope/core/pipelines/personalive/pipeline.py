@@ -26,7 +26,7 @@ from PIL import Image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 
 from ..interface import Pipeline, Requirements
-from ..process import preprocess_chunk, postprocess_chunk
+from ..process import preprocess_chunk
 from ..schema import PersonaLiveConfig
 from ..utils import load_model_config
 from .components import FaceDetector
@@ -41,7 +41,6 @@ from .modules import (
     draw_keypoints,
     get_boxes,
 )
-
 
 # Profiling utilities
 _profiling_enabled = False
@@ -87,7 +86,7 @@ def _profile_stage(name: str):
 
 # TensorRT support (optional)
 try:
-    from .tensorrt import TRT_AVAILABLE, TRTRunner, get_engine_path, PYCUDA_AVAILABLE
+    from .tensorrt import PYCUDA_AVAILABLE, TRT_AVAILABLE, TRTRunner, get_engine_path
 
     # Import EngineModel if pycuda is available (best performance)
     if PYCUDA_AVAILABLE:
@@ -604,9 +603,9 @@ class PersonaLivePipeline(Pipeline):
         )
 
         for i in range(self.temporal_adaptive_step - 1):
-            l = i * self.temporal_window_size
+            left_idx = i * self.temporal_window_size
             r = (i + 1) * self.temporal_window_size
-            self.latents_pile.append(noisy_latents_first[:, :, l:r])
+            self.latents_pile.append(noisy_latents_first[:, :, left_idx:r])
 
         # For TensorRT, also prefill initial latents (using correct input name 'sample')
         if self.use_tensorrt:
@@ -977,9 +976,9 @@ class PersonaLivePipeline(Pipeline):
                 ref_motion, dri_motion[:, :1], num=12 + 1
             )[:, :-1]
             for i in range(temporal_adaptive_step - 1):
-                l = i * temporal_window_size
+                left_idx = i * temporal_window_size
                 r = (i + 1) * temporal_window_size
-                self.motion_pile.append(init_motion_hidden_states[:, l:r])
+                self.motion_pile.append(init_motion_hidden_states[:, left_idx:r])
             self.motion_pile.append(dri_motion)
 
             self.motion_bank = ref_motion
@@ -996,9 +995,9 @@ class PersonaLivePipeline(Pipeline):
         pose_fea = self.pose_guider(keypoints)
         if self.first_frame:
             for i in range(temporal_adaptive_step):
-                l = i * temporal_window_size
+                left_idx = i * temporal_window_size
                 r = (i + 1) * temporal_window_size
-                self.pose_pile.append(pose_fea[:, :, l:r])
+                self.pose_pile.append(pose_fea[:, :, left_idx:r])
             self.first_frame = False
         else:
             self.pose_pile.append(pose_fea)

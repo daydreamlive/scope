@@ -8,8 +8,8 @@ PersonaLive/src/modeling/framed_models.py
 """
 
 import torch
-from torch import nn
 from einops import rearrange
+from torch import nn
 
 try:
     from polygraphy.backend.trt import Profile

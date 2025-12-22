@@ -1,7 +1,6 @@
 """Face detection component using MediaPipe for PersonaLive pipeline."""
 
 import logging
-from typing import Tuple
 
 import numpy as np
 import torch
@@ -60,7 +59,7 @@ class FaceDetector:
 
     def get_face_bounding_box(
         self, image: np.ndarray, padding_ratio: float = 0.2
-    ) -> Tuple[int, int, int, int] | None:
+    ) -> tuple[int, int, int, int] | None:
         """Get bounding box for the detected face.
 
         Args:
@@ -103,7 +102,7 @@ class FaceDetector:
     def crop_face(
         self,
         image: np.ndarray,
-        target_size: Tuple[int, int] = (512, 512),
+        target_size: tuple[int, int] = (512, 512),
         padding_ratio: float = 0.2,
     ) -> np.ndarray | None:
         """Crop and resize face from image.
@@ -131,7 +130,7 @@ class FaceDetector:
 
         return np.array(face_pil)
 
-    def crop_face_from_pil(self, pil_image, target_size: Tuple[int, int] = (512, 512)):
+    def crop_face_from_pil(self, pil_image, target_size: tuple[int, int] = (512, 512)):
         """Crop face from a PIL image.
 
         Args:
@@ -154,8 +153,8 @@ class FaceDetector:
     def crop_face_tensor(
         self,
         image_tensor: torch.Tensor,
-        boxes: Tuple[int, int, int, int],
-        target_size: Tuple[int, int] = (224, 224),
+        boxes: tuple[int, int, int, int],
+        target_size: tuple[int, int] = (224, 224),
     ) -> torch.Tensor:
         """Crop face region from a tensor using precomputed box.
 
@@ -196,3 +195,5 @@ class FaceDetector:
 
     def __del__(self):
         self.close()
+
+

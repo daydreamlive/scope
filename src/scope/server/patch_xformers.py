@@ -8,8 +8,6 @@ from pathlib import Path
 def find_xformers_flash_file() -> Path | None:
     """Find the xformers flash.py file in the installed package."""
     try:
-        import xformers
-
         # Get the package path
         spec = importlib.util.find_spec("xformers")
         if spec is None or spec.origin is None:

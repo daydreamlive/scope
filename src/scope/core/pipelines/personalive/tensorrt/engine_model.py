@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 # Check for TensorRT and pycuda availability
 PYCUDA_TRT_AVAILABLE = False
 try:
-    import tensorrt as trt
-    import pycuda.driver as cuda
     import pycuda.autoinit  # noqa: F401 - Required for pycuda initialization
+    import pycuda.driver as cuda
+    import tensorrt as trt
 
     PYCUDA_TRT_AVAILABLE = True
     TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
@@ -185,7 +185,7 @@ class EngineModel:
 
         except Exception as e:
             self.ctx.pop()
-            raise RuntimeError(f"Failed to initialize TensorRT engine: {e}")
+            raise RuntimeError(f"Failed to initialize TensorRT engine: {e}") from e
 
         self.ctx.pop()
 

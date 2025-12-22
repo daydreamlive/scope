@@ -8,7 +8,6 @@ Based on: https://github.com/NVIDIA/TensorRT/blob/main/demo/Diffusion/utilities.
 
 import gc
 import logging
-import os
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -108,8 +107,8 @@ def optimize_onnx(
     """
     try:
         import onnx
-    except ImportError:
-        raise RuntimeError("onnx package required. Install with: pip install onnx")
+    except ImportError as e:
+        raise RuntimeError("onnx package required. Install with: pip install onnx") from e
 
     onnx_path = Path(onnx_path)
     onnx_opt_path = Path(onnx_opt_path)

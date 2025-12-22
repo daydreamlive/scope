@@ -8,7 +8,6 @@ Uses CUDA device buffers (DeviceView) to avoid CPU-GPU memory transfers.
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
@@ -19,7 +18,6 @@ logger = logging.getLogger(__name__)
 TRT_AVAILABLE = False
 CUDA_BUFFERS_AVAILABLE = False
 try:
-    import tensorrt as trt
     from polygraphy.backend.common import BytesFromPath
     from polygraphy.backend.trt import EngineFromBytes, TrtRunner
 
