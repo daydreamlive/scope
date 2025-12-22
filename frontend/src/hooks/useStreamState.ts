@@ -19,9 +19,9 @@ import { getPipelineDefaultMode } from "../data/pipelines";
 // Resolution and denoising steps use conservative values; mode-specific
 // values are derived from pipelines.ts when possible.
 const BASE_FALLBACK = {
-  height: 512,
-  width: 512,
-  denoisingSteps: [750, 250] as number[],
+  height: 320,
+  width: 576,
+  denoisingSteps: [1000, 750, 500, 250] as number[],
   seed: 42,
 };
 
@@ -137,10 +137,10 @@ export function useStreamState() {
   );
 
   // Get initial defaults (use fallback since schemas haven't loaded yet)
-  const initialDefaults = getFallbackDefaults("streamdiffusionv2");
+  const initialDefaults = getFallbackDefaults("longlive");
 
   const [settings, setSettings] = useState<SettingsState>({
-    pipelineId: "streamdiffusionv2",
+    pipelineId: "longlive",
     resolution: {
       height: initialDefaults.height,
       width: initialDefaults.width,
