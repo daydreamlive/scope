@@ -294,37 +294,35 @@ export function InputAndControlsPanel({
         )}
 
         {/* VACE Reference Images - only show when VACE is enabled */}
-        {/* VACE available for LongLive and StreamDiffusion */}
-        {vaceEnabled &&
-          (pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
-            <div>
-              <ImageManager
-                images={refImages}
-                onImagesChange={onRefImagesChange || (() => {})}
-                disabled={isDownloading}
-              />
-              {onSendHints && refImages && refImages.length > 0 && (
-                <div className="flex items-center justify-end mt-2">
-                  <Button
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      onSendHints(refImages.filter(img => img));
-                    }}
-                    disabled={isDownloading || !isStreaming}
-                    size="sm"
-                    className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={
-                      !isStreaming
-                        ? "Start streaming to send hints"
-                        : "Submit all reference images"
-                    }
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
+        {vaceEnabled && (
+          <div>
+            <ImageManager
+              images={refImages}
+              onImagesChange={onRefImagesChange || (() => {})}
+              disabled={isDownloading}
+            />
+            {onSendHints && refImages && refImages.length > 0 && (
+              <div className="flex items-center justify-end mt-2">
+                <Button
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    onSendHints(refImages.filter(img => img));
+                  }}
+                  disabled={isDownloading || !isStreaming}
+                  size="sm"
+                  className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !isStreaming
+                      ? "Start streaming to send hints"
+                      : "Submit all reference images"
+                  }
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         <div>
           {(() => {

@@ -20,7 +20,11 @@ import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
+import {
+  PIPELINES,
+  pipelineSupportsLoRA,
+  pipelineSupportsVACE,
+} from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
@@ -333,8 +337,7 @@ export function SettingsPanel({
         )}
 
         {/* VACE Toggle */}
-        {/* VACE available for LongLive and StreamDiffusion */}
-        {(pipelineId === "longlive" || pipelineId === "streamdiffusionv2") && (
+        {pipelineSupportsVACE(pipelineId) && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip

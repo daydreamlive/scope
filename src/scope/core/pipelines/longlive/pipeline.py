@@ -198,17 +198,6 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
             if self.state.get("manage_cache", True):
                 kwargs["init_cache"] = True
 
-        # Log vace_ref_images before setting into state
-        if "vace_ref_images" in kwargs:
-            ref_images = kwargs.get("vace_ref_images", [])
-            logger.info(
-                f"LongLivePipeline._generate: Setting vace_ref_images into state: "
-                f"count={len(ref_images) if ref_images else 0}, "
-                f"paths={ref_images if ref_images else 'None'}"
-            )
-        else:
-            logger.debug("LongLivePipeline._generate: No ref_images in kwargs")
-
         for k, v in kwargs.items():
             self.state.set(k, v)
 

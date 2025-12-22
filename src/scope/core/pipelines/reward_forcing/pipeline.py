@@ -19,6 +19,7 @@ from ..schema import RewardForcingConfig
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.vace.mixin import VACEEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import RewardForcingBlocks
 from .modules.causal_model import CausalWanModel
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
+class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return RewardForcingConfig
@@ -52,7 +53,9 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-1.3B")
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
 
-        # Load generator
+        # Load generator with VACE support via upfront loading
+        # Strategy: Load base model, wrap with VACE (if enabled), then apply LoRA
+        # (VACE loaded before LoRA to ensure correct wrapper ordering)
         start = time.time()
         generator = WanDiffusionWrapper(
             CausalWanModel,
@@ -63,6 +66,12 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
         )
 
         print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+
+        # Apply VACE wrapper if vace_path is configured (upfront loading)
+        # This must happen before LoRA to get correct ordering: LoRA -> VACE -> Base
+        generator.model = self._init_vace(
+            config, generator.model, device=device, dtype=dtype
+        )
 
         # Initialize any additional, user-configured LoRA adapters via shared manager.
         generator.model = self._init_loras(config, generator.model)
@@ -174,6 +183,10 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline):
         # Clear video from state if not provided to prevent stale video data
         if "video" not in kwargs:
             self.state.set("video", None)
+
+        # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "vace_ref_images" not in kwargs:
+            self.state.set("vace_ref_images", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

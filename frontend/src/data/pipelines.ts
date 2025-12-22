@@ -18,6 +18,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationMethod?: "linear" | "slerp"; // Default method for temporal interpolation
   defaultTemporalInterpolationSteps?: number; // Default number of steps for temporal interpolation
   supportsLoRA?: boolean; // Whether this pipeline supports LoRA adapters
+  supportsVACE?: boolean; // Whether this pipeline supports VACE (Video All-In-One Creation and Editing)
 
   // Multi-mode support
   supportedModes: InputMode[];
@@ -37,6 +38,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
     supportsLoRA: true,
+    supportsVACE: true,
     // Multi-mode support
     supportedModes: ["text", "video"],
     defaultMode: "video",
@@ -53,6 +55,7 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
     supportsLoRA: true,
+    supportsVACE: true,
     // Multi-mode support
     supportedModes: ["text", "video"],
     defaultMode: "text",
@@ -78,13 +81,14 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     docsUrl:
       "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/reward_forcing/docs/usage.md",
     about:
-      "A streaming pipeline and autoregressive video diffusion model from ZJU, Ant Group, SIAS-ZJU, HUST and SJTU. The model is trained with Rewarded Distribution Matching Distillation using Wan2.1 1.3b as the base model.",
+      "A streaming pipeline and autoregressive video diffusion model from ZJU, Ant Group, SIAS-ZJU, HUST and SJTU. The model is trained with Rewarded Distribution Matching Distillation using Wan2.1 1.3b as the base model. Includes VACE (All-In-One Video Creation and Editing) for reference image conditioning and structural guidance (depth, flow, pose).",
     modified: true,
     estimatedVram: 20,
     requiresModels: true,
     defaultTemporalInterpolationMethod: "slerp",
     defaultTemporalInterpolationSteps: 0,
     supportsLoRA: true,
+    supportsVACE: true,
     // Multi-mode support
     supportedModes: ["text", "video"],
     defaultMode: "text",
@@ -102,6 +106,10 @@ export const PIPELINES: Record<string, PipelineInfo> = {
 
 export function pipelineSupportsLoRA(pipelineId: string): boolean {
   return PIPELINES[pipelineId]?.supportsLoRA === true;
+}
+
+export function pipelineSupportsVACE(pipelineId: string): boolean {
+  return PIPELINES[pipelineId]?.supportsVACE === true;
 }
 
 export function pipelineSupportsMode(
