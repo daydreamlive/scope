@@ -16,8 +16,8 @@ UMT5_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
 )
 
 VACE_ARTIFACT = HuggingfaceRepoArtifact(
-    repo_id="Wan-AI/Wan2.1-VACE-1.3B",
-    files=["diffusion_pytorch_model.safetensors"],
+    repo_id="Kijai/WanVideo_comfy",
+    files=["Wan2_1-VACE_module_1_3B_bf16.safetensors"],
 )
 
 # Pipeline-specific artifacts

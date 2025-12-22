@@ -1,9 +1,11 @@
 """
-Utility for selectively loading VACE-specific weights into a Wan2.1 based causal model.
+Utility for loading VACE-specific weights into a Wan2.1 based causal model.
 
-This module extracts only VACE components (vace_blocks, vace_patch_embedding)
-from a VACE checkpoint and loads them into a CausalVaceWanModel that's already
-been initialized with Wan2.1 based causal model weights.
+This module loads VACE components (vace_blocks, vace_patch_embedding) from either:
+- A VACE-only module file (e.g., Wan2_1-VACE_module_1_3B_bf16.safetensors) - loaded directly
+- A full VACE checkpoint (e.g., Wan2.1-VACE-1.3B) - filtered to extract only VACE weights
+
+The function auto-detects the checkpoint type and handles both cases.
 """
 
 import logging
@@ -15,19 +17,21 @@ logger = logging.getLogger(__name__)
 
 def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
     """
-    load_vace_weights_only: Load only VACE-specific weights from checkpoint into model.
+    Load VACE-specific weights from checkpoint into model.
 
-    Extracts and loads:
+    Loads:
     - vace_blocks.* (VACE attention blocks for hint generation)
     - vace_patch_embedding.* (Conv3D for encoding reference images)
 
-    Skips all base model weights since those come from the causal model.
+    Auto-detects checkpoint type:
+    - VACE-only module: All keys are VACE keys, loaded directly
+    - Full checkpoint: Contains base model weights, filtered to VACE keys only
 
     Args:
         model: CausalVaceWanModel instance (already has causal model base weights)
                 May be wrapped by PEFT, in which case we unwrap to access base_model.
                 Typically called before PEFT wrapping to avoid unwrapping issues.
-        vace_checkpoint_path: Path to VACE safetensors checkpoint
+        vace_checkpoint_path: Path to VACE safetensors checkpoint (module or full)
 
     Returns:
         None (modifies model in-place)
@@ -96,29 +100,46 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
                 f"load_vace_weights_only: Model has vace_patch_embedding: {hasattr(model, 'vace_patch_embedding')}"
             )
 
-    # Load full VACE checkpoint
+    # Load VACE checkpoint
     state_dict = load_state_dict(vace_checkpoint_path)
 
-    # Filter to only VACE-specific keys
-    vace_keys = [
+    # VACE-specific key prefixes
+    vace_prefixes = [
         "vace_blocks.",
         "vace_patch_embedding.",
     ]
 
-    vace_state_dict = {}
-    for key, value in state_dict.items():
-        if any(key.startswith(prefix) for prefix in vace_keys):
-            vace_state_dict[key] = value
-
-    if not vace_state_dict:
-        raise ValueError(
-            f"load_vace_weights_only: No VACE-specific weights found in checkpoint. "
-            f"Expected keys starting with: {vace_keys}"
-        )
-
-    logger.debug(
-        f"load_vace_weights_only: Found {len(vace_state_dict)} VACE-specific parameters"
+    # Check if this is a VACE-only module (all keys are VACE keys) or a full checkpoint
+    all_keys_are_vace = all(
+        any(key.startswith(prefix) for prefix in vace_prefixes)
+        for key in state_dict.keys()
     )
+
+    if all_keys_are_vace:
+        # VACE-only module file - use directly without filtering
+        logger.debug(
+            f"load_vace_weights_only: Detected VACE-only module with {len(state_dict)} parameters, loading directly"
+        )
+        vace_state_dict = state_dict
+    else:
+        # Full checkpoint - filter to only VACE-specific keys
+        logger.debug(
+            "load_vace_weights_only: Detected full checkpoint, filtering for VACE keys"
+        )
+        vace_state_dict = {}
+        for key, value in state_dict.items():
+            if any(key.startswith(prefix) for prefix in vace_prefixes):
+                vace_state_dict[key] = value
+
+        if not vace_state_dict:
+            raise ValueError(
+                f"load_vace_weights_only: No VACE-specific weights found in checkpoint. "
+                f"Expected keys starting with: {vace_prefixes}"
+            )
+
+        logger.debug(
+            f"load_vace_weights_only: Filtered to {len(vace_state_dict)} VACE-specific parameters"
+        )
 
     # Check shapes before loading
     if "vace_patch_embedding.weight" in vace_state_dict:
@@ -143,7 +164,7 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
 
     # Filter out expected missing keys (all the base model weights)
     actual_missing = [
-        k for k in missing_keys if any(k.startswith(prefix) for prefix in vace_keys)
+        k for k in missing_keys if any(k.startswith(prefix) for prefix in vace_prefixes)
     ]
 
     if actual_missing:
