@@ -15,11 +15,17 @@ UMT5_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
     files=["umt5-xxl-enc-fp8_e4m3fn.safetensors"],
 )
 
+VACE_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="Wan-AI/Wan2.1-VACE-1.3B",
+    files=["diffusion_pytorch_model.safetensors"],
+)
+
 # Pipeline-specific artifacts
 PIPELINE_ARTIFACTS = {
     "streamdiffusionv2": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        VACE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="jerryfeng/StreamDiffusionV2",
             files=["wan_causal_dmd_v2v/model.pt"],
@@ -28,6 +34,7 @@ PIPELINE_ARTIFACTS = {
     "longlive": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        VACE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="Efficient-Large-Model/LongLive-1.3B",
             files=["models/longlive_base.pt", "models/lora.pt"],
@@ -48,6 +55,7 @@ PIPELINE_ARTIFACTS = {
     "reward-forcing": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        VACE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="JaydenLu666/Reward-Forcing-T2V-1.3B",
             files=["rewardforcing.pt"],
