@@ -1,45 +1,87 @@
-# VACE (Video All-in-One Creation and Editing)
+# Using VACE (Video All-in-One Creation and Editing)
 
-VACE adds reference image conditioning to LongLive and StreamDiffusionV2 pipelines.
+A subset of the pipeline in Scope support using a modified version of [VACE](https://ali-vilab.github.io/VACE-Page/) for additional video creation and editing tasks.
 
-## Features
+> [!IMPORTANT]
+> VACE support is still experimental and the implementation is incomplete.
 
-The web interface supports:
-- **Reference Image Conditioning**: Upload reference images to guide video generation
+## Compatibility
 
-The pipelines are also capable of:
-- **Image Guidance with Depth Maps**: Structural control using depth information
-- **Inpainting**: Masked video-to-video generation
+At the moment, only the following Wan2.1 1.3B based pipelines support VACE tasks:
 
-## Usage
+- `longlive`
+- `reward-forcing`
 
-### Web Interface
+`streamdiffusionv2` also supports VACE capabilities, but beware that the quality is poor right now.
 
-1. **Load Pipeline**: Select LongLive or StreamDiffusionV2
-2. **Upload Reference Images**: Use the image manager in the controls panel
-3. **Adjust VACE Scale**: Control conditioning strength (0.0-2.0, default 1.0)
-4. **Generate**: Start streaming with reference image guidance
+We're investigating support for Wan2.1 14B based pipepline.
 
-### Advanced Usage (Python API)
+## Supported Features
 
-For depth guidance and inpainting examples, see:
-- [`src/scope/core/pipelines/longlive/test_vace.py`](../src/scope/core/pipelines/longlive/test_vace.py)
+These features are currently supported:
 
-This test script demonstrates:
-- R2V (Reference-to-Video) generation
-- Depth guidance using depth maps
-- Inpainting with masks
-- Combining multiple modes (R2V + Depth, R2V + Inpainting, etc.)
+- Reference-to-video (R2V) using reference images to guide generation.
+- Video-to-video (VACE V2V) editing using control videos (eg. depth, pose, scribble, optical flow, etc.) to guide generation.
+- Animate Anything (R2V + VACE V2V) where a reference image is used to define the character and style while the control video provides the structure.
 
-## Parameters
+## Unsupported Features
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `ref_images` | `list[str]` | `None` | List of reference image paths |
-| `vace_context_scale` | `float` | `1.0` | Conditioning strength (0.0-2.0) |
+These features are not supported right now, but we're investigating them:
 
-Higher `vace_context_scale` values make reference images more influential. Lower values allow more creative freedom while maintaining general guidance.
+- Multiple reference images for R2V
+- Built-in real-time preprocessing of source videos into control videos (eg. real-time depth estimation)
+- Masked video-to-video (MV2V) editing which enables downstream tasks like inpainting, outpainting, video extension (first frame, last frame)
+- More complex tasks supported in the original VACE project such as Swap Anything, Reference Anything, Move ANything, Expand Anything
 
-## Model Requirements
+## Enabling VACE
 
-VACE requires the `Wan2.1-VACE-1.3B` model, which is automatically downloaded when you download LongLive or StreamDiffusionV2 models.
+Make sure that VACE is toggled to "On" in the Settings panel.
+
+<img width="529" height="716" alt="Screenshot 2025-12-22 114746" src="https://github.com/user-attachments/assets/4a3831d4-a36e-429e-ad55-f34865f672d0" />
+
+## R2V
+
+Click "Add Image" under "Reference Images".
+
+<img width="525" height="714" alt="Screenshot 2025-12-22 114718" src="https://github.com/user-attachments/assets/74901190-1ea2-4bbd-b574-caf7c50a2cbf" />
+
+Use the media picker to either upload an image or select an image from your asset collection (previously uploaded images).
+
+<img width="815" height="606" alt="Screenshot 2025-12-22 114729" src="https://github.com/user-attachments/assets/37091a2d-bc02-4ef5-b265-f3db566570e4" />
+
+Then, you should see a preview of the selected reference image.
+
+<img width="534" height="764" alt="Screenshot 2025-12-22 114738" src="https://github.com/user-attachments/assets/49807633-11e0-425e-a9d0-5b53ecba1302" />
+
+> [!NOTE]
+> Only a single reference image is supported right now.
+
+## VACE V2V
+
+Make sure that you have "Video" selected under "Input Mode" in the "Input & Controls Panel".
+
+Upload a control video (eg. depth, pose, scribble, optical flow, etc.).
+
+An example control video (pose) that can be used:
+
+https://github.com/user-attachments/assets/9b2b1619-dbe9-4e46-9cfa-5bf304cc161f
+
+<img width="516" height="1063" alt="Screenshot 2025-12-22 115520" src="https://github.com/user-attachments/assets/65210820-00af-4592-b314-5cb4aa991b88" />
+
+## Animate Anything
+
+R2V and VACE V2V can be combined for an "Animate Anything" task.
+
+In this example, we're using this reference image with the `longlive` pipeline:
+
+<img width="826" height="481" alt="Screenshot 2025-12-19 172128" src="https://github.com/user-attachments/assets/a08ca39c-ea15-43c5-9e49-10c5b8823872" />
+
+https://github.com/user-attachments/assets/da126478-1f7f-4564-9fcb-c46a28977f3c
+
+In this example, we also use the [Wan2.1 1.3B Arcane Jinx LoRA](https://civitai.com/models/1332383/wan-lora-arcane-jinx-v1-wan-13b) as described in the [LoRA guide](./lora.md) to improve the character and style consistency in the generation:
+
+https://github.com/user-attachments/assets/ed65e627-3a48-4d54-9715-d25cb79655ed
+
+## API Usage
+
+*Coming soon*
