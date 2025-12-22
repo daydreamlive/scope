@@ -72,6 +72,5 @@ def validate_resolution(
         raise ValueError(
             f"Invalid resolution {width}×{height}. "
             f"Both width and height must be divisible by {scale_factor} "
-            f"(VAE downsample factor 8 × patch embedding downsample factor 2 = {scale_factor}). "
             f"Please adjust to a valid resolution, e.g., {adjusted_width}×{adjusted_height}."
         )
