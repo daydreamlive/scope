@@ -29,6 +29,8 @@ Scope is a tool for running and customizing real-time, interactive generative AI
   - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video, video-to-video)
   - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
   - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
+- [LoRAs](./docs/lora.md) to customize concepts and styles used with autoregressive video diffusion models
+- [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide autoregressive video diffusion models
 - WebRTC real-time streaming
 - [Spout](./docs/spout.md) (Windows only) real-time video sharing with local applications
 - Low latency async video processing pipelines
@@ -153,6 +155,7 @@ Examples with importable timeline files can be found here:
 After your first generation you can:
 
 - Use [LoRAs](./docs/lora.md) to customize the concepts and styles used in your generations.
+- Use [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide generations.
 - Use [Spout](./docs/spout.md) (Windows only) to share real-time video between Scope and other local applications.
 
 ## Firewalls
