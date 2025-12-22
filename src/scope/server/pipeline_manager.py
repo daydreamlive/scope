@@ -214,15 +214,17 @@ class PipelineManager:
             return False
 
     def _get_vace_checkpoint_path(self) -> str:
-        """Get the path to the VACE checkpoint.
+        """Get the path to the VACE module checkpoint.
 
         Returns:
-            str: Path to VACE checkpoint file
+            str: Path to VACE module checkpoint file (contains only VACE weights)
         """
         from .models_config import get_model_file_path
 
         return str(
-            get_model_file_path("Wan2.1-VACE-1.3B/diffusion_pytorch_model.safetensors")
+            get_model_file_path(
+                "WanVideo_comfy/Wan2_1-VACE_module_1_3B_bf16.safetensors"
+            )
         )
 
     def _configure_vace(self, config: dict, load_params: dict | None = None) -> None:
