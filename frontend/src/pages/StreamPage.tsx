@@ -337,25 +337,23 @@ export function StreamPage() {
             setSelectedTimelinePrompt(null);
             setExternalSelectedPromptId(null);
 
-            // Get defaults for the pipeline's default mode
+            // Preserve the current input mode that the user selected before download
+            // Only fall back to pipeline's default mode if no mode is currently set
             const newPipeline = PIPELINES[pipelineId];
-            const defaultMode = newPipeline?.defaultMode || "text";
-            const defaults = getDefaults(pipelineId, defaultMode);
-
-            // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
-            setPromptItems([
-              { text: getDefaultPromptForMode(defaultMode), weight: 100 },
-            ]);
+            const currentMode =
+              settings.inputMode || newPipeline?.defaultMode || "text";
+            const defaults = getDefaults(pipelineId, currentMode);
 
             // Use custom video resolution if mode is video and one exists
             const resolution =
-              defaultMode === "video" && customVideoResolution
+              currentMode === "video" && customVideoResolution
                 ? customVideoResolution
                 : { height: defaults.height, width: defaults.width };
 
+            // Only update pipeline-related settings, preserving current input mode and prompts
             updateSettings({
               pipelineId,
-              inputMode: defaultMode,
+              inputMode: currentMode,
               denoisingSteps: defaults.denoisingSteps,
               resolution,
               noiseScale: defaults.noiseScale,
