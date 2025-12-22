@@ -338,7 +338,11 @@ def download_hf_artifact(
         models_root: Root directory where models are stored
         pipeline_id: Pipeline ID to download models for
     """
-    local_dir = models_root / artifact.repo_id.split("/")[-1]
+    # Use custom local_dir if specified, otherwise default to repo name
+    if artifact.local_dir:
+        local_dir = models_root / artifact.local_dir
+    else:
+        local_dir = models_root / artifact.repo_id.split("/")[-1]
 
     # Convert file/directory specifications to glob patterns
     allow_patterns = []
@@ -398,6 +402,7 @@ Examples:
   python download_models.py --pipeline longlive
   python download_models.py --pipeline krea-realtime-video
   python download_models.py --pipeline reward-forcing
+  python download_models.py --pipeline personalive
   python download_models.py -p streamdiffusionv2
         """,
     )
@@ -407,7 +412,7 @@ Examples:
         type=str,
         default=None,
         required=True,
-        help="Pipeline ID (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing').",
+        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing', 'personalive').",
     )
 
     args = parser.parse_args()

@@ -378,6 +378,42 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
+class PersonaLiveLoadParams(PipelineLoadParams):
+    """Load parameters for PersonaLive portrait animation pipeline.
+
+    Note: PersonaLive is now a plugin (scope-personalive).
+    A reference image must be uploaded via /api/v1/personalive/reference
+    before the pipeline can process driving video frames.
+    """
+
+    height: int = Field(
+        default=512,
+        description="Target video height",
+        ge=256,
+        le=1024,
+    )
+    width: int = Field(
+        default=512,
+        description="Target video width",
+        ge=256,
+        le=1024,
+    )
+    seed: int = Field(
+        default=42,
+        description="Random seed for generation",
+        ge=0,
+    )
+
+
+class PersonaLiveReferenceResponse(BaseModel):
+    """Response after setting PersonaLive reference image."""
+
+    success: bool = Field(
+        ..., description="Whether the reference image was set successfully"
+    )
+    message: str = Field(..., description="Status message")
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -389,6 +425,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | PersonaLiveLoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 

@@ -110,11 +110,15 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
 
     required_files = []
     for artifact in artifacts:
-        local_dir_name = artifact.repo_id.split("/")[-1]
+        # Use custom local_dir if specified, otherwise default to repo name
+        if artifact.local_dir:
+            local_dir = artifact.local_dir
+        else:
+            local_dir = artifact.repo_id.split("/")[-1]
 
         # Add each file from the artifact's files list
         for file in artifact.files:
-            required_files.append(models_dir / local_dir_name / file)
+            required_files.append(models_dir / local_dir / file)
 
     return required_files
 

@@ -516,6 +516,9 @@ class PassthroughConfig(BasePipelineConfig):
     )
 
 
+# NOTE: PersonaLiveConfig has been moved to the scope-personalive plugin
+
+
 # Registry of pipeline config classes
 PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "longlive": LongLiveConfig,

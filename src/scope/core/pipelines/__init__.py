@@ -1,4 +1,7 @@
-"""Pipelines package."""
+"""Pipelines package.
+
+NOTE: PersonaLive has been moved to the scope-personalive plugin.
+"""
 
 
 def __getattr__(name):

@@ -20,6 +20,15 @@ import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Info, Minus, Plus, RotateCcw } from "lucide-react";
+import {
+  pipelineShowsResolutionControl,
+  pipelineShowsSeedControl,
+  pipelineShowsDenoisingSteps,
+  pipelineShowsCacheManagement,
+  pipelineShowsQuantization,
+  pipelineShowsKvCacheAttentionBias,
+  pipelineShowsNoiseControls,
+} from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
@@ -70,8 +79,6 @@ interface SettingsPanelProps {
   loraMergeStrategy?: LoraMergeStrategy;
   // Input mode for conditional rendering of noise controls
   inputMode?: InputMode;
-  // Whether this pipeline supports noise controls in video mode (schema-derived)
-  supportsNoiseControls?: boolean;
   // Spout settings
   spoutSender?: SettingsState["spoutSender"];
   onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
@@ -113,7 +120,6 @@ export function SettingsPanel({
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
   inputMode,
-  supportsNoiseControls = false,
   spoutSender,
   onSpoutSenderChange,
   spoutAvailable = false,
@@ -373,231 +379,221 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="space-y-2">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <LabelWithTooltip
-                      label={PARAMETER_METADATA.height.label}
-                      tooltip={PARAMETER_METADATA.height.tooltip}
-                      className="text-sm text-foreground w-14"
-                    />
-                    <div
-                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${heightError ? "border-red-500" : ""}`}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={() => decrementResolution("height")}
-                        disabled={isStreaming}
-                      >
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                      <Input
-                        type="number"
-                        value={resolution.height}
-                        onChange={e => {
-                          const value = parseInt(e.target.value);
-                          if (!isNaN(value)) {
-                            handleResolutionChange("height", value);
-                          }
-                        }}
-                        disabled={isStreaming}
-                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        min={MIN_DIMENSION}
-                        max={2048}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={() => incrementResolution("height")}
-                        disabled={isStreaming}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  {heightError && (
-                    <p className="text-xs text-red-500 ml-16">{heightError}</p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <LabelWithTooltip
-                      label={PARAMETER_METADATA.width.label}
-                      tooltip={PARAMETER_METADATA.width.tooltip}
-                      className="text-sm text-foreground w-14"
-                    />
-                    <div
-                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${widthError ? "border-red-500" : ""}`}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={() => decrementResolution("width")}
-                        disabled={isStreaming}
-                      >
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                      <Input
-                        type="number"
-                        value={resolution.width}
-                        onChange={e => {
-                          const value = parseInt(e.target.value);
-                          if (!isNaN(value)) {
-                            handleResolutionChange("width", value);
-                          }
-                        }}
-                        disabled={isStreaming}
-                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        min={MIN_DIMENSION}
-                        max={2048}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={() => incrementResolution("width")}
-                        disabled={isStreaming}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  {widthError && (
-                    <p className="text-xs text-red-500 ml-16">{widthError}</p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <LabelWithTooltip
-                      label={PARAMETER_METADATA.seed.label}
-                      tooltip={PARAMETER_METADATA.seed.tooltip}
-                      className="text-sm text-foreground w-14"
-                    />
-                    <div
-                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${seedError ? "border-red-500" : ""}`}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={decrementSeed}
-                        disabled={isStreaming}
-                      >
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                      <Input
-                        type="number"
-                        value={seed}
-                        onChange={e => {
-                          const value = parseInt(e.target.value);
-                          if (!isNaN(value)) {
-                            handleSeedChange(value);
-                          }
-                        }}
-                        disabled={isStreaming}
-                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        min={0}
-                        max={2147483647}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                        onClick={incrementSeed}
-                        disabled={isStreaming}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  {seedError && (
-                    <p className="text-xs text-red-500 ml-16">{seedError}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="space-y-2 pt-2">
-                {pipelineId === "krea-realtime-video" && (
-                  <SliderWithInput
-                    label={PARAMETER_METADATA.kvCacheAttentionBias.label}
-                    tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
-                    value={kvCacheAttentionBiasSlider.localValue}
-                    onValueChange={kvCacheAttentionBiasSlider.handleValueChange}
-                    onValueCommit={kvCacheAttentionBiasSlider.handleValueCommit}
-                    min={0.01}
-                    max={1.0}
-                    step={0.01}
-                    incrementAmount={0.01}
-                    labelClassName="text-sm text-foreground w-20"
-                    valueFormatter={kvCacheAttentionBiasSlider.formatValue}
-                    inputParser={v => parseFloat(v) || 1.0}
-                  />
-                )}
-
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.manageCache.label}
-                    tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                    className="text-sm text-foreground"
-                  />
-                  <Toggle
-                    pressed={manageCache}
-                    onPressedChange={onManageCacheChange || (() => {})}
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
+        {/* Resolution controls */}
+        {pipelineShowsResolutionControl(pipelineId) && (
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.height.label}
+                  tooltip={PARAMETER_METADATA.height.tooltip}
+                  className="text-sm text-foreground w-14"
+                />
+                <div
+                  className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${heightError ? "border-red-500" : ""}`}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                    onClick={() => decrementResolution("height")}
+                    disabled={isStreaming}
                   >
-                    {manageCache ? "ON" : "OFF"}
-                  </Toggle>
-                </div>
-
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.resetCache.label}
-                    tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                    className="text-sm text-foreground"
+                    <Minus className="h-3.5 w-3.5" />
+                  </Button>
+                  <Input
+                    type="number"
+                    value={resolution.height}
+                    onChange={e => {
+                      const value = parseInt(e.target.value);
+                      if (!isNaN(value)) {
+                        handleResolutionChange("height", value);
+                      }
+                    }}
+                    disabled={isStreaming}
+                    className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    min={MIN_DIMENSION}
+                    max={2048}
                   />
                   <Button
-                    type="button"
-                    onClick={onResetCache || (() => {})}
-                    disabled={manageCache}
-                    variant="outline"
-                    size="sm"
-                    className="h-7 w-7 p-0"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                    onClick={() => incrementResolution("height")}
+                    disabled={isStreaming}
                   >
-                    <RotateCcw className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </div>
+              {heightError && (
+                <p className="text-xs text-red-500 ml-16">{heightError}</p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.width.label}
+                  tooltip={PARAMETER_METADATA.width.tooltip}
+                  className="text-sm text-foreground w-14"
+                />
+                <div
+                  className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${widthError ? "border-red-500" : ""}`}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                    onClick={() => decrementResolution("width")}
+                    disabled={isStreaming}
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </Button>
+                  <Input
+                    type="number"
+                    value={resolution.width}
+                    onChange={e => {
+                      const value = parseInt(e.target.value);
+                      if (!isNaN(value)) {
+                        handleResolutionChange("width", value);
+                      }
+                    }}
+                    disabled={isStreaming}
+                    className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    min={MIN_DIMENSION}
+                    max={2048}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                    onClick={() => incrementResolution("width")}
+                    disabled={isStreaming}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              {widthError && (
+                <p className="text-xs text-red-500 ml-16">{widthError}</p>
+              )}
             </div>
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
+        {/* Seed control */}
+        {pipelineShowsSeedControl(pipelineId) && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.seed.label}
+                tooltip={PARAMETER_METADATA.seed.tooltip}
+                className="text-sm text-foreground w-14"
+              />
+              <div
+                className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${seedError ? "border-red-500" : ""}`}
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                  onClick={decrementSeed}
+                  disabled={isStreaming}
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </Button>
+                <Input
+                  type="number"
+                  value={seed}
+                  onChange={e => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      handleSeedChange(value);
+                    }
+                  }}
+                  disabled={isStreaming}
+                  className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  min={0}
+                  max={2147483647}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                  onClick={incrementSeed}
+                  disabled={isStreaming}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+            {seedError && (
+              <p className="text-xs text-red-500 ml-16">{seedError}</p>
+            )}
+          </div>
+        )}
+
+        {/* KV Cache Attention Bias (krea-realtime-video specific) */}
+        {pipelineShowsKvCacheAttentionBias(pipelineId) && (
+          <SliderWithInput
+            label={PARAMETER_METADATA.kvCacheAttentionBias.label}
+            tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
+            value={kvCacheAttentionBiasSlider.localValue}
+            onValueChange={kvCacheAttentionBiasSlider.handleValueChange}
+            onValueCommit={kvCacheAttentionBiasSlider.handleValueCommit}
+            min={0.01}
+            max={1.0}
+            step={0.01}
+            incrementAmount={0.01}
+            labelClassName="text-sm text-foreground w-20"
+            valueFormatter={kvCacheAttentionBiasSlider.formatValue}
+            inputParser={v => parseFloat(v) || 1.0}
+          />
+        )}
+
+        {/* Cache management controls */}
+        {pipelineShowsCacheManagement(pipelineId) && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.manageCache.label}
+                tooltip={PARAMETER_METADATA.manageCache.tooltip}
+                className="text-sm text-foreground"
+              />
+              <Toggle
+                pressed={manageCache}
+                onPressedChange={onManageCacheChange || (() => {})}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {manageCache ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.resetCache.label}
+                tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                className="text-sm text-foreground"
+              />
+              <Button
+                type="button"
+                onClick={onResetCache || (() => {})}
+                disabled={manageCache}
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Denoising steps slider */}
+        {pipelineShowsDenoisingSteps(pipelineId) && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
@@ -606,84 +602,70 @@ export function SettingsPanel({
           />
         )}
 
-        {/* Noise controls - show for video mode on supported pipelines (schema-derived) */}
-        {inputMode === "video" && supportsNoiseControls && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="space-y-2 pt-2">
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.noiseController.label}
-                    tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                    className="text-sm text-foreground"
-                  />
-                  <Toggle
-                    pressed={noiseController}
-                    onPressedChange={onNoiseControllerChange || (() => {})}
-                    disabled={isStreaming}
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                  >
-                    {noiseController ? "ON" : "OFF"}
-                  </Toggle>
-                </div>
-              </div>
-
-              <SliderWithInput
-                label={PARAMETER_METADATA.noiseScale.label}
-                tooltip={PARAMETER_METADATA.noiseScale.tooltip}
-                value={noiseScaleSlider.localValue}
-                onValueChange={noiseScaleSlider.handleValueChange}
-                onValueCommit={noiseScaleSlider.handleValueCommit}
-                min={0.0}
-                max={1.0}
-                step={0.01}
-                incrementAmount={0.01}
-                disabled={noiseController}
-                labelClassName="text-sm text-foreground w-20"
-                valueFormatter={noiseScaleSlider.formatValue}
-                inputParser={v => parseFloat(v) || 0.0}
+        {/* Noise controls - show for video mode on pipelines that support it */}
+        {inputMode === "video" && pipelineShowsNoiseControls(pipelineId) && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.noiseController.label}
+                tooltip={PARAMETER_METADATA.noiseController.tooltip}
+                className="text-sm text-foreground"
               />
+              <Toggle
+                pressed={noiseController}
+                onPressedChange={onNoiseControllerChange || (() => {})}
+                disabled={isStreaming}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {noiseController ? "ON" : "OFF"}
+              </Toggle>
             </div>
+
+            <SliderWithInput
+              label={PARAMETER_METADATA.noiseScale.label}
+              tooltip={PARAMETER_METADATA.noiseScale.tooltip}
+              value={noiseScaleSlider.localValue}
+              onValueChange={noiseScaleSlider.handleValueChange}
+              onValueCommit={noiseScaleSlider.handleValueCommit}
+              min={0.0}
+              max={1.0}
+              step={0.01}
+              incrementAmount={0.01}
+              disabled={noiseController}
+              labelClassName="text-sm text-foreground w-20"
+              valueFormatter={noiseScaleSlider.formatValue}
+              inputParser={v => parseFloat(v) || 0.0}
+            />
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="space-y-2 pt-2">
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.quantization.label}
-                    tooltip={PARAMETER_METADATA.quantization.tooltip}
-                    className="text-sm text-foreground"
-                  />
-                  <Select
-                    value={quantization || "none"}
-                    onValueChange={value => {
-                      onQuantizationChange?.(
-                        value === "none" ? null : (value as "fp8_e4m3fn")
-                      );
-                    }}
-                    disabled={isStreaming}
-                  >
-                    <SelectTrigger className="w-[140px] h-7">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="fp8_e4m3fn">
-                        fp8_e4m3fn (Dynamic)
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
+        {/* Quantization selector */}
+        {pipelineShowsQuantization(pipelineId) && (
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label={PARAMETER_METADATA.quantization.label}
+              tooltip={PARAMETER_METADATA.quantization.tooltip}
+              className="text-sm text-foreground"
+            />
+            <Select
+              value={quantization || "none"}
+              onValueChange={value => {
+                onQuantizationChange?.(
+                  value === "none" ? null : (value as "fp8_e4m3fn")
+                );
+              }}
+              disabled={isStreaming}
+            >
+              <SelectTrigger className="w-[140px] h-7">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="fp8_e4m3fn">fp8_e4m3fn (Dynamic)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
 

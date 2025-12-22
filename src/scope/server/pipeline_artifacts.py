@@ -61,4 +61,33 @@ PIPELINE_ARTIFACTS = {
             files=["rewardforcing.pt"],
         ),
     ],
+    "personalive": [
+        # Base model with CLIP image encoder (SD fine-tuned to accept CLIP image embeddings)
+        HuggingfaceRepoArtifact(
+            repo_id="lambdalabs/sd-image-variations-diffusers",
+            files=["image_encoder", "unet", "model_index.json"],
+            local_dir="PersonaLive/pretrained_weights/sd-image-variations-diffusers",
+        ),
+        # Improved VAE fine-tuned on MSE loss
+        HuggingfaceRepoArtifact(
+            repo_id="stabilityai/sd-vae-ft-mse",
+            files=["config.json", "diffusion_pytorch_model.safetensors"],
+            local_dir="PersonaLive/pretrained_weights/sd-vae-ft-mse",
+        ),
+        # PersonaLive-specific weights: denoising_unet, reference_unet, motion modules, etc.
+        # Files are at pretrained_weights/personalive/ in the repo
+        # See: https://huggingface.co/huaichang/PersonaLive/tree/main/pretrained_weights/personalive
+        HuggingfaceRepoArtifact(
+            repo_id="huaichang/PersonaLive",
+            files=[
+                "pretrained_weights/personalive/denoising_unet.pth",
+                "pretrained_weights/personalive/reference_unet.pth",
+                "pretrained_weights/personalive/motion_encoder.pth",
+                "pretrained_weights/personalive/motion_extractor.pth",
+                "pretrained_weights/personalive/pose_guider.pth",
+                "pretrained_weights/personalive/temporal_module.pth",
+            ],
+            local_dir="PersonaLive",
+        ),
+    ],
 }
