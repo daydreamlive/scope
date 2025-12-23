@@ -41,6 +41,7 @@ dependencies = [
     "peft>=0.17.1",
     "torchao==0.13.0",
     "kernels>=0.10.4",
+    "tomli>=2.0.0; python_version < '3.11'",
     "triton==3.4.0; sys_platform == 'linux'",
     "triton-windows==3.4.0.post21; sys_platform == 'win32'",
     "SpoutGL>=0.1.1; sys_platform == 'win32'",

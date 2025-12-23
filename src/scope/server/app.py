@@ -1012,7 +1012,11 @@ def _get_plugin_id_from_pyproject(plugin_path: Path) -> str | None:
         return None
 
     try:
-        import tomllib
+        # Try tomllib (Python 3.11+) first, fall back to tomli for Python 3.10
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
 
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
