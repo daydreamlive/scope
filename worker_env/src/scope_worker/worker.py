@@ -397,11 +397,21 @@ def _load_plugin_pipeline(pipeline_id: str, load_params: dict | None = None):
     pipeline_module_path = os.path.join(cwd, "pipeline.py")
 
     if not os.path.exists(pipeline_module_path):
-        # Try src/<plugin_id>/pipeline.py pattern
+        # Try src/<name>/pipeline.py pattern (standard Python package layout)
         src_dir = os.path.join(cwd, "src")
         if os.path.exists(src_dir):
             for name in os.listdir(src_dir):
                 candidate = os.path.join(src_dir, name, "pipeline.py")
+                if os.path.exists(candidate):
+                    pipeline_module_path = candidate
+                    break
+
+    if not os.path.exists(pipeline_module_path):
+        # Try <package_name>/pipeline.py pattern (flat layout, e.g. scope_test_generator/)
+        for name in os.listdir(cwd):
+            candidate_dir = os.path.join(cwd, name)
+            if os.path.isdir(candidate_dir) and not name.startswith("."):
+                candidate = os.path.join(candidate_dir, "pipeline.py")
                 if os.path.exists(candidate):
                     pipeline_module_path = candidate
                     break
