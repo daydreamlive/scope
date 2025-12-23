@@ -150,6 +150,10 @@ class FrameProcessorProxy:
             logger.error(f"Error getting FPS: {e}")
             return 30.0
 
+    def get_output_fps(self) -> float:
+        """Get the output FPS (alias for get_current_pipeline_fps)."""
+        return self.get_current_pipeline_fps()
+
     def update_parameters(self, parameters: dict):
         """Update parameters that will be used in the next pipeline call."""
         try:
