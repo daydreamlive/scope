@@ -1062,6 +1062,45 @@ def _copy_plugin_to_plugins_dir(source_path: Path, plugin_id: str) -> Path:
     return target_dir
 
 
+def _clone_git_repo(git_url: str) -> Path:
+    """Clone a git repository to a temporary directory.
+
+    Args:
+        git_url: Git URL (e.g., git+https://github.com/user/repo.git)
+
+    Returns:
+        Path to the cloned directory
+    """
+    import tempfile
+
+    # Remove git+ prefix if present
+    if git_url.startswith("git+"):
+        git_url = git_url[4:]
+
+    # Create a temporary directory
+    temp_dir = tempfile.mkdtemp(prefix="scope-plugin-")
+    temp_path = Path(temp_dir)
+
+    click.echo(f"Cloning {git_url}...")
+
+    # Clone the repository
+    result = subprocess.run(
+        ["git", "clone", "--depth", "1", git_url, str(temp_path / "repo")],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        click.echo(f"Error cloning repository: {result.stderr}", err=True)
+        # Clean up temp directory
+        import shutil
+
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        sys.exit(1)
+
+    return temp_path / "repo"
+
+
 @main.command()
 @click.argument("source", required=True)
 @click.option(
@@ -1070,71 +1109,93 @@ def _copy_plugin_to_plugins_dir(source_path: Path, plugin_id: str) -> Path:
 )
 @click.option("--force", is_flag=True, help="Force reinstall if plugin already exists")
 def install(source, plugin_id, force):
-    """Install a plugin from a local path.
+    """Install a plugin from a local path or git URL.
 
-    SOURCE is the path to the plugin directory containing pyproject.toml.
+    SOURCE can be:
+    - A local path to a plugin directory containing pyproject.toml
+    - A git URL (e.g., git+https://github.com/user/repo.git)
 
     The plugin will be copied to ~/.daydream-scope/plugins/<plugin_id>/
     and will run in its own isolated environment when loaded.
 
-    Example:
+    Examples:
         daydream-scope install ./my-plugin
         daydream-scope install /path/to/scope-personalive --plugin-id personalive
+        daydream-scope install git+https://github.com/user/scope-plugin.git
     """
+    import shutil
+
     from .models_config import get_plugins_dir
 
-    source_path = Path(source).expanduser().resolve()
+    temp_clone_dir = None
 
-    if not source_path.exists():
-        click.echo(f"Error: Source path does not exist: {source_path}", err=True)
-        sys.exit(1)
+    # Check if source is a git URL
+    if source.startswith("git+") or source.startswith("https://github.com"):
+        # Add git+ prefix if missing for github URLs
+        if source.startswith("https://github.com") and not source.startswith("git+"):
+            source = f"git+{source}"
+        temp_clone_dir = _clone_git_repo(source)
+        source_path = temp_clone_dir
+    else:
+        source_path = Path(source).expanduser().resolve()
 
-    if not source_path.is_dir():
-        click.echo(f"Error: Source must be a directory: {source_path}", err=True)
-        sys.exit(1)
+    try:
+        if not source_path.exists():
+            click.echo(f"Error: Source path does not exist: {source_path}", err=True)
+            sys.exit(1)
 
-    pyproject_path = source_path / "pyproject.toml"
-    if not pyproject_path.exists():
-        click.echo(
-            f"Error: No pyproject.toml found in {source_path}. "
-            "Plugins must have a pyproject.toml file.",
-            err=True,
-        )
-        sys.exit(1)
+        if not source_path.is_dir():
+            click.echo(f"Error: Source must be a directory: {source_path}", err=True)
+            sys.exit(1)
 
-    # Determine plugin ID
-    if plugin_id is None:
-        plugin_id = _get_plugin_id_from_pyproject(source_path)
-        if plugin_id is None:
+        pyproject_path = source_path / "pyproject.toml"
+        if not pyproject_path.exists():
             click.echo(
-                "Error: Could not determine plugin ID from pyproject.toml. "
-                "Please specify --plugin-id explicitly.",
+                f"Error: No pyproject.toml found in {source_path}. "
+                "Plugins must have a pyproject.toml file.",
                 err=True,
             )
             sys.exit(1)
 
-    # Check if plugin already exists
-    plugins_dir = get_plugins_dir()
-    target_dir = plugins_dir / plugin_id
-    if target_dir.exists() and not force:
-        click.echo(
-            f"Plugin '{plugin_id}' already exists at {target_dir}. "
-            "Use --force to reinstall.",
-            err=True,
-        )
-        sys.exit(1)
+        # Determine plugin ID
+        if plugin_id is None:
+            plugin_id = _get_plugin_id_from_pyproject(source_path)
+            if plugin_id is None:
+                click.echo(
+                    "Error: Could not determine plugin ID from pyproject.toml. "
+                    "Please specify --plugin-id explicitly.",
+                    err=True,
+                )
+                sys.exit(1)
 
-    # Copy plugin to plugins directory
-    try:
+        # Check if plugin already exists
+        plugins_dir = get_plugins_dir()
+        target_dir = plugins_dir / plugin_id
+        if target_dir.exists() and not force:
+            click.echo(
+                f"Plugin '{plugin_id}' already exists at {target_dir}. "
+                "Use --force to reinstall.",
+                err=True,
+            )
+            sys.exit(1)
+
+        # Copy plugin to plugins directory
         installed_path = _copy_plugin_to_plugins_dir(source_path, plugin_id)
         click.echo(f"✓ Plugin '{plugin_id}' installed successfully.")
         click.echo(f"  Location: {installed_path}")
         click.echo(
             f"\n  The plugin will be available after restarting the server."
         )
+
     except Exception as e:
         click.echo(f"Error installing plugin: {e}", err=True)
         sys.exit(1)
+
+    finally:
+        # Clean up temporary clone directory if we cloned from git
+        if temp_clone_dir is not None:
+            parent_dir = temp_clone_dir.parent
+            shutil.rmtree(parent_dir, ignore_errors=True)
 
 
 @main.command()
