@@ -6,7 +6,9 @@
 uv run download_models --pipeline <PIPELINE_ID>
 ```
 
-Pipeline IDs: `streamdiffusionv2` (video input), `longlive` (no video input), `krea-realtime-video` (no video input), `passthrough` (testing)
+Pipeline IDs: `streamdiffusionv2`, `longlive`, `krea-realtime-video`, `reward-forcing`, `passthrough` (testing)
+
+All pipelines except `passthrough` support both video input and no video input modes.
 
 ## Starting the Server
 
@@ -120,10 +122,11 @@ The `/api/v1/pipeline/status` endpoint returns:
 
 ## Connecting to the Server
 
-- **Video-input pipelines** (`streamdiffusionv2`): Send video to server (bidirectional)
-- **No-video-input pipelines** (`longlive`, `krea-realtime-video`): Receive video only (one-way)
+All pipelines (except `passthrough`) support both modes:
+- **Video-input mode**: Send video to server (bidirectional)
+- **No-video-input mode**: Receive video only (one-way)
 
-### For Video-Input Pipelines (e.g., streamdiffusionv2)
+### For Video-Input Mode
 
 ```javascript
 // 1. Fetch ICE servers from backend (includes TURN servers for firewall traversal)
@@ -255,7 +258,7 @@ if (queuedCandidates.length > 0) {
 }
 ```
 
-### For No-Video-Input Pipelines (e.g., longlive, krea-realtime-video)
+### For No-Video-Input Mode
 
 ```javascript
 // 1. Fetch ICE servers from backend (includes TURN servers for firewall traversal)
