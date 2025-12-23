@@ -1,476 +1,337 @@
 # Scope Server API
 
-## Prerequisites
+## Table of Contents
 
-```bash
-uv run download_models --pipeline <PIPELINE_ID>
-```
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Authentication](#authentication)
+- [Workflows](#workflows)
+- [API Reference](#api-reference)
 
-Pipeline IDs: `streamdiffusionv2`, `longlive`, `krea-realtime-video`, `reward-forcing`, `passthrough` (testing)
+## Quick Start
 
-All pipelines except `passthrough` support both video input and no video input modes.
+This guide will get you streaming video from the Scope API in under 5 minutes. At the end, you'll have an `index.html` file that streams real-time generated video from the API using the `longlive` pipeline.
 
-## Starting the Server
+### Prerequisites
+
+1. **Start the Scope server**:
 
 ```bash
 uv run daydream-scope
-# Custom host/port: --host 0.0.0.0 --port 8000
 ```
 
-Server runs on `http://localhost:8000` by default.
+The server runs on `http://localhost:8000` by default.
 
-## Loading a Pipeline
+2. **Download models for the longlive pipeline** (if not already downloaded):
 
-**Important**: Pipeline loading is **asynchronous**. The `/api/v1/pipeline/load` endpoint initiates loading in the background and returns immediately. You must poll the `/api/v1/pipeline/status` endpoint to check when the pipeline is fully loaded before starting streaming.
+```bash
+uv run download_models --pipeline longlive
+```
 
-```javascript
-// Load a pipeline (initiates async loading)
-async function loadPipeline(pipelineId, loadParams = {}) {
-  const response = await fetch("http://localhost:8000/api/v1/pipeline/load", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      pipeline_id: pipelineId,
-      load_params: loadParams,
-    }),
-  });
+### Create index.html
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to load pipeline: ${error}`);
-  }
+Create a file named `index.html` with the following content:
 
-  return await response.json();
-}
-
-// Check pipeline status
-async function getPipelineStatus() {
-  const response = await fetch("http://localhost:8000/api/v1/pipeline/status");
-  return await response.json();
-}
-
-// Wait for pipeline to finish loading
-async function waitForPipelineLoaded(maxWaitMs = 300000, pollIntervalMs = 1000) {
-  const startTime = Date.now();
-
-  while (Date.now() - startTime < maxWaitMs) {
-    const status = await getPipelineStatus();
-
-    if (status.status === "loaded") {
-      console.log("Pipeline loaded successfully:", status);
-      return status;
-    } else if (status.status === "loading") {
-      console.log("Pipeline still loading...");
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-    } else {
-      throw new Error(`Unexpected pipeline status: ${status.status}`);
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scope API Quick Start</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
     }
-  }
+    video {
+      max-width: 100%;
+      max-height: 100vh;
+    }
+    #status {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-family: monospace;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Connecting...</div>
+  <video id="video" autoplay muted playsinline></video>
 
-  throw new Error("Timeout waiting for pipeline to load");
-}
+  <script>
+    const API_BASE = "http://localhost:8000";
+    const statusEl = document.getElementById("status");
+    const videoEl = document.getElementById("video");
 
-// Example: Load StreamDiffusionV2 pipeline and wait
-await loadPipeline("streamdiffusionv2", {
-  height: 512,
-  width: 512,
-  seed: 42,
-});
-await waitForPipelineLoaded();
+    async function loadPipeline() {
+      statusEl.textContent = "Loading pipeline...";
 
-// Example: Load LongLive pipeline and wait
-await loadPipeline("longlive", {
-  height: 320,
-  width: 576,
-  seed: 42,
-});
-await waitForPipelineLoaded();
-
-// Example: Load Krea Realtime Video pipeline and wait
-await loadPipeline("krea-realtime-video", {
-  height: 320,
-  width: 576,
-  seed: 42,
-  quantization: "fp8_e4m3fn", // or null for no quantization
-});
-await waitForPipelineLoaded();
-```
-
-### Pipeline Status Response
-
-The `/api/v1/pipeline/status` endpoint returns:
-
-```json
-{
-  "status": "loaded",
-  "pipeline_id": "streamdiffusionv2",
-  "load_params": {
-    "height": 512,
-    "width": 512,
-    "seed": 42
-  },
-  "loaded_lora_adapters": []
-}
-```
-
-**Status values**:
-- `"not_loaded"` - No pipeline is loaded
-- `"loading"` - Pipeline is currently being loaded
-- `"loaded"` - Pipeline is ready for streaming
-
-## Connecting to the Server
-
-All pipelines (except `passthrough`) support both modes:
-- **Video-input mode**: Send video to server (bidirectional)
-- **No-video-input mode**: Receive video only (one-way)
-
-### For Video-Input Mode
-
-```javascript
-// 1. Fetch ICE servers from backend (includes TURN servers for firewall traversal)
-const iceServersResponse = await fetch("http://localhost:8000/api/v1/webrtc/ice-servers");
-const { iceServers } = await iceServersResponse.json();
-
-// 2. Create peer connection
-const pc = new RTCPeerConnection({
-  iceServers: iceServers,
-});
-
-// Store session ID for sending ICE candidates
-let sessionId = null;
-const queuedCandidates = [];
-
-// 3. Create data channel
-const dataChannel = pc.createDataChannel("parameters", { ordered: true });
-
-dataChannel.onopen = () => {
-  console.log("Data channel opened");
-};
-
-dataChannel.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  if (data.type === "stream_stopped") {
-    console.log("Stream stopped:", data.error_message);
-    pc.close();
-  }
-};
-
-// 4. Set up video element
-const videoElement = document.createElement("video");
-videoElement.autoplay = true;
-videoElement.muted = true;
-videoElement.playsInline = true;
-document.body.appendChild(videoElement);
-
-// 5. Add local video track
-const localStream = await navigator.mediaDevices.getUserMedia({
-  video: { width: 512, height: 512 },
-});
-
-localStream.getTracks().forEach((track) => {
-  if (track.kind === "video") {
-    pc.addTrack(track, localStream);
-  }
-});
-
-// 6. Set up event handlers
-const onTrack = (event) => {
-  if (event.streams && event.streams[0]) {
-    videoElement.srcObject = event.streams[0];
-  }
-};
-
-const onConnectionStateChange = () => {
-  console.log("Connection state:", pc.connectionState);
-};
-
-const onIceCandidate = async (event) => {
-  if (event.candidate) {
-    // Trickle ICE: Send candidates as they arrive
-    if (sessionId) {
-      await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
-        method: "PATCH",
+      // Load the longlive pipeline
+      await fetch(`${API_BASE}/api/v1/pipeline/load`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          candidates: [{
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-          }],
-        }),
+          pipeline_id: "longlive"
+        })
       });
-    } else {
-      // Queue candidates until session ID is available
-      queuedCandidates.push(event.candidate);
+
+      // Wait for pipeline to finish loading
+      while (true) {
+        const response = await fetch(`${API_BASE}/api/v1/pipeline/status`);
+        const { status } = await response.json();
+
+        if (status === "loaded") break;
+        if (status === "error") throw new Error("Pipeline failed to load");
+
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      statusEl.textContent = "Pipeline loaded";
     }
-  } else {
-    console.log("ICE gathering complete");
-  }
-};
 
-// Attach event handlers
-pc.ontrack = onTrack;
-pc.onconnectionstatechange = onConnectionStateChange;
-pc.onicecandidate = onIceCandidate;
+    async function startStream() {
+      // Get ICE servers
+      const iceResponse = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`);
+      const { iceServers } = await iceResponse.json();
 
-// 7. Create offer and send immediately (Trickle ICE)
-const offer = await pc.createOffer();
-await pc.setLocalDescription(offer);
+      // Create peer connection
+      const pc = new RTCPeerConnection({ iceServers });
 
-const sdpResponse = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    sdp: pc.localDescription.sdp,
-    type: pc.localDescription.type,
-    initialParameters: {
-      prompts: [{ text: "A beautiful landscape", weight: 1.0 }],
-      prompt_interpolation_method: "linear",
-      denoising_step_list: [700, 500],
-    },
-  }),
-});
+      // Store session ID for ICE candidates
+      let sessionId = null;
+      const queuedCandidates = [];
 
-const answerData = await sdpResponse.json();
-sessionId = answerData.sessionId; // Store session ID
+      // Create data channel for parameters
+      const dataChannel = pc.createDataChannel("parameters", { ordered: true });
 
-await pc.setRemoteDescription({
-  type: answerData.type,
-  sdp: answerData.sdp,
-});
+      dataChannel.onopen = () => {
+        statusEl.textContent = "Connected - Streaming";
+      };
 
-// Flush queued candidates
-if (queuedCandidates.length > 0) {
-  await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      candidates: queuedCandidates.map(c => ({
-        candidate: c.candidate,
-        sdpMid: c.sdpMid,
-        sdpMLineIndex: c.sdpMLineIndex,
-      })),
-    }),
-  });
-  queuedCandidates.length = 0;
-}
-```
+      dataChannel.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "stream_stopped") {
+          statusEl.textContent = "Stream stopped: " + (data.error_message || "Unknown error");
+          pc.close();
+        }
+      };
 
-### For No-Video-Input Mode
+      // Add video transceiver (receive-only mode)
+      pc.addTransceiver("video");
 
-```javascript
-// 1. Fetch ICE servers from backend (includes TURN servers for firewall traversal)
-const iceServersResponse = await fetch("http://localhost:8000/api/v1/webrtc/ice-servers");
-const { iceServers } = await iceServersResponse.json();
+      // Handle incoming video track
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          videoEl.srcObject = event.streams[0];
+        }
+      };
 
-// 2. Create peer connection
-const pc = new RTCPeerConnection({
-  iceServers: iceServers,
-});
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "connected") {
+          statusEl.textContent = "Connected - Streaming";
+        } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+          statusEl.textContent = "Disconnected";
+        }
+      };
 
-// Store session ID for sending ICE candidates
-let sessionId = null;
-const queuedCandidates = [];
+      // Send ICE candidates as they arrive (Trickle ICE)
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          if (sessionId) {
+            await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                candidates: [{
+                  candidate: event.candidate.candidate,
+                  sdpMid: event.candidate.sdpMid,
+                  sdpMLineIndex: event.candidate.sdpMLineIndex
+                }]
+              })
+            });
+          } else {
+            queuedCandidates.push(event.candidate);
+          }
+        }
+      };
 
-// 3. Create data channel
-const dataChannel = pc.createDataChannel("parameters", { ordered: true });
+      // Create and send offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-dataChannel.onopen = () => {
-  console.log("Data channel opened");
-  // Send initial parameters
-  dataChannel.send(
-    JSON.stringify({
-      prompts: [{ text: "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.", weight: 100 }],
-      prompt_interpolation_method: "linear",
-      denoising_step_list: [1000, 750, 500, 250],
-      manage_cache: true,
-    })
-  );
-};
-
-dataChannel.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  if (data.type === "stream_stopped") {
-    console.log("Stream stopped:", data.error_message);
-    pc.close();
-  }
-};
-
-// 4. Add video transceiver (after data channel, before event handlers)
-pc.addTransceiver("video");
-
-// 5. Set up video element
-const videoElement = document.createElement("video");
-videoElement.autoplay = true;
-videoElement.muted = true;
-videoElement.playsInline = true;
-document.body.appendChild(videoElement);
-
-// 6. Set up event handlers
-const onTrack = (event) => {
-  if (event.streams && event.streams[0]) {
-    videoElement.srcObject = event.streams[0];
-  }
-};
-
-const onConnectionStateChange = () => {
-  console.log("Connection state:", pc.connectionState);
-};
-
-const onIceConnectionStateChange = () => {
-  console.log("ICE connection state:", pc.iceConnectionState);
-};
-
-const onIceCandidate = async (event) => {
-  if (event.candidate) {
-    // Trickle ICE: Send candidates as they arrive
-    if (sessionId) {
-      await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
-        method: "PATCH",
+      const sdpResponse = await fetch(`${API_BASE}/api/v1/webrtc/offer`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          candidates: [{
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-          }],
-        }),
+          sdp: pc.localDescription.sdp,
+          type: pc.localDescription.type,
+          initialParameters: {
+            prompts: [{ text: "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.", weight: 1.0 }],
+            denoising_step_list: [1000, 750, 500, 250],
+            manage_cache: true
+          }
+        })
       });
-    } else {
-      // Queue candidates until session ID is available
-      queuedCandidates.push(event.candidate);
+
+      const answer = await sdpResponse.json();
+      sessionId = answer.sessionId;
+
+      await pc.setRemoteDescription({
+        type: answer.type,
+        sdp: answer.sdp
+      });
+
+      // Send any queued ICE candidates
+      if (queuedCandidates.length > 0) {
+        await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            candidates: queuedCandidates.map(c => ({
+              candidate: c.candidate,
+              sdpMid: c.sdpMid,
+              sdpMLineIndex: c.sdpMLineIndex
+            }))
+          })
+        });
+      }
     }
-  } else {
-    console.log("ICE gathering complete");
-  }
-};
 
-// Attach event handlers
-pc.ontrack = onTrack;
-pc.onconnectionstatechange = onConnectionStateChange;
-pc.oniceconnectionstatechange = onIceConnectionStateChange;
-pc.onicecandidate = onIceCandidate;
-
-// 7. Create offer and send immediately (Trickle ICE)
-const offer = await pc.createOffer();
-await pc.setLocalDescription(offer);
-
-const sdpResponse = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    sdp: pc.localDescription.sdp,
-    type: pc.localDescription.type,
-    initialParameters: {
-      prompts: [{ text: "A 3D animated scene. A **panda** walks along a path towards the camera in a park on a spring day.", weight: 100 }],
-      prompt_interpolation_method: "linear",
-      denoising_step_list: [1000, 750, 500, 250],
-      manage_cache: true,
-    },
-  }),
-});
-
-const answerData = await sdpResponse.json();
-sessionId = answerData.sessionId; // Store session ID
-
-await pc.setRemoteDescription({
-  type: answerData.type,
-  sdp: answerData.sdp,
-});
-
-// Flush queued candidates
-if (queuedCandidates.length > 0) {
-  await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      candidates: queuedCandidates.map(c => ({
-        candidate: c.candidate,
-        sdpMid: c.sdpMid,
-        sdpMLineIndex: c.sdpMLineIndex,
-      })),
-    }),
-  });
-  queuedCandidates.length = 0;
-}
+    // Main
+    (async () => {
+      try {
+        await loadPipeline();
+        await startStream();
+      } catch (error) {
+        statusEl.textContent = "Error: " + error.message;
+        console.error(error);
+      }
+    })();
+  </script>
+</body>
+</html>
 ```
 
-- **Order:** Create data channel → Add transceiver/track → Set event handlers → Create offer
-- **Video element:** Use `autoplay`, `muted`, `playsInline` attributes
+### Run It
 
-## React/Component Framework Integration
+1. Open `index.html` in your browser
+2. The page will:
+   - Load the `longlive` pipeline
+   - Establish a WebRTC connection
+   - Display real-time generated video based on the prompt
 
-```javascript
-const [remoteStream, setRemoteStream] = useState(null);
-const videoRef = useRef(null);
+## Configuration
 
-pc.ontrack = (event) => {
-  if (event.streams && event.streams[0]) {
-    setRemoteStream(event.streams[0]);
-  }
-};
+### Server Options
 
-useEffect(() => {
-  if (videoRef.current && remoteStream) {
-    videoRef.current.srcObject = remoteStream;
-  } else if (videoRef.current && !remoteStream) {
-    videoRef.current.srcObject = null;
-  }
-}, [remoteStream]);
+```bash
+uv run daydream-scope [OPTIONS]
+
+Options:
+  --host HOST       Host to bind to (default: 0.0.0.0)
+  --port PORT       Port to bind to (default: 8000)
+  --reload          Enable auto-reload for development
+  -N, --no-browser  Don't open browser automatically
+  --version         Show version and exit
 ```
 
-```jsx
-<video ref={videoRef} autoPlay muted playsInline />
+### Environment Variables
+
+| Variable          | Description                                                   |
+| ----------------- | ------------------------------------------------------------- |
+| `PIPELINE`        | Default pipeline to pre-warm on startup                       |
+| `HF_TOKEN`        | Hugging Face token for downloading models and Cloudflare TURN |
+| `VERBOSE_LOGGING` | Enable verbose logging for debugging                          |
+
+### Available Pipelines
+
+| Pipeline ID           | Default Resolution (HxW) |
+| --------------------- | ------------------------ |
+| `longlive`            | 576x320                  |
+| `streamdiffusionv2`   | 512x512                  |
+| `krea-realtime-video` | 512x512                  |
+| `reward-forcing`      | 576x320                  |
+| `passthrough`         | 512x512                  |
+
+## Authentication
+
+The API does not require authentication by default for local usage.
+
+### TURN Server Credentials
+
+For WebRTC connections that need to traverse firewalls (NAT traversal), TURN servers are used. The server automatically configures TURN credentials when environment variables are set:
+
+**Using Cloudflare (via Hugging Face)**:
+
+```bash
+export HF_TOKEN=your_huggingface_token
 ```
 
-## Sending Parameters
+If no TURN credentials are configured, the server falls back to Google's public STUN server, which works for direct connections but may not work behind strict firewalls.
 
-```javascript
-const dataChannel = pc.createDataChannel("parameters", { ordered: true });
+## Workflows
 
-dataChannel.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  if (data.type === "stream_stopped") {
-    pc.close();
-  }
-};
+- **[Load Pipeline](api/load.md)** - Load a pipeline and wait for it to be ready
+- **[Send Parameters](api/parameters.md)** - Send real-time parameter updates during streaming
+- **[Receive Video](api/receive.md)** - Set up a WebRTC connection to receive video (text-to-video mode)
+- **[Send and Receive Video](api/sendreceive.md)** - Set up a WebRTC connecton to send and receive video (video-to-video mode)
+- **[Using VACE](api/vace.md)** - Use VACE to guide generation with reference images and control videos
 
-// Send parameter updates
-dataChannel.send(JSON.stringify({
-  prompts: [{ text: "A cat", weight: 1.0 }],
-  prompt_interpolation_method: "slerp",
-  denoising_step_list: [600, 400],
-  noise_scale: 0.8, // StreamDiffusionV2
-  paused: false,
-  reset_cache: true, // when manage_cache is false
-}));
-```
+## API Reference
 
-## Parameters
+The `/docs` endpoint also returns Swagger API docs about all available endpoints.
 
-- **`prompts`** (array): `[{ text: string, weight: number }]` - Prompts with weights for spatial blending
-- **`prompt_interpolation_method`** (string): `"linear"` or `"slerp"` (default: `"linear"`)
-- **`transition`** (object): `{ target_prompts: [...], num_steps: number, temporal_interpolation_method: "linear"|"slerp" }` - Smooth prompt transitions
-- **`denoising_step_list`** (array): Descending timesteps (e.g., `[700, 500]`)
-- **`noise_scale`** (number, StreamDiffusionV2): `0.0-1.0` - Noise amount
-- **`noise_controller`** (boolean, StreamDiffusionV2): Auto-adjust noise scale
-- **`manage_cache`** (boolean, krea-realtime-video/longlive): Auto cache management
-- **`reset_cache`** (boolean): Reset cache (when `manage_cache` is false)
-- **`kv_cache_attention_bias`** (number, krea-realtime-video): `0.01-1.0` - Past frame reliance
-- **`paused`** (boolean): Pause/resume generation
+### Health & Info
 
+| Endpoint                | Method | Description                                  |
+| ----------------------- | ------ | -------------------------------------------- |
+| `/health`               | GET    | Health check                                 |
+| `/api/v1/hardware/info` | GET    | Get hardware info (VRAM, Spout availability) |
+| `/docs`                 | GET    | Interactive API documentation (Swagger UI)   |
 
-## API Endpoints
+### Pipeline Management
 
-- `POST /api/v1/pipeline/load` - Load a pipeline
-- `GET /api/v1/pipeline/status` - Get pipeline status
-- `GET /api/v1/webrtc/ice-servers` - Get ICE server configuration (includes TURN servers)
-- `POST /api/v1/webrtc/offer` - Establish WebRTC connection (returns `sessionId`)
-- `PATCH /api/v1/webrtc/offer/{session_id}` - Send ICE candidate(s) (Trickle ICE)
-- `GET /api/v1/models/status?pipeline_id=<ID>` - Check if models are downloaded
-- `POST /api/v1/models/download` - Download models for a pipeline
-- `GET /api/v1/hardware/info` - Get hardware information
-- `GET /health` - Health check endpoint
-- `GET /docs` - API documentation (Swagger UI)
+| Endpoint                    | Method | Description                             |
+| --------------------------- | ------ | --------------------------------------- |
+| `/api/v1/pipeline/load`     | POST   | Load a pipeline                         |
+| `/api/v1/pipeline/status`   | GET    | Get current pipeline status             |
+| `/api/v1/pipelines/schemas` | GET    | Get schemas for all available pipelines |
+
+### Model Management
+
+| Endpoint                  | Method | Description                                   |
+| ------------------------- | ------ | --------------------------------------------- |
+| `/api/v1/models/status`   | GET    | Check if models are downloaded for a pipeline |
+| `/api/v1/models/download` | POST   | Start downloading models for a pipeline       |
+
+### WebRTC
+
+| Endpoint                            | Method | Description                       |
+| ----------------------------------- | ------ | --------------------------------- |
+| `/api/v1/webrtc/ice-servers`        | GET    | Get ICE server configuration      |
+| `/api/v1/webrtc/offer`              | POST   | Send WebRTC offer, receive answer |
+| `/api/v1/webrtc/offer/{session_id}` | PATCH  | Add ICE candidates (Trickle ICE)  |
+
+### Assets
+
+| Endpoint                | Method | Description                           |
+| ----------------------- | ------ | ------------------------------------- |
+| `/api/v1/assets`        | GET    | List available assets (images/videos) |
+| `/api/v1/assets`        | POST   | Upload an asset                       |
+| `/api/v1/assets/{path}` | GET    | Serve an asset file                   |
+
+### LoRA
+
+| Endpoint            | Method | Description               |
+| ------------------- | ------ | ------------------------- |
+| `/api/v1/lora/list` | GET    | List available LoRA files |
