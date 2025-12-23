@@ -6,6 +6,7 @@ requires-python = ">=3.10.12"
 dependencies = [
     "scope-worker-base",
     "numpy>=1.24.0",
+    "einops>=0.8.1",
 ]
 
 [tool.uv.sources]

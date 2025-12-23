@@ -7,6 +7,8 @@ dependencies = [
     "pyzmq>=26.0.0",
     "pydantic>=2.0.0",
     "numpy>=1.24.0",
+    "torch",
+    "omegaconf>=2.3.0",
 ]
 
 [project.scripts]
