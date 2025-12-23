@@ -244,6 +244,12 @@ async def lifespan(app: FastAPI):
     pipeline_manager = PipelineManager()
     logger.info("Pipeline manager initialized")
 
+    # Register plugin routes (must be done before server starts accepting requests)
+    from scope.core.plugins import register_plugin_routes
+
+    register_plugin_routes(app)
+    logger.info("Plugin routes registered")
+
     # Pre-warm the default pipeline
     if PIPELINE is not None:
         asyncio.create_task(prewarm_pipeline(PIPELINE))

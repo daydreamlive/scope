@@ -379,7 +379,12 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
 
 
 class PipelineLoadRequest(BaseModel):
-    """Pipeline load request schema."""
+    """Pipeline load request schema.
+
+    Note: Plugin pipelines can define their own load parameters. The load_params
+    field accepts any dict-like structure that will be passed to the pipeline.
+    Built-in pipelines have typed load params for validation.
+    """
 
     pipeline_id: str = Field(
         default="streamdiffusionv2", description="ID of pipeline to load"
@@ -389,6 +394,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | PipelineLoadParams  # Generic fallback for plugin pipelines
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 

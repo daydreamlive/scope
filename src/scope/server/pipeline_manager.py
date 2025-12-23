@@ -333,10 +333,48 @@ class PipelineManager:
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
-            # Plugin pipeline - instantiate generically with load_params
+            # Plugin pipeline - instantiate with config object like built-in pipelines
             logger.info(f"Loading plugin pipeline: {pipeline_id}")
-            load_params = load_params or {}
-            return pipeline_class(**load_params)
+            from .models_config import get_models_dir
+
+            models_dir = get_models_dir()
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                }
+            )
+
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            # Get defaults from the pipeline's config class if available
+            config_class = None
+            if hasattr(pipeline_class, "get_config_class"):
+                config_class = pipeline_class.get_config_class()
+
+            default_height = 512
+            default_width = 512
+            if config_class is not None:
+                default_height = getattr(
+                    config_class.model_fields.get("height"), "default", 512
+                ) or 512
+                default_width = getattr(
+                    config_class.model_fields.get("width"), "default", 512
+                ) or 512
+
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=default_height,
+                default_width=default_width,
+                default_seed=42,
+            )
+
+            pipeline = pipeline_class(
+                config,
+                device=torch.device("cuda"),
+                dtype=torch.float16,
+            )
+            logger.info(f"Plugin pipeline {pipeline_id} initialized")
+            return pipeline
 
         # Fall through to built-in pipeline initialization
         if pipeline_id == "streamdiffusionv2":

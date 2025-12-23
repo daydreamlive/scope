@@ -1,8 +1,11 @@
 """
 Defines which artifacts each pipeline requires.
+
+Built-in pipelines define their artifacts here. Plugin pipelines can register
+their artifacts via the `register_artifacts` hook.
 """
 
-from .artifacts import HuggingfaceRepoArtifact
+from .artifacts import Artifact, HuggingfaceRepoArtifact
 
 # Common artifacts shared across pipelines
 WAN_1_3B_ARTIFACT = HuggingfaceRepoArtifact(
@@ -20,8 +23,8 @@ VACE_ARTIFACT = HuggingfaceRepoArtifact(
     files=["Wan2_1-VACE_module_1_3B_bf16.safetensors"],
 )
 
-# Pipeline-specific artifacts
-PIPELINE_ARTIFACTS = {
+# Built-in pipeline artifacts
+_BUILTIN_PIPELINE_ARTIFACTS: dict[str, list[Artifact]] = {
     "streamdiffusionv2": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
@@ -62,3 +65,27 @@ PIPELINE_ARTIFACTS = {
         ),
     ],
 }
+
+
+def get_pipeline_artifacts() -> dict[str, list[Artifact]]:
+    """Get all pipeline artifacts including those registered by plugins.
+
+    Returns:
+        Dictionary mapping pipeline_id to list of artifacts
+    """
+    from scope.core.plugins import load_plugins, register_plugin_artifacts
+
+    # Ensure plugins are loaded (idempotent if already loaded)
+    load_plugins()
+
+    # Start with built-in artifacts
+    all_artifacts = dict(_BUILTIN_PIPELINE_ARTIFACTS)
+
+    # Register plugin artifacts
+    register_plugin_artifacts(all_artifacts)
+
+    return all_artifacts
+
+
+# Legacy alias for backward compatibility
+PIPELINE_ARTIFACTS = _BUILTIN_PIPELINE_ARTIFACTS
