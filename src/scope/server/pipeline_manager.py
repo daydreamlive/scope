@@ -324,7 +324,6 @@ class PipelineManager:
         pipeline_class = PipelineRegistry.get(pipeline_id)
 
         # List of built-in pipelines with custom initialization
-        # NOTE: PersonaLive has been moved to the scope-personalive plugin
         BUILTIN_PIPELINES = {
             "streamdiffusionv2",
             "passthrough",

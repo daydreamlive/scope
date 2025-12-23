@@ -113,7 +113,6 @@ def _register_pipelines():
         logger.info("No GPU detected")
 
     # Define pipeline imports with their module paths and class names
-    # NOTE: PersonaLive has been moved to the scope-personalive plugin
     pipeline_configs = [
         ("passthrough", ".passthrough.pipeline", "PassthroughPipeline"),
         ("longlive", ".longlive.pipeline", "LongLivePipeline"),
