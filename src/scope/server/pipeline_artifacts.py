@@ -1,8 +1,11 @@
 """
 Defines which artifacts each pipeline requires.
+
+Built-in pipelines define their artifacts here. Plugin pipelines can register
+their artifacts via the `register_artifacts` hook.
 """
 
-from .artifacts import HuggingfaceRepoArtifact
+from .artifacts import Artifact, HuggingfaceRepoArtifact
 
 # Common artifacts shared across pipelines
 WAN_1_3B_ARTIFACT = HuggingfaceRepoArtifact(
@@ -20,8 +23,8 @@ VACE_ARTIFACT = HuggingfaceRepoArtifact(
     files=["Wan2_1-VACE_module_1_3B_bf16.safetensors"],
 )
 
-# Pipeline-specific artifacts
-PIPELINE_ARTIFACTS = {
+# Built-in pipeline artifacts
+_BUILTIN_PIPELINE_ARTIFACTS: dict[str, list[Artifact]] = {
     "streamdiffusionv2": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
@@ -61,33 +64,28 @@ PIPELINE_ARTIFACTS = {
             files=["rewardforcing.pt"],
         ),
     ],
-    "personalive": [
-        # Base model with CLIP image encoder (SD fine-tuned to accept CLIP image embeddings)
-        HuggingfaceRepoArtifact(
-            repo_id="lambdalabs/sd-image-variations-diffusers",
-            files=["image_encoder", "unet", "model_index.json"],
-            local_dir="PersonaLive/pretrained_weights/sd-image-variations-diffusers",
-        ),
-        # Improved VAE fine-tuned on MSE loss
-        HuggingfaceRepoArtifact(
-            repo_id="stabilityai/sd-vae-ft-mse",
-            files=["config.json", "diffusion_pytorch_model.safetensors"],
-            local_dir="PersonaLive/pretrained_weights/sd-vae-ft-mse",
-        ),
-        # PersonaLive-specific weights: denoising_unet, reference_unet, motion modules, etc.
-        # Files are at pretrained_weights/personalive/ in the repo
-        # See: https://huggingface.co/huaichang/PersonaLive/tree/main/pretrained_weights/personalive
-        HuggingfaceRepoArtifact(
-            repo_id="huaichang/PersonaLive",
-            files=[
-                "pretrained_weights/personalive/denoising_unet.pth",
-                "pretrained_weights/personalive/reference_unet.pth",
-                "pretrained_weights/personalive/motion_encoder.pth",
-                "pretrained_weights/personalive/motion_extractor.pth",
-                "pretrained_weights/personalive/pose_guider.pth",
-                "pretrained_weights/personalive/temporal_module.pth",
-            ],
-            local_dir="PersonaLive",
-        ),
-    ],
 }
+
+
+def get_pipeline_artifacts() -> dict[str, list[Artifact]]:
+    """Get all pipeline artifacts including those registered by plugins.
+
+    Returns:
+        Dictionary mapping pipeline_id to list of artifacts
+    """
+    from scope.core.plugins import load_plugins, register_plugin_artifacts
+
+    # Ensure plugins are loaded (idempotent if already loaded)
+    load_plugins()
+
+    # Start with built-in artifacts
+    all_artifacts = dict(_BUILTIN_PIPELINE_ARTIFACTS)
+
+    # Register plugin artifacts
+    register_plugin_artifacts(all_artifacts)
+
+    return all_artifacts
+
+
+# Legacy alias for backward compatibility
+PIPELINE_ARTIFACTS = _BUILTIN_PIPELINE_ARTIFACTS

@@ -371,13 +371,26 @@ def download_models(pipeline_id: str) -> None:
 
     Args:
         pipeline_id: Pipeline ID to download models for.
+
+    Raises:
+        KeyError: If pipeline_id has no registered artifacts
     """
-    from .pipeline_artifacts import PIPELINE_ARTIFACTS
+    from .pipeline_artifacts import get_pipeline_artifacts
 
     models_root = ensure_models_dir()
 
     logger.info(f"Downloading models for pipeline: {pipeline_id}")
-    artifacts = PIPELINE_ARTIFACTS[pipeline_id]
+
+    # Get all artifacts including plugin-registered ones
+    all_artifacts = get_pipeline_artifacts()
+
+    if pipeline_id not in all_artifacts:
+        raise KeyError(
+            f"No artifacts registered for pipeline '{pipeline_id}'. "
+            f"Available pipelines: {list(all_artifacts.keys())}"
+        )
+
+    artifacts = all_artifacts[pipeline_id]
 
     # Download each artifact (progress tracking starts in set_download_context)
     for artifact in artifacts:
@@ -402,8 +415,9 @@ Examples:
   python download_models.py --pipeline longlive
   python download_models.py --pipeline krea-realtime-video
   python download_models.py --pipeline reward-forcing
-  python download_models.py --pipeline personalive
   python download_models.py -p streamdiffusionv2
+
+  # Plugin pipelines can also register artifacts for download
         """,
     )
     parser.add_argument(
@@ -412,7 +426,7 @@ Examples:
         type=str,
         default=None,
         required=True,
-        help="Pipeline ID to download (e.g., 'streamdiffusionv2', 'longlive', 'krea-realtime-video', 'reward-forcing', 'personalive').",
+        help="Pipeline ID to download models for. Use 'daydream-scope pipelines' to list available pipelines.",
     )
 
     args = parser.parse_args()

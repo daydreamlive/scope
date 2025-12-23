@@ -34,3 +34,33 @@ def register_plugin_pipelines(registry):
         logger.info(f"Registered plugin pipeline: {pipeline_id}")
 
     pm.hook.register_pipelines(register=register_callback)
+
+
+def register_plugin_artifacts(artifacts_dict: dict):
+    """Call register_artifacts hook for all plugins.
+
+    Args:
+        artifacts_dict: Dictionary to populate with pipeline_id -> [Artifact] mappings
+    """
+
+    def register_callback(pipeline_id: str, artifacts: list):
+        """Callback function passed to plugins."""
+        if pipeline_id in artifacts_dict:
+            logger.warning(
+                f"Overwriting existing artifacts for pipeline: {pipeline_id}"
+            )
+        artifacts_dict[pipeline_id] = artifacts
+        logger.info(
+            f"Registered {len(artifacts)} artifact(s) for plugin pipeline: {pipeline_id}"
+        )
+
+    pm.hook.register_artifacts(register=register_callback)
+
+
+def register_plugin_routes(app):
+    """Call register_routes hook for all plugins.
+
+    Args:
+        app: FastAPI application instance
+    """
+    pm.hook.register_routes(app=app)
