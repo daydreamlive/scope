@@ -1,17 +1,18 @@
 """Pipeline Manager for lazy loading and managing ML pipelines."""
 
 import asyncio
+import json
 import logging
-import multiprocessing as mp
 import os
-import queue
+import subprocess
 import threading
 import time
 import traceback
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
-from .pipeline_worker import WorkerCommand, WorkerResponse, pipeline_worker_process
+import zmq
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,32 @@ PIPELINE_LOAD_TIMEOUT = 300  # 5 minutes
 WORKER_SHUTDOWN_TIMEOUT = 5  # seconds
 WORKER_TERMINATE_TIMEOUT = 3  # seconds
 WORKER_KILL_TIMEOUT = 1  # seconds
+
+
+class WorkerCommand(Enum):
+    """Commands that can be sent to the worker process."""
+
+    LOAD_PIPELINE = "load_pipeline"
+    UNLOAD_PIPELINE = "unload_pipeline"
+    CREATE_FRAME_PROCESSOR = "create_frame_processor"
+    DESTROY_FRAME_PROCESSOR = "destroy_frame_processor"
+    PUT_FRAME = "put_frame"
+    GET_FRAME = "get_frame"
+    UPDATE_PARAMETERS = "update_parameters"
+    GET_FPS = "get_fps"
+    SHUTDOWN = "shutdown"
+
+
+class WorkerResponse(Enum):
+    """Response types from worker process."""
+
+    SUCCESS = "success"
+    ERROR = "error"
+    PIPELINE_LOADED = "pipeline_loaded"
+    PIPELINE_NOT_LOADED = "pipeline_not_loaded"
+    RESULT = "result"
+    FRAME_PROCESSOR_CREATED = "frame_processor_created"
+    FRAME = "frame"
 
 
 class PipelineNotAvailableException(Exception):
@@ -49,9 +76,14 @@ class PipelineManager:
         self._lock = threading.RLock()  # Single reentrant lock for all access
 
         # Worker process management
-        self._worker_process = None
-        self._command_queue = None
-        self._response_queue = None
+        self._worker_process: subprocess.Popen | None = None
+
+        # ZMQ context and sockets
+        self._zmq_context: zmq.Context | None = None
+        self._command_socket: zmq.Socket | None = None
+        self._response_socket: zmq.Socket | None = None
+        self._command_port: int | None = None
+        self._response_port: int | None = None
 
     @property
     def status(self) -> PipelineStatus:
@@ -283,6 +315,14 @@ class PipelineManager:
         self._load_params = None
         self._error_message = None
 
+    def _find_free_port(self) -> int:
+        """Find a free port to use for ZMQ communication."""
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
     def _start_worker_and_load_pipeline(
         self, pipeline_id: str, load_params: dict | None = None
     ) -> bool:
@@ -297,41 +337,93 @@ class PipelineManager:
         # Stop any existing worker first
         self._stop_worker()
 
-        # Create communication queues with spawn context for better CUDA compatibility
-        # Using 'spawn' ensures a clean process without CUDA context issues
-        ctx = mp.get_context("spawn")
-        self._command_queue = ctx.Queue()
-        self._response_queue = ctx.Queue()
+        # Find the worker_env directory
+        project_root = Path(__file__).parent.parent.parent.parent
+        worker_env_dir = project_root / "worker_env"
 
-        # Start worker process with spawn context
-        self._worker_process = ctx.Process(
-            target=pipeline_worker_process,
-            args=(self._command_queue, self._response_queue),
-            daemon=False,  # We want to control its lifecycle explicitly
+        if not worker_env_dir.exists():
+            raise RuntimeError(f"Worker environment directory not found: {worker_env_dir}")
+
+        # Set up ZMQ context and sockets
+        self._zmq_context = zmq.Context()
+
+        # Find free ports for communication
+        self._command_port = self._find_free_port()
+        self._response_port = self._find_free_port()
+
+        # PUSH socket for sending commands (bind)
+        self._command_socket = self._zmq_context.socket(zmq.PUSH)
+        self._command_socket.bind(f"tcp://127.0.0.1:{self._command_port}")
+
+        # PULL socket for receiving responses (bind)
+        self._response_socket = self._zmq_context.socket(zmq.PULL)
+        self._response_socket.bind(f"tcp://127.0.0.1:{self._response_port}")
+
+        # Get models directory from environment or config
+        from .models_config import get_models_dir
+
+        models_dir = str(get_models_dir())
+
+        # Build environment for the worker process
+        env = os.environ.copy()
+        env["SCOPE_PROJECT_ROOT"] = str(project_root)
+        env["MODELS_DIR"] = models_dir
+
+        # Start worker process using uv run
+        cmd = [
+            "uv",
+            "run",
+            "scope-worker",
+            "--command-port",
+            str(self._command_port),
+            "--response-port",
+            str(self._response_port),
+        ]
+
+        logger.info(f"Starting worker process: {' '.join(cmd)}")
+        logger.info(f"Working directory: {worker_env_dir}")
+
+        self._worker_process = subprocess.Popen(
+            cmd,
+            cwd=str(worker_env_dir),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
-        self._worker_process.start()
+
+        # Start a thread to log worker output
+        def log_worker_output():
+            if self._worker_process and self._worker_process.stdout:
+                for line in iter(self._worker_process.stdout.readline, b""):
+                    if line:
+                        logger.info(f"[Worker] {line.decode('utf-8').rstrip()}")
+
+        output_thread = threading.Thread(target=log_worker_output, daemon=True)
+        output_thread.start()
 
         logger.info(f"Started worker process (PID: {self._worker_process.pid})")
 
+        # Give the worker a moment to start and connect
+        time.sleep(0.5)
+
         # Send load command
-        self._command_queue.put(
-            {
-                "command": WorkerCommand.LOAD_PIPELINE.value,
-                "pipeline_id": pipeline_id,
-                "load_params": load_params,
-            }
-        )
+        command = {
+            "command": WorkerCommand.LOAD_PIPELINE.value,
+            "pipeline_id": pipeline_id,
+            "load_params": load_params,
+        }
+        self._command_socket.send(json.dumps(command).encode("utf-8"))
 
         # Wait for response with timeout, checking if worker is still alive
         start_time = time.time()
-        check_interval = 0.5  # Check worker status every 0.5 seconds
+        check_interval = 500  # milliseconds for ZMQ poll
 
         while True:
             # Check if worker process is still alive
-            if not self._worker_process.is_alive():
+            if self._worker_process.poll() is not None:
                 # Worker died unexpectedly - get exit code
-                exit_code = self._worker_process.exitcode
-                if exit_code is not None and exit_code != 0:
+                exit_code = self._worker_process.returncode
+                if exit_code != 0:
                     # Process crashed (e.g., OOM, segmentation fault)
                     if exit_code == -9:  # SIGKILL (often OOM killer)
                         error_msg = (
@@ -371,8 +463,9 @@ class PipelineManager:
                 raise RuntimeError(error_msg)
 
             # Try to get response with short timeout to allow periodic worker checks
-            try:
-                response = self._response_queue.get(timeout=check_interval)
+            if self._response_socket.poll(timeout=check_interval):
+                message = self._response_socket.recv()
+                response = json.loads(message.decode("utf-8"))
 
                 if response["status"] == WorkerResponse.SUCCESS.value:
                     logger.info(
@@ -385,59 +478,74 @@ class PipelineManager:
                     logger.error(f"Failed to load pipeline in worker: {error_msg}")
                     raise RuntimeError(f"Pipeline loading failed: {error_msg}")
 
-            except queue.Empty:
-                # Timeout on queue.get - continue loop to check worker status
-                continue
-
     def _stop_worker(self):
         """Stop the worker process if it's running.
 
         This ensures proper VRAM cleanup by killing the process.
         """
-        if self._worker_process is not None and self._worker_process.is_alive():
+        if self._worker_process is not None and self._worker_process.poll() is None:
             logger.info(f"Stopping worker process (PID: {self._worker_process.pid})")
 
-            # Try graceful shutdown first
+            # Try graceful shutdown first by sending shutdown command
             try:
-                self._command_queue.put(None)  # Shutdown signal
-                self._worker_process.join(timeout=WORKER_SHUTDOWN_TIMEOUT)
+                if self._command_socket:
+                    command = {"command": WorkerCommand.SHUTDOWN.value}
+                    self._command_socket.send(json.dumps(command).encode("utf-8"))
+                    # Wait for process to exit
+                    try:
+                        self._worker_process.wait(timeout=WORKER_SHUTDOWN_TIMEOUT)
+                    except subprocess.TimeoutExpired:
+                        pass
             except Exception as e:
                 logger.warning(f"Error during graceful shutdown: {e}")
 
             # Force terminate if still alive
-            if self._worker_process.is_alive():
+            if self._worker_process.poll() is None:
                 logger.warning(
                     "Worker process did not shut down gracefully, terminating..."
                 )
                 self._worker_process.terminate()
-                self._worker_process.join(timeout=WORKER_TERMINATE_TIMEOUT)
+                try:
+                    self._worker_process.wait(timeout=WORKER_TERMINATE_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    pass
 
             # Final kill if still alive
-            if self._worker_process.is_alive():
+            if self._worker_process.poll() is None:
                 logger.warning("Worker process did not terminate, killing...")
                 self._worker_process.kill()
-                self._worker_process.join(timeout=WORKER_KILL_TIMEOUT)
+                try:
+                    self._worker_process.wait(timeout=WORKER_KILL_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    pass
 
             logger.info("Worker process stopped")
 
-        # Clean up queues
-        if self._command_queue is not None:
+        # Clean up ZMQ sockets
+        if self._command_socket is not None:
             try:
-                self._command_queue.close()
-                self._command_queue.join_thread()
+                self._command_socket.close()
             except Exception:
                 pass
-            self._command_queue = None
+            self._command_socket = None
 
-        if self._response_queue is not None:
+        if self._response_socket is not None:
             try:
-                self._response_queue.close()
-                self._response_queue.join_thread()
+                self._response_socket.close()
             except Exception:
                 pass
-            self._response_queue = None
+            self._response_socket = None
+
+        if self._zmq_context is not None:
+            try:
+                self._zmq_context.term()
+            except Exception:
+                pass
+            self._zmq_context = None
 
         self._worker_process = None
+        self._command_port = None
+        self._response_port = None
 
     def unload_pipeline(self):
         """Unload the current pipeline (thread-safe)."""
@@ -468,25 +576,26 @@ class PipelineManager:
                 )
 
             # Send command to create FrameProcessor in worker
-            self._command_queue.put(
-                {
-                    "command": WorkerCommand.CREATE_FRAME_PROCESSOR.value,
-                    "frame_processor_id": frame_processor_id,
-                    "initial_parameters": initial_parameters or {},
-                }
-            )
+            command = {
+                "command": WorkerCommand.CREATE_FRAME_PROCESSOR.value,
+                "frame_processor_id": frame_processor_id,
+                "initial_parameters": initial_parameters or {},
+            }
+            self._command_socket.send(json.dumps(command).encode("utf-8"))
 
             # Wait for response
-            try:
-                response = self._response_queue.get(timeout=60)
+            if self._response_socket.poll(timeout=60000):  # 60 seconds
+                message = self._response_socket.recv()
+                response = json.loads(message.decode("utf-8"))
+
                 if response["status"] == WorkerResponse.FRAME_PROCESSOR_CREATED.value:
                     return FrameProcessorProxy(
                         frame_processor_id=frame_processor_id,
-                        command_queue=self._command_queue,
-                        response_queue=self._response_queue,
+                        command_socket=self._command_socket,
+                        response_socket=self._response_socket,
                     )
                 else:
                     error_msg = response.get("error", "Unknown error")
                     raise RuntimeError(f"Failed to create FrameProcessor: {error_msg}")
-            except queue.Empty:
+            else:
                 raise RuntimeError("Timeout waiting for FrameProcessor creation")
