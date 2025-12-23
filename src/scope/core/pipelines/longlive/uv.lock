@@ -1003,7 +1003,7 @@ wheels = [
 ]
 
 [[package]]
-name = "scope-pipeline-streamdiffusionv2"
+name = "scope-pipeline-longlive"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
