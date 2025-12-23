@@ -489,13 +489,21 @@ class PipelineManager:
             # Try graceful shutdown first by sending shutdown command
             try:
                 if self._command_socket:
+                    # Set linger to 0 for immediate close (avoid blocking on pending messages)
+                    self._command_socket.setsockopt(zmq.LINGER, 0)
                     command = {"command": WorkerCommand.SHUTDOWN.value}
-                    self._command_socket.send(json.dumps(command).encode("utf-8"))
+                    # Use NOBLOCK to avoid blocking if receiver is not consuming
+                    self._command_socket.send(
+                        json.dumps(command).encode("utf-8"), zmq.NOBLOCK
+                    )
                     # Wait for process to exit
                     try:
                         self._worker_process.wait(timeout=WORKER_SHUTDOWN_TIMEOUT)
                     except subprocess.TimeoutExpired:
                         pass
+            except zmq.ZMQError:
+                # Socket error (e.g., would block), skip graceful shutdown
+                pass
             except Exception as e:
                 logger.warning(f"Error during graceful shutdown: {e}")
 
@@ -521,9 +529,10 @@ class PipelineManager:
 
             logger.info("Worker process stopped")
 
-        # Clean up ZMQ sockets
+        # Clean up ZMQ sockets - set LINGER to 0 first to avoid blocking on close
         if self._command_socket is not None:
             try:
+                self._command_socket.setsockopt(zmq.LINGER, 0)
                 self._command_socket.close()
             except Exception:
                 pass
@@ -531,6 +540,7 @@ class PipelineManager:
 
         if self._response_socket is not None:
             try:
+                self._response_socket.setsockopt(zmq.LINGER, 0)
                 self._response_socket.close()
             except Exception:
                 pass
