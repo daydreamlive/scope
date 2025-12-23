@@ -10,22 +10,21 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 
 ## Table of Contents
 
-- [Daydream Scope](#daydream-scope)
-  - [Table of Contents](#table-of-contents)
-  - [Features](#features)
-  - [System Requirements](#system-requirements)
-  - [Quick Start](#quick-start)
-  - [Install](#install)
-    - [Manual Installation](#manual-installation)
-      - [Clone](#clone)
-      - [Build](#build)
-      - [Run](#run)
-    - [Runpod](#runpod)
-  - [First Generation](#first-generation)
-  - [Firewalls](#firewalls)
-  - [Contributing](#contributing)
-  - [Troubleshooting](#troubleshooting)
-  - [License](#license)
+- [Table of Contents](#table-of-contents)
+- [Features](#features)
+- [System Requirements](#system-requirements)
+- [Quick Start](#quick-start)
+- [Install](#install)
+  - [Manual Installation](#manual-installation)
+    - [Clone](#clone)
+    - [Build](#build)
+    - [Run](#run)
+  - [Runpod](#runpod)
+- [First Generation](#first-generation)
+- [Firewalls](#firewalls)
+- [Contributing](#contributing)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ## Features
 

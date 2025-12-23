@@ -73,7 +73,7 @@ https://github.com/user-attachments/assets/2b3dd3ef-ba68-4254-b0dd-af2ee97bd8a9
 Then, navigate to `~/.daydream-scope/models/lora` and run:
 
 ```
-wget -O <file name> "<link address>?token=<TOKEN>"
+wget -O <file name> "<link address>&token=<TOKEN>"
 ```
 
 `<TOKEN>` is your API key.
