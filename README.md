@@ -10,17 +10,22 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 
 ## Table of Contents
 
-- [Features](#features)
-- [System Requirements](#system-requirements)
-- [Quick Start](#quick-start)
-- [Install](#install)
-  - [Manual Installation](#manual-installation)
-  - [Runpod](#runpod)
-- [First Generation](#first-generation)
-- [Firewalls](#firewalls)
-- [Contributing](#contributing)
-- [Troubleshooting](#troubleshooting)
-- [License](#license)
+- [Daydream Scope](#daydream-scope)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [System Requirements](#system-requirements)
+  - [Quick Start](#quick-start)
+  - [Install](#install)
+    - [Manual Installation](#manual-installation)
+      - [Clone](#clone)
+      - [Build](#build)
+      - [Run](#run)
+    - [Runpod](#runpod)
+  - [First Generation](#first-generation)
+  - [Firewalls](#firewalls)
+  - [Contributing](#contributing)
+  - [Troubleshooting](#troubleshooting)
+  - [License](#license)
 
 ## Features
 
@@ -31,7 +36,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
   - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
 - [LoRAs](./docs/lora.md) to customize concepts and styles used with autoregressive video diffusion models
 - [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide autoregressive video diffusion models
-- WebRTC real-time streaming
+- [API](./docs/server.md) with WebRTC real-time streaming
 - [Spout](./docs/spout.md) (Windows only) real-time video sharing with local applications
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
@@ -157,6 +162,7 @@ After your first generation you can:
 - Use [LoRAs](./docs/lora.md) to customize the concepts and styles used in your generations.
 - Use [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide generations.
 - Use [Spout](./docs/spout.md) (Windows only) to share real-time video between Scope and other local applications.
+- Use the [API](./docs/server.md) to programatically control Scope.
 
 ## Firewalls
 
