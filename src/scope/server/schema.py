@@ -10,7 +10,12 @@ from scope.core.pipelines.schema import (
     LongLiveConfig,
     StreamDiffusionV2Config,
 )
-from scope.core.pipelines.utils import Quantization
+
+
+class Quantization(str, Enum):
+    """Quantization method enumeration."""
+
+    FP8_E4M3FN = "fp8_e4m3fn"
 
 
 class HealthResponse(BaseModel):
