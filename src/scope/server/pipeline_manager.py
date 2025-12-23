@@ -323,6 +323,45 @@ class PipelineManager:
             s.bind(("127.0.0.1", 0))
             return s.getsockname()[1]
 
+    def _get_pipeline_env_dir(self, pipeline_id: str) -> Path:
+        """Get the environment directory for a specific pipeline.
+
+        Each pipeline has its own pyproject.toml with pipeline-specific dependencies.
+
+        Args:
+            pipeline_id: The pipeline identifier
+
+        Returns:
+            Path to the pipeline's environment directory
+        """
+        project_root = Path(__file__).parent.parent.parent.parent
+
+        # Map pipeline IDs to their directory names
+        pipeline_dir_map = {
+            "passthrough": "passthrough",
+            "streamdiffusionv2": "streamdiffusionv2",
+            "longlive": "longlive",
+            "krea-realtime-video": "krea_realtime_video",
+        }
+
+        if pipeline_id in pipeline_dir_map:
+            pipeline_dir = (
+                project_root
+                / "src"
+                / "scope"
+                / "core"
+                / "pipelines"
+                / pipeline_dir_map[pipeline_id]
+            )
+            if pipeline_dir.exists() and (pipeline_dir / "pyproject.toml").exists():
+                return pipeline_dir
+
+        # Fallback to base worker_env for unknown pipelines
+        worker_env_dir = project_root / "worker_env"
+        if not worker_env_dir.exists():
+            raise RuntimeError(f"Worker environment directory not found: {worker_env_dir}")
+        return worker_env_dir
+
     def _start_worker_and_load_pipeline(
         self, pipeline_id: str, load_params: dict | None = None
     ) -> bool:
@@ -337,12 +376,11 @@ class PipelineManager:
         # Stop any existing worker first
         self._stop_worker()
 
-        # Find the worker_env directory
+        # Get the pipeline-specific environment directory
         project_root = Path(__file__).parent.parent.parent.parent
-        worker_env_dir = project_root / "worker_env"
+        pipeline_env_dir = self._get_pipeline_env_dir(pipeline_id)
 
-        if not worker_env_dir.exists():
-            raise RuntimeError(f"Worker environment directory not found: {worker_env_dir}")
+        logger.info(f"Using pipeline environment: {pipeline_env_dir}")
 
         # Set up ZMQ context and sockets
         self._zmq_context = zmq.Context()
@@ -381,11 +419,11 @@ class PipelineManager:
         ]
 
         logger.info(f"Starting worker process: {' '.join(cmd)}")
-        logger.info(f"Working directory: {worker_env_dir}")
+        logger.info(f"Working directory: {pipeline_env_dir}")
 
         self._worker_process = subprocess.Popen(
             cmd,
-            cwd=str(worker_env_dir),
+            cwd=str(pipeline_env_dir),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

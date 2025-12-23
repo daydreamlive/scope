@@ -1,0 +1,51 @@
+[project]
+name = "scope-pipeline-krea-realtime-video"
+version = "0.1.0"
+description = "KREA Realtime Video pipeline for daydream-scope"
+requires-python = ">=3.10.12,<3.11"
+dependencies = [
+    "scope-worker-base",
+    "aiortc>=1.13.0",
+    "torch==2.8.0",
+    "torchvision==0.23.0",
+    "easydict>=1.13",
+    "diffusers>=0.31.0",
+    "ftfy>=6.3.1",
+    "transformers>=4.49.0",
+    "einops>=0.8.1",
+    "lmdb>=1.7.3",
+    "omegaconf>=2.3.0",
+    "accelerate>=1.1.1",
+    "flash-attn==2.8.3; sys_platform == 'linux' or sys_platform == 'win32'",
+    "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
+    "safetensors>=0.6.2",
+    "huggingface_hub>=0.25.0",
+    "peft>=0.17.1",
+    "torchcodec==0.7.0",
+    "torchao==0.13.0",
+    "kernels>=0.10.4",
+    "triton==3.4.0; sys_platform != 'win32'",
+    "triton-windows==3.4.0.post21; sys_platform == 'win32'",
+]
+
+[tool.uv.sources]
+scope-worker-base = { path = "../../../../../worker_env", editable = true }
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+flash-attn = [
+    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp310-cp310-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+    { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
+]
+sageattention = [
+    { url = "https://github.com/daydreamlive/SageAttention/releases/download/v2.2.0-linux/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+    { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
