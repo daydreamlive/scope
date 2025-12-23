@@ -3,37 +3,44 @@ from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 from diffusers.utils import logging as diffusers_logging
 
 from ..wan2_1.blocks import (
+    AutoPrepareLatentsBlock,
+    AutoPreprocessVideoBlock,
     CleanKVCacheBlock,
     DecodeBlock,
     DenoiseBlock,
     EmbeddingBlendingBlock,
-    PrepareLatentsBlock,
     PrepareNextBlock,
     SetTimestepsBlock,
+    SetTransformerBlocksLocalAttnSizeBlock,
     SetupCachesBlock,
     TextConditioningBlock,
 )
+from ..wan2_1.vace.blocks import VaceEncodingBlock
 from .blocks import (
     PrepareRecacheFramesBlock,
     RecacheFramesBlock,
-    SetTransformerBlocksLocalAttnSizeBlock,
 )
 
 logger = diffusers_logging.get_logger(__name__)
 
-# Main pipeline blocks for T2V workflow
+# Main pipeline blocks with multi-mode support (text-to-video and video-to-video)
+# AutoPreprocessVideoBlock: Routes to video preprocessing when 'video' input provided
+# AutoPrepareLatentsBlock: Routes to PrepareVideoLatentsBlock or PrepareLatentsBlock
+# VaceEncodingBlock: Encodes VACE context for conditioning
 ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("embedding_blending", EmbeddingBlendingBlock),
         ("set_timesteps", SetTimestepsBlock),
+        ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("setup_caches", SetupCachesBlock),
         (
             "set_transformer_blocks_local_attn_size",
             SetTransformerBlocksLocalAttnSizeBlock,
         ),
-        ("prepare_latents", PrepareLatentsBlock),
+        ("auto_prepare_latents", AutoPrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),
+        ("vace_encoding", VaceEncodingBlock),
         ("denoise", DenoiseBlock),
         ("clean_kv_cache", CleanKVCacheBlock),
         ("decode", DecodeBlock),

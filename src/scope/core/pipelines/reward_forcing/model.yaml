@@ -1,0 +1,10 @@
+base_model_name: Wan2.1-T2V-1.3B
+base_model_kwargs:
+  timestep_shift: 5.0
+  sink_size: 3
+num_frame_per_block: 3
+local_attn_size: 9
+vae_spatial_downsample_factor: 8
+vae_temporal_downsample_factor: 4
+patch_embedding_spatial_downsample_factor: 2
+max_rope_freq_table_seq_len: 1024

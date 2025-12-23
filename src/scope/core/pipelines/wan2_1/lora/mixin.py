@@ -121,6 +121,11 @@ class LoRAEnabledPipeline:
     ) -> None:
         """Apply runtime scale updates for loaded LoRA adapters if supported.
 
+        Supports per-LoRA merge modes. The manager will look up the merge_mode
+        for each LoRA from loaded_adapters and route updates to the appropriate
+        strategy. Strategies that don't support runtime updates will handle this
+        gracefully (e.g. permanent_merge logs a warning).
+
         Args:
             lora_scales: Iterable of {path, scale} updates from the client.
             model:       Model instance currently used by the pipeline (may be wrapped).
@@ -131,17 +136,18 @@ class LoRAEnabledPipeline:
         if not self.loaded_lora_adapters:
             return
 
-        # Some strategies (e.g. permanent_merge) do not support runtime updates.
-        if self._lora_merge_mode == PERMANENT_MERGE_MODE:
-            # Manager will already log a warning, but short-circuit here as well.
+        scale_updates_list = list(lora_scales)
+        if not scale_updates_list:
             return
 
+        # Delegate to manager, which routes updates to appropriate strategies
+        # Pass None for merge_mode so manager looks it up from loaded_adapters
         updated_adapters = LoRAManager.update_adapter_scales(
             model=model,
             loaded_adapters=list(self.loaded_lora_adapters),
-            scale_updates=list(lora_scales),
+            scale_updates=scale_updates_list,
             logger_prefix=f"{self.__class__.__name__}.prepare: ",
-            merge_mode=self._lora_merge_mode,
+            merge_mode=None,  # Manager will look up per-LoRA merge_mode from loaded_adapters
         )
 
         self.loaded_lora_adapters = updated_adapters

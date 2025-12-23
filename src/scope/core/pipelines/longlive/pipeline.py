@@ -1,27 +1,42 @@
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import torch
 from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline
+from ..defaults import (
+    apply_mode_defaults_to_state,
+    handle_mode_transition,
+    prepare_for_mode,
+    resolve_input_mode,
+)
+from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
+from ..schema import LongLiveConfig
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from .components import WanVAEWrapper
+from ..wan2_1.vace import VACEEnabledPipeline
+from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import LongLiveBlocks
-from .modules.causal_model import CausalWanModel
+
+if TYPE_CHECKING:
+    from ..schema import BasePipelineConfig
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
+class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
+    @classmethod
+    def get_config_class(cls) -> type["BasePipelineConfig"]:
+        return LongLiveConfig
+
     def __init__(
         self,
         config,
@@ -29,6 +44,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        from .modules.causal_model import CausalWanModel
+
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
         lora_path = getattr(config, "lora_path", None)
@@ -43,8 +60,12 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         )
         lora_config = getattr(model_config, "adapter", {})
 
-        # Load generator
+        # Load generator with VACE support via upfront loading
+        # Strategy: Load LongLive base, wrap with VACE (if enabled), add VACE weights, then apply LoRA
+        # (VACE loaded before LoRA to ensure correct wrapper ordering)
         start = time.time()
+
+        # Always create base CausalWanModel first
         generator = WanDiffusionWrapper(
             CausalWanModel,
             model_name=base_model_name,
@@ -54,7 +75,11 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             **base_model_kwargs,
         )
 
-        print(f"Loaded diffusion model in {time.time() - start:.3f}s")
+        # Apply VACE wrapper if vace_path is configured (upfront loading)
+        # This must happen before LoRA to get correct ordering: LoRA -> VACE -> Base
+        generator.model = self._init_vace(
+            config, generator.model, device=device, dtype=dtype
+        )
 
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
         # This mirrors the original LongLive behavior and is independent of any
@@ -112,9 +137,9 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE
+        # Load VAE using unified WanVAEWrapper
         start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir)
+        vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
         print(f"Loaded VAE in {time.time() - start:.3f}s")
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
@@ -151,15 +176,16 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         self.state.set("base_seed", getattr(config, "seed", 42))
 
         self.first_call = True
+        self.last_mode = None  # Track mode for transition detection
+
+    def prepare(self, **kwargs) -> Requirements | None:
+        """Return input requirements based on current mode."""
+        return prepare_for_mode(self.__class__, self.components.config, kwargs)
 
     def __call__(self, **kwargs) -> torch.Tensor:
-        if self.first_call:
-            self.state.set("init_cache", True)
-            self.first_call = False
-        else:
-            # This will be overriden if the init_cache is passed in kwargs
-            self.state.set("init_cache", False)
-
+        self.first_call, self.last_mode = handle_mode_transition(
+            self.state, self.components.vae, self.first_call, self.last_mode, kwargs
+        )
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
@@ -180,8 +206,20 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
+        # Clear video from state if not provided to prevent stale video data
+        if "video" not in kwargs:
+            self.state.set("video", None)
+
+        # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "vace_ref_images" not in kwargs:
+            self.state.set("vace_ref_images", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
+
+        # Apply mode-specific defaults (noise_scale, noise_controller)
+        mode = resolve_input_mode(kwargs)
+        apply_mode_defaults_to_state(self.state, self.__class__, mode, kwargs)
 
         _, self.state = self.blocks(self.components, self.state)
         return postprocess_chunk(self.state.values["output_video"])

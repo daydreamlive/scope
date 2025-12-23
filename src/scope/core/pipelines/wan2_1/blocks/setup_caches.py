@@ -95,6 +95,12 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 default=None,
                 description="Input video (if present, indicates video input is enabled)",
             ),
+            InputParam(
+                "vace_input_frames",
+                type_hint=list[torch.Tensor] | torch.Tensor | None,
+                default=None,
+                description="Input frames for VACE conditioning (if present, indicates video input is enabled)",
+            ),
         ]
 
     @property
@@ -138,7 +144,10 @@ class SetupCachesBlock(ModularPipelineBlocks):
             block_state.conditioning_embeds_updated
             and not transitioning_context
             and block_state.manage_cache
-            and block_state.video is not None
+            and (
+                block_state.video is not None
+                or block_state.vace_input_frames is not None
+            )
         ):
             init_cache = True
 

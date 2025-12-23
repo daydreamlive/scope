@@ -7,17 +7,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Badge } from "./ui/badge";
-import { Upload } from "lucide-react";
+import { Input } from "./ui/input";
+import { Upload, ArrowUp } from "lucide-react";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { PIPELINES } from "../data/pipelines";
+import type { InputMode } from "../types";
+import type { PipelineInfo } from "../hooks/usePipelines";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { ImageManager } from "./ImageManager";
+import { Button } from "./ui/button";
 
 interface InputAndControlsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
@@ -49,10 +56,25 @@ interface InputAndControlsPanelProps {
   timelinePrompts?: TimelinePrompt[];
   transitionSteps: number;
   onTransitionStepsChange: (steps: number) => void;
+  // Spout input settings
+  spoutReceiverName?: string;
+  onSpoutReceiverChange?: (name: string) => void;
+  // Input mode (text vs video) for multi-mode pipelines
+  inputMode: InputMode;
+  onInputModeChange: (mode: InputMode) => void;
+  // Whether Spout is available (server-side detection for native Windows, not WSL)
+  spoutAvailable?: boolean;
+  // VACE reference images (only shown when VACE is enabled)
+  vaceEnabled?: boolean;
+  refImages?: string[];
+  onRefImagesChange?: (images: string[]) => void;
+  onSendHints?: (imagePaths: string[]) => void;
+  isDownloading?: boolean;
 }
 
 export function InputAndControlsPanel({
   className = "",
+  pipelines,
   localStream,
   isInitializing,
   error,
@@ -84,6 +106,16 @@ export function InputAndControlsPanel({
   timelinePrompts: _timelinePrompts = [],
   transitionSteps,
   onTransitionStepsChange,
+  spoutReceiverName = "",
+  onSpoutReceiverChange,
+  inputMode,
+  onInputModeChange,
+  spoutAvailable = false,
+  vaceEnabled = true,
+  refImages = [],
+  onRefImagesChange,
+  onSendHints,
+  isDownloading = false,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -97,8 +129,9 @@ export function InputAndControlsPanel({
   };
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Get pipeline category, deafault to video-input
-  const pipelineCategory = PIPELINES[pipelineId]?.category || "video-input";
+  // Check if this pipeline supports multiple input modes
+  const pipeline = pipelines?.[pipelineId];
+  const isMultiMode = (pipeline?.supportedModes?.length ?? 0) > 1;
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -129,90 +162,168 @@ export function InputAndControlsPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
-        <div>
-          <h3 className="text-sm font-medium mb-2">Mode</h3>
-          <Select
-            value={pipelineCategory === "video-input" ? mode : "text"}
-            onValueChange={value => {
-              if (pipelineCategory === "video-input" && value) {
-                onModeChange(value as VideoSourceMode);
-              }
-            }}
-            disabled={isStreaming}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {pipelineCategory === "video-input" ? (
-                <>
-                  <SelectItem value="video">Video</SelectItem>
-                  <SelectItem value="camera">Camera</SelectItem>
-                </>
-              ) : (
+        {/* Input Mode selector - only show for multi-mode pipelines */}
+        {isMultiMode && (
+          <div>
+            <h3 className="text-sm font-medium mb-2">Input Mode</h3>
+            <Select
+              value={inputMode}
+              onValueChange={value => {
+                if (value) {
+                  onInputModeChange(value as InputMode);
+                }
+              }}
+              disabled={isStreaming}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                 <SelectItem value="text">Text</SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
+                <SelectItem value="video">Video</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-        {pipelineCategory === "video-input" && (
+        {/* Video Source toggle - only show when in video input mode */}
+        {inputMode === "video" && (
+          <div>
+            <h3 className="text-sm font-medium mb-2">Video Source</h3>
+            <ToggleGroup
+              type="single"
+              value={mode}
+              onValueChange={value => {
+                if (value) {
+                  onModeChange(value as VideoSourceMode);
+                }
+              }}
+              className="justify-start"
+            >
+              <ToggleGroupItem value="video" aria-label="Video file">
+                Video File
+              </ToggleGroupItem>
+              <ToggleGroupItem value="camera" aria-label="Camera">
+                Camera
+              </ToggleGroupItem>
+              {spoutAvailable && (
+                <ToggleGroupItem value="spout" aria-label="Spout Receiver">
+                  Spout Receiver
+                </ToggleGroupItem>
+              )}
+            </ToggleGroup>
+          </div>
+        )}
+
+        {/* Video preview - only show when in video input mode */}
+        {inputMode === "video" && (
           <div>
             <h3 className="text-sm font-medium mb-2">Input</h3>
-            <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
-              {isInitializing ? (
-                <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera"
-                    ? "Requesting camera access..."
-                    : "Initializing video..."}
-                </div>
-              ) : error ? (
-                <div className="text-center text-red-500 text-sm p-4">
-                  <p>
-                    {mode === "camera"
-                      ? "Camera access failed:"
-                      : "Video error:"}
-                  </p>
-                  <p className="text-xs mt-1">{error}</p>
-                </div>
-              ) : localStream ? (
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  muted
-                  playsInline
+            {mode === "spout" ? (
+              /* Spout Receiver Configuration */
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name:"
+                  tooltip="The name of the sender to receive video from Spout-compatible apps like TouchDesigner, Resolume, OBS. Leave empty to receive from any sender."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
                 />
-              ) : (
-                <div className="text-center text-muted-foreground text-sm">
-                  {mode === "camera" ? "Camera Preview" : "Video Preview"}
-                </div>
-              )}
-
-              {/* Upload button - only show in video mode */}
-              {mode === "video" && onVideoFileUpload && (
-                <>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    id="video-upload"
-                    disabled={isStreaming || isConnecting}
+                <Input
+                  type="text"
+                  value={spoutReceiverName}
+                  onChange={e => onSpoutReceiverChange?.(e.target.value)}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="TDSyphonSpoutOut"
+                />
+              </div>
+            ) : (
+              /* Video/Camera Input Preview */
+              <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
+                {isInitializing ? (
+                  <div className="text-center text-muted-foreground text-sm">
+                    {mode === "camera"
+                      ? "Requesting camera access..."
+                      : "Initializing video..."}
+                  </div>
+                ) : error ? (
+                  <div className="text-center text-red-500 text-sm p-4">
+                    <p>
+                      {mode === "camera"
+                        ? "Camera access failed:"
+                        : "Video error:"}
+                    </p>
+                    <p className="text-xs mt-1">{error}</p>
+                  </div>
+                ) : localStream ? (
+                  <video
+                    ref={videoRef}
+                    className="w-full h-full object-cover"
+                    autoPlay
+                    muted
+                    playsInline
                   />
-                  <label
-                    htmlFor="video-upload"
-                    className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                      isStreaming || isConnecting
-                        ? "opacity-50 cursor-not-allowed"
-                        : "hover:bg-black/70 cursor-pointer"
-                    }`}
-                  >
-                    <Upload className="h-4 w-4 text-white" />
-                  </label>
-                </>
-              )}
-            </div>
+                ) : (
+                  <div className="text-center text-muted-foreground text-sm p-4">
+                    {mode === "camera" ? "Camera Preview" : "Video Preview"}
+                  </div>
+                )}
+
+                {/* Upload button - only show in video mode */}
+                {mode === "video" && onVideoFileUpload && (
+                  <>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="video-upload"
+                      disabled={isStreaming || isConnecting}
+                    />
+                    <label
+                      htmlFor="video-upload"
+                      className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
+                        isStreaming || isConnecting
+                          ? "opacity-50 cursor-not-allowed"
+                          : "hover:bg-black/70 cursor-pointer"
+                      }`}
+                    >
+                      <Upload className="h-4 w-4 text-white" />
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* VACE Reference Images - only show when VACE is enabled */}
+        {vaceEnabled && (
+          <div>
+            <ImageManager
+              images={refImages}
+              onImagesChange={onRefImagesChange || (() => {})}
+              disabled={isDownloading}
+            />
+            {onSendHints && refImages && refImages.length > 0 && (
+              <div className="flex items-center justify-end mt-2">
+                <Button
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    onSendHints(refImages.filter(img => img));
+                  }}
+                  disabled={isDownloading || !isStreaming}
+                  size="sm"
+                  className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !isStreaming
+                      ? "Start streaming to send hints"
+                      : "Submit all reference images"
+                  }
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -220,6 +331,11 @@ export function InputAndControlsPanel({
           {(() => {
             // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
             const isEditMode = selectedTimelinePrompt && isVideoPaused;
+
+            // Hide prompts section if pipeline doesn't support prompts
+            if (pipeline?.supportsPrompts === false) {
+              return null;
+            }
 
             return (
               <div>
@@ -250,7 +366,6 @@ export function InputAndControlsPanel({
                     onPromptsSubmit={onPromptsSubmit}
                     onTransitionSubmit={onTransitionSubmit}
                     disabled={
-                      pipelineId === "passthrough" ||
                       (_isTimelinePlaying &&
                         !isVideoPaused &&
                         !isAtEndOfTimeline()) ||

@@ -539,21 +539,23 @@ class CausalWanSelfAttention(nn.Module):
                 )
 
                 # Convert scalars to tensors to avoid ShapeAsConstantBuffer dtype issues during compilation
-                frame_seqlen_tensor = torch.tensor(
+                # This is critical when using torch.compile with flex_attention
+                frame_seqlen_tensor = torch.as_tensor(
                     frame_seqlen, dtype=torch.int32, device=roped_query.device
                 )
-                # cache_current_block_start might already be a tensor([0]) based on the way local_end_index is initialized
-                # in the KV cache but we want a scalar tensor so we check for that case and convert if needed
-                cache_current_block_start_tensor = cache_current_block_start
-                if isinstance(cache_current_block_start_tensor, torch.Tensor) and cache_current_block_start_tensor.ndim > 0:
-                    cache_current_block_start_tensor = cache_current_block_start_tensor.squeeze()
+                cache_current_block_start_tensor = torch.as_tensor(
+                    cache_current_block_start, dtype=torch.int32, device=roped_query.device
+                ).squeeze()
+                log_scale_tensor = torch.as_tensor(
+                    log_scale, dtype=roped_query.dtype, device=roped_query.device
+                )
 
                 def score_mod(score, b_idx, h_idx, q_idx, kv_idx):
                     # Apply bias only to past frames (exclude first frame and current block)
                     return torch.where(
                         (kv_idx >= frame_seqlen_tensor)
                         & (kv_idx < cache_current_block_start_tensor),
-                        score + log_scale,
+                        score + log_scale_tensor,
                         score,
                     )
 

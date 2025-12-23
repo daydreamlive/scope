@@ -1,29 +1,45 @@
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import torch
 from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
 from ..components import ComponentsManager
-from ..interface import Pipeline
+from ..defaults import (
+    apply_mode_defaults_to_state,
+    handle_mode_transition,
+    prepare_for_mode,
+    resolve_input_mode,
+)
+from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
+from ..schema import KreaRealtimeVideoConfig
 from ..utils import Quantization, load_model_config
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from .components import WanVAEWrapper
+from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import KreaRealtimeVideoBlocks
-from .modules.causal_model import CausalWanModel
+
+if TYPE_CHECKING:
+    from ..schema import BasePipelineConfig
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
+# This default value < 1.0 will trigger torch.compile in the flex_attention code path
+# during warmup
+DEFAULT_KV_CACHE_ATTENTION_BIAS = 0.3
 
-WARMUP_RUNS = 3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
+    @classmethod
+    def get_config_class(cls) -> type["BasePipelineConfig"]:
+        return KreaRealtimeVideoConfig
+
     def __init__(
         self,
         config,
@@ -32,6 +48,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        from .modules.causal_model import CausalWanModel
+
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)
@@ -136,28 +154,44 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # does not work properly
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", 1.0)
+        self.state.set("kv_cache_attention_bias", DEFAULT_KV_CACHE_ATTENTION_BIAS)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "seed", 42))
 
-        start = time.time()
-        for _ in range(WARMUP_RUNS):
-            self._generate(prompts=WARMUP_PROMPT)
+        # Warm-up: Run enough iterations to fill the KV cache completely.
+        # This ensures torch.compile compiles the flex_attention kernel at the
+        # steady-state cache size, avoiding recompilation during actual streaming.
+        #
+        # Cache fills at: num_frame_per_block frames per iteration
+        # Cache capacity: local_attn_size frames
+        # Iterations needed: ceil(local_attn_size / num_frame_per_block) + 1
+        #   (+1 to exercise the "cache full with eviction" path)
+        local_attn_size = getattr(model_config, "local_attn_size", 6)
+        num_frame_per_block = getattr(model_config, "num_frame_per_block", 3)
+        warmup_runs = (local_attn_size // num_frame_per_block) + 1
 
-        print(f"Warmed up in {time.time() - start:2f}s")
+        start = time.time()
+        for i in range(warmup_runs):
+            self._generate(
+                prompts=WARMUP_PROMPT,
+                init_cache=(i == 0),  # Only init on first run, then accumulate
+            )
+
+        print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
 
         self.first_call = True
+        self.last_mode = None  # Track mode for transition detection
+
+    def prepare(self, **kwargs) -> Requirements | None:
+        """Return input requirements based on current mode."""
+        return prepare_for_mode(self.__class__, self.components.config, kwargs)
 
     def __call__(self, **kwargs) -> torch.Tensor:
-        if self.first_call:
-            self.state.set("init_cache", True)
-            self.first_call = False
-        else:
-            # This will be overriden if the init_cache is passed in kwargs
-            self.state.set("init_cache", False)
-
+        self.first_call, self.last_mode = handle_mode_transition(
+            self.state, self.components.vae, self.first_call, self.last_mode, kwargs
+        )
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
@@ -178,8 +212,16 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         if "transition" not in kwargs:
             self.state.set("transition", None)
 
+        # Clear video from state if not provided to prevent stale video data
+        if "video" not in kwargs:
+            self.state.set("video", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
+
+        # Apply mode-specific defaults (noise_scale, noise_controller)
+        mode = resolve_input_mode(kwargs)
+        apply_mode_defaults_to_state(self.state, self.__class__, mode, kwargs)
 
         _, self.state = self.blocks(self.components, self.state)
         return postprocess_chunk(self.state.values["output_video"])

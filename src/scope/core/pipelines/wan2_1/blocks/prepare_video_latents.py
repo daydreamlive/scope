@@ -77,35 +77,9 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
-        target_num_frames = (
-            components.config.num_frame_per_block
-            * components.config.vae_temporal_downsample_factor
-        )
-        # The first block will require an additional frame due to behavior of VAE
-        if block_state.current_start_frame == 0:
-            target_num_frames += 1
-
-        input_video = block_state.video
-        _, _, num_frames, _, _ = input_video.shape
-        # If we do not have enough frames use linear interpolation to resample existing frames
-        # to meet the required number of frames
-        if num_frames != target_num_frames:
-            indices = (
-                torch.linspace(
-                    0,
-                    num_frames - 1,
-                    target_num_frames,
-                    device=input_video.device,
-                )
-                .round()
-                .long()
-            )
-            input_video = input_video[:, :, indices]
-
         # Encode frames to latents using VAE
-        latents = components.vae.encode_to_latent(input_video)
-        # Transpose latents
-        latents = latents.transpose(2, 1)
+        # VAE returns [B, F, C, H, W] which is what DenoiseBlock/Generator expect
+        latents = components.vae.encode_to_latent(block_state.video)
 
         # The default param for InputParam does not work right now
         # The workaround is to set the default values here

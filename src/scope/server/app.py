@@ -1,27 +1,32 @@
-import argparse
 import asyncio
+import contextlib
+import io
 import logging
 import os
 import subprocess
 import sys
 import threading
 import time
+import warnings
 import webbrowser
 from contextlib import asynccontextmanager
 from datetime import datetime
+from functools import wraps
 from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+import click
 import torch
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .download_models import download_models
+from .download_progress_manager import download_progress_manager
 from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
@@ -29,12 +34,23 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
-from .models_config import ensure_models_dir, get_models_dir, models_are_downloaded
+from .models_config import (
+    ensure_models_dir,
+    get_assets_dir,
+    get_models_dir,
+    models_are_downloaded,
+)
 from .pipeline_manager import PipelineManager
 from .schema import (
+    AssetFileInfo,
+    AssetsResponse,
     HardwareInfoResponse,
     HealthResponse,
+    IceCandidateRequest,
+    IceServerConfig,
+    IceServersResponse,
     PipelineLoadRequest,
+    PipelineSchemasResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
@@ -103,6 +119,28 @@ if os.getenv("VERBOSE_LOGGING"):
 PIPELINE = os.getenv("PIPELINE", None)
 
 logger = logging.getLogger(__name__)
+
+
+def suppress_init_output(func):
+    """Decorator to suppress all initialization output (logging, warnings, stdout/stderr)."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("ignore")
+            # Temporarily disable all logging
+            logging.disable(logging.CRITICAL)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                # Re-enable logging
+                logging.disable(logging.NOTSET)
+
+    return wrapper
 
 
 def get_git_commit_hash() -> str:
@@ -180,23 +218,27 @@ async def lifespan(app: FastAPI):
     # Startup
     global webrtc_manager, pipeline_manager
 
-    # Check CUDA availability before proceeding
+    # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
-        error_msg = (
+        warning_msg = (
             "CUDA is not available on this system. "
-            "This application currently requires a CUDA-compatible GPU and "
-            "other hardware will be supported in the future."
+            "Some pipelines may not work without a CUDA-compatible GPU. "
+            "The application will start, but pipeline functionality may be limited."
         )
-        logger.error(error_msg)
-        sys.exit(1)
+        logger.warning(warning_msg)
 
     # Log logs directory
     logs_dir = get_logs_dir()
     logger.info(f"Logs directory: {logs_dir}")
 
-    # Ensure models directory and lora subdirectory exist
+    # Ensure models directory and subdirectories exist
     models_dir = ensure_models_dir()
     logger.info(f"Models directory: {models_dir}")
+
+    # Ensure assets directory exists for VACE reference images and other media (at same level as models)
+    assets_dir = get_assets_dir()
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Assets directory: {assets_dir}")
 
     # Initialize pipeline manager (but don't load pipeline yet)
     pipeline_manager = PipelineManager()
@@ -265,10 +307,18 @@ async def root():
     if not frontend_dist.exists():
         return {"message": "Scope API - Frontend not built"}
 
-    # Serve the frontend index.html
+    # Serve the frontend index.html with no-cache headers
+    # This ensures clients like Electron alway fetch the latest HTML (which references hashed assets)
     index_file = frontend_dist / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     return {"message": "Scope API - Frontend index.html not found"}
 
@@ -308,6 +358,54 @@ async def get_pipeline_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/pipelines/schemas", response_model=PipelineSchemasResponse)
+async def get_pipeline_schemas():
+    """Get configuration schemas and defaults for all available pipelines.
+
+    Returns the output of each pipeline's get_schema_with_metadata() method,
+    which includes:
+    - Pipeline metadata (id, name, description, version)
+    - supported_modes: List of supported input modes ("text", "video")
+    - default_mode: Default input mode for this pipeline
+    - mode_defaults: Mode-specific default overrides (if any)
+    - config_schema: Full JSON schema with defaults
+
+    The frontend should use this as the source of truth for parameter defaults.
+    """
+    from scope.core.pipelines.registry import PipelineRegistry
+
+    pipelines: dict = {}
+
+    for pipeline_id in PipelineRegistry.list_pipelines():
+        config_class = PipelineRegistry.get_config_class(pipeline_id)
+        if config_class:
+            # get_schema_with_metadata() includes supported_modes, default_mode,
+            # and mode_defaults directly from the config class
+            schema_data = config_class.get_schema_with_metadata()
+            pipelines[pipeline_id] = schema_data
+
+    return PipelineSchemasResponse(pipelines=pipelines)
+
+
+@app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
+async def get_ice_servers(
+    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+):
+    """Return ICE server configuration for frontend WebRTC connection."""
+    ice_servers = []
+
+    for server in webrtc_manager.rtc_config.iceServers:
+        ice_servers.append(
+            IceServerConfig(
+                urls=server.urls,
+                username=server.username if hasattr(server, "username") else None,
+                credential=server.credential if hasattr(server, "credential") else None,
+            )
+        )
+
+    return IceServersResponse(iceServers=ice_servers)
+
+
 @app.post("/api/v1/webrtc/offer", response_model=WebRTCOfferResponse)
 async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
@@ -328,6 +426,45 @@ async def handle_webrtc_offer(
 
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.patch(
+    "/api/v1/webrtc/offer/{session_id}", status_code=204, response_class=Response
+)
+async def add_ice_candidate(
+    session_id: str,
+    candidate_request: IceCandidateRequest,
+    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+):
+    """Add ICE candidate(s) to an existing WebRTC session (Trickle ICE).
+
+    This endpoint follows the Trickle ICE pattern, allowing clients to send
+    ICE candidates as they are discovered.
+    """
+    # TODO: Validate that the Content-Type is 'application/trickle-ice-sdpfrag'
+    # At the moment FastAPI defaults to validating that it is 'application/json'
+    try:
+        for candidate_init in candidate_request.candidates:
+            await webrtc_manager.add_ice_candidate(
+                session_id=session_id,
+                candidate=candidate_init.candidate,
+                sdp_mid=candidate_init.sdpMid,
+                sdp_mline_index=candidate_init.sdpMLineIndex,
+            )
+
+            logger.debug(
+                f"Added {len(candidate_request.candidates)} ICE candidates to session {session_id}"
+            )
+
+        # Return 204 No Content on success
+        return Response(status_code=204)
+
+    except ValueError as e:
+        # Session not found or invalid candidate
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error adding ICE candidate to session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -390,12 +527,193 @@ async def list_lora_files():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/assets", response_model=AssetsResponse)
+async def list_assets(
+    type: str | None = Query(None, description="Filter by asset type (image, video)"),
+):
+    """List available asset files in the assets directory and its subdirectories."""
+
+    def process_asset_file(
+        file_path: Path, assets_dir: Path, asset_type: str
+    ) -> AssetFileInfo:
+        """Extract asset file metadata."""
+        size_mb = file_path.stat().st_size / (1024 * 1024)
+        created_at = file_path.stat().st_ctime
+        relative_path = file_path.relative_to(assets_dir)
+        folder = (
+            str(relative_path.parent) if relative_path.parent != Path(".") else None
+        )
+        return AssetFileInfo(
+            name=file_path.stem,
+            path=str(file_path),
+            size_mb=round(size_mb, 2),
+            folder=folder,
+            type=asset_type,
+            created_at=created_at,
+        )
+
+    try:
+        assets_dir = get_assets_dir()
+        asset_files: list[AssetFileInfo] = []
+
+        if assets_dir.exists() and assets_dir.is_dir():
+            # Define patterns based on type filter
+            if type == "image" or type is None:
+                image_patterns = ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp")
+                for pattern in image_patterns:
+                    for file_path in assets_dir.rglob(pattern):
+                        if file_path.is_file():
+                            asset_files.append(
+                                process_asset_file(file_path, assets_dir, "image")
+                            )
+
+            if type == "video" or type is None:
+                video_patterns = ("*.mp4", "*.avi", "*.mov", "*.mkv", "*.webm")
+                for pattern in video_patterns:
+                    for file_path in assets_dir.rglob(pattern):
+                        if file_path.is_file():
+                            asset_files.append(
+                                process_asset_file(file_path, assets_dir, "video")
+                            )
+
+        # Sort by created_at (most recent first), then by folder and name
+        asset_files.sort(key=lambda x: (-x.created_at, x.folder or "", x.name))
+        return AssetsResponse(assets=asset_files)
+
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"list_assets: Error listing asset files: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/assets", response_model=AssetFileInfo)
+async def upload_asset(request: Request, filename: str = Query(...)):
+    """Upload an asset file (image or video) to the assets directory."""
+    try:
+        # Validate file type - support both images and videos
+        allowed_image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+        allowed_video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+        allowed_extensions = allowed_image_extensions | allowed_video_extensions
+
+        file_extension = Path(filename).suffix.lower()
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
+            )
+
+        # Determine asset type
+        if file_extension in allowed_image_extensions:
+            asset_type = "image"
+        else:
+            asset_type = "video"
+
+        # Ensure assets directory exists
+        assets_dir = get_assets_dir()
+        assets_dir.mkdir(parents=True, exist_ok=True)
+
+        # Read file content from request body
+        content = await request.body()
+
+        # Validate file size (50MB limit)
+        max_size = 50 * 1024 * 1024  # 50MB
+        if len(content) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
+            )
+
+        # Save file to assets directory
+        file_path = assets_dir / filename
+        file_path.write_bytes(content)
+
+        # Return file info matching AssetFileInfo structure
+        size_mb = len(content) / (1024 * 1024)
+        created_at = file_path.stat().st_ctime
+        relative_path = file_path.relative_to(assets_dir)
+        folder = (
+            str(relative_path.parent) if relative_path.parent != Path(".") else None
+        )
+
+        logger.info(f"upload_asset: Uploaded {asset_type} file: {file_path}")
+        return AssetFileInfo(
+            name=file_path.stem,
+            path=str(file_path),
+            size_mb=round(size_mb, 2),
+            folder=folder,
+            type=asset_type,
+            created_at=created_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"upload_asset: Error uploading asset file: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/assets/{asset_path:path}")
+async def serve_asset(asset_path: str):
+    """Serve an asset file (for thumbnails/previews)."""
+    try:
+        assets_dir = get_assets_dir()
+        file_path = assets_dir / asset_path
+
+        # Security check: ensure the path is within assets directory
+        try:
+            file_path = file_path.resolve()
+            assets_dir_resolved = assets_dir.resolve()
+            if not str(file_path).startswith(str(assets_dir_resolved)):
+                raise HTTPException(status_code=403, detail="Access denied")
+        except Exception:
+            raise HTTPException(status_code=403, detail="Invalid path") from None
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Asset not found")
+
+        # Determine media type based on extension
+        file_extension = file_path.suffix.lower()
+        media_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".mp4": "video/mp4",
+            ".avi": "video/x-msvideo",
+            ".mov": "video/quicktime",
+            ".mkv": "video/x-matroska",
+            ".webm": "video/webm",
+        }
+        media_type = media_types.get(file_extension, "application/octet-stream")
+
+        return FileResponse(file_path, media_type=media_type)
+
+    except HTTPException:
+        raise
+    except Exception as e:  # pragma: no cover - defensive logging
+        logger.error(f"serve_asset: Error serving asset file: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/models/status")
 async def get_model_status(pipeline_id: str):
-    """Check if models for a pipeline are downloaded."""
+    """Check if models for a pipeline are downloaded and get download progress."""
     try:
+        progress = download_progress_manager.get_progress(pipeline_id)
+
+        # If download is in progress, always report as not downloaded
+        if progress and progress.get("is_downloading"):
+            return {"downloaded": False, "progress": progress}
+
+        # Check if files actually exist
         downloaded = models_are_downloaded(pipeline_id)
-        return ModelStatusResponse(downloaded=downloaded)
+
+        # Clean up progress if download is complete
+        if downloaded and progress:
+            download_progress_manager.clear_progress(pipeline_id)
+            progress = None
+
+        return {"downloaded": downloaded, "progress": progress}
     except Exception as e:
         logger.error(f"Error checking model status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -408,25 +726,49 @@ async def download_pipeline_models(request: DownloadModelsRequest):
         if not request.pipeline_id:
             raise HTTPException(status_code=400, detail="pipeline_id is required")
 
+        pipeline_id = request.pipeline_id
+
+        # Check if download already in progress
+        existing_progress = download_progress_manager.get_progress(pipeline_id)
+        if existing_progress and existing_progress.get("is_downloading"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Download already in progress for {pipeline_id}",
+            )
+
         # Download in a background thread to avoid blocking
         import threading
 
         def download_in_background():
-            download_models(pipeline_id=request.pipeline_id)
+            """Run download in background thread."""
+            try:
+                download_models(pipeline_id)
+                download_progress_manager.mark_complete(pipeline_id)
+            except Exception as e:
+                logger.error(f"Error downloading models for {pipeline_id}: {e}")
+                download_progress_manager.clear_progress(pipeline_id)
 
         thread = threading.Thread(target=download_in_background)
         thread.daemon = True
         thread.start()
 
-        return {"message": f"Model download started for {request.pipeline_id}"}
+        return {"message": f"Model download started for {pipeline_id}"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error starting model download: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def is_spout_available() -> bool:
+    """Check if Spout is available (native Windows only, not WSL)."""
+    # Spout requires native Windows - it won't work in WSL/Linux
+    return sys.platform == "win32"
+
+
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info():
-    """Get hardware information including available VRAM."""
+    """Get hardware information including available VRAM and Spout availability."""
     try:
         vram_gb = None
 
@@ -435,7 +777,10 @@ async def get_hardware_info():
             _, total_mem = torch.cuda.mem_get_info(0)
             vram_gb = total_mem / (1024**3)
 
-        return HardwareInfoResponse(vram_gb=vram_gb)
+        return HardwareInfoResponse(
+            vram_gb=vram_gb,
+            spout_available=is_spout_available(),
+        )
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -454,8 +799,10 @@ async def get_current_logs():
             )
 
         # Read the entire file into memory to avoid Content-Length issues
-        # with actively written log files
-        log_content = log_file_path.read_text(encoding="utf-8")
+        # with actively written log files.
+        # Use errors='replace' to handle non-UTF-8 bytes gracefully (e.g., Windows-1252
+        # characters from subprocess output or exception messages on Windows).
+        log_content = log_file_path.read_text(encoding="utf-8", errors="replace")
 
         # Return as a text response with proper headers for download
         return Response(
@@ -487,9 +834,17 @@ async def serve_frontend(request: Request, path: str):
         return FileResponse(file_path)
 
     # Fallback to index.html for SPA routing
+    # This ensures clients like Electron alway fetch the latest HTML (which references hashed assets)
     index_file = frontend_dist / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     raise HTTPException(status_code=404, detail="Frontend index.html not found")
 
@@ -518,40 +873,12 @@ def open_browser_when_ready(host: str, port: int, server):
         logger.info(f"🌐 UI is available at: {url}")
 
 
-def main():
-    """Main entry point for the daydream-scope command."""
-    parser = argparse.ArgumentParser(
-        description="Daydream Scope - Real-time AI video generation and streaming"
-    )
-    parser.add_argument(
-        "--version",
-        action="store_true",
-        help="Show version information and exit",
-    )
-    parser.add_argument(
-        "--reload",
-        action="store_true",
-        help="Enable auto-reload for development (default: False)",
-    )
-    parser.add_argument(
-        "--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8000, help="Port to bind to (default: 8000)"
-    )
-    parser.add_argument(
-        "-N",
-        "--no-browser",
-        action="store_true",
-        help="Do not automatically open a browser window after the server starts",
-    )
+def run_server(reload: bool, host: str, port: int, no_browser: bool):
+    """Run the Daydream Scope server."""
 
-    args = parser.parse_args()
-
-    # Handle version flag
-    if args.version:
-        print_version_info()
-        sys.exit(0)
+    from scope.core.pipelines.registry import (
+        PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
+    )
 
     # Configure static file serving
     configure_static_files()
@@ -564,18 +891,18 @@ def main():
         # Create server instance for production mode
         config = uvicorn.Config(
             "scope.server.app:app",
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
+            host=host,
+            port=port,
+            reload=reload,
             log_config=None,  # Use our logging config, don't override it
         )
         server = uvicorn.Server(config)
 
         # Start browser opening thread (unless disabled)
-        if not args.no_browser:
+        if not no_browser:
             browser_thread = threading.Thread(
                 target=open_browser_when_ready,
-                args=(args.host, args.port, server),
+                args=(host, port, server),
                 daemon=True,
             )
             browser_thread.start()
@@ -591,11 +918,258 @@ def main():
         # Development mode - just run normally
         uvicorn.run(
             "scope.server.app:app",
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
+            host=host,
+            port=port,
+            reload=reload,
             log_config=None,  # Use our logging config, don't override it
         )
+
+
+@click.group(invoke_without_command=True)
+@click.option("--version", is_flag=True, help="Show version information and exit")
+@click.option(
+    "--reload", is_flag=True, help="Enable auto-reload for development (default: False)"
+)
+@click.option("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+@click.option("--port", default=8000, help="Port to bind to (default: 8000)")
+@click.option(
+    "-N",
+    "--no-browser",
+    is_flag=True,
+    help="Do not automatically open a browser window after the server starts",
+)
+@click.pass_context
+def main(ctx, version: bool, reload: bool, host: str, port: int, no_browser: bool):
+    # Handle version flag
+    if version:
+        print_version_info()
+        sys.exit(0)
+
+    # If no subcommand was invoked, run the server
+    if ctx.invoked_subcommand is None:
+        run_server(reload, host, port, no_browser)
+
+
+@main.command()
+def plugins():
+    """List all installed plugins."""
+    from .models_config import get_plugins_dir
+
+    plugins_dir = get_plugins_dir()
+
+    if not plugins_dir.exists():
+        click.echo("No plugins installed.")
+        return
+
+    # List plugin directories
+    plugin_dirs = [
+        d for d in plugins_dir.iterdir()
+        if d.is_dir() and (d / "pyproject.toml").exists()
+    ]
+
+    if not plugin_dirs:
+        click.echo("No plugins installed.")
+        return
+
+    click.echo(f"{len(plugin_dirs)} plugin(s) installed:\n")
+
+    for plugin_dir in sorted(plugin_dirs):
+        plugin_id = plugin_dir.name
+        click.echo(f"  • {plugin_id}")
+        click.echo(f"    Location: {plugin_dir}")
+
+
+@main.command()
+def pipelines():
+    """List all available pipelines."""
+
+    @suppress_init_output
+    def _load_pipelines():
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        return PipelineRegistry.list_pipelines()
+
+    all_pipelines = _load_pipelines()
+
+    if not all_pipelines:
+        click.echo("No pipelines available.")
+        return
+
+    click.echo(f"{len(all_pipelines)} pipeline(s) available:\n")
+
+    # List all pipelines
+    for pipeline_id in all_pipelines:
+        click.echo(f"  • {pipeline_id}")
+
+
+def _get_plugin_id_from_pyproject(plugin_path: Path) -> str | None:
+    """Extract plugin ID from pyproject.toml.
+
+    Looks for a pipeline_id in the project metadata or uses the project name.
+    """
+    pyproject_path = plugin_path / "pyproject.toml"
+    if not pyproject_path.exists():
+        return None
+
+    try:
+        import tomllib
+
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+
+        # Try to get pipeline_id from project.entry-points or use project name
+        project = data.get("project", {})
+        name = project.get("name", "")
+
+        # Use project name as plugin ID (strip common prefixes)
+        plugin_id = name
+        for prefix in ["scope-plugin-", "daydream-scope-plugin-", "scope-"]:
+            if plugin_id.startswith(prefix):
+                plugin_id = plugin_id[len(prefix) :]
+                break
+
+        return plugin_id if plugin_id else None
+    except Exception as e:
+        logger.warning(f"Failed to parse pyproject.toml: {e}")
+        return None
+
+
+def _copy_plugin_to_plugins_dir(source_path: Path, plugin_id: str) -> Path:
+    """Copy plugin source to the plugins directory.
+
+    Args:
+        source_path: Path to the plugin source
+        plugin_id: Unique identifier for the plugin
+
+    Returns:
+        Path to the installed plugin directory
+    """
+    import shutil
+
+    from .models_config import ensure_plugins_dir
+
+    plugins_dir = ensure_plugins_dir()
+    target_dir = plugins_dir / plugin_id
+
+    # Remove existing plugin if it exists
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+
+    # Copy the plugin directory
+    shutil.copytree(source_path, target_dir)
+
+    logger.info(f"Plugin '{plugin_id}' installed to {target_dir}")
+    return target_dir
+
+
+@main.command()
+@click.argument("source", required=True)
+@click.option(
+    "--plugin-id",
+    help="Override the plugin ID (default: extracted from pyproject.toml)",
+)
+@click.option("--force", is_flag=True, help="Force reinstall if plugin already exists")
+def install(source, plugin_id, force):
+    """Install a plugin from a local path.
+
+    SOURCE is the path to the plugin directory containing pyproject.toml.
+
+    The plugin will be copied to ~/.daydream-scope/plugins/<plugin_id>/
+    and will run in its own isolated environment when loaded.
+
+    Example:
+        daydream-scope install ./my-plugin
+        daydream-scope install /path/to/scope-personalive --plugin-id personalive
+    """
+    from .models_config import get_plugins_dir
+
+    source_path = Path(source).expanduser().resolve()
+
+    if not source_path.exists():
+        click.echo(f"Error: Source path does not exist: {source_path}", err=True)
+        sys.exit(1)
+
+    if not source_path.is_dir():
+        click.echo(f"Error: Source must be a directory: {source_path}", err=True)
+        sys.exit(1)
+
+    pyproject_path = source_path / "pyproject.toml"
+    if not pyproject_path.exists():
+        click.echo(
+            f"Error: No pyproject.toml found in {source_path}. "
+            "Plugins must have a pyproject.toml file.",
+            err=True,
+        )
+        sys.exit(1)
+
+    # Determine plugin ID
+    if plugin_id is None:
+        plugin_id = _get_plugin_id_from_pyproject(source_path)
+        if plugin_id is None:
+            click.echo(
+                "Error: Could not determine plugin ID from pyproject.toml. "
+                "Please specify --plugin-id explicitly.",
+                err=True,
+            )
+            sys.exit(1)
+
+    # Check if plugin already exists
+    plugins_dir = get_plugins_dir()
+    target_dir = plugins_dir / plugin_id
+    if target_dir.exists() and not force:
+        click.echo(
+            f"Plugin '{plugin_id}' already exists at {target_dir}. "
+            "Use --force to reinstall.",
+            err=True,
+        )
+        sys.exit(1)
+
+    # Copy plugin to plugins directory
+    try:
+        installed_path = _copy_plugin_to_plugins_dir(source_path, plugin_id)
+        click.echo(f"✓ Plugin '{plugin_id}' installed successfully.")
+        click.echo(f"  Location: {installed_path}")
+        click.echo(
+            f"\n  The plugin will be available after restarting the server."
+        )
+    except Exception as e:
+        click.echo(f"Error installing plugin: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("plugin_id", required=True)
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation")
+def uninstall(plugin_id, yes):
+    """Uninstall a plugin.
+
+    PLUGIN_ID is the identifier of the plugin to uninstall.
+
+    Example:
+        daydream-scope uninstall personalive
+    """
+    import shutil
+
+    from .models_config import get_plugins_dir
+
+    plugins_dir = get_plugins_dir()
+    plugin_dir = plugins_dir / plugin_id
+
+    if not plugin_dir.exists():
+        click.echo(f"Error: Plugin '{plugin_id}' is not installed.", err=True)
+        sys.exit(1)
+
+    if not yes:
+        if not click.confirm(f"Uninstall plugin '{plugin_id}' from {plugin_dir}?"):
+            click.echo("Cancelled.")
+            return
+
+    try:
+        shutil.rmtree(plugin_dir)
+        click.echo(f"✓ Plugin '{plugin_id}' uninstalled successfully.")
+    except Exception as e:
+        click.echo(f"Error uninstalling plugin: {e}", err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

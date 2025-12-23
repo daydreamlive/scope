@@ -28,7 +28,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.pipeline_manager = pipeline_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
-        # FPS variables (will be updated from FrameProcessor)
+        # FPS variables (will be updated from FrameProcessor or input measurement)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
 
@@ -40,13 +40,21 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused_lock = threading.Lock()
         self._last_frame = None
 
+        # Spout input mode - when enabled, frames come from Spout instead of WebRTC
+        self._spout_receiver_enabled = False
+        if initial_parameters:
+            spout_receiver = initial_parameters.get("spout_receiver")
+            if spout_receiver and spout_receiver.get("enabled"):
+                self._spout_receiver_enabled = True
+                logger.info("Spout input mode enabled")
+
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
         while self.input_task_running:
             try:
                 input_frame = await self.track.recv()
 
-                # Store raw VideoFrame for later processing
+                # Store raw VideoFrame for later processing (tracks input FPS internally)
                 self.frame_processor.put(input_frame)
 
             except asyncio.CancelledError:
@@ -103,11 +111,13 @@ class VideoProcessingTrack(MediaStreamTrack):
         """Return the next available processed frame"""
         # Lazy initialization on first call
         self.initialize_output_processing()
-        while self.input_task_running:
+
+        # Keep running while either WebRTC input is active OR Spout input is enabled
+        while self.input_task_running or self._spout_receiver_enabled:
             try:
-                # Update FPS from FrameProcessor
+                # Update FPS: use minimum of input FPS and pipeline FPS
                 if self.frame_processor:
-                    self.fps = self.frame_processor.get_current_pipeline_fps()
+                    self.fps = self.frame_processor.get_output_fps()
                     self.frame_ptime = 1.0 / self.fps
 
                 # If paused, wait for the appropriate frame interval before returning
@@ -151,6 +161,7 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     async def stop(self):
         self.input_task_running = False
+        self._spout_receiver_enabled = False
 
         if self.input_task is not None:
             self.input_task.cancel()

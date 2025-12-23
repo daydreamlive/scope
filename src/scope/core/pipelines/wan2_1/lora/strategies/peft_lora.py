@@ -20,6 +20,7 @@ from ..utils import (
     load_lora_weights,
     parse_lora_weights,
     sanitize_adapter_name,
+    standardize_lora_for_peft,
 )
 
 logger = logging.getLogger(__name__)
@@ -393,6 +394,19 @@ class PeftLoRAStrategy:
         # Sample LoRA keys for debugging
         sample_lora_keys = list(lora_state.keys())[:5]
         logger.debug(f"load_adapter: Sample LoRA keys from file: {sample_lora_keys}")
+
+        # Standardize LoRA format if needed (handles lora_up/lora_down, missing diffusion_model prefix, etc.)
+        converted_state = standardize_lora_for_peft(lora_path=lora_path)
+        if converted_state is not None:
+            logger.debug(
+                f"load_adapter: Converted LoRA to PEFT format ({len(converted_state)} keys)"
+            )
+            lora_state = converted_state
+            # Sample converted keys for debugging
+            sample_converted_keys = list(lora_state.keys())[:5]
+            logger.debug(
+                f"load_adapter: Sample converted LoRA keys: {sample_converted_keys}"
+            )
 
         # Always use model.state_dict() - build_key_map handles PEFT detection
         # This works for both first LoRA (non-PEFT) and subsequent LoRAs (PEFT-wrapped)

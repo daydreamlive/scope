@@ -19,24 +19,31 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import { PIPELINES, pipelineSupportsLoRA } from "../data/pipelines";
+import { Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
-import { getDefaultDenoisingSteps, getDefaultResolution } from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
+import type {
+  PipelineId,
+  LoRAConfig,
+  LoraMergeStrategy,
+  SettingsState,
+  InputMode,
+} from "../types";
+import type { PipelineInfo } from "../hooks/usePipelines";
 import { LoRAManager } from "./LoRAManager";
 
 const MIN_DIMENSION = 16;
 
 interface SettingsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   pipelineId: PipelineId;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
-  isDownloading?: boolean;
-  resolution?: {
+  isLoading?: boolean;
+  // Resolution is required - parent should always provide from schema defaults
+  resolution: {
     height: number;
     width: number;
   };
@@ -45,6 +52,8 @@ interface SettingsPanelProps {
   onSeedChange?: (seed: number) => void;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
+  // Default denoising steps for reset functionality - derived from backend schema
+  defaultDenoisingSteps: number[];
   noiseScale?: number;
   onNoiseScaleChange?: (noiseScale: number) => void;
   noiseController?: boolean;
@@ -59,21 +68,36 @@ interface SettingsPanelProps {
   loras?: LoRAConfig[];
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
-  onLoraMergeStrategyChange?: (strategy: LoraMergeStrategy) => void;
+  // Input mode for conditional rendering of noise controls
+  inputMode?: InputMode;
+  // Whether this pipeline supports noise controls in video mode (schema-derived)
+  supportsNoiseControls?: boolean;
+  // Spout settings
+  spoutSender?: SettingsState["spoutSender"];
+  onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
+  // Whether Spout is available (server-side detection for native Windows, not WSL)
+  spoutAvailable?: boolean;
+  // VACE settings
+  vaceEnabled?: boolean;
+  onVaceEnabledChange?: (enabled: boolean) => void;
+  vaceContextScale?: number;
+  onVaceContextScaleChange?: (scale: number) => void;
 }
 
 export function SettingsPanel({
   className = "",
+  pipelines,
   pipelineId,
   onPipelineIdChange,
   isStreaming = false,
-  isDownloading = false,
+  isLoading = false,
   resolution,
   onResolutionChange,
   seed = 42,
   onSeedChange,
   denoisingSteps = [700, 500],
   onDenoisingStepsChange,
+  defaultDenoisingSteps,
   noiseScale = 0.7,
   onNoiseScaleChange,
   noiseController = true,
@@ -88,16 +112,25 @@ export function SettingsPanel({
   loras = [],
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
-  onLoraMergeStrategyChange,
+  inputMode,
+  supportsNoiseControls = false,
+  spoutSender,
+  onSpoutSenderChange,
+  spoutAvailable = false,
+  vaceEnabled = true,
+  onVaceEnabledChange,
+  vaceContextScale = 1.0,
+  onVaceContextScaleChange,
 }: SettingsPanelProps) {
-  // Use pipeline-specific default if resolution is not provided
-  const effectiveResolution = resolution || getDefaultResolution(pipelineId);
-
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
     onKvCacheAttentionBiasChange
+  );
+  const vaceContextScaleSlider = useLocalSliderValue(
+    vaceContextScale,
+    onVaceContextScaleChange
   );
 
   // Validation error states
@@ -106,7 +139,7 @@ export function SettingsPanel({
   const [seedError, setSeedError] = useState<string | null>(null);
 
   const handlePipelineIdChange = (value: string) => {
-    if (value in PIPELINES) {
+    if (pipelines && value in pipelines) {
       onPipelineIdChange?.(value as PipelineId);
     }
   };
@@ -118,7 +151,8 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
     const maxValue = 2048;
@@ -147,14 +181,14 @@ export function SettingsPanel({
 
     // Always update the value (even if invalid)
     onResolutionChange?.({
-      ...effectiveResolution,
+      ...resolution,
       [dimension]: value,
     });
   };
 
   const incrementResolution = (dimension: "height" | "width") => {
     const maxValue = 2048;
-    const newValue = Math.min(maxValue, effectiveResolution[dimension] + 1);
+    const newValue = Math.min(maxValue, resolution[dimension] + 1);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -162,10 +196,11 @@ export function SettingsPanel({
     const minValue =
       pipelineId === "longlive" ||
       pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video"
+      pipelineId === "krea-realtime-video" ||
+      pipelineId === "reward-forcing"
         ? MIN_DIMENSION
         : 1;
-    const newValue = Math.max(minValue, effectiveResolution[dimension] - 1);
+    const newValue = Math.max(minValue, resolution[dimension] - 1);
     handleResolutionChange(dimension, newValue);
   };
 
@@ -198,7 +233,7 @@ export function SettingsPanel({
     handleSeedChange(newValue);
   };
 
-  const currentPipeline = PIPELINES[pipelineId];
+  const currentPipeline = pipelines?.[pipelineId];
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
@@ -211,17 +246,18 @@ export function SettingsPanel({
           <Select
             value={pipelineId}
             onValueChange={handlePipelineIdChange}
-            disabled={isStreaming || isDownloading}
+            disabled={isStreaming || isLoading}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select a pipeline" />
             </SelectTrigger>
             <SelectContent>
-              {Object.keys(PIPELINES).map(id => (
-                <SelectItem key={id} value={id}>
-                  {id}
-                </SelectItem>
-              ))}
+              {pipelines &&
+                Object.keys(pipelines).map(id => (
+                  <SelectItem key={id} value={id}>
+                    {id}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -236,9 +272,7 @@ export function SettingsPanel({
               </div>
 
               <div>
-                {(currentPipeline.about ||
-                  currentPipeline.docsUrl ||
-                  currentPipeline.modified) && (
+                {(currentPipeline.about || currentPipeline.docsUrl) && (
                   <div className="flex items-stretch gap-1 h-6">
                     {currentPipeline.about && (
                       <TooltipProvider>
@@ -253,26 +287,6 @@ export function SettingsPanel({
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs">
                             <p className="text-xs">{currentPipeline.about}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                    {currentPipeline.modified && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="outline"
-                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
-                            >
-                              <Hammer className="h-3.5 w-3.5" />
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>
-                              This pipeline contains modifications based on the
-                              original project.
-                            </p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -299,79 +313,70 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {pipelineSupportsLoRA(pipelineId) && (
-          <div className="space-y-4">
-            <LoRAManager
-              loras={loras}
-              onLorasChange={onLorasChange}
-              disabled={isDownloading}
-              isStreaming={isStreaming}
-              loraMergeStrategy={loraMergeStrategy}
-            />
+        {/* VACE Toggle */}
+        {currentPipeline?.supportsVACE && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label="VACE"
+                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding. Requires pipeline reload to take effect."
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={vaceEnabled}
+                onPressedChange={onVaceEnabledChange || (() => {})}
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={isStreaming || isLoading}
+              >
+                {vaceEnabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
 
-            {loras.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
+            {vaceEnabled && (
+              <div className="rounded-lg border bg-card p-3">
+                <div className="flex items-center gap-2">
                   <LabelWithTooltip
-                    label={PARAMETER_METADATA.loraMergeStrategy.label}
-                    tooltip={PARAMETER_METADATA.loraMergeStrategy.tooltip}
-                    className="text-sm text-foreground"
+                    label="Scale:"
+                    tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
+                    className="text-xs text-muted-foreground w-16"
                   />
-                  <Select
-                    value={loraMergeStrategy}
-                    onValueChange={value => {
-                      onLoraMergeStrategyChange?.(value as LoraMergeStrategy);
-                    }}
-                    disabled={isStreaming}
-                  >
-                    <SelectTrigger className="w-[180px] h-7">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <SelectItem value="permanent_merge">
-                              Permanent Merge
-                            </SelectItem>
-                          </TooltipTrigger>
-                          <TooltipContent side="right" className="max-w-xs">
-                            <p className="text-xs">
-                              Maximum performance, no runtime updates. LoRA
-                              scales are permanently merged into model weights
-                              at load time. Ideal for when you already know what
-                              scale to use.
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <SelectItem value="runtime_peft">
-                              Runtime PEFT
-                            </SelectItem>
-                          </TooltipTrigger>
-                          <TooltipContent side="right" className="max-w-xs">
-                            <p className="text-xs">
-                              Lower performance, instant runtime updates. LoRA
-                              scales can be adjusted during streaming without
-                              reloading the model. Faster initialization.
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex-1 min-w-0">
+                    <SliderWithInput
+                      value={vaceContextScaleSlider.localValue}
+                      onValueChange={vaceContextScaleSlider.handleValueChange}
+                      onValueCommit={vaceContextScaleSlider.handleValueCommit}
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      incrementAmount={0.1}
+                      valueFormatter={vaceContextScaleSlider.formatValue}
+                      inputParser={v => parseFloat(v) || 1.0}
+                    />
+                  </div>
                 </div>
               </div>
             )}
           </div>
         )}
 
+        {currentPipeline?.supportsLoRA && (
+          <div className="space-y-4">
+            <LoRAManager
+              loras={loras}
+              onLorasChange={onLorasChange}
+              disabled={isLoading}
+              isStreaming={isStreaming}
+              loraMergeStrategy={loraMergeStrategy}
+            />
+          </div>
+        )}
+
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2">
@@ -396,7 +401,7 @@ export function SettingsPanel({
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.height}
+                        value={resolution.height}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
@@ -445,7 +450,7 @@ export function SettingsPanel({
                       </Button>
                       <Input
                         type="number"
-                        value={effectiveResolution.width}
+                        value={resolution.width}
                         onChange={e => {
                           const value = parseInt(e.target.value);
                           if (!isNaN(value)) {
@@ -528,7 +533,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -590,16 +596,18 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
-            defaultValues={getDefaultDenoisingSteps(pipelineId)}
+            defaultValues={defaultDenoisingSteps}
             tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
           />
         )}
 
-        {pipelineId === "streamdiffusionv2" && (
+        {/* Noise controls - show for video mode on supported pipelines (schema-derived) */}
+        {inputMode === "video" && supportsNoiseControls && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -643,7 +651,8 @@ export function SettingsPanel({
 
         {(pipelineId === "longlive" ||
           pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video") && (
+          pipelineId === "krea-realtime-video" ||
+          pipelineId === "reward-forcing") && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
@@ -667,12 +676,64 @@ export function SettingsPanel({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="fp8_e4m3fn">fp8_e4m3fn</SelectItem>
+                      <SelectItem value="fp8_e4m3fn">
+                        fp8_e4m3fn (Dynamic)
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Spout Sender Settings (available on native Windows only) */}
+        {spoutAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.spoutSender.label}
+                tooltip={PARAMETER_METADATA.spoutSender.tooltip}
+                className="text-sm text-foreground"
+              />
+              <Toggle
+                pressed={spoutSender?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onSpoutSenderChange?.({
+                    enabled,
+                    name: spoutSender?.name ?? "ScopeOut",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {spoutSender?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {spoutSender?.enabled && (
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name:"
+                  tooltip="The name of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={spoutSender?.name ?? "ScopeOut"}
+                  onChange={e => {
+                    onSpoutSenderChange?.({
+                      enabled: spoutSender?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="ScopeOut"
+                />
+              </div>
+            )}
           </div>
         )}
       </CardContent>

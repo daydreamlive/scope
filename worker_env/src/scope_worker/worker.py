@@ -376,6 +376,71 @@ def _get_models_dir() -> str:
     return os.environ.get("MODELS_DIR", os.path.expanduser("~/.daydream-scope/models"))
 
 
+def _get_plugins_dir() -> str:
+    """Get the plugins directory."""
+    models_dir = _get_models_dir()
+    # Get parent directory of models and add plugins
+    parent_dir = os.path.dirname(models_dir)
+    return os.path.join(parent_dir, "plugins")
+
+
+def _load_plugin_pipeline(pipeline_id: str, load_params: dict | None = None):
+    """Try to load a plugin pipeline from the plugins directory or current working directory.
+
+    The worker is started with cwd set to the plugin directory, so we can import
+    the pipeline module directly.
+    """
+    import importlib.util
+
+    # First, try to find a pipeline.py in the current working directory
+    cwd = os.getcwd()
+    pipeline_module_path = os.path.join(cwd, "pipeline.py")
+
+    if not os.path.exists(pipeline_module_path):
+        # Try src/<plugin_id>/pipeline.py pattern
+        src_dir = os.path.join(cwd, "src")
+        if os.path.exists(src_dir):
+            for name in os.listdir(src_dir):
+                candidate = os.path.join(src_dir, name, "pipeline.py")
+                if os.path.exists(candidate):
+                    pipeline_module_path = candidate
+                    break
+
+    if not os.path.exists(pipeline_module_path):
+        raise ValueError(f"No pipeline.py found for plugin pipeline: {pipeline_id}")
+
+    logger.info(f"Loading plugin pipeline from: {pipeline_module_path}")
+
+    # Dynamically import the pipeline module
+    spec = importlib.util.spec_from_file_location("plugin_pipeline", pipeline_module_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Could not load pipeline module from: {pipeline_module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["plugin_pipeline"] = module
+    spec.loader.exec_module(module)
+
+    # Look for a Pipeline class in the module
+    pipeline_class = None
+    for name in dir(module):
+        obj = getattr(module, name)
+        if isinstance(obj, type) and name.endswith("Pipeline") and name != "Pipeline":
+            pipeline_class = obj
+            break
+
+    if pipeline_class is None:
+        raise ValueError(f"No Pipeline class found in {pipeline_module_path}")
+
+    logger.info(f"Found pipeline class: {pipeline_class.__name__}")
+
+    # Instantiate the pipeline with load_params
+    load_params = load_params or {}
+    pipeline = pipeline_class(**load_params)
+
+    logger.info(f"Plugin pipeline '{pipeline_id}' initialized in worker process")
+    return pipeline
+
+
 def _load_pipeline_implementation(pipeline_id: str, load_params: dict | None = None):
     """Load a pipeline in the worker process."""
     # Add the main project src to path so we can import scope modules
@@ -384,6 +449,19 @@ def _load_pipeline_implementation(pipeline_id: str, load_params: dict | None = N
         src_path = os.path.join(project_root, "src")
         if src_path not in sys.path:
             sys.path.insert(0, src_path)
+
+    # List of built-in pipelines
+    BUILTIN_PIPELINES = {
+        "streamdiffusionv2",
+        "passthrough",
+        "longlive",
+        "krea-realtime-video",
+        "reward-forcing",
+    }
+
+    # If not a built-in pipeline, try to load as plugin
+    if pipeline_id not in BUILTIN_PIPELINES:
+        return _load_plugin_pipeline(pipeline_id, load_params)
 
     if pipeline_id == "streamdiffusionv2":
         from scope.core.pipelines import StreamDiffusionV2Pipeline
@@ -566,8 +644,64 @@ def _load_pipeline_implementation(pipeline_id: str, load_params: dict | None = N
         logger.info("krea-realtime-video pipeline initialized in worker process")
         return pipeline
 
+    elif pipeline_id == "reward-forcing":
+        from scope.core.pipelines import RewardForcingPipeline
+
+        config = OmegaConf.create(
+            {
+                "model_dir": str(_get_models_dir()),
+                "generator_path": str(
+                    _get_model_file_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")
+                ),
+                "text_encoder_path": str(
+                    _get_model_file_path(
+                        "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                    )
+                ),
+                "tokenizer_path": str(
+                    _get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                ),
+                "vae_path": str(
+                    _get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+                ),
+            }
+        )
+
+        # Apply load parameters (resolution, seed, LoRAs) to config
+        height = 320
+        width = 576
+        seed = 42
+        loras = None
+        lora_merge_mode = "permanent_merge"
+        quantization = None
+
+        if load_params:
+            height = load_params.get("height", 320)
+            width = load_params.get("width", 576)
+            seed = load_params.get("seed", 42)
+            loras = load_params.get("loras", None)
+            lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
+            quantization = load_params.get("quantization", None)
+
+        config["height"] = height
+        config["width"] = width
+        config["seed"] = seed
+        if loras:
+            config["loras"] = loras
+        config["_lora_merge_mode"] = lora_merge_mode
+
+        pipeline = RewardForcingPipeline(
+            config,
+            quantization=quantization,
+            device=torch.device("cuda"),
+            dtype=torch.bfloat16,
+        )
+        logger.info("RewardForcing pipeline initialized in worker process")
+        return pipeline
+
     else:
-        raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
+        # Fallback: try to load as plugin pipeline
+        return _load_plugin_pipeline(pipeline_id, load_params)
 
 
 def serialize_for_zmq(obj):

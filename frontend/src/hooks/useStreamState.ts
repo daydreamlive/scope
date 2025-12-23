@@ -4,9 +4,43 @@ import type {
   StreamStatus,
   SettingsState,
   PromptData,
+  PipelineId,
+  InputMode,
 } from "../types";
-import { getDefaultResolution } from "../lib/utils";
-import { getHardwareInfo, type HardwareInfoResponse } from "../lib/api";
+import {
+  getHardwareInfo,
+  getPipelineSchemas,
+  type HardwareInfoResponse,
+  type PipelineSchemasResponse,
+} from "../lib/api";
+
+// Generic fallback defaults used before schemas are loaded.
+// Resolution and denoising steps use conservative values.
+const BASE_FALLBACK = {
+  height: 512,
+  width: 512,
+  denoisingSteps: [750, 250] as number[],
+  seed: 42,
+};
+
+// Get fallback defaults for a pipeline before schemas are loaded
+function getFallbackDefaults(mode?: InputMode) {
+  // Default to text mode if no mode specified (will be corrected when schemas load)
+  const effectiveMode = mode ?? "text";
+  const isVideoMode = effectiveMode === "video";
+
+  // Video mode gets noise controls, text mode doesn't
+  return {
+    height: BASE_FALLBACK.height,
+    width: BASE_FALLBACK.width,
+    denoisingSteps: BASE_FALLBACK.denoisingSteps,
+    noiseScale: isVideoMode ? 0.7 : undefined,
+    noiseController: isVideoMode ? true : undefined,
+    inputMode: effectiveMode,
+    seed: BASE_FALLBACK.seed,
+    quantization: undefined as "fp8_e4m3fn" | undefined,
+  };
+}
 
 export function useStreamState() {
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
@@ -22,18 +56,102 @@ export function useStreamState() {
     status: "Ready",
   });
 
+  // Store pipeline schemas from backend
+  const [pipelineSchemas, setPipelineSchemas] =
+    useState<PipelineSchemasResponse | null>(null);
+
+  // Helper to get defaults from schemas or fallback
+  // When mode is provided, applies mode-specific overrides from mode_defaults
+  // Returns undefined instead of null for optional fields to match SettingsState types
+  const getDefaults = useCallback(
+    (pipelineId: PipelineId, mode?: InputMode) => {
+      const schema = pipelineSchemas?.pipelines[pipelineId];
+      if (schema?.config_schema?.properties) {
+        const props = schema.config_schema.properties;
+
+        // Start with base defaults from config_schema
+        let height = (props.height?.default as number) ?? 512;
+        let width = (props.width?.default as number) ?? 512;
+        let denoisingSteps: number[] | undefined =
+          (props.denoising_steps?.default as number[] | null) ?? undefined;
+        let noiseScale: number | undefined =
+          (props.noise_scale?.default as number | null) ?? undefined;
+        let noiseController: boolean | undefined =
+          (props.noise_controller?.default as boolean | null) ?? undefined;
+
+        // Apply mode-specific overrides if mode is specified and mode_defaults exist
+        const effectiveMode = mode ?? schema.default_mode;
+        const modeOverrides = schema.mode_defaults?.[effectiveMode];
+        if (modeOverrides) {
+          if (modeOverrides.height !== undefined) height = modeOverrides.height;
+          if (modeOverrides.width !== undefined) width = modeOverrides.width;
+          if (modeOverrides.denoising_steps !== undefined)
+            denoisingSteps = modeOverrides.denoising_steps ?? undefined;
+          if (modeOverrides.noise_scale !== undefined)
+            noiseScale = modeOverrides.noise_scale ?? undefined;
+          if (modeOverrides.noise_controller !== undefined)
+            noiseController = modeOverrides.noise_controller ?? undefined;
+        }
+
+        return {
+          height,
+          width,
+          denoisingSteps,
+          noiseScale,
+          noiseController,
+          inputMode: effectiveMode,
+          seed: (props.base_seed?.default as number) ?? 42,
+          quantization: undefined as "fp8_e4m3fn" | undefined,
+        };
+      }
+      // Fallback to derived defaults if schemas not loaded
+      return getFallbackDefaults(mode);
+    },
+    [pipelineSchemas]
+  );
+
+  // Check if a pipeline supports noise controls in video mode
+  // Derived from schema: if video mode has noise_scale defined, noise controls are supported
+  const supportsNoiseControls = useCallback(
+    (pipelineId: PipelineId): boolean => {
+      const schema = pipelineSchemas?.pipelines[pipelineId];
+      if (schema?.mode_defaults?.video) {
+        // Check if video mode explicitly defines noise_scale (not null/undefined)
+        return schema.mode_defaults.video.noise_scale !== undefined;
+      }
+      // Fallback: check if schema has noise_scale property at all
+      if (schema?.config_schema?.properties?.noise_scale) {
+        return true;
+      }
+      // Before schemas load, use fallback knowledge
+      return (
+        pipelineId === "streamdiffusionv2" ||
+        pipelineId === "longlive" ||
+        pipelineId === "krea-realtime-video"
+      );
+    },
+    [pipelineSchemas]
+  );
+
+  // Get initial defaults (use fallback since schemas haven't loaded yet)
+  const initialDefaults = getFallbackDefaults();
+
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "streamdiffusionv2",
-    resolution: getDefaultResolution("streamdiffusionv2"), // Default resolution for StreamDiffusionV2
-    seed: 42,
-    denoisingSteps: [700, 500], // Default for StreamDiffusionV2
-    noiseScale: 0.7, // Default noise scale for StreamDiffusionV2
-    noiseController: true, // Default noise controller for StreamDiffusionV2
-    manageCache: true, // Default manage cache for StreamDiffusionV2
+    resolution: {
+      height: initialDefaults.height,
+      width: initialDefaults.width,
+    },
+    seed: initialDefaults.seed,
+    denoisingSteps: initialDefaults.denoisingSteps,
+    noiseScale: initialDefaults.noiseScale,
+    noiseController: initialDefaults.noiseController,
+    manageCache: true,
     quantization: null,
-    kvCacheAttentionBias: 0.3, // Default cache bias
-    paused: false, // Default to not paused (generating)
-    loraMergeStrategy: "permanent_merge", // Default LoRA merge strategy
+    kvCacheAttentionBias: 0.3,
+    paused: false,
+    loraMergeStrategy: "permanent_merge",
+    inputMode: initialDefaults.inputMode,
   });
 
   const [promptData, setPromptData] = useState<PromptData>({
@@ -46,33 +164,97 @@ export function useStreamState() {
     null
   );
 
-  // Fetch hardware info on mount
+  // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
-    const fetchHardwareInfo = async () => {
+    const fetchInitialData = async () => {
       try {
-        const info = await getHardwareInfo();
-        setHardwareInfo(info);
+        const [schemasResult, hardwareResult] = await Promise.allSettled([
+          getPipelineSchemas(),
+          getHardwareInfo(),
+        ]);
+
+        if (schemasResult.status === "fulfilled") {
+          const schemas = schemasResult.value;
+          setPipelineSchemas(schemas);
+
+          // Check if the default pipeline (streamdiffusionv2) is available
+          // If not, switch to the first available pipeline
+          const availablePipelines = Object.keys(schemas.pipelines);
+          const preferredPipeline = "streamdiffusionv2";
+
+          if (
+            !availablePipelines.includes(preferredPipeline) &&
+            availablePipelines.length > 0
+          ) {
+            const firstPipelineId = availablePipelines[0] as PipelineId;
+            const firstPipelineSchema = schemas.pipelines[firstPipelineId];
+
+            setSettings(prev => ({
+              ...prev,
+              pipelineId: firstPipelineId,
+              inputMode: firstPipelineSchema.default_mode,
+            }));
+          }
+        } else {
+          console.error(
+            "useStreamState: Failed to fetch pipeline schemas:",
+            schemasResult.reason
+          );
+        }
+
+        if (hardwareResult.status === "fulfilled") {
+          setHardwareInfo(hardwareResult.value);
+        } else {
+          console.error(
+            "useStreamState: Failed to fetch hardware info:",
+            hardwareResult.reason
+          );
+        }
       } catch (error) {
-        console.error("Failed to fetch hardware info:", error);
+        console.error("useStreamState: Failed to fetch initial data:", error);
       }
     };
 
-    fetchHardwareInfo();
+    fetchInitialData();
   }, []);
 
-  // Set recommended quantization when krea-realtime-video is selected
+  // Update inputMode when schemas load or pipeline changes
+  // This sets the correct default mode for the pipeline
   useEffect(() => {
-    if (
-      settings.pipelineId === "krea-realtime-video" &&
-      hardwareInfo?.vram_gb !== null &&
-      hardwareInfo?.vram_gb !== undefined
-    ) {
-      // > 40GB = no quantization (null), <= 40GB = fp8_e4m3fn
-      const recommendedQuantization =
-        hardwareInfo.vram_gb > 40 ? null : "fp8_e4m3fn";
+    if (pipelineSchemas) {
+      const schema = pipelineSchemas.pipelines[settings.pipelineId];
+      if (schema?.default_mode) {
+        setSettings(prev => ({
+          ...prev,
+          inputMode: schema.default_mode,
+        }));
+      }
+    }
+    // Only run when schemas load or pipeline changes, NOT when inputMode changes
+  }, [pipelineSchemas, settings.pipelineId]);
+
+  // Set recommended quantization when krea-realtime-video is selected
+  // Reset to null when switching to other pipelines
+  useEffect(() => {
+    if (settings.pipelineId === "krea-realtime-video") {
+      // Krea pipeline: set quantization based on VRAM if hardware info is available
+      if (
+        hardwareInfo?.vram_gb !== null &&
+        hardwareInfo?.vram_gb !== undefined
+      ) {
+        // > 40GB = no quantization (null), <= 40GB = fp8_e4m3fn
+        const recommendedQuantization =
+          hardwareInfo.vram_gb > 40 ? null : "fp8_e4m3fn";
+        setSettings(prev => ({
+          ...prev,
+          quantization: recommendedQuantization,
+        }));
+      }
+    } else {
+      // Non-Krea pipeline: reset quantization to null (default for other pipelines)
       setSettings(prev => ({
         ...prev,
-        quantization: recommendedQuantization,
+        quantization: null,
       }));
     }
   }, [settings.pipelineId, hardwareInfo]);
@@ -93,15 +275,22 @@ export function useStreamState() {
     setPromptData(prev => ({ ...prev, ...newPrompt }));
   }, []);
 
+  // Derive spoutAvailable from hardware info (server-side detection)
+  const spoutAvailable = hardwareInfo?.spout_available ?? false;
+
   return {
     systemMetrics,
     streamStatus,
     settings,
     promptData,
     hardwareInfo,
+    pipelineSchemas,
     updateMetrics,
     updateStreamStatus,
     updateSettings,
     updatePrompt,
+    getDefaults,
+    supportsNoiseControls,
+    spoutAvailable,
   };
 }

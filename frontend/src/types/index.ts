@@ -2,7 +2,22 @@ export type PipelineId =
   | "streamdiffusionv2"
   | "passthrough"
   | "longlive"
-  | "krea-realtime-video";
+  | "krea-realtime-video"
+  | "reward-forcing";
+
+// Input mode for pipeline operation
+export type InputMode = "text" | "video";
+
+// WebRTC ICE server configuration
+export interface IceServerConfig {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export interface IceServersResponse {
+  iceServers: IceServerConfig[];
+}
 
 export interface SystemMetrics {
   cpu: number;
@@ -28,6 +43,7 @@ export interface LoRAConfig {
   id: string;
   path: string;
   scale: number;
+  mergeMode?: LoraMergeStrategy;
 }
 
 export interface SettingsState {
@@ -46,14 +62,48 @@ export interface SettingsState {
   paused?: boolean;
   loras?: LoRAConfig[];
   loraMergeStrategy?: LoraMergeStrategy;
+  // Track current input mode (text vs video)
+  inputMode?: InputMode;
+  // Spout settings
+  spoutReceiver?: {
+    enabled: boolean;
+    name: string;
+  };
+  spoutSender?: {
+    enabled: boolean;
+    name: string;
+  };
+  // VACE-specific settings
+  vaceEnabled?: boolean;
+  refImages?: string[];
+  vaceContextScale?: number;
 }
-
-export type PipelineCategory = "video-input" | "no-video-input";
 
 export interface PipelineInfo {
   name: string;
   about: string;
   projectUrl?: string;
-  modified?: boolean;
-  category: PipelineCategory;
+  docsUrl?: string;
+  defaultPrompt?: string;
+  estimatedVram?: number;
+  requiresModels?: boolean;
+  defaultTemporalInterpolationMethod?: "linear" | "slerp";
+  defaultTemporalInterpolationSteps?: number;
+  supportsLoRA?: boolean;
+  supportsVACE?: boolean;
+
+  // Multi-mode support
+  supportedModes: InputMode[];
+  defaultMode: InputMode;
+}
+
+export interface DownloadProgress {
+  is_downloading: boolean;
+  percentage: number;
+  current_artifact: string | null;
+}
+
+export interface ModelStatusResponse {
+  downloaded: boolean;
+  progress: DownloadProgress | null;
 }

@@ -259,44 +259,6 @@ class PipelineManager:
 
             return False
 
-    def _apply_load_params(
-        self,
-        config: dict,
-        load_params: dict | None,
-        default_height: int,
-        default_width: int,
-        default_seed: int = 42,
-    ) -> None:
-        """Extract and apply common load parameters (resolution, seed, LoRAs) to config.
-
-        Args:
-            config: Pipeline config dict to update
-            load_params: Load parameters dict (may contain height, width, seed, loras, lora_merge_mode)
-            default_height: Default height if not in load_params
-            default_width: Default width if not in load_params
-            default_seed: Default seed if not in load_params
-        """
-        height = default_height
-        width = default_width
-        seed = default_seed
-        loras = None
-        lora_merge_mode = "permanent_merge"
-
-        if load_params:
-            height = load_params.get("height", default_height)
-            width = load_params.get("width", default_width)
-            seed = load_params.get("seed", default_seed)
-            loras = load_params.get("loras", None)
-            lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
-
-        config["height"] = height
-        config["width"] = width
-        config["seed"] = seed
-        if loras:
-            config["loras"] = loras
-        # Pass merge_mode directly to mixin, not via config
-        config["_lora_merge_mode"] = lora_merge_mode
-
     def _unload_pipeline_unsafe(self):
         """Unload the current pipeline. Must be called with lock held.
 
@@ -327,6 +289,7 @@ class PipelineManager:
         """Get the environment directory for a specific pipeline.
 
         Each pipeline has its own pyproject.toml with pipeline-specific dependencies.
+        For plugin pipelines, this returns the plugin's installed directory.
 
         Args:
             pipeline_id: The pipeline identifier
@@ -334,27 +297,38 @@ class PipelineManager:
         Returns:
             Path to the pipeline's environment directory
         """
+        from .models_config import get_plugins_dir
+
         project_root = Path(__file__).parent.parent.parent.parent
 
-        # Map pipeline IDs to their directory names
-        pipeline_dir_map = {
+        # Map built-in pipeline IDs to their directory names
+        builtin_pipeline_dir_map = {
             "passthrough": "passthrough",
             "streamdiffusionv2": "streamdiffusionv2",
             "longlive": "longlive",
             "krea-realtime-video": "krea_realtime_video",
+            "reward-forcing": "reward_forcing",
         }
 
-        if pipeline_id in pipeline_dir_map:
+        # Check if it's a built-in pipeline
+        if pipeline_id in builtin_pipeline_dir_map:
             pipeline_dir = (
                 project_root
                 / "src"
                 / "scope"
                 / "core"
                 / "pipelines"
-                / pipeline_dir_map[pipeline_id]
+                / builtin_pipeline_dir_map[pipeline_id]
             )
             if pipeline_dir.exists() and (pipeline_dir / "pyproject.toml").exists():
                 return pipeline_dir
+
+        # Check if it's a plugin pipeline
+        plugins_dir = get_plugins_dir()
+        plugin_dir = plugins_dir / pipeline_id
+        if plugin_dir.exists() and (plugin_dir / "pyproject.toml").exists():
+            logger.info(f"Found plugin pipeline at: {plugin_dir}")
+            return plugin_dir
 
         # Fallback to base worker_env for unknown pipelines
         worker_env_dir = project_root / "worker_env"

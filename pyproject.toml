@@ -1,6 +1,6 @@
 [project]
 name = "daydream-scope"
-version = "0.1.0a7"
+version = "0.1.0a12"
 description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
 requires-python = ">=3.10.12"
@@ -36,6 +36,15 @@ dependencies = [
     "uvicorn>=0.35.0",
     "torch==2.8.0",
     "huggingface_hub>=0.25.0",
+    "pluggy>=1.5.0",
+    "click>=8.3.1",
+    "peft>=0.17.1",
+    "torchao==0.13.0",
+    "kernels>=0.10.4",
+    "triton==3.4.0; sys_platform == 'linux'",
+    "triton-windows==3.4.0.post21; sys_platform == 'win32'",
+    "SpoutGL>=0.1.1; sys_platform == 'win32'",
+    "PyOpenGL>=3.1.10; sys_platform == 'win32'",
 ]
 
 [project.scripts]
@@ -47,6 +56,15 @@ download_models = "scope.server.download_models:main"
 Homepage = "https://github.com/daydreamlive/scope"
 Repository = "https://github.com/daydreamlive/scope"
 Issues = "https://github.com/daydreamlive/scope/issues"
+
+[tool.uv]
+preview = true
+
+[tool.uv.extra-build-dependencies]
+flash-attn = [{ requirement = "torch", match-runtime = true, marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
+
+[tool.uv.extra-build-variables]
+flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 [tool.uv.sources]
 torch = [
@@ -68,6 +86,9 @@ dev = [
     "pytest>=8.4.2",
     "freezegun>=1.5.5",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
