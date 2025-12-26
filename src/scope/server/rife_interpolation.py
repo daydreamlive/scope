@@ -8,8 +8,6 @@ should be placed in ~/.daydream-scope/models/RIFE/flownet.pkl.
 """
 
 import logging
-import os
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -144,6 +142,18 @@ class RIFEInterpolator:
                 self.model.eval()
                 self.model.device()  # Move model to device
                 logger.info(f"Loaded RIFE HDv3 weights from {model_dir_path}/flownet.pkl")
+
+                # Compile model for faster inference (PyTorch 2.0+)
+                if hasattr(torch, "compile"):
+                    try:
+                        self.model.flownet = torch.compile(
+                            self.model.flownet,
+                            mode="reduce-overhead",  # Best for inference
+                            fullgraph=False,  # Allow graph breaks for compatibility
+                        )
+                        logger.info("RIFE flownet compiled with torch.compile()")
+                    except Exception as e:
+                        logger.warning(f"torch.compile() failed, using eager mode: {e}")
             else:
                 raise FileNotFoundError(
                     "RIFE HDv3 model weights (flownet.pkl) not found. "
@@ -196,6 +206,12 @@ class RIFEInterpolator:
     def _rife_interpolate(self, frames: torch.Tensor) -> torch.Tensor:
         """Use RIFE model for interpolation.
 
+        Optimized implementation with:
+        - BF16 mixed precision for faster tensor core inference
+        - Batched processing of all frame pairs in single forward pass
+        - Pre-computed padding applied once to all frames
+        - Minimal CPU-GPU transfers (single transfer at end)
+
         Args:
             frames: Input frames tensor of shape [T, H, W, C] with values in [0, 255]
 
@@ -209,54 +225,47 @@ class RIFEInterpolator:
         T, H, W, C = frames.shape
 
         # Convert from [T, H, W, C] to [T, C, H, W] and normalize to [0, 1]
-        frames_chw = (frames.permute(0, 3, 1, 2) / 255.0).contiguous()
+        # Move to GPU once at the start
+        frames_chw = (frames.permute(0, 3, 1, 2) / 255.0).to(self.device).contiguous()
 
         # Calculate padding - RIFE requires dimensions to be multiples of 32
-        # (or 32/scale, but we use scale=1.0 by default)
         tmp = 32  # For scale=1.0
         ph = ((H - 1) // tmp + 1) * tmp
         pw = ((W - 1) // tmp + 1) * tmp
         padding = (0, pw - W, 0, ph - H)
 
-        interpolated_frames = []
+        # Pre-compute padding for all frames at once (optimization)
+        frames_padded = F.pad(frames_chw, padding)  # [T, C, pH, pW]
 
-        # Process each pair of consecutive frames
         with torch.no_grad():
-            for i in range(num_frames - 1):
-                frame1 = frames_chw[i:i+1]  # [1, C, H, W] in [0, 1]
-                frame2 = frames_chw[i+1:i+2]  # [1, C, H, W] in [0, 1]
+            # Use BF16 mixed precision for faster inference on modern GPUs
+            autocast_dtype = torch.bfloat16 if self.device.type == "cuda" else torch.float32
+            with torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype):
+                # Batch all frame pairs: frames[0:T-1] and frames[1:T]
+                frames1_padded = frames_padded[:-1]  # [T-1, C, pH, pW]
+                frames2_padded = frames_padded[1:]   # [T-1, C, pH, pW]
 
-                # Move to device
-                frame1 = frame1.to(self.device)
-                frame2 = frame2.to(self.device)
+                # Batched inference - process all pairs at once
+                mid_frames_padded = self.model.inference(
+                    frames1_padded, frames2_padded, scale=1.0
+                )  # [T-1, C, pH, pW]
 
-                # Apply padding to both frames
-                frame1_padded = F.pad(frame1, padding)
-                frame2_padded = F.pad(frame2, padding)
+            # Remove padding from interpolated frames (stay on GPU)
+            mid_frames = mid_frames_padded[:, :, :H, :W].float()  # [T-1, C, H, W]
 
-                # Add original frame (remove padding and convert back to [0, 255] range)
-                frame1_unpadded = frame1_padded[:, :, :H, :W]
-                interpolated_frames.append((frame1_unpadded * 255.0).cpu())
+            # Get original frames without padding (stay on GPU)
+            original_frames = frames_padded[:, :, :H, :W]  # [T, C, H, W]
 
-                # Interpolate between frame1 and frame2 using RIFE HDv3
-                # RIFE HDv3 inference expects frames in [0, 1] range and outputs in [0, 1] range
-                # HDv3 uses scale parameter (default 1.0)
-                mid_frame_padded = self.model.inference(frame1_padded, frame2_padded, scale=1.0)
+            # Interleave original and interpolated frames on GPU
+            # Result: [orig[0], mid[0], orig[1], mid[1], ..., orig[T-2], mid[T-2], orig[T-1]]
+            result_frames = torch.zeros(
+                (T * 2 - 1, C, H, W), dtype=torch.float32, device=self.device
+            )
+            result_frames[0::2] = original_frames  # Original frames at even indices
+            result_frames[1::2] = mid_frames       # Interpolated frames at odd indices
 
-                # Remove padding from interpolated frame
-                mid_frame = mid_frame_padded[:, :, :H, :W]
-
-                # Convert back to [0, 255] range and move to CPU
-                mid_frame = (mid_frame * 255.0).cpu()
-                interpolated_frames.append(mid_frame)
-
-            # Add last frame (remove padding)
-            frame_last_padded = F.pad(frames_chw[-1:].to(self.device), padding)
-            frame_last = frame_last_padded[:, :, :H, :W]
-            interpolated_frames.append((frame_last * 255.0).cpu())
-
-        # Concatenate all frames: [T*2-1, C, H, W]
-        result_chw = torch.cat(interpolated_frames, dim=0)
+            # Scale to [0, 255] and transfer to CPU once at the end
+            result_chw = (result_frames * 255.0).cpu()
 
         # Convert back to [T*2-1, H, W, C]
         result = result_chw.permute(0, 2, 3, 1).contiguous()

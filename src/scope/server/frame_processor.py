@@ -264,6 +264,10 @@ class FrameProcessor:
         input_fps = self._get_input_fps()
         pipeline_fps = self.get_current_pipeline_fps()
 
+        # RIFE interpolation doubles the frame count, so double the output rate
+        if self.rife_interpolator.enabled:
+            pipeline_fps = pipeline_fps * 2
+
         if input_fps is None:
             return pipeline_fps
 
