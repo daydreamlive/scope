@@ -208,8 +208,8 @@ class CausalWanSelfAttention(nn.Module):
                 num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
                 num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - total_sink_tokens
 
-                evicted_start = total_sink_tokens + num_rolled_tokens
-                evicted_end = total_sink_tokens + num_rolled_tokens + num_evicted_tokens
+                evicted_start = total_sink_tokens
+                evicted_end = total_sink_tokens + num_evicted_tokens
                 evicted_k = kv_cache["k"][:, evicted_start:evicted_end].clone()
                 evicted_v = kv_cache["v"][:, evicted_start:evicted_end].clone()
                 evicted_tokens_exist = True
