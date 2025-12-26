@@ -108,6 +108,7 @@ class CausalWanSelfAttention(nn.Module):
         kv_cache=None,
         current_start=0,
         cache_start=None,
+        sink_recache_after_switch=False,
     ):
         r"""
         Args:
@@ -319,6 +320,8 @@ class CausalWanSelfAttention(nn.Module):
                     if is_recompute
                     else local_start_index
                 )
+                if sink_recache_after_switch:
+                    write_start_index = local_start_index
                 roped_offset = max(0, write_start_index - local_start_index)
                 write_len = max(0, local_end_index - write_start_index)
                 if write_len > 0:
@@ -363,6 +366,8 @@ class CausalWanSelfAttention(nn.Module):
                     if is_recompute
                     else local_start_index
                 )
+                if sink_recache_after_switch:
+                    write_start_index = local_start_index
                 roped_offset = max(0, write_start_index - local_start_index)
                 write_len = max(0, local_end_index - write_start_index)
                 if write_len > 0:
@@ -483,6 +488,7 @@ class CausalWanAttentionBlock(nn.Module):
         crossattn_cache=None,
         current_start=0,
         cache_start=None,
+        sink_recache_after_switch=False,
     ):
         r"""
         Args:
@@ -512,6 +518,7 @@ class CausalWanAttentionBlock(nn.Module):
             kv_cache,
             current_start,
             cache_start,
+            sink_recache_after_switch,
         )
 
         if kv_cache is not None:
@@ -1054,6 +1061,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         crossattn_cache: dict = None,
         current_start: int = 0,
         cache_start: int = 0,
+        sink_recache_after_switch=False,
     ):
         r"""
         Run the diffusion model with kv caching.
@@ -1145,6 +1153,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context=context,
             context_lens=context_lens,
             block_mask=self.block_mask,
+            sink_recache_after_switch=sink_recache_after_switch,
         )
 
         # print("kwargs done")

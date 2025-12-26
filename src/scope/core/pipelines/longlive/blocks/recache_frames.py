@@ -25,6 +25,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         return [
             ConfigSpec("num_frame_per_block", 3),
             ConfigSpec("local_attn_size", 12),
+            ConfigSpec("global_sink", True),
         ]
 
     @property
@@ -139,16 +140,21 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             block_state.width // scale_size
         )
 
-        block_state.kv_cache = initialize_kv_cache(
-            generator=components.generator,
-            batch_size=1,
-            dtype=generator_param.dtype,
-            device=generator_param.device,
-            local_attn_size=components.config.local_attn_size,
-            frame_seq_length=frame_seq_length,
-            kv_cache_existing=block_state.kv_cache,
-            reset_indices=False,  # Do not reset indices
-        )
+        global_sink = components.config.global_sink
+
+        # When global_sink is True (default): Preserve sink tokens in KV cache
+        # When global_sink is False: Reset KV cache before recaching
+        if not global_sink:
+            block_state.kv_cache = initialize_kv_cache(
+                generator=components.generator,
+                batch_size=1,
+                dtype=generator_param.dtype,
+                device=generator_param.device,
+                local_attn_size=components.config.local_attn_size,
+                frame_seq_length=frame_seq_length,
+                kv_cache_existing=block_state.kv_cache,
+                reset_indices=False,
+            )
 
         # Get the number of frames to recache (min of what we've generated and buffer size)
         num_recache_frames = min(
@@ -182,6 +188,8 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         )
 
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
+        # When global_sink is True: sink_recache_after_switch=False (preserve sink tokens)
+        # When global_sink is False: sink_recache_after_switch=True (recache writes to sink positions)
         components.generator(
             noisy_image_or_video=recache_frames,
             conditional_dict=conditional_dict,
@@ -189,6 +197,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
             current_start=recache_start * frame_seq_length,
+            sink_recache_after_switch=not global_sink,
         )
 
         block_state.crossattn_cache = initialize_crossattn_cache(
