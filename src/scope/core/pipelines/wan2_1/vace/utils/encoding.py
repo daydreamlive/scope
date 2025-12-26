@@ -60,11 +60,9 @@ def vace_encode_frames(
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
-        # Use cache=True for inactive portion to share temporal state with video encoding
-        # This ensures the unmasked portion has consistent temporal encoding across chunks
+        # Use cache=True to ensure cache consistency for both inactive and reactive portions
         inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=True)
-        # Reactive portion can use cache=False since it's masked (will be inpainted)
-        reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=False)
+        reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=True)
         # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
         inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
         reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
