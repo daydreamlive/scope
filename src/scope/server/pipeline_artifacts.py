@@ -61,4 +61,13 @@ PIPELINE_ARTIFACTS = {
             files=["rewardforcing.pt"],
         ),
     ],
+    "memflow": [
+        WAN_1_3B_ARTIFACT,
+        UMT5_ENCODER_ARTIFACT,
+        VACE_ARTIFACT,
+        HuggingfaceRepoArtifact(
+            repo_id="KlingTeam/MemFlow",
+            files=["base.pt", "lora.pt"],
+        ),
+    ],
 }

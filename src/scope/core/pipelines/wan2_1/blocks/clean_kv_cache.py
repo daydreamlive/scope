@@ -26,6 +26,7 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             ConfigSpec("num_frame_per_block", 3),
             ConfigSpec("vae_spatial_downsample_factor", 8),
             ConfigSpec("patch_embedding_spatial_downsample_factor", 2),
+            ConfigSpec("record_interval", 3),
         ]
 
     @property
@@ -60,6 +61,11 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
                 description="Initialized cross-attention cache",
             ),
             InputParam(
+                "kv_bank",
+                type_hint=list[dict],
+                description="Initialized KV memory bank",
+            ),
+            InputParam(
                 "height", required=True, type_hint=int, description="Height of video"
             ),
             InputParam(
@@ -89,6 +95,15 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             block_state.width // scale_size
         )
 
+        record_interval = getattr(components.config, "record_interval", None)
+        if (
+            record_interval is not None
+            and block_state.current_start_frame % (3 * record_interval) == 0
+        ):
+            update_bank = True
+        else:
+            update_bank = False
+
         generator_param = next(components.generator.parameters())
 
         _, num_frames, _, _, _ = block_state.latents.shape
@@ -117,6 +132,10 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             timestep=context_timestep,
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
+            kv_bank=block_state.kv_bank,
+            update_bank=update_bank,
+            q_bank=False,
+            update_cache=True,
             current_start=block_state.current_start_frame * frame_seq_length,
             current_end=current_end_frame * frame_seq_length,
         )

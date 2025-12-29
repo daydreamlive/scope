@@ -431,6 +431,68 @@ class RewardForcingConfig(BasePipelineConfig):
         }
 
 
+class MemFlowConfig(BasePipelineConfig):
+    """Configuration for MemFlow pipeline.
+
+    MemFlow supports both text-to-video and video-to-video modes.
+    Default mode is text (T2V was the original training focus).
+    """
+
+    pipeline_id: ClassVar[str] = "memflow"
+    pipeline_name: ClassVar[str] = "MemFlow"
+    pipeline_description: ClassVar[str] = (
+        "A streaming pipeline and autoregressive video diffusion model from Kling."
+    )
+
+    # Mode support
+    supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
+    default_mode: ClassVar[InputMode] = "text"
+
+    # LongLive defaults (text mode baseline)
+    height: int = Field(default=320, ge=1, description="Output height in pixels")
+    width: int = Field(default=576, ge=1, description="Output width in pixels")
+    denoising_steps: list[int] | None = Field(
+        default=[1000, 750, 500, 250],
+        description="Denoising step schedule for progressive generation",
+    )
+    # noise_scale is None by default (text mode), overridden in video mode
+    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
+        default=None,
+        description="Amount of noise to add during video generation (video mode only)",
+    )
+
+    # VACE (optional reference image conditioning)
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
+    )
+
+    @classmethod
+    def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
+        """MemFlow mode-specific defaults."""
+        return {
+            "text": ModeDefaults(
+                # Text mode: no video input, no noise controls
+                noise_scale=None,
+                noise_controller=None,
+            ),
+            "video": ModeDefaults(
+                # Video mode: requires input frames, noise controls active
+                height=512,
+                width=512,
+                noise_scale=0.7,
+                noise_controller=True,
+                denoising_steps=[1000, 750],
+            ),
+        }
+
+
 class PassthroughConfig(BasePipelineConfig):
     """Configuration for Passthrough pipeline (testing).
 

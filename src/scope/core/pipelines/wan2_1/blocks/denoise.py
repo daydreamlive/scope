@@ -97,6 +97,11 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="Initialized cross-attention cache",
             ),
             InputParam(
+                "kv_bank",
+                type_hint=list[dict],
+                description="Initialized KV memory bank",
+            ),
+            InputParam(
                 "generator",
                 required=True,
                 description="Random number generator",
@@ -162,6 +167,11 @@ class DenoiseBlock(ModularPipelineBlocks):
 
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
+            if index == 0:
+                q_bank = True
+            else:
+                q_bank = False
+
             timestep = (
                 torch.ones(
                     [batch_size, num_frames],
@@ -178,6 +188,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                     timestep=timestep,
                     kv_cache=block_state.kv_cache,
                     crossattn_cache=block_state.crossattn_cache,
+                    kv_bank=block_state.kv_bank,
+                    update_bank=False,
+                    q_bank=q_bank,
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
@@ -211,6 +224,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                     timestep=timestep,
                     kv_cache=block_state.kv_cache,
                     crossattn_cache=block_state.crossattn_cache,
+                    kv_bank=block_state.kv_bank,
+                    update_bank=False,
+                    q_bank=q_bank,
                     current_start=start_frame * frame_seq_length,
                     current_end=end_frame * frame_seq_length,
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
