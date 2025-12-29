@@ -131,6 +131,52 @@ After your first generation you can:
 - Use [LoRAs](./docs/lora.md) to customize the concepts and styles used in your generations.
 - Use [Spout](./docs/spout.md) (Windows only) to share real-time video between Scope and other local applications.
 
+## Benchmarking
+
+Scope includes a comprehensive benchmarking suite to test pipeline performance across different configurations and hardware setups. This is useful for:
+
+- Understanding performance characteristics of different GPUs (H100, A6000, 4090, etc.)
+- Determining optimal configurations (resolution, denoising steps) for your hardware
+- Identifying optimization opportunities
+
+### Quick Start
+
+Install benchmark dependencies:
+
+```bash
+uv sync --group benchmark
+```
+
+Run a comprehensive benchmark (all pipelines, all configurations):
+
+```bash
+uv run benchmark.py
+```
+
+### Example Usage
+
+```bash
+# Benchmark specific pipelines
+uv run benchmark.py --pipelines streamdiffusionv2 longlive
+
+# Custom resolutions
+uv run benchmark.py --resolutions 480x832 768x1344
+
+# Custom iterations (defaults: warmup=10, iterations=100)
+uv run benchmark.py --warmup 5 --iterations 50
+
+# Save results to specific file
+uv run benchmark.py --output h100_results.json
+```
+
+### Output
+
+The benchmark generates a JSON file with:
+- Hardware specifications (GPU, CPU, memory)
+- Average performance metrics per configuration
+- Peak resource utilization (VRAM, GPU utilization, CPU usage)
+
+
 ## Firewalls
 
 If you run Scope in a cloud environment with restrictive firewall settings (eg. Runpod), Scope supports using [TURN servers](https://webrtc.org/getting-started/turn-server) to establish a connection between your browser and the streaming server.
