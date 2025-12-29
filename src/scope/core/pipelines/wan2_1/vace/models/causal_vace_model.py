@@ -295,8 +295,14 @@ class CausalVaceWanModel(nn.Module):
         crossattn_cache,
     ):
         """Process VACE context to generate hints."""
+        # Get target dtype from vace_patch_embedding parameters
+        target_dtype = next(self.vace_patch_embedding.parameters()).dtype
+
+        # Convert all VACE context to model dtype first
+        vace_context_converted = [u.to(dtype=target_dtype) for u in vace_context]
+
         # Embed VACE context
-        c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
+        c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context_converted]
         c = [u.flatten(2).transpose(1, 2) for u in c]
 
         # Pad to seq_len

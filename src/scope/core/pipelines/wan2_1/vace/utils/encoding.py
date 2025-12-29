@@ -78,6 +78,7 @@ def vace_encode_frames(
         masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
         inactive = [i * (1 - m) + 0 * m for i, m in zip(frames, masks, strict=False)]
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
+
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
 
@@ -92,6 +93,7 @@ def vace_encode_frames(
         # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
         inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
         reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
+
         latents = [
             torch.cat((u, c), dim=0)
             for u, c in zip(inactive_transposed, reactive_transposed, strict=False)
