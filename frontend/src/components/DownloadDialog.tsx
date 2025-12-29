@@ -9,8 +9,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Progress } from "./ui/progress";
-import type { PipelineId, DownloadProgress } from "../types";
-import type { PipelineInfo } from "../hooks/usePipelines";
+import type { PipelineId, DownloadProgress, PipelineInfo } from "../types";
 
 interface DownloadDialogProps {
   open: boolean;

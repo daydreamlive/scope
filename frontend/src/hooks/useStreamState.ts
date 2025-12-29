@@ -123,12 +123,8 @@ export function useStreamState() {
       if (schema?.config_schema?.properties?.noise_scale) {
         return true;
       }
-      // Before schemas load, use fallback knowledge
-      return (
-        pipelineId === "streamdiffusionv2" ||
-        pipelineId === "longlive" ||
-        pipelineId === "krea-realtime-video"
-      );
+      // If schemas haven't loaded yet, return false (controls will appear once schemas load)
+      return false;
     },
     [pipelineSchemas]
   );
@@ -136,8 +132,11 @@ export function useStreamState() {
   // Get initial defaults (use fallback since schemas haven't loaded yet)
   const initialDefaults = getFallbackDefaults();
 
+  // Default pipeline ID - will be updated once schemas load if this pipeline doesn't exist
+  const defaultPipelineId = "streamdiffusionv2";
+
   const [settings, setSettings] = useState<SettingsState>({
-    pipelineId: "streamdiffusionv2",
+    pipelineId: defaultPipelineId,
     resolution: {
       height: initialDefaults.height,
       width: initialDefaults.width,
@@ -177,13 +176,12 @@ export function useStreamState() {
           const schemas = schemasResult.value;
           setPipelineSchemas(schemas);
 
-          // Check if the default pipeline (streamdiffusionv2) is available
+          // Check if the default pipeline is available
           // If not, switch to the first available pipeline
           const availablePipelines = Object.keys(schemas.pipelines);
-          const preferredPipeline = "streamdiffusionv2";
 
           if (
-            !availablePipelines.includes(preferredPipeline) &&
+            !availablePipelines.includes(defaultPipelineId) &&
             availablePipelines.length > 0
           ) {
             const firstPipelineId = availablePipelines[0] as PipelineId;
@@ -233,31 +231,34 @@ export function useStreamState() {
     // Only run when schemas load or pipeline changes, NOT when inputMode changes
   }, [pipelineSchemas, settings.pipelineId]);
 
-  // Set recommended quantization when krea-realtime-video is selected
-  // Reset to null when switching to other pipelines
+  // Set recommended quantization based on pipeline schema and available VRAM
   useEffect(() => {
-    if (settings.pipelineId === "krea-realtime-video") {
-      // Krea pipeline: set quantization based on VRAM if hardware info is available
-      if (
-        hardwareInfo?.vram_gb !== null &&
-        hardwareInfo?.vram_gb !== undefined
-      ) {
-        // > 40GB = no quantization (null), <= 40GB = fp8_e4m3fn
-        const recommendedQuantization =
-          hardwareInfo.vram_gb > 40 ? null : "fp8_e4m3fn";
-        setSettings(prev => ({
-          ...prev,
-          quantization: recommendedQuantization,
-        }));
-      }
+    const schema = pipelineSchemas?.pipelines[settings.pipelineId];
+    const vramThreshold = schema?.recommended_quantization_vram_threshold;
+
+    // Only set quantization if pipeline has a recommendation and hardware info is available
+    if (
+      vramThreshold !== null &&
+      vramThreshold !== undefined &&
+      hardwareInfo?.vram_gb !== null &&
+      hardwareInfo?.vram_gb !== undefined
+    ) {
+      // If user's VRAM > threshold, no quantization needed (null)
+      // Otherwise, recommend fp8_e4m3fn quantization
+      const recommendedQuantization =
+        hardwareInfo.vram_gb > vramThreshold ? null : "fp8_e4m3fn";
+      setSettings(prev => ({
+        ...prev,
+        quantization: recommendedQuantization,
+      }));
     } else {
-      // Non-Krea pipeline: reset quantization to null (default for other pipelines)
+      // No recommendation from pipeline: reset quantization to null (default)
       setSettings(prev => ({
         ...prev,
         quantization: null,
       }));
     }
-  }, [settings.pipelineId, hardwareInfo]);
+  }, [settings.pipelineId, hardwareInfo, pipelineSchemas]);
 
   const updateMetrics = useCallback((newMetrics: Partial<SystemMetrics>) => {
     setSystemMetrics(prev => ({ ...prev, ...newMetrics }));

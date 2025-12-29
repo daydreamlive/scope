@@ -1,21 +1,6 @@
 import { useState, useEffect } from "react";
 import { getPipelineSchemas } from "../lib/api";
-import type { InputMode } from "../types";
-
-export interface PipelineInfo {
-  name: string;
-  about: string;
-  docsUrl?: string | null;
-  estimatedVram?: number | null;
-  requiresModels?: boolean;
-  supportsPrompts?: boolean;
-  defaultTemporalInterpolationMethod?: "linear" | "slerp";
-  defaultTemporalInterpolationSteps?: number;
-  supportsLoRA?: boolean;
-  supportsVACE?: boolean;
-  supportedModes: InputMode[];
-  defaultMode: InputMode;
-}
+import type { InputMode, PipelineInfo } from "../types";
 
 export function usePipelines() {
   const [pipelines, setPipelines] = useState<Record<
@@ -38,22 +23,28 @@ export function usePipelines() {
         // Transform to camelCase for TypeScript conventions
         const transformed: Record<string, PipelineInfo> = {};
         for (const [id, schema] of Object.entries(schemas.pipelines)) {
-          transformed[id] = {
-            name: schema.name,
-            about: schema.description,
-            supportedModes: schema.supported_modes as InputMode[],
-            defaultMode: schema.default_mode as InputMode,
-            supportsPrompts: schema.supports_prompts,
-            defaultTemporalInterpolationMethod:
-              schema.default_temporal_interpolation_method,
-            defaultTemporalInterpolationSteps:
-              schema.default_temporal_interpolation_steps,
-            docsUrl: schema.docs_url,
-            estimatedVram: schema.estimated_vram_gb,
-            requiresModels: schema.requires_models,
-            supportsLoRA: schema.supports_lora,
-            supportsVACE: schema.supports_vace,
-          };
+        transformed[id] = {
+          name: schema.name,
+          about: schema.description,
+          supportedModes: schema.supported_modes as InputMode[],
+          defaultMode: schema.default_mode as InputMode,
+          supportsPrompts: schema.supports_prompts,
+          defaultTemporalInterpolationMethod:
+            schema.default_temporal_interpolation_method,
+          defaultTemporalInterpolationSteps:
+            schema.default_temporal_interpolation_steps,
+          docsUrl: schema.docs_url ?? undefined,
+          estimatedVram: schema.estimated_vram_gb ?? undefined,
+          requiresModels: schema.requires_models,
+          supportsLoRA: schema.supports_lora,
+          supportsVACE: schema.supports_vace,
+          supportsCacheManagement: schema.supports_cache_management,
+          supportsKvCacheBias: schema.supports_kv_cache_bias,
+          supportsQuantization: schema.supports_quantization,
+          minDimension: schema.min_dimension,
+          recommendedQuantizationVramThreshold:
+            schema.recommended_quantization_vram_threshold ?? undefined,
+        };
         }
 
         setPipelines(transformed);

@@ -693,77 +693,48 @@ export function StreamPage() {
       const currentMode =
         settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
 
-      // Prepare load parameters based on pipeline type
-      let loadParams = null;
-
       // Use settings.resolution if available, otherwise fall back to videoResolution
       const resolution = settings.resolution || videoResolution;
 
-      // Compute VACE enabled state once - enabled by default for text mode on VACE-supporting pipelines
-      const vaceEnabled =
-        settings.vaceEnabled ??
-        (pipelines?.[pipelineIdToUse]?.supportsVACE && currentMode !== "video");
+      // Build load parameters dynamically based on pipeline capabilities and settings
+      // The backend will use only the parameters it needs based on the pipeline schema
+      const currentPipeline = pipelines?.[pipelineIdToUse];
+      let loadParams: Record<string, unknown> | null = null;
 
-      if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          vace_enabled: vaceEnabled,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      } else if (pipelineIdToUse === "passthrough" && resolution) {
+      if (resolution) {
+        // Start with common parameters
         loadParams = {
           height: resolution.height,
           width: resolution.width,
         };
+
+        // Add seed if pipeline supports quantization (implies it needs seed)
+        if (currentPipeline?.supportsQuantization) {
+          loadParams.seed = settings.seed ?? 42;
+          loadParams.quantization = settings.quantization ?? null;
+        }
+
+        // Add LoRA parameters if pipeline supports LoRA
+        if (currentPipeline?.supportsLoRA && settings.loras) {
+          const loraParams = buildLoRAParams(settings.loras, settings.loraMergeStrategy);
+          loadParams = { ...loadParams, ...loraParams };
+        }
+
+        // Add VACE parameters if pipeline supports VACE
+        if (currentPipeline?.supportsVACE) {
+          const vaceEnabled =
+            settings.vaceEnabled ??
+            (currentMode !== "video");
+          loadParams.vace_enabled = vaceEnabled;
+
+          // Add VACE reference images if provided
+          const vaceParams = getVaceParams(settings.refImages, settings.vaceContextScale);
+          loadParams = { ...loadParams, ...vaceParams };
+        }
+
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}`
-        );
-      } else if (pipelineIdToUse === "longlive" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          vace_enabled: vaceEnabled,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
-        );
-      } else if (pipelineIdToUse === "krea-realtime-video" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization:
-            settings.quantization !== undefined
-              ? settings.quantization
-              : "fp8_e4m3fn",
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      } else if (pipelineIdToUse === "reward-forcing" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          vace_enabled: vaceEnabled,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading ${pipelineIdToUse} with resolution ${resolution.width}x${resolution.height}`,
+          loadParams
         );
       }
 
@@ -818,17 +789,13 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for krea_realtime_video, longlive, and reward-forcing
-      if (
-        pipelineIdToUse === "krea-realtime-video" ||
-        pipelineIdToUse === "longlive" ||
-        pipelineIdToUse === "reward-forcing"
-      ) {
+      // Cache management for pipelines that support it
+      if (pipelineInfo?.supportsCacheManagement) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
-      // Krea-realtime-video-specific parameters
-      if (pipelineIdToUse === "krea-realtime-video") {
+      // KV cache bias for pipelines that support it
+      if (pipelineInfo?.supportsKvCacheBias) {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
       }

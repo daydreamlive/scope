@@ -65,6 +65,16 @@ class BasePipelineConfig(BaseModel):
     supports_lora: ClassVar[bool] = False
     supports_vace: ClassVar[bool] = False
 
+    # UI capability metadata - tells frontend what controls to show
+    supports_cache_management: ClassVar[bool] = False
+    supports_kv_cache_bias: ClassVar[bool] = False
+    supports_quantization: ClassVar[bool] = False
+    min_dimension: ClassVar[int] = 1
+    # Recommended quantization based on VRAM: if user's VRAM > this threshold (GB),
+    # quantization=null is recommended, otherwise fp8_e4m3fn is recommended.
+    # None means no specific recommendation (pipeline doesn't benefit from quantization).
+    recommended_quantization_vram_threshold: ClassVar[float | None] = None
+
     # Mode support - override in subclasses
     supported_modes: ClassVar[list[InputMode]] = ["text"]
     default_mode: ClassVar[InputMode] = "text"
@@ -183,6 +193,13 @@ class BasePipelineConfig(BaseModel):
         metadata["requires_models"] = cls.requires_models
         metadata["supports_lora"] = cls.supports_lora
         metadata["supports_vace"] = cls.supports_vace
+        metadata["supports_cache_management"] = cls.supports_cache_management
+        metadata["supports_kv_cache_bias"] = cls.supports_kv_cache_bias
+        metadata["supports_quantization"] = cls.supports_quantization
+        metadata["min_dimension"] = cls.min_dimension
+        metadata["recommended_quantization_vram_threshold"] = (
+            cls.recommended_quantization_vram_threshold
+        )
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults if defined
@@ -228,6 +245,11 @@ class LongLiveConfig(BasePipelineConfig):
     requires_models: ClassVar[bool] = True
     supports_lora: ClassVar[bool] = True
     supports_vace: ClassVar[bool] = True
+
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -299,6 +321,11 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     requires_models: ClassVar[bool] = True
     supports_lora: ClassVar[bool] = True
     supports_vace: ClassVar[bool] = True
+
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -376,6 +403,14 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     requires_models: ClassVar[bool] = True
     supports_lora: ClassVar[bool] = True
 
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_kv_cache_bias: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
+    # Recommend quantization for systems with <= 40GB VRAM
+    recommended_quantization_vram_threshold: ClassVar[float | None] = 40.0
+
     default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
         "linear"
     )
@@ -438,6 +473,11 @@ class RewardForcingConfig(BasePipelineConfig):
     requires_models: ClassVar[bool] = True
     supports_lora: ClassVar[bool] = True
     supports_vace: ClassVar[bool] = True
+
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
