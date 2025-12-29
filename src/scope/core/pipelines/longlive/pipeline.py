@@ -225,6 +225,14 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         if "vace_ref_images" not in kwargs:
             self.state.set("vace_ref_images", None)
 
+        # Clear extension mode parameters from state if not provided to prevent reuse on non-extension chunks
+        if "extension_mode" not in kwargs:
+            self.state.set("extension_mode", None)
+        if "first_frame_image" not in kwargs:
+            self.state.set("first_frame_image", None)
+        if "last_frame_image" not in kwargs:
+            self.state.set("last_frame_image", None)
+
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
 
