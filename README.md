@@ -33,6 +33,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
   - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video, video-to-video)
   - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
   - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
+  - [MemFlow](./src/scope/core/pipelines/memflow/docs/usage.md) (text-to-video, video-to-video)
 - [LoRAs](./docs/lora.md) to customize concepts and styles used with autoregressive video diffusion models
 - [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide autoregressive video diffusion models
 - [API](./docs/server.md) with WebRTC real-time streaming
@@ -154,6 +155,7 @@ Examples with importable timeline files can be found here:
 - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md)
 - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md)
 - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md)
+- [MemFlow](./src/scope/core/pipelines/memflow/docs/usage.md)
 - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md)
 
 After your first generation you can:

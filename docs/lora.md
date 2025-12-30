@@ -7,13 +7,14 @@ The pipelines in Scope support using one or multiple LoRAs to customize concepts
 - The `streamdiffusionv2` pipeline is compatible with Wan2.1-T2V-1.3B LoRAs.
 - The `longlive` pipeline is compatible with Wan2.1-T2V-1.3B LoRAs.
 - The `reward-forcing` pipeline is compatible with Wan2.1-T2V-1.3B LoRAs.
+- The `memflow` pipeline is compatible with Wan2.1-T2V-1.3B LoRAs.
 - The `krea-realtime-video` pipeline is compatible with Wan2.1-T2V-14B LoRAs.
 
 ## Downloading LoRAs
 
 Scope supports using LoRAs that can be downloaded from popular hubs such as [HuggingFace](https://huggingface.co/) or [CivitAI](https://civitai.com/).
 
-A few LoRAs that you can start with for `streamdiffusionv2`, `longlive` and `reward-forcing`:
+A few LoRAs that you can start with for `streamdiffusionv2`, `longlive`, `reward-forcing` and `memflow`:
 
 - [Arcane Jinx](https://civitai.com/models/1332383/wan-lora-arcane-jinx-v1-wan-13b)
 - [Genshin TCG](https://civitai.com/models/1728768/genshin-tcg-style-wan-13b)

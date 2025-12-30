@@ -261,6 +261,7 @@ Options:
 | `streamdiffusionv2`   | 512x512                  |
 | `krea-realtime-video` | 512x512                  |
 | `reward-forcing`      | 576x320                  |
+| `memflow`             | 576x320                  |
 | `passthrough`         | 512x512                  |
 
 ## Authentication
