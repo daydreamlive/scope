@@ -1,3 +1,5 @@
+import os
+
 import torch
 from diffusers.modular_pipelines import BlockState, ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (
@@ -9,6 +11,29 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 from einops import rearrange
 
 from scope.core.pipelines.wan2_1.utils import initialize_kv_cache
+
+
+def _get_block_mask_model(model: torch.nn.Module) -> torch.nn.Module:
+    """Return the underlying model object that owns `block_mask`.
+
+    When VACE is enabled, `components.generator.model` is wrapped by `CausalVaceWanModel`,
+    but the actual `block_mask` lives on the wrapped base model (`causal_wan_model`).
+    """
+    causal_wan_model = getattr(model, "causal_wan_model", None)
+    if causal_wan_model is not None:
+        return causal_wan_model
+
+    # PEFT models (runtime_peft) expose the wrapped module at base_model.model.
+    base_model = getattr(model, "base_model", None)
+    if base_model is not None:
+        inner = getattr(base_model, "model", None)
+        if inner is not None:
+            causal_wan_model = getattr(inner, "causal_wan_model", None)
+            if causal_wan_model is not None:
+                return causal_wan_model
+            return inner
+
+    return model
 
 
 class RecomputeKVCacheBlock(ModularPipelineBlocks):
@@ -91,24 +116,6 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Conditioning embeddings to condition denoising",
             ),
-            InputParam(
-                "vace_context",
-                default=None,
-                type_hint=list | None,
-                description="VACE context for conditioning (R2V reference images or depth/flow/etc.)",
-            ),
-            InputParam(
-                "vace_context_scale",
-                default=1.0,
-                type_hint=float,
-                description="Scaling factor for VACE hint injection",
-            ),
-            InputParam(
-                "conditioning_embeds_updated",
-                default=False,
-                type_hint=bool,
-                description="Whether conditioning_embeds were updated (requires cache recomputation)",
-            ),
         ]
 
     @property
@@ -156,6 +163,25 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
 
         block_state.start_frame = start_frame
 
+        # Optional perf knob: recompute KV cache less frequently in steady-state.
+        #
+        # This is an algorithmic trade-off: skipping recompute may increase drift / error
+        # accumulation, but can save ~10–15% of pipeline time on B300 (cu130).
+        #
+        # Semantics:
+        # - Always run recompute for the first block (current_start_frame == 0).
+        # - Only start skipping once the cache is in steady-state:
+        #     current_start_frame >= kv_cache_num_frames
+        # - Recompute every N "blocks" (a block produces num_frame_per_block frames).
+        every_n = int(os.getenv("SCOPE_KV_CACHE_RECOMPUTE_EVERY", "1") or "1")
+        if every_n > 1 and block_state.current_start_frame > 0:
+            if block_state.current_start_frame >= components.config.kv_cache_num_frames:
+                num_frame_per_block = int(components.config.num_frame_per_block)
+                block_idx = int(block_state.current_start_frame) // max(1, num_frame_per_block)
+                if (block_idx % every_n) != 0:
+                    self.set_block_state(state, block_state)
+                    return components, state
+
         if block_state.current_start_frame == 0:
             context_frame_buffer_max_size = components.config.kv_cache_num_frames - 1
             decoded_frame_buffer_max_size = (
@@ -200,13 +226,6 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             self.set_block_state(state, block_state)
             return components, state
 
-        # Only recompute KV cache if conditioning_embeds were updated (prompt changed)
-        # This preserves VACE hints (R2V reference image conditioning) in the cache
-        # across chunks, allowing the reference image to naturally animate with the prompt
-        if not block_state.conditioning_embeds_updated:
-            self.set_block_state(state, block_state)
-            return components, state
-
         scale_size = (
             components.config.vae_spatial_downsample_factor
             * components.config.patch_embedding_spatial_downsample_factor
@@ -226,31 +245,28 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             local_attn_size=components.config.local_attn_size,
             frame_seq_length=frame_seq_length,
             kv_cache_existing=block_state.kv_cache,
+            # The recompute pass immediately overwrites the active cache window and
+            # updates indices, so zeroing the full cache is wasted bandwidth.
+            zero_cache=False,
         )
 
         # Prepare blockwise causal mask
-        components.generator.model.block_mask = (
-            components.generator.model._prepare_blockwise_causal_attn_mask(
+        block_mask_model = _get_block_mask_model(components.generator.model)
+        block_mask_model.block_mask = block_mask_model._prepare_blockwise_causal_attn_mask(
                 device=context_frames.device,
                 num_frames=num_context_frames,
                 frame_seqlen=frame_seq_length,
                 num_frame_per_block=components.config.num_frame_per_block,
                 local_attn_size=-1,
             )
-        )
 
-        context_timestep = (
-            torch.ones(
-                [1, num_context_frames],
-                device=context_frames.device,
-                dtype=torch.int64,
-            )
-            * 0
+        context_timestep = torch.zeros(
+            [1, num_context_frames],
+            device=context_frames.device,
+            dtype=torch.int64,
         )
 
         # Cache recomputation: no bias to faithfully store context frames
-        # Pass vace_context to ensure VACE hints are included in KV cache recomputation
-        # This is critical for R2V mode where reference image conditioning must persist
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
         components.generator(
             noisy_image_or_video=context_frames,
@@ -259,11 +275,9 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
             current_start=start_frame * frame_seq_length,
-            vace_context=block_state.vace_context,
-            vace_context_scale=block_state.vace_context_scale,
         )
 
-        components.generator.model.block_mask = None
+        block_mask_model.block_mask = None
 
         self.set_block_state(state, block_state)
         return components, state

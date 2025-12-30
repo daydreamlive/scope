@@ -809,6 +809,7 @@ export function StreamPage() {
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_context_scale?: number;
+        vace_enabled?: boolean;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -846,8 +847,12 @@ export function StreamPage() {
       );
       if ("vace_ref_images" in vaceParams) {
         initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+        initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         initialParameters.vace_context_scale = vaceParams.vace_context_scale;
       }
+
+      // Explicitly pass vace_enabled state
+      initialParameters.vace_enabled = vaceEnabled;
 
       // Video mode parameters - applies to all pipelines in video mode
       if (currentMode === "video") {

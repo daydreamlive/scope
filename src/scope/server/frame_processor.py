@@ -719,7 +719,18 @@ class FrameProcessor:
             # Route video input based on VACE status
             # We do not support combining normal V2V (denoising from noisy video latents) and VACE V2V editing
             if video_input is not None:
-                vace_enabled = getattr(pipeline, "vace_enabled", False)
+                # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
+                # This fixes the chicken-and-egg problem where VACE isn't enabled until vace_input_frames arrives
+                vace_enabled = self.parameters.get("vace_enabled", False)
+
+                # Robustness fallback: If vace_enabled is missing (e.g. old frontend build),
+                # infer intent from VACE-specific parameters that are only sent when VACE is desired.
+                if not vace_enabled and (
+                    self.parameters.get("vace_context_scale") is not None
+                    or self.parameters.get("vace_ref_images") is not None
+                ):
+                    vace_enabled = True
+
                 if vace_enabled:
                     # VACE V2V editing mode: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input

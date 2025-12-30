@@ -19,7 +19,6 @@ from ..schema import KreaRealtimeVideoConfig
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from ..wan2_1.vace import CausalVaceWanModel
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import KreaRealtimeVideoBlocks
 from .modules.causal_model import CausalWanModel
@@ -251,6 +250,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
             f"_enable_vace: Wrapping model with CausalVaceWanModel "
             f"(vace_in_dim={self._vace_in_dim}, vace_layers={self._vace_layers})..."
         )
+        from ..wan2_1.vace import CausalVaceWanModel
+
         vace_wrapped_model = CausalVaceWanModel(
             base_model,
             vace_in_dim=self._vace_in_dim,
@@ -341,6 +342,10 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
         if "vace_ref_images" not in kwargs:
             self.state.set("vace_ref_images", None)
+        if "vace_input_frames" not in kwargs:
+            self.state.set("vace_input_frames", None)
+        if "vace_input_masks" not in kwargs:
+            self.state.set("vace_input_masks", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

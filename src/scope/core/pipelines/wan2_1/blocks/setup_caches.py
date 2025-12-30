@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import torch
@@ -13,6 +14,8 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 )
 
 from ..utils import initialize_crossattn_cache, initialize_kv_cache
+
+logger = logging.getLogger(__name__)
 
 
 class SetupCachesBlock(ModularPipelineBlocks):
@@ -101,6 +104,12 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 default=None,
                 description="Input frames for VACE conditioning (if present, indicates video input is enabled)",
             ),
+            InputParam(
+                "soft_transition_active",
+                type_hint=bool,
+                default=False,
+                description="Whether a soft transition (KV bias lowering) is active - prevents cache reset on prompt change",
+            ),
         ]
 
     @property
@@ -130,6 +139,10 @@ class SetupCachesBlock(ModularPipelineBlocks):
         init_cache = block_state.init_cache
         is_transitioning = state.get("_transition_active", False)
         was_transitioning = state.get("_transition_active_prev", False)
+        soft_transitioning = block_state.soft_transition_active
+
+        if init_cache:
+            logger.info("HARD CUT: SetupCachesBlock received init_cache=True, will reset KV cache")
 
         max_current_start = (
             components.config.max_rope_freq_table_seq_len
@@ -139,7 +152,8 @@ class SetupCachesBlock(ModularPipelineBlocks):
             init_cache = True
 
         # Clear KV cache when conditioning changes outside of a transition if manage_cache is enabled and video input is present.
-        transitioning_context = is_transitioning or was_transitioning
+        # Transitions include: embedding blending (_transition_active) and soft transitions (KV bias lowering).
+        transitioning_context = is_transitioning or was_transitioning or soft_transitioning
         if (
             block_state.conditioning_embeds_updated
             and not transitioning_context
@@ -206,6 +220,9 @@ class SetupCachesBlock(ModularPipelineBlocks):
             )
 
         if init_cache:
+            logger.info(
+                "HARD CUT: Executing cache reset - current_start_frame=0, clearing VAE cache"
+            )
             block_state.current_start_frame = 0
 
             components.vae.clear_cache()
