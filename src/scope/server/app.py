@@ -950,21 +950,14 @@ def main(ctx, version: bool, reload: bool, host: str, port: int, no_browser: boo
         run_server(reload, host, port, no_browser)
 
 
-def _check_preview_flag():
+def _is_preview_enabled():
     """Check if the DAYDREAM_SCOPE_PREVIEW feature flag is enabled."""
-    if os.environ.get("DAYDREAM_SCOPE_PREVIEW", "").lower() not in ("1", "true", "yes"):
-        click.echo(
-            "Error: This command requires the DAYDREAM_SCOPE_PREVIEW feature flag.\n"
-            "Set DAYDREAM_SCOPE_PREVIEW=1 to enable preview features.",
-            err=True,
-        )
-        sys.exit(1)
+    return os.environ.get("DAYDREAM_SCOPE_PREVIEW", "").lower() in ("1", "true", "yes")
 
 
-@main.command()
+@main.command(hidden=not _is_preview_enabled())
 def plugins():
     """List all installed plugins."""
-    _check_preview_flag()
 
     @suppress_init_output
     def _load_plugins():
@@ -990,7 +983,6 @@ def plugins():
 @main.command()
 def pipelines():
     """List all available pipelines."""
-    _check_preview_flag()
 
     @suppress_init_output
     def _load_pipelines():
@@ -1011,7 +1003,7 @@ def pipelines():
         click.echo(f"  • {pipeline_id}")
 
 
-@main.command()
+@main.command(hidden=not _is_preview_enabled())
 @click.argument("packages", nargs=-1, required=False)
 @click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
 @click.option(
@@ -1024,7 +1016,6 @@ def pipelines():
 )
 def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
     """Install a plugin."""
-    _check_preview_flag()
     args = ["uv", "pip", "install"]
     if upgrade:
         args.append("--upgrade")
@@ -1044,12 +1035,11 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
         sys.exit(result.returncode)
 
 
-@main.command()
+@main.command(hidden=not _is_preview_enabled())
 @click.argument("packages", nargs=-1, required=True)
 @click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation")
 def uninstall(packages, yes):
     """Uninstall a plugin."""
-    _check_preview_flag()
     args = ["uv", "pip", "uninstall"]
     args += list(packages)
     if yes:
