@@ -751,7 +751,9 @@ export function StreamPage() {
             settings.quantization !== undefined
               ? settings.quantization
               : "fp8_e4m3fn",
+          vace_enabled: vaceEnabled,
           ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
+          ...getVaceParams(settings.refImages, settings.vaceContextScale),
         };
         console.log(
           `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`

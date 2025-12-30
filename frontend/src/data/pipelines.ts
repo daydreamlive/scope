@@ -65,13 +65,14 @@ export const PIPELINES: Record<string, PipelineInfo> = {
     docsUrl:
       "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/krea_realtime_video/docs/usage.md",
     about:
-      "A streaming pipeline and autoregressive video diffusion model from Krea. The model is trained using Self-Forcing on Wan2.1 14b.",
+      "A streaming pipeline and autoregressive video diffusion model from Krea. The model is trained using Self-Forcing on Wan2.1 14b. Includes VACE (All-In-One Video Creation and Editing) for reference image conditioning and structural guidance (depth, flow, pose).",
     modified: true,
     estimatedVram: 32,
     requiresModels: true,
     defaultTemporalInterpolationMethod: "linear",
     defaultTemporalInterpolationSteps: 4,
     supportsLoRA: true,
+    supportsVACE: true,
     // Multi-mode support
     supportedModes: ["text", "video"],
     defaultMode: "text",

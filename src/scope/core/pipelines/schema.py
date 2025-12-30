@@ -349,6 +349,18 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         description="Amount of noise to add during video generation (video mode only)",
     )
 
+    # VACE (optional reference image conditioning)
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
+    )
+
     @classmethod
     def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
         """Krea mode-specific defaults."""

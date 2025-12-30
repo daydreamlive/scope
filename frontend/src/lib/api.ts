@@ -73,6 +73,9 @@ export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
   quantization?: "fp8_e4m3fn" | null;
   loras?: LoRAConfig[];
   lora_merge_mode?: "permanent_merge" | "runtime_peft";
+  // VACE (optional reference image conditioning)
+  vace_ref_images?: string[];
+  vace_context_scale?: number;
 }
 
 export interface PipelineLoadRequest {

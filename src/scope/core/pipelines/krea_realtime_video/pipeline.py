@@ -19,6 +19,7 @@ from ..schema import KreaRealtimeVideoConfig
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.vace import CausalVaceWanModel
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import KreaRealtimeVideoBlocks
 from .modules.causal_model import CausalWanModel
@@ -37,6 +38,14 @@ WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
+    # VACE state - lazy loaded when needed
+    vace_enabled: bool = False
+    _vace_path: str | None = None
+    _vace_in_dim: int = 96
+    _vace_layers: list[int] | None = None
+    _stored_device: torch.device | None = None
+    _stored_dtype: torch.dtype | None = None
+    _stored_model_dir: str | None = None
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return KreaRealtimeVideoConfig
@@ -64,6 +73,14 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         vae_path = getattr(config, "vae_path", None)
 
         model_config = load_model_config(config, __file__)
+
+        # Store VACE path and config for lazy loading
+        self._vace_path = getattr(config, "vace_path", None)
+        self._vace_in_dim = getattr(model_config, "vace_in_dim", 96)
+        self._vace_layers = getattr(model_config, "vace_layers", None)
+        self._stored_device = device
+        self._stored_dtype = dtype
+        self._stored_model_dir = model_dir
         base_model_name = getattr(model_config, "base_model_name", "Wan2.1-T2V-14B")
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
 
@@ -191,6 +208,100 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
 
+    def _needs_vace(self, kwargs: dict) -> bool:
+        """Check if VACE is needed based on the provided kwargs."""
+        if self._vace_path is None:
+            return False
+        # Check for VACE-specific inputs
+        return (
+            kwargs.get("vace_ref_images") is not None
+            or kwargs.get("vace_input_frames") is not None
+        )
+
+    def _enable_vace(self) -> None:
+        """Lazy-load VACE components when first needed."""
+        if self.vace_enabled:
+            return
+
+        if self._vace_path is None:
+            logger.warning("_enable_vace: No vace_path configured, cannot enable VACE")
+            return
+
+        logger.info("_enable_vace: Lazy loading VACE components...")
+
+        from ..wan2_1.vace import load_vace_weights_only
+
+        # Free up GPU memory by offloading text encoder to CPU
+        # The text encoder (~6.4 GB FP8) is only used occasionally for prompt encoding
+        # and can run on CPU while outputting embeddings to GPU
+        # NOTE: Must cast to BF16 first since FP8 doesn't work on CPU
+        logger.info("_enable_vace: Offloading text encoder to CPU to free VRAM...")
+        self.components.text_encoder.output_device = self._stored_device  # Keep outputs on GPU
+        # Cast to bfloat16 before moving to CPU (FP8 is GPU-only)
+        self.components.text_encoder.to(dtype=torch.bfloat16, device="cpu")
+        torch.cuda.empty_cache()
+        logger.info("_enable_vace: Text encoder offloaded to CPU (as bf16), CUDA cache cleared")
+
+        # Get the current generator model
+        base_model = self.components.generator.model
+
+        # Wrap with VACE using stored config (vace_in_dim, vace_layers)
+        start = time.time()
+        logger.info(
+            f"_enable_vace: Wrapping model with CausalVaceWanModel "
+            f"(vace_in_dim={self._vace_in_dim}, vace_layers={self._vace_layers})..."
+        )
+        vace_wrapped_model = CausalVaceWanModel(
+            base_model,
+            vace_in_dim=self._vace_in_dim,
+            vace_layers=self._vace_layers,
+        )
+        logger.info(f"_enable_vace: Wrapped model in {time.time() - start:.3f}s")
+
+        # Load VACE weights (BF16) on CPU first
+        start = time.time()
+        logger.info(f"_enable_vace: Loading VACE weights from {self._vace_path}...")
+        load_vace_weights_only(vace_wrapped_model, self._vace_path)
+        logger.info(f"_enable_vace: Loaded VACE weights in {time.time() - start:.3f}s")
+
+        # Move VACE components to GPU and quantize to FP8 (same as main model)
+        # This provides memory efficiency while keeping VACE on GPU for fast inference
+        logger.info("_enable_vace: Moving VACE components to GPU and quantizing to FP8...")
+        vace_wrapped_model.vace_patch_embedding.to(
+            device=self._stored_device, dtype=self._stored_dtype
+        )
+        vace_wrapped_model.vace_blocks.to(
+            device=self._stored_device, dtype=self._stored_dtype
+        )
+
+        # Quantize VACE components to FP8 (same as main model quantization)
+        start = time.time()
+        from torchao.quantization.quant_api import (
+            Float8DynamicActivationFloat8WeightConfig,
+            PerTensor,
+            quantize_,
+        )
+
+        quantize_(
+            vace_wrapped_model.vace_patch_embedding,
+            Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
+            device=self._stored_device,
+        )
+        quantize_(
+            vace_wrapped_model.vace_blocks,
+            Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
+            device=self._stored_device,
+        )
+        logger.info(f"_enable_vace: Quantized VACE to FP8 in {time.time() - start:.3f}s")
+
+        # Replace generator model
+        logger.info("_enable_vace: Setting wrapped model as generator...")
+        self.components.generator.model = vace_wrapped_model
+        logger.info("_enable_vace: Wrapped model set successfully")
+
+        self.vace_enabled = True
+        logger.info("_enable_vace: VACE enabled successfully")
+
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
         return prepare_for_mode(self.__class__, self.components.config, kwargs)
@@ -202,6 +313,10 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> torch.Tensor:
+        # Lazy load VACE if needed
+        if self._needs_vace(kwargs) and not self.vace_enabled:
+            self._enable_vace()
+
         # Handle runtime LoRA scale updates before writing into state.
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:
@@ -222,6 +337,10 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # Clear video from state if not provided to prevent stale video data
         if "video" not in kwargs:
             self.state.set("video", None)
+
+        # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "vace_ref_images" not in kwargs:
+            self.state.set("vace_ref_images", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

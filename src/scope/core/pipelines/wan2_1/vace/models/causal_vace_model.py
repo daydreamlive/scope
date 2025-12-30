@@ -99,15 +99,18 @@ class CausalVaceWanModel(nn.Module):
         self._replace_blocks_with_hint_injection_support()
 
         # Create VACE blocks (parallel processing path for reference images)
+        # Created on CPU by default for memory efficiency
         self._create_vace_blocks()
 
-        # VACE patch embedding
-        self.vace_patch_embedding = nn.Conv3d(
-            self.vace_in_dim,
-            self.dim,
-            kernel_size=self.patch_size,
-            stride=self.patch_size,
-        )
+        # VACE patch embedding - create on CPU for memory efficiency
+        # Will be populated with weights via load_vace_weights_only()
+        with torch.device("cpu"):
+            self.vace_patch_embedding = nn.Conv3d(
+                self.vace_in_dim,
+                self.dim,
+                kernel_size=self.patch_size,
+                stride=self.patch_size,
+            )
 
     def _get_block_init_kwargs(self):
         """Get initialization kwargs for creating new blocks.
@@ -150,6 +153,8 @@ class CausalVaceWanModel(nn.Module):
         Creates new block instances of the factory-generated class and copies
         weights from the original blocks. Uses proper inheritance (not composition),
         so state_dict paths are preserved.
+        
+        Memory-optimized: replaces blocks one at a time to avoid doubling memory usage.
         """
         original_blocks = self.causal_wan_model.blocks
 
@@ -160,35 +165,51 @@ class CausalVaceWanModel(nn.Module):
         # Get initialization kwargs
         block_kwargs = self._get_block_init_kwargs()
 
-        # Create new blocks with hint injection support
+        # Replace blocks ONE AT A TIME to minimize peak memory usage
+        # This avoids having both old and new blocks in memory simultaneously
         new_blocks = nn.ModuleList()
+        
         for i in range(self.num_layers):
             block_id = self.vace_layers_mapping[i] if i in self.vace_layers else None
-            new_block = self._BaseWanAttentionBlock(
-                **block_kwargs,
-                block_id=block_id,
-            )
-            new_blocks.append(new_block)
-
-        # Set to eval mode and move to correct device/dtype
-        new_blocks.eval()
-        new_blocks.to(device=orig_device, dtype=orig_dtype)
-
-        # Copy weights from original blocks
-        for _i, (orig_block, new_block) in enumerate(
-            zip(original_blocks, new_blocks, strict=False)
-        ):
+            orig_block = original_blocks[i]
+            
+            # Create new block on CPU first to avoid GPU memory spike
+            with torch.device("cpu"):
+                new_block = self._BaseWanAttentionBlock(
+                    **block_kwargs,
+                    block_id=block_id,
+                )
+            
+            # Get state dict from original (on GPU) and copy to new block (on CPU)
             orig_state = orig_block.state_dict()
             new_state = new_block.state_dict()
             saved_block_id = new_block.block_id
-
+            
             for key in orig_state.keys():
                 if key in new_state:
-                    new_state[key] = orig_state[key].clone()
-
+                    # Copy to CPU (where new_block is)
+                    new_state[key] = orig_state[key].to("cpu")
+            
             new_block.load_state_dict(new_state, strict=False, assign=True)
             new_block.block_id = saved_block_id
+            
+            # Move new block to target device/dtype
+            new_block = new_block.to(device=orig_device, dtype=orig_dtype)
+            new_block.eval()
+            
+            # Clear the original block's parameters to free GPU memory immediately
+            # This is safe because we've already copied the weights
+            orig_block.to("cpu")
+            
+            new_blocks.append(new_block)
+            
+            # Clear CUDA cache periodically to help with fragmentation
+            if i % 10 == 0:
+                torch.cuda.empty_cache()
 
+        # Final cache clear
+        torch.cuda.empty_cache()
+        
         # Replace blocks in wrapped model
         self.causal_wan_model.blocks = new_blocks
 
@@ -196,25 +217,31 @@ class CausalVaceWanModel(nn.Module):
         self.blocks = new_blocks
 
     def _create_vace_blocks(self):
-        """Create VACE blocks for parallel processing of reference images."""
-        # Get device and dtype from existing blocks
+        """Create VACE blocks for parallel processing of reference images.
+        
+        Creates blocks on CPU by default to save GPU memory.
+        They will be populated with weights later via load_vace_weights_only().
+        """
+        # Get dtype from existing blocks (but create on CPU for memory efficiency)
         orig_dtype = next(self.blocks[0].parameters()).dtype
-        orig_device = next(self.blocks[0].parameters()).device
 
         # Get initialization kwargs
         block_kwargs = self._get_block_init_kwargs()
 
-        # Create VACE blocks
+        # Create VACE blocks on CPU to save GPU memory
+        # They will receive weights via load_vace_weights_only() and can optionally
+        # be moved to GPU later if memory permits
         vace_blocks = nn.ModuleList()
-        for block_id in range(len(self.vace_layers)):
-            vace_block = self._VaceWanAttentionBlock(
-                **block_kwargs,
-                block_id=block_id,
-            )
-            vace_blocks.append(vace_block)
+        with torch.device("cpu"):
+            for block_id in range(len(self.vace_layers)):
+                vace_block = self._VaceWanAttentionBlock(
+                    **block_kwargs,
+                    block_id=block_id,
+                )
+                vace_blocks.append(vace_block)
 
-        # Move to correct device/dtype
-        vace_blocks.to(device=orig_device, dtype=orig_dtype)
+        # Keep on CPU, use orig_dtype
+        vace_blocks.to(dtype=orig_dtype)
 
         self.vace_blocks = vace_blocks
 

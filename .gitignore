@@ -20,3 +20,6 @@ notes/
 .cursorrules
 .cursorignore
 .cursorindexingignore
+
+.cursor/
+.specstory/
