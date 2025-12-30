@@ -712,6 +712,11 @@ export function StreamPage() {
       // Build load parameters dynamically based on pipeline capabilities and settings
       // The backend will use only the parameters it needs based on the pipeline schema
       const currentPipeline = pipelines?.[pipelineIdToUse];
+      // Compute VACE enabled state - needed for both loadParams and initialParameters
+      const vaceEnabled = currentPipeline?.supportsVACE
+        ? (settings.vaceEnabled ?? currentMode !== "video")
+        : false;
+
       let loadParams: Record<string, unknown> | null = null;
 
       if (resolution) {
@@ -735,11 +740,6 @@ export function StreamPage() {
           );
           loadParams = { ...loadParams, ...loraParams };
         }
-
-        // Compute VACE enabled state - needed for both loadParams and initialParameters
-        const vaceEnabled = currentPipeline?.supportsVACE
-          ? (settings.vaceEnabled ?? currentMode !== "video")
-          : false;
 
         // Add VACE parameters if pipeline supports VACE
         if (currentPipeline?.supportsVACE) {
@@ -833,7 +833,9 @@ export function StreamPage() {
       }
 
       // Explicitly pass vace_enabled state
-      initialParameters.vace_enabled = settings.vaceEnabled ?? false;
+      if (currentPipeline?.supportsVACE) {
+        initialParameters.vace_enabled = vaceEnabled;
+      }
 
       // Video mode parameters - applies to all pipelines in video mode
       if (currentMode === "video") {
