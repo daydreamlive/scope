@@ -5,11 +5,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from scope.core.pipelines.schema import (
-    KreaRealtimeVideoConfig,
-    LongLiveConfig,
-    StreamDiffusionV2Config,
-)
+from scope.core.pipelines.krea_realtime_video.schema import KreaRealtimeVideoConfig
+from scope.core.pipelines.longlive.schema import LongLiveConfig
+from scope.core.pipelines.streamdiffusionv2.schema import StreamDiffusionV2Config
 from scope.core.pipelines.utils import Quantization
 
 

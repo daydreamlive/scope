@@ -15,7 +15,6 @@ from ..defaults import (
 )
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
-from ..schema import MemFlowConfig
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
@@ -24,6 +23,7 @@ from ..wan2_1.vace import VACEEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import MemFlowBlocks
 from .modules.causal_model import CausalWanModel
+from .schema import MemFlowConfig
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig

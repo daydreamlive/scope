@@ -111,19 +111,16 @@ export function useStreamState() {
   );
 
   // Check if a pipeline supports noise controls in video mode
-  // Derived from schema: if video mode has noise_scale defined, noise controls are supported
+  // Derived from schema: only show if video mode explicitly defines noise_scale with a value
   const supportsNoiseControls = useCallback(
     (pipelineId: PipelineId): boolean => {
       const schema = pipelineSchemas?.pipelines[pipelineId];
       if (schema?.mode_defaults?.video) {
-        // Check if video mode explicitly defines noise_scale (not null/undefined)
-        return schema.mode_defaults.video.noise_scale !== undefined;
+        // Check if video mode explicitly defines noise_scale with a non-null value
+        const noiseScale = schema.mode_defaults.video.noise_scale;
+        return noiseScale !== undefined && noiseScale !== null;
       }
-      // Fallback: check if schema has noise_scale property at all
-      if (schema?.config_schema?.properties?.noise_scale) {
-        return true;
-      }
-      // If schemas haven't loaded yet, return false (controls will appear once schemas load)
+      // If video mode doesn't define noise_scale, don't show noise controls
       return false;
     },
     [pipelineSchemas]
