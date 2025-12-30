@@ -15,13 +15,13 @@ from ..defaults import (
 )
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
-from ..schema import RewardForcingConfig
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vace.mixin import VACEEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import RewardForcingBlocks
+from .schema import RewardForcingConfig
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig

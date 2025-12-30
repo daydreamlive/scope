@@ -5,7 +5,7 @@ from einops import rearrange
 
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
-from ..schema import PassthroughConfig
+from .schema import PassthroughConfig
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig

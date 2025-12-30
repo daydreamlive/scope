@@ -1,0 +1,36 @@
+from ..base_schema import BasePipelineConfig, ModeDefaults
+
+
+class LongLiveConfig(BasePipelineConfig):
+    pipeline_id = "longlive"
+    pipeline_name = "LongLive"
+    pipeline_description = (
+        "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. "
+        "The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt "
+        "switching and improved quality over longer time periods while maintaining fast generation."
+    )
+    docs_url = "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md"
+    estimated_vram_gb = 20.0
+    requires_models = True
+    supports_lora = True
+    supports_vace = True
+
+    supports_cache_management = True
+    supports_quantization = True
+    min_dimension = 16
+    modified = True
+
+    height: int = 320
+    width: int = 576
+    denoising_steps: list[int] = [1000, 750, 500, 250]
+
+    modes = {
+        "text": ModeDefaults(default=True),
+        "video": ModeDefaults(
+            height=512,
+            width=512,
+            noise_scale=0.7,
+            noise_controller=True,
+            denoising_steps=[1000, 750],
+        ),
+    }
