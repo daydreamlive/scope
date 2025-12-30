@@ -22,7 +22,6 @@ from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vace import VACEEnabledPipeline
 from .components import StreamDiffusionV2WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
-from .modules.causal_model import CausalWanModel
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -44,6 +43,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        from .modules.causal_model import CausalWanModel
+
         # Validate resolution requirements
         # VAE downsample (8) * patch embedding downsample (2) = 16
         validate_resolution(

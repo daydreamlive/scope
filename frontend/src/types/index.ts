@@ -1,9 +1,5 @@
-export type PipelineId =
-  | "streamdiffusionv2"
-  | "passthrough"
-  | "longlive"
-  | "krea-realtime-video"
-  | "reward-forcing";
+// Pipeline IDs are dynamic - any string returned from backend is valid
+export type PipelineId = string;
 
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";
@@ -88,13 +84,22 @@ export interface PipelineInfo {
   defaultPrompt?: string;
   estimatedVram?: number;
   requiresModels?: boolean;
+  supportsPrompts?: boolean;
   defaultTemporalInterpolationMethod?: "linear" | "slerp";
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
+  supportsVACE?: boolean;
 
   // Multi-mode support
   supportedModes: InputMode[];
   defaultMode: InputMode;
+
+  // UI capabilities - tells frontend what controls to show
+  supportsCacheManagement?: boolean;
+  supportsKvCacheBias?: boolean;
+  supportsQuantization?: boolean;
+  minDimension?: number;
+  recommendedQuantizationVramThreshold?: number | null;
 }
 
 export interface DownloadProgress {

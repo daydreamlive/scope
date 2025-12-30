@@ -59,10 +59,34 @@ class BasePipelineConfig(BaseModel):
     pipeline_name: ClassVar[str] = "Base Pipeline"
     pipeline_description: ClassVar[str] = "Base pipeline configuration"
     pipeline_version: ClassVar[str] = "1.0.0"
+    docs_url: ClassVar[str | None] = None
+    estimated_vram_gb: ClassVar[float | None] = None
+    requires_models: ClassVar[bool] = False
+    supports_lora: ClassVar[bool] = False
+    supports_vace: ClassVar[bool] = False
+
+    # UI capability metadata - tells frontend what controls to show
+    supports_cache_management: ClassVar[bool] = False
+    supports_kv_cache_bias: ClassVar[bool] = False
+    supports_quantization: ClassVar[bool] = False
+    min_dimension: ClassVar[int] = 1
+    # Whether this pipeline contains modifications based on the original project
+    modified: ClassVar[bool] = False
+    # Recommended quantization based on VRAM: if user's VRAM > this threshold (GB),
+    # quantization=null is recommended, otherwise fp8_e4m3fn is recommended.
+    # None means no specific recommendation (pipeline doesn't benefit from quantization).
+    recommended_quantization_vram_threshold: ClassVar[float | None] = None
 
     # Mode support - override in subclasses
     supported_modes: ClassVar[list[InputMode]] = ["text"]
     default_mode: ClassVar[InputMode] = "text"
+
+    # Prompt and temporal interpolation support
+    supports_prompts: ClassVar[bool] = True
+    default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
+        "slerp"
+    )
+    default_temporal_interpolation_steps: ClassVar[int] = 0
 
     # Resolution settings
     height: int = Field(default=512, ge=1, description="Output height in pixels")
@@ -154,16 +178,31 @@ class BasePipelineConfig(BaseModel):
         This is the primary method for API/UI schema generation.
 
         Returns:
-            Dict containing:
-            - Pipeline metadata (id, name, description, version)
-            - supported_modes: List of supported input modes
-            - default_mode: Default input mode
-            - mode_defaults: Dict of mode-specific default overrides
-            - config_schema: Full JSON schema for the config model
+            Dict containing pipeline metadata
         """
         metadata = cls.get_pipeline_metadata()
         metadata["supported_modes"] = cls.supported_modes
         metadata["default_mode"] = cls.default_mode
+        metadata["supports_prompts"] = cls.supports_prompts
+        metadata["default_temporal_interpolation_method"] = (
+            cls.default_temporal_interpolation_method
+        )
+        metadata["default_temporal_interpolation_steps"] = (
+            cls.default_temporal_interpolation_steps
+        )
+        metadata["docs_url"] = cls.docs_url
+        metadata["estimated_vram_gb"] = cls.estimated_vram_gb
+        metadata["requires_models"] = cls.requires_models
+        metadata["supports_lora"] = cls.supports_lora
+        metadata["supports_vace"] = cls.supports_vace
+        metadata["supports_cache_management"] = cls.supports_cache_management
+        metadata["supports_kv_cache_bias"] = cls.supports_kv_cache_bias
+        metadata["supports_quantization"] = cls.supports_quantization
+        metadata["min_dimension"] = cls.min_dimension
+        metadata["recommended_quantization_vram_threshold"] = (
+            cls.recommended_quantization_vram_threshold
+        )
+        metadata["modified"] = cls.modified
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults if defined
@@ -188,68 +227,6 @@ class BasePipelineConfig(BaseModel):
 # Concrete pipeline configurations
 
 
-class LongLiveConfig(BasePipelineConfig):
-    """Configuration for LongLive pipeline.
-
-    LongLive supports both text-to-video and video-to-video modes.
-    Default mode is text (T2V was the original training focus).
-    """
-
-    pipeline_id: ClassVar[str] = "longlive"
-    pipeline_name: ClassVar[str] = "LongLive"
-    pipeline_description: ClassVar[str] = (
-        "Long-form video generation with temporal consistency"
-    )
-
-    # Mode support
-    supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
-    default_mode: ClassVar[InputMode] = "text"
-
-    # LongLive defaults (text mode baseline)
-    height: int = Field(default=320, ge=1, description="Output height in pixels")
-    width: int = Field(default=576, ge=1, description="Output width in pixels")
-    denoising_steps: list[int] | None = Field(
-        default=[1000, 750, 500, 250],
-        description="Denoising step schedule for progressive generation",
-    )
-    # noise_scale is None by default (text mode), overridden in video mode
-    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
-        default=None,
-        description="Amount of noise to add during video generation (video mode only)",
-    )
-
-    # VACE (optional reference image conditioning)
-    ref_images: list[str] | None = Field(
-        default=None,
-        description="List of reference image paths for VACE conditioning",
-    )
-    vace_context_scale: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=2.0,
-        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
-    )
-
-    @classmethod
-    def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
-        """LongLive mode-specific defaults."""
-        return {
-            "text": ModeDefaults(
-                # Text mode: no video input, no noise controls
-                noise_scale=None,
-                noise_controller=None,
-            ),
-            "video": ModeDefaults(
-                # Video mode: requires input frames, noise controls active
-                height=512,
-                width=512,
-                noise_scale=0.7,
-                noise_controller=True,
-                denoising_steps=[1000, 750],
-            ),
-        }
-
-
 class StreamDiffusionV2Config(BasePipelineConfig):
     """Configuration for StreamDiffusion V2 pipeline.
 
@@ -258,10 +235,25 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     """
 
     pipeline_id: ClassVar[str] = "streamdiffusionv2"
-    pipeline_name: ClassVar[str] = "StreamDiffusion V2"
+    pipeline_name: ClassVar[str] = "StreamDiffusionV2"
     pipeline_description: ClassVar[str] = (
-        "Real-time video-to-video generation with temporal consistency"
+        "A streaming pipeline and autoregressive video diffusion model from the creators of the original "
+        "StreamDiffusion project. The model is trained using Self-Forcing on Wan2.1 1.3b with modifications "
+        "to support streaming."
     )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/streamdiffusionv2/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 20.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
+    supports_vace: ClassVar[bool] = True
+
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
+    modified: ClassVar[bool] = True
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -319,6 +311,83 @@ class StreamDiffusionV2Config(BasePipelineConfig):
         }
 
 
+class LongLiveConfig(BasePipelineConfig):
+    """Configuration for LongLive pipeline.
+
+    LongLive supports both text-to-video and video-to-video modes.
+    Default mode is text (T2V was the original training focus).
+    """
+
+    pipeline_id: ClassVar[str] = "longlive"
+    pipeline_name: ClassVar[str] = "LongLive"
+    pipeline_description: ClassVar[str] = (
+        "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. "
+        "The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt "
+        "switching and improved quality over longer time periods while maintaining fast generation."
+    )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/longlive/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 20.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
+    supports_vace: ClassVar[bool] = True
+
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
+    modified: ClassVar[bool] = True
+
+    # Mode support
+    supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
+    default_mode: ClassVar[InputMode] = "text"
+
+    # LongLive defaults (text mode baseline)
+    height: int = Field(default=320, ge=1, description="Output height in pixels")
+    width: int = Field(default=576, ge=1, description="Output width in pixels")
+    denoising_steps: list[int] | None = Field(
+        default=[1000, 750, 500, 250],
+        description="Denoising step schedule for progressive generation",
+    )
+    # noise_scale is None by default (text mode), overridden in video mode
+    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = Field(
+        default=None,
+        description="Amount of noise to add during video generation (video mode only)",
+    )
+
+    # VACE (optional reference image conditioning)
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
+    )
+
+    @classmethod
+    def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
+        """LongLive mode-specific defaults."""
+        return {
+            "text": ModeDefaults(
+                # Text mode: no video input, no noise controls
+                noise_scale=None,
+                noise_controller=None,
+            ),
+            "video": ModeDefaults(
+                # Video mode: requires input frames, noise controls active
+                height=512,
+                width=512,
+                noise_scale=0.7,
+                noise_controller=True,
+                denoising_steps=[1000, 750],
+            ),
+        }
+
+
 class KreaRealtimeVideoConfig(BasePipelineConfig):
     """Configuration for Krea Realtime Video pipeline.
 
@@ -329,8 +398,29 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     pipeline_id: ClassVar[str] = "krea-realtime-video"
     pipeline_name: ClassVar[str] = "Krea Realtime Video"
     pipeline_description: ClassVar[str] = (
-        "High-quality real-time video generation with 14B model"
+        "A streaming pipeline and autoregressive video diffusion model from Krea. "
+        "The model is trained using Self-Forcing on Wan2.1 14b."
     )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/krea_realtime_video/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 32.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
+
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_kv_cache_bias: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
+    modified: ClassVar[bool] = True
+    # Recommend quantization for systems with <= 40GB VRAM
+    recommended_quantization_vram_threshold: ClassVar[float | None] = 40.0
+
+    default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
+        "linear"
+    )
+    default_temporal_interpolation_steps: ClassVar[int] = 4
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -379,8 +469,22 @@ class RewardForcingConfig(BasePipelineConfig):
     pipeline_id: ClassVar[str] = "reward-forcing"
     pipeline_name: ClassVar[str] = "RewardForcing"
     pipeline_description: ClassVar[str] = (
-        "Efficient streaming video generation with rewarded distribution matching distillation"
+        "A streaming pipeline and autoregressive video diffusion model from ZJU, Ant Group, SIAS-ZJU, HUST and SJTU. "
+        "The model is trained with Rewarded Distribution Matching Distillation using Wan2.1 1.3b as the base model."
     )
+    docs_url: ClassVar[str | None] = (
+        "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/reward_forcing/docs/usage.md"
+    )
+    estimated_vram_gb: ClassVar[float | None] = 20.0
+    requires_models: ClassVar[bool] = True
+    supports_lora: ClassVar[bool] = True
+    supports_vace: ClassVar[bool] = True
+
+    # UI capabilities
+    supports_cache_management: ClassVar[bool] = True
+    supports_quantization: ClassVar[bool] = True
+    min_dimension: ClassVar[int] = 16
+    modified: ClassVar[bool] = True
 
     # Mode support
     supported_modes: ClassVar[list[InputMode]] = ["text", "video"]
@@ -501,11 +605,16 @@ class PassthroughConfig(BasePipelineConfig):
 
     pipeline_id: ClassVar[str] = "passthrough"
     pipeline_name: ClassVar[str] = "Passthrough"
-    pipeline_description: ClassVar[str] = "Passthrough pipeline for testing"
+    pipeline_description: ClassVar[str] = (
+        "A pipeline that returns the input video without any processing that is useful for testing and debugging."
+    )
 
     # Mode support - video only
     supported_modes: ClassVar[list[InputMode]] = ["video"]
     default_mode: ClassVar[InputMode] = "video"
+
+    # Does not support prompts
+    supports_prompts: ClassVar[bool] = False
 
     # Passthrough defaults - requires video input (distinct from StreamDiffusionV2)
     height: int = Field(default=512, ge=1, description="Output height in pixels")
@@ -515,11 +624,20 @@ class PassthroughConfig(BasePipelineConfig):
         description="Expected input video frame count",
     )
 
+    @classmethod
+    def get_mode_defaults(cls) -> dict[InputMode, ModeDefaults]:
+        """Passthrough mode-specific defaults - no noise controls."""
+        return {
+            "video": ModeDefaults(
+                # No noise controls for passthrough - it just passes frames through
+            ),
+        }
+
 
 # Registry of pipeline config classes
 PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
-    "longlive": LongLiveConfig,
     "streamdiffusionv2": StreamDiffusionV2Config,
+    "longlive": LongLiveConfig,
     "krea-realtime-video": KreaRealtimeVideoConfig,
     "reward-forcing": RewardForcingConfig,
     "passthrough": PassthroughConfig,
