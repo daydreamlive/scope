@@ -32,12 +32,12 @@ ALL_BLOCKS = InsertableDict(
         ("text_conditioning", TextConditioningBlock),
         ("embedding_blending", EmbeddingBlendingBlock),
         ("set_timesteps", SetTimestepsBlock),
-        ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("setup_caches", SetupCachesBlock),
         (
             "set_transformer_blocks_local_attn_size",
             SetTransformerBlocksLocalAttnSizeBlock,
         ),
+        ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("auto_prepare_latents", AutoPrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),
         ("vace_encoding", VaceEncodingBlock),
