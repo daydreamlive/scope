@@ -2,10 +2,11 @@
 
 This module provides block-level routing between text-to-video and video-to-video
 workflows at two critical points:
-1. Video preprocessing (before SetupCachesBlock)
+1. Video preprocessing (after SetupCachesBlock)
 2. Latent preparation (after SetupCachesBlock)
 
-This split maintains the correct execution order from the original unified workflow.
+Video preprocessing runs after SetupCachesBlock to ensure that when caches are reset
+(e.g., when prompts change), the preprocessing uses the correct current_start_frame value.
 """
 
 from typing import Any
@@ -38,7 +39,7 @@ class V2VPreprocessingWorkflow(SequentialPipelineBlocks):
     """Video preprocessing workflow for V2V mode.
 
     Preprocesses input video and applies motion-aware noise control.
-    Runs BEFORE SetupCachesBlock.
+    Runs AFTER SetupCachesBlock to ensure correct frame count when caches are reset.
     """
 
     block_classes = [
@@ -55,7 +56,7 @@ class V2VPreprocessingWorkflow(SequentialPipelineBlocks):
 class AutoPreprocessVideoBlock(AutoPipelineBlocks):
     """Auto-routing block for video preprocessing.
 
-    This runs BEFORE SetupCachesBlock.
+    This runs AFTER SetupCachesBlock to ensure correct frame count when caches are reset.
     """
 
     block_classes = [
@@ -75,7 +76,7 @@ class AutoPreprocessVideoBlock(AutoPipelineBlocks):
     @property
     def description(self):
         return (
-            "AutoPreprocessVideoBlock: Routes video preprocessing before cache setup:\n"
+            "AutoPreprocessVideoBlock: Routes video preprocessing after cache setup:\n"
             " - Routes to V2VPreprocessingWorkflow when 'video' input is provided\n"
             " - Routes to PreprocessVideoBlock when 'vace_input_frames' input is provided\n"
             " - Skips preprocessing when no 'video' input is provided\n"

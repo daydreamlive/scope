@@ -1,18 +1,22 @@
-import argparse
 import asyncio
+import contextlib
+import io
 import logging
 import os
 import subprocess
 import sys
 import threading
 import time
+import warnings
 import webbrowser
 from contextlib import asynccontextmanager
 from datetime import datetime
+from functools import wraps
 from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+import click
 import torch
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -115,6 +119,28 @@ if os.getenv("VERBOSE_LOGGING"):
 PIPELINE = os.getenv("PIPELINE", None)
 
 logger = logging.getLogger(__name__)
+
+
+def suppress_init_output(func):
+    """Decorator to suppress all initialization output (logging, warnings, stdout/stderr)."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("ignore")
+            # Temporarily disable all logging
+            logging.disable(logging.CRITICAL)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                # Re-enable logging
+                logging.disable(logging.NOTSET)
+
+    return wrapper
 
 
 def get_git_commit_hash() -> str:
@@ -346,15 +372,17 @@ async def get_pipeline_schemas():
 
     The frontend should use this as the source of truth for parameter defaults.
     """
-    from scope.core.pipelines.schema import PIPELINE_CONFIGS
+    from scope.core.pipelines.registry import PipelineRegistry
 
     pipelines: dict = {}
 
-    for pipeline_id, config_class in PIPELINE_CONFIGS.items():
-        # get_schema_with_metadata() now includes supported_modes, default_mode,
-        # and mode_defaults directly from the config class
-        schema_data = config_class.get_schema_with_metadata()
-        pipelines[pipeline_id] = schema_data
+    for pipeline_id in PipelineRegistry.list_pipelines():
+        config_class = PipelineRegistry.get_config_class(pipeline_id)
+        if config_class:
+            # get_schema_with_metadata() includes supported_modes, default_mode,
+            # and mode_defaults directly from the config class
+            schema_data = config_class.get_schema_with_metadata()
+            pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
 
@@ -845,40 +873,12 @@ def open_browser_when_ready(host: str, port: int, server):
         logger.info(f"🌐 UI is available at: {url}")
 
 
-def main():
-    """Main entry point for the daydream-scope command."""
-    parser = argparse.ArgumentParser(
-        description="A tool for running and customizing real-time, interactive generative AI pipelines and models"
-    )
-    parser.add_argument(
-        "--version",
-        action="store_true",
-        help="Show version information and exit",
-    )
-    parser.add_argument(
-        "--reload",
-        action="store_true",
-        help="Enable auto-reload for development (default: False)",
-    )
-    parser.add_argument(
-        "--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8000, help="Port to bind to (default: 8000)"
-    )
-    parser.add_argument(
-        "-N",
-        "--no-browser",
-        action="store_true",
-        help="Do not automatically open a browser window after the server starts",
-    )
+def run_server(reload: bool, host: str, port: int, no_browser: bool):
+    """Run the Daydream Scope server."""
 
-    args = parser.parse_args()
-
-    # Handle version flag
-    if args.version:
-        print_version_info()
-        sys.exit(0)
+    from scope.core.pipelines.registry import (
+        PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
+    )
 
     # Configure static file serving
     configure_static_files()
@@ -891,18 +891,18 @@ def main():
         # Create server instance for production mode
         config = uvicorn.Config(
             "scope.server.app:app",
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
+            host=host,
+            port=port,
+            reload=reload,
             log_config=None,  # Use our logging config, don't override it
         )
         server = uvicorn.Server(config)
 
         # Start browser opening thread (unless disabled)
-        if not args.no_browser:
+        if not no_browser:
             browser_thread = threading.Thread(
                 target=open_browser_when_ready,
-                args=(args.host, args.port, server),
+                args=(host, port, server),
                 daemon=True,
             )
             browser_thread.start()
@@ -918,11 +918,137 @@ def main():
         # Development mode - just run normally
         uvicorn.run(
             "scope.server.app:app",
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
+            host=host,
+            port=port,
+            reload=reload,
             log_config=None,  # Use our logging config, don't override it
         )
+
+
+@click.group(invoke_without_command=True)
+@click.option("--version", is_flag=True, help="Show version information and exit")
+@click.option(
+    "--reload", is_flag=True, help="Enable auto-reload for development (default: False)"
+)
+@click.option("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+@click.option("--port", default=8000, help="Port to bind to (default: 8000)")
+@click.option(
+    "-N",
+    "--no-browser",
+    is_flag=True,
+    help="Do not automatically open a browser window after the server starts",
+)
+@click.pass_context
+def main(ctx, version: bool, reload: bool, host: str, port: int, no_browser: bool):
+    # Handle version flag
+    if version:
+        print_version_info()
+        sys.exit(0)
+
+    # If no subcommand was invoked, run the server
+    if ctx.invoked_subcommand is None:
+        run_server(reload, host, port, no_browser)
+
+
+def _is_preview_enabled():
+    """Check if the DAYDREAM_SCOPE_PREVIEW feature flag is enabled."""
+    return os.environ.get("DAYDREAM_SCOPE_PREVIEW", "").lower() in ("1", "true", "yes")
+
+
+@main.command(hidden=not _is_preview_enabled())
+def plugins():
+    """List all installed plugins."""
+
+    @suppress_init_output
+    def _load_plugins():
+        from scope.core.plugins import load_plugins, pm
+
+        load_plugins()
+        return pm.get_plugins()
+
+    plugin_list = _load_plugins()
+
+    if not plugin_list:
+        click.echo("No plugins installed.")
+        return
+
+    click.echo(f"{len(plugin_list)} plugin(s) installed:\n")
+
+    # List each plugin
+    for plugin in plugin_list:
+        plugin_name = plugin.__name__ if hasattr(plugin, "__name__") else str(plugin)
+        click.echo(f"  • {plugin_name}")
+
+
+@main.command()
+def pipelines():
+    """List all available pipelines."""
+
+    @suppress_init_output
+    def _load_pipelines():
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        return PipelineRegistry.list_pipelines()
+
+    all_pipelines = _load_pipelines()
+
+    if not all_pipelines:
+        click.echo("No pipelines available.")
+        return
+
+    click.echo(f"{len(all_pipelines)} pipeline(s) available:\n")
+
+    # List all pipelines
+    for pipeline_id in all_pipelines:
+        click.echo(f"  • {pipeline_id}")
+
+
+@main.command(hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=False)
+@click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
+@click.option(
+    "-e", "--editable", help="Install a project in editable mode from this path"
+)
+@click.option("--force-reinstall", is_flag=True, help="Force reinstall packages")
+@click.option("--no-cache-dir", is_flag=True, help="Disable the cache")
+@click.option(
+    "--pre", is_flag=True, help="Include pre-release and development versions"
+)
+def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
+    """Install a plugin."""
+    args = ["uv", "pip", "install"]
+    if upgrade:
+        args.append("--upgrade")
+    if editable:
+        args += ["--editable", editable]
+    if force_reinstall:
+        args.append("--force-reinstall")
+    if no_cache_dir:
+        args.append("--no-cache-dir")
+    if pre:
+        args.append("--pre")
+    args += list(packages)
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+@main.command(hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=True)
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation")
+def uninstall(packages, yes):
+    """Uninstall a plugin."""
+    args = ["uv", "pip", "uninstall"]
+    args += list(packages)
+    if yes:
+        args.append("-y")
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 if __name__ == "__main__":

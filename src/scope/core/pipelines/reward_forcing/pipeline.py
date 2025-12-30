@@ -15,14 +15,13 @@ from ..defaults import (
 )
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
-from ..schema import RewardForcingConfig
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vace.mixin import VACEEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import RewardForcingBlocks
-from .modules.causal_model import CausalWanModel
+from .schema import RewardForcingConfig
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -44,6 +43,8 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        from .modules.causal_model import CausalWanModel
+
         model_dir = getattr(config, "model_dir", None)
         generator_path = getattr(config, "generator_path", None)
         text_encoder_path = getattr(config, "text_encoder_path", None)

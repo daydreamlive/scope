@@ -1,8 +1,4 @@
-import type {
-  LoRAConfig,
-  IceServersResponse,
-  ModelStatusResponse,
-} from "../types";
+import type { IceServersResponse, ModelStatusResponse } from "../types";
 
 export interface PromptItem {
   text: string;
@@ -37,55 +33,12 @@ export interface PipelineLoadParams {
   [key: string]: unknown;
 }
 
-export interface PassthroughLoadParams extends PipelineLoadParams {
-  height?: number;
-  width?: number;
-}
-
-export interface StreamDiffusionV2LoadParams extends PipelineLoadParams {
-  height?: number;
-  width?: number;
-  seed?: number;
-  quantization?: "fp8_e4m3fn" | null;
-  loras?: LoRAConfig[];
-  lora_merge_mode?: "permanent_merge" | "runtime_peft";
-  // VACE (optional reference image conditioning for text mode)
-  vace_ref_images?: string[];
-  vace_context_scale?: number;
-}
-
-export interface LongLiveLoadParams extends PipelineLoadParams {
-  height?: number;
-  width?: number;
-  seed?: number;
-  quantization?: "fp8_e4m3fn" | null;
-  loras?: LoRAConfig[];
-  lora_merge_mode?: "permanent_merge" | "runtime_peft";
-  // VACE (optional reference image conditioning)
-  vace_ref_images?: string[];
-  vace_context_scale?: number;
-}
-
-export interface KreaRealtimeVideoLoadParams extends PipelineLoadParams {
-  height?: number;
-  width?: number;
-  seed?: number;
-  quantization?: "fp8_e4m3fn" | null;
-  loras?: LoRAConfig[];
-  lora_merge_mode?: "permanent_merge" | "runtime_peft";
-  // VACE (optional reference image conditioning)
-  vace_ref_images?: string[];
-  vace_context_scale?: number;
-}
+// Generic load params - accepts any key-value pairs based on pipeline config
+export type PipelineLoadParamsGeneric = Record<string, unknown>;
 
 export interface PipelineLoadRequest {
   pipeline_id?: string;
-  load_params?:
-    | PassthroughLoadParams
-    | StreamDiffusionV2LoadParams
-    | LongLiveLoadParams
-    | KreaRealtimeVideoLoadParams
-    | null;
+  load_params?: PipelineLoadParamsGeneric | null;
 }
 
 export interface PipelineStatusResponse {
@@ -426,12 +379,29 @@ export interface PipelineSchemaInfo {
   name: string;
   description: string;
   version: string;
+  docs_url: string | null;
+  estimated_vram_gb: number | null;
+  requires_models: boolean;
+  supports_lora: boolean;
+  supports_vace: boolean;
+  // Pipeline config schema
   config_schema: PipelineConfigSchema;
   // Mode support - comes from config class
   supported_modes: ("text" | "video")[];
   default_mode: "text" | "video";
+  // Prompt and temporal interpolation support
+  supports_prompts: boolean;
+  default_temporal_interpolation_method: "linear" | "slerp";
+  default_temporal_interpolation_steps: number;
   // Mode-specific default overrides (optional)
   mode_defaults?: Record<"text" | "video", ModeDefaults>;
+  // UI capabilities
+  supports_cache_management: boolean;
+  supports_kv_cache_bias: boolean;
+  supports_quantization: boolean;
+  min_dimension: number;
+  recommended_quantization_vram_threshold: number | null;
+  modified: boolean;
 }
 
 export interface PipelineSchemasResponse {

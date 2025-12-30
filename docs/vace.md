@@ -11,6 +11,7 @@ At the moment, only the following Wan2.1 1.3B based pipelines support VACE tasks
 
 - `longlive`
 - `reward-forcing`
+- `memflow`
 
 `streamdiffusionv2` also supports VACE capabilities, but beware that the quality is poor right now.
 

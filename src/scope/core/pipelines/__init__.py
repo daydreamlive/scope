@@ -24,27 +24,39 @@ def __getattr__(name):
         from .passthrough.pipeline import PassthroughPipeline
 
         return PassthroughPipeline
+    elif name == "MemFlowPipeline":
+        from .memflow.pipeline import MemFlowPipeline
+
+        return MemFlowPipeline
     # Config classes
     elif name == "BasePipelineConfig":
-        from .schema import BasePipelineConfig
+        from .base_schema import BasePipelineConfig
 
         return BasePipelineConfig
     elif name == "LongLiveConfig":
-        from .schema import LongLiveConfig
+        from .longlive.schema import LongLiveConfig
 
         return LongLiveConfig
     elif name == "StreamDiffusionV2Config":
-        from .schema import StreamDiffusionV2Config
+        from .streamdiffusionv2.schema import StreamDiffusionV2Config
 
         return StreamDiffusionV2Config
     elif name == "KreaRealtimeVideoConfig":
-        from .schema import KreaRealtimeVideoConfig
+        from .krea_realtime_video.schema import KreaRealtimeVideoConfig
 
         return KreaRealtimeVideoConfig
     elif name == "PassthroughConfig":
-        from .schema import PassthroughConfig
+        from .passthrough.schema import PassthroughConfig
 
         return PassthroughConfig
+    elif name == "RewardForcingConfig":
+        from .reward_forcing.schema import RewardForcingConfig
+
+        return RewardForcingConfig
+    elif name == "MemFlowConfig":
+        from .memflow.schema import MemFlowConfig
+
+        return MemFlowConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -55,10 +67,13 @@ __all__ = [
     "RewardForcingPipeline",
     "StreamDiffusionV2Pipeline",
     "PassthroughPipeline",
+    "MemFlowPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
     "StreamDiffusionV2Config",
     "KreaRealtimeVideoConfig",
     "PassthroughConfig",
+    "RewardForcingConfig",
+    "MemFlowConfig",
 ]

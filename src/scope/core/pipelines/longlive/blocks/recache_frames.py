@@ -59,6 +59,11 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 description="Initialized cross-attention cache",
             ),
             InputParam(
+                "kv_bank",
+                type_hint=list[dict],
+                description="Initialized KV memory bank",
+            ),
+            InputParam(
                 "height", required=True, type_hint=int, description="Height of video"
             ),
             InputParam(
@@ -196,6 +201,11 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             timestep=context_timestep,
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
+            kv_bank=block_state.kv_bank,
+            update_bank=False,
+            q_bank=True,
+            update_cache=True,
+            is_recache=True,
             current_start=recache_start * frame_seq_length,
             sink_recache_after_switch=not global_sink,
         )

@@ -14,8 +14,7 @@ import { Upload, ArrowUp } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import type { InputMode } from "../types";
-import { pipelineIsMultiMode } from "../data/pipelines";
+import type { InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
@@ -24,6 +23,7 @@ import { Button } from "./ui/button";
 
 interface InputAndControlsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
@@ -73,6 +73,7 @@ interface InputAndControlsPanelProps {
 
 export function InputAndControlsPanel({
   className = "",
+  pipelines,
   localStream,
   isInitializing,
   error,
@@ -128,7 +129,8 @@ export function InputAndControlsPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Check if this pipeline supports multiple input modes
-  const isMultiMode = pipelineIsMultiMode(pipelineId);
+  const pipeline = pipelines?.[pipelineId];
+  const isMultiMode = (pipeline?.supportedModes?.length ?? 0) > 1;
 
   useEffect(() => {
     if (videoRef.current && localStream) {
@@ -198,7 +200,7 @@ export function InputAndControlsPanel({
               className="justify-start"
             >
               <ToggleGroupItem value="video" aria-label="Video file">
-                Video File
+                File
               </ToggleGroupItem>
               <ToggleGroupItem value="camera" aria-label="Camera">
                 Camera
@@ -329,6 +331,11 @@ export function InputAndControlsPanel({
             // The Input can have two states: Append (default) and Edit (when a prompt is selected and the video is paused)
             const isEditMode = selectedTimelinePrompt && isVideoPaused;
 
+            // Hide prompts section if pipeline doesn't support prompts
+            if (pipeline?.supportsPrompts === false) {
+              return null;
+            }
+
             return (
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -358,7 +365,6 @@ export function InputAndControlsPanel({
                     onPromptsSubmit={onPromptsSubmit}
                     onTransitionSubmit={onTransitionSubmit}
                     disabled={
-                      pipelineId === "passthrough" ||
                       (_isTimelinePlaying &&
                         !isVideoPaused &&
                         !isAtEndOfTimeline()) ||

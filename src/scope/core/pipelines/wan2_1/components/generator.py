@@ -193,9 +193,17 @@ class WanDiffusionWrapper(torch.nn.Module):
         # As a workaround we inspect the internal _forward_inference() function to determine what the accepted params are
         # This allows us to filter out params that might not work with the underlying CausalWanModel impl
         sig = inspect.signature(self.model._forward_inference)
-        accepted = {
-            name: value for name, value in kwargs.items() if name in sig.parameters
-        }
+
+        # Check if the signature accepts **kwargs (VAR_KEYWORD), if so pass all parameters through
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        if has_var_keyword:
+            accepted = kwargs
+        else:
+            accepted = {
+                name: value for name, value in kwargs.items() if name in sig.parameters
+            }
         return self.model(*args, **accepted)
 
     def forward(
@@ -205,6 +213,11 @@ class WanDiffusionWrapper(torch.nn.Module):
         timestep: torch.Tensor,
         kv_cache: list[dict] | None = None,
         crossattn_cache: list[dict] | None = None,
+        kv_bank: list[dict] | None = None,
+        update_bank: bool | None = False,
+        q_bank: bool | None = False,
+        update_cache: bool | None = False,
+        is_recache: bool | None = False,
         current_start: int | None = None,
         current_end: int | None = None,
         classify_mode: bool | None = False,
@@ -235,6 +248,11 @@ class WanDiffusionWrapper(torch.nn.Module):
                 seq_len=self.seq_len,
                 kv_cache=kv_cache,
                 crossattn_cache=crossattn_cache,
+                kv_bank=kv_bank,
+                update_bank=update_bank,
+                q_bank=q_bank,
+                update_cache=update_cache,
+                is_recache=is_recache,
                 current_start=current_start,
                 current_end=current_end,
                 cache_start=cache_start,

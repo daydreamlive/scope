@@ -5,7 +5,7 @@ from einops import rearrange
 
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
-from ..schema import PassthroughConfig
+from .schema import PassthroughConfig
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -48,9 +48,8 @@ class PassthroughPipeline(Pipeline):
             raise ValueError("Input cannot be None for PassthroughPipeline")
 
         if isinstance(input, list):
-            input = preprocess_chunk(
-                input, self.device, self.dtype, height=self.height, width=self.width
-            )
+            # Don't resize for passthrough - preserve original input resolution
+            input = preprocess_chunk(input, self.device, self.dtype)
 
         input = rearrange(input, "B C T H W -> B T C H W")
 

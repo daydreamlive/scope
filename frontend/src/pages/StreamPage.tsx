@@ -12,12 +12,8 @@ import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
-import {
-  PIPELINES,
-  getPipelineDefaultMode,
-  getDefaultPromptForMode,
-  pipelineSupportsVACE,
-} from "../data/pipelines";
+import { usePipelines } from "../hooks/usePipelines";
+import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
   InputMode,
@@ -67,6 +63,14 @@ function getVaceParams(
 }
 
 export function StreamPage() {
+  // Fetch available pipelines dynamically
+  const { pipelines } = usePipelines();
+
+  // Helper to get default mode for a pipeline
+  const getPipelineDefaultMode = (pipelineId: string): InputMode => {
+    return pipelines?.[pipelineId]?.defaultMode ?? "text";
+  };
+
   // Use the stream state hook for settings management
   const {
     settings,
@@ -254,7 +258,7 @@ export function StreamPage() {
       stopStream();
     }
 
-    const newPipeline = PIPELINES[pipelineId];
+    const newPipeline = pipelines?.[pipelineId];
     const modeToUse = newPipeline?.defaultMode || "text";
     const currentMode = settings.inputMode || "text";
 
@@ -340,7 +344,7 @@ export function StreamPage() {
 
             // Preserve the current input mode that the user selected before download
             // Only fall back to pipeline's default mode if no mode is currently set
-            const newPipeline = PIPELINES[pipelineId];
+            const newPipeline = pipelines?.[pipelineId];
             const currentMode =
               settings.inputMode || newPipeline?.defaultMode || "text";
             const defaults = getDefaults(pipelineId, currentMode);
@@ -611,9 +615,9 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
-  // Update temporal interpolation defaults when pipeline changes
+  // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
-    const pipeline = PIPELINES[settings.pipelineId];
+    const pipeline = pipelines?.[settings.pipelineId];
     if (pipeline) {
       const defaultMethod =
         pipeline.defaultTemporalInterpolationMethod || "slerp";
@@ -621,8 +625,13 @@ export function StreamPage() {
 
       setTemporalInterpolationMethod(defaultMethod);
       setTransitionSteps(defaultSteps);
+
+      // Clear prompts if pipeline doesn't support them
+      if (pipeline.supportsPrompts === false) {
+        setPromptItems([{ text: "", weight: 1.0 }]);
+      }
     }
-  }, [settings.pipelineId]);
+  }, [settings.pipelineId, pipelines]);
 
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;
@@ -662,7 +671,7 @@ export function StreamPage() {
 
     try {
       // Check if models are needed but not downloaded
-      const pipelineInfo = PIPELINES[pipelineIdToUse];
+      const pipelineInfo = pipelines?.[pipelineIdToUse];
       if (pipelineInfo?.requiresModels) {
         try {
           const status = await checkModelStatus(pipelineIdToUse);
@@ -685,9 +694,6 @@ export function StreamPage() {
       const currentMode =
         settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
 
-      // Prepare load parameters based on pipeline type
-      let loadParams = null;
-
       // Use settings.resolution if available, otherwise fall back to videoResolution
       let resolution = settings.resolution || videoResolution;
 
@@ -703,73 +709,53 @@ export function StreamPage() {
         }
       }
 
-      // Compute VACE enabled state once - enabled by default for text mode on VACE-supporting pipelines
-      const vaceEnabled =
-        settings.vaceEnabled ??
-        (pipelineSupportsVACE(pipelineIdToUse) && currentMode !== "video");
+      // Build load parameters dynamically based on pipeline capabilities and settings
+      // The backend will use only the parameters it needs based on the pipeline schema
+      const currentPipeline = pipelines?.[pipelineIdToUse];
+      let loadParams: Record<string, unknown> | null = null;
 
-      if (pipelineIdToUse === "streamdiffusionv2" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          vace_enabled: vaceEnabled,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      } else if (pipelineIdToUse === "passthrough" && resolution) {
+      if (resolution) {
+        // Start with common parameters
         loadParams = {
           height: resolution.height,
           width: resolution.width,
         };
+
+        // Add seed if pipeline supports quantization (implies it needs seed)
+        if (currentPipeline?.supportsQuantization) {
+          loadParams.seed = settings.seed ?? 42;
+          loadParams.quantization = settings.quantization ?? null;
+        }
+
+        // Add LoRA parameters if pipeline supports LoRA
+        if (currentPipeline?.supportsLoRA && settings.loras) {
+          const loraParams = buildLoRAParams(
+            settings.loras,
+            settings.loraMergeStrategy
+          );
+          loadParams = { ...loadParams, ...loraParams };
+        }
+
+        // Compute VACE enabled state - needed for both loadParams and initialParameters
+        const vaceEnabled = currentPipeline?.supportsVACE
+          ? (settings.vaceEnabled ?? currentMode !== "video")
+          : false;
+
+        // Add VACE parameters if pipeline supports VACE
+        if (currentPipeline?.supportsVACE) {
+          loadParams.vace_enabled = vaceEnabled;
+
+          // Add VACE reference images if provided
+          const vaceParams = getVaceParams(
+            settings.refImages,
+            settings.vaceContextScale
+          );
+          loadParams = { ...loadParams, ...vaceParams };
+        }
+
         console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}`
-        );
-      } else if (pipelineIdToUse === "longlive" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          vace_enabled: vaceEnabled,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}`
-        );
-      } else if (pipelineIdToUse === "krea-realtime-video" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization:
-            settings.quantization !== undefined
-              ? settings.quantization
-              : "fp8_e4m3fn",
-          vace_enabled: vaceEnabled,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
-        );
-      } else if (pipelineIdToUse === "reward-forcing" && resolution) {
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-          seed: settings.seed ?? 42,
-          quantization: settings.quantization ?? null,
-          vace_enabled: vaceEnabled,
-          ...buildLoRAParams(settings.loras, settings.loraMergeStrategy),
-          ...getVaceParams(settings.refImages, settings.vaceContextScale),
-        };
-        console.log(
-          `Loading with resolution: ${resolution.width}x${resolution.height}, seed: ${loadParams.seed}, quantization: ${loadParams.quantization}, lora_merge_mode: ${loadParams.lora_merge_mode}`
+          `Loading ${pipelineIdToUse} with resolution ${resolution.width}x${resolution.height}`,
+          loadParams
         );
       }
 
@@ -817,7 +803,7 @@ export function StreamPage() {
       };
 
       // Common parameters for pipelines that support prompts
-      if (pipelineIdToUse !== "passthrough") {
+      if (pipelineInfo?.supportsPrompts !== false) {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
@@ -825,17 +811,13 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for krea_realtime_video, longlive, and reward-forcing
-      if (
-        pipelineIdToUse === "krea-realtime-video" ||
-        pipelineIdToUse === "longlive" ||
-        pipelineIdToUse === "reward-forcing"
-      ) {
+      // Cache management for pipelines that support it
+      if (pipelineInfo?.supportsCacheManagement) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
-      // Krea-realtime-video-specific parameters
-      if (pipelineIdToUse === "krea-realtime-video") {
+      // KV cache bias for pipelines that support it
+      if (pipelineInfo?.supportsKvCacheBias) {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
       }
@@ -892,6 +874,7 @@ export function StreamPage() {
         <div className="w-1/5">
           <InputAndControlsPanel
             className="h-full"
+            pipelines={pipelines}
             localStream={localStream}
             isInitializing={isInitializing}
             error={videoSourceError}
@@ -938,7 +921,7 @@ export function StreamPage() {
             spoutAvailable={spoutAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
-              (pipelineSupportsVACE(settings.pipelineId) &&
+              (pipelines?.[settings.pipelineId]?.supportsVACE &&
                 settings.inputMode !== "video")
             }
             refImages={settings.refImages || []}
@@ -1056,12 +1039,7 @@ export function StreamPage() {
                   });
                 }
               }}
-              disabled={
-                settings.pipelineId === "passthrough" ||
-                isPipelineLoading ||
-                isConnecting ||
-                showDownloadDialog
-              }
+              disabled={isPipelineLoading || isConnecting || showDownloadDialog}
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}
@@ -1091,6 +1069,7 @@ export function StreamPage() {
         <div className="w-1/5">
           <SettingsPanel
             className="h-full"
+            pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
@@ -1141,7 +1120,7 @@ export function StreamPage() {
             spoutAvailable={spoutAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
-              (pipelineSupportsVACE(settings.pipelineId) &&
+              (pipelines?.[settings.pipelineId]?.supportsVACE &&
                 settings.inputMode !== "video")
             }
             onVaceEnabledChange={handleVaceEnabledChange}
@@ -1158,6 +1137,7 @@ export function StreamPage() {
       {pipelineNeedsModels && (
         <DownloadDialog
           open={showDownloadDialog}
+          pipelines={pipelines}
           pipelineId={pipelineNeedsModels as PipelineId}
           onClose={handleDialogClose}
           onDownload={handleDownloadModels}

@@ -1,3 +1,4 @@
+import json
 import os
 from enum import Enum
 from pathlib import Path
@@ -74,3 +75,72 @@ def validate_resolution(
             f"Both width and height must be divisible by {scale_factor} "
             f"Please adjust to a valid resolution, e.g., {adjusted_width}×{adjusted_height}."
         )
+
+
+def parse_jsonl_prompts(file_path: str) -> list[list[str]]:
+    """Parse and validate a JSONL file containing prompt sequences.
+
+    Args:
+        file_path: Path to the JSONL file
+
+    Returns:
+        List of prompt sequences (each sequence is a list of prompt strings)
+
+    Raises:
+        ValueError: If the file is invalid JSONL or doesn't follow the expected format
+    """
+    prompt_sequences = []
+    path = Path(file_path)
+
+    if not path.exists():
+        raise ValueError(f"File not found: {file_path}")
+
+    with open(path, encoding="utf-8") as f:
+        for line_num, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+
+            # Parse JSON
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSONL at line {line_num}: {e}") from e
+
+            # Validate structure
+            if "prompts" not in data:
+                raise ValueError(
+                    f"Invalid format at line {line_num}: missing 'prompts' key"
+                )
+
+            prompts = data["prompts"]
+            if not isinstance(prompts, list):
+                raise ValueError(
+                    f"Invalid format at line {line_num}: 'prompts' must be a list of strings"
+                )
+
+            for i, prompt in enumerate(prompts):
+                if not isinstance(prompt, str):
+                    raise ValueError(
+                        f"Invalid format at line {line_num}: prompt at index {i} is not a string"
+                    )
+
+            prompt_sequences.append(prompts)
+
+    if not prompt_sequences:
+        raise ValueError(f"No valid prompt sequences found in {file_path}")
+
+    return prompt_sequences
+
+
+def print_statistics(latency_measures: list[float], fps_measures: list[float]) -> None:
+    """Print performance statistics."""
+    print("\n=== Performance Statistics ===")
+    print(
+        f"Latency - Avg: {sum(latency_measures) / len(latency_measures):.2f}s, "
+        f"Max: {max(latency_measures):.2f}s, Min: {min(latency_measures):.2f}s"
+    )
+    print(
+        f"FPS - Avg: {sum(fps_measures) / len(fps_measures):.2f}, "
+        f"Max: {max(fps_measures):.2f}, Min: {min(fps_measures):.2f}"
+    )
