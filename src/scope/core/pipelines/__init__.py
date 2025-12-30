@@ -30,27 +30,27 @@ def __getattr__(name):
 
         return BasePipelineConfig
     elif name == "LongLiveConfig":
-        from .longlive.schema import LongLiveConfig
+        from .schema import LongLiveConfig
 
         return LongLiveConfig
     elif name == "StreamDiffusionV2Config":
-        from .streamdiffusionv2.schema import StreamDiffusionV2Config
+        from .schema import StreamDiffusionV2Config
 
         return StreamDiffusionV2Config
     elif name == "KreaRealtimeVideoConfig":
-        from .krea_realtime_video.schema import KreaRealtimeVideoConfig
+        from .schema import KreaRealtimeVideoConfig
 
         return KreaRealtimeVideoConfig
     elif name == "PassthroughConfig":
-        from .passthrough.schema import PassthroughConfig
+        from .schema import PassthroughConfig
 
         return PassthroughConfig
     elif name == "RewardForcingConfig":
-        from .reward_forcing.schema import RewardForcingConfig
+        from .schema import RewardForcingConfig
 
         return RewardForcingConfig
     elif name == "MemFlowConfig":
-        from .memflow.schema import MemFlowConfig
+        from .schema import MemFlowConfig
 
         return MemFlowConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

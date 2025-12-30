@@ -1,6 +1,8 @@
 """Base interface for all pipelines."""
 
+import inspect
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -19,14 +21,19 @@ class Requirements(BaseModel):
 class Pipeline(ABC):
     """Abstract base class for all pipelines.
 
-    Pipelines must implement get_config_class() to return their Pydantic config model.
+    Pipelines automatically get their config class from schema.yaml in their directory.
     This enables:
     - Validation via model_validate() / model_validate_json()
     - JSON Schema generation via model_json_schema()
     - Type-safe configuration access
     - API introspection and automatic UI generation
 
-    See schema.py for the BasePipelineConfig model and pipeline-specific configs.
+    To create a new pipeline:
+    1. Create a directory for your pipeline (e.g., my_pipeline/)
+    2. Add a schema.yaml with pipeline metadata and defaults
+    3. Create pipeline.py with your Pipeline subclass
+
+    See schema.py for the BasePipelineConfig model and available fields.
     For multi-mode pipeline support (text/video), pipelines use helper functions
     from defaults.py (resolve_input_mode, apply_mode_defaults_to_state, etc.).
     """
@@ -35,29 +42,36 @@ class Pipeline(ABC):
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         """Return the Pydantic config class for this pipeline.
 
-        The config class should inherit from BasePipelineConfig and define:
+        Automatically loads from schema.yaml in the same directory as the
+        pipeline subclass. No need to override this method - just provide
+        a schema.yaml file.
+
+        The config class defines:
         - pipeline_id: Unique identifier
         - pipeline_name: Human-readable name
         - pipeline_description: Capabilities description
-        - pipeline_version: Version string
         - Default parameter values for the pipeline
 
         Returns:
-            Pydantic config model class
-
-        Note:
-            Subclasses should override this method to return their config class.
-            The default implementation returns BasePipelineConfig.
-
-        Example:
-            from .schema import LongLiveConfig
-
-            @classmethod
-            def get_config_class(cls) -> type[BasePipelineConfig]:
-                return LongLiveConfig
+            Pydantic config model class loaded from schema.yaml
         """
-        from .schema import BasePipelineConfig
+        from .schema_loader import load_config_from_yaml
 
+        # Find the directory containing this pipeline subclass
+        module = inspect.getmodule(cls)
+        if module is None or module.__file__ is None:
+            # Fallback to base config if we can't find the module
+            from .schema import BasePipelineConfig
+            return BasePipelineConfig
+
+        pipeline_dir = Path(module.__file__).parent
+        schema_path = pipeline_dir / "schema.yaml"
+
+        if schema_path.exists():
+            return load_config_from_yaml(schema_path)
+
+        # Fallback to base config if no schema.yaml found
+        from .schema import BasePipelineConfig
         return BasePipelineConfig
 
     @abstractmethod

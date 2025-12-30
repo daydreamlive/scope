@@ -1,0 +1,33 @@
+pipeline_id: "krea-realtime-video"
+pipeline_name: "Krea Realtime Video"
+pipeline_description: >
+  A streaming pipeline and autoregressive video diffusion model from Krea.
+  The model is trained using Self-Forcing on Wan2.1 14b.
+docs_url: "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/krea_realtime_video/docs/usage.md"
+estimated_vram_gb: 32.0
+requires_models: true
+supports_lora: true
+
+supports_cache_management: true
+supports_kv_cache_bias: true
+supports_quantization: true
+min_dimension: 16
+modified: true
+recommended_quantization_vram_threshold: 40.0
+
+default_temporal_interpolation_method: "linear"
+default_temporal_interpolation_steps: 4
+
+height: 320
+width: 576
+denoising_steps: [1000, 750, 500, 250]
+
+modes:
+  text:
+    default: true
+  video:
+    height: 256
+    width: 256
+    noise_scale: 0.7
+    noise_controller: true
+    denoising_steps: [1000, 750]

@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import TYPE_CHECKING
 
 import torch
 from diffusers.modular_pipelines import PipelineState
@@ -23,10 +22,6 @@ from ..wan2_1.vace import VACEEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import MemFlowBlocks
 from .modules.causal_model import CausalWanModel
-from .schema import MemFlowConfig
-
-if TYPE_CHECKING:
-    from ..schema import BasePipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +29,6 @@ DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
 class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
-    @classmethod
-    def get_config_class(cls) -> type["BasePipelineConfig"]:
-        return MemFlowConfig
-
     def __init__(
         self,
         config,
