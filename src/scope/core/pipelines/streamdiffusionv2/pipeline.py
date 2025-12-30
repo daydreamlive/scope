@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import TYPE_CHECKING
 
 import torch
 from diffusers.modular_pipelines import PipelineState
@@ -21,10 +20,6 @@ from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vace import VACEEnabledPipeline
 from .components import StreamDiffusionV2WanVAEWrapper
 from .modular_blocks import StreamDiffusionV2Blocks
-from .schema import StreamDiffusionV2Config
-
-if TYPE_CHECKING:
-    from ..schema import BasePipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +27,6 @@ DEFAULT_DENOISING_STEP_LIST = [750, 250]
 
 
 class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
-    @classmethod
-    def get_config_class(cls) -> type["BasePipelineConfig"]:
-        return StreamDiffusionV2Config
-
     def __init__(
         self,
         config,

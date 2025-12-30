@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import TYPE_CHECKING
 
 import torch
 from diffusers.modular_pipelines import PipelineState
@@ -20,10 +19,6 @@ from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import KreaRealtimeVideoBlocks
-from .schema import KreaRealtimeVideoConfig
-
-if TYPE_CHECKING:
-    from ..schema import BasePipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +31,6 @@ WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
-    @classmethod
-    def get_config_class(cls) -> type["BasePipelineConfig"]:
-        return KreaRealtimeVideoConfig
-
     def __init__(
         self,
         config,
