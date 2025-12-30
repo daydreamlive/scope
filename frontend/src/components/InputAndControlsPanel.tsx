@@ -200,7 +200,7 @@ export function InputAndControlsPanel({
               className="justify-start"
             >
               <ToggleGroupItem value="video" aria-label="Video file">
-                Video File
+                File
               </ToggleGroupItem>
               <ToggleGroupItem value="camera" aria-label="Camera">
                 Camera
