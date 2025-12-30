@@ -22,7 +22,6 @@ from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStra
 from ..wan2_1.vace import VACEEnabledPipeline
 from ..wan2_1.vae import WanVAEWrapper
 from .modular_blocks import MemFlowBlocks
-from .modules.causal_model import CausalWanModel
 from .schema import MemFlowConfig
 
 if TYPE_CHECKING:
@@ -45,6 +44,8 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ):
+        from .modules.causal_model import CausalWanModel
+
         # Validate resolution requirements
         # VAE downsample (8) * patch embedding downsample (2) = 16
         validate_resolution(
