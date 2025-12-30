@@ -455,8 +455,18 @@ class CausalWanSelfAttention(nn.Module):
                     else:
                         local_end_index_bank_ = min(local_end_index_bank, kv_bank_size)
 
-                    k_bank = bank_k[:, :local_end_index_bank_]
-                    v_bank = bank_v[:, :local_end_index_bank_]
+                    # Only use the bank if it has been populated with real data
+                    # (global_end_index > 0 indicates the bank has valid entries)
+                    # On first frames, the bank is zeros which causes noisy output
+                    bank_has_data = kv_bank["global_end_index"].item() > 0
+                    if bank_has_data:
+                        k_bank = bank_k[:, :local_end_index_bank_]
+                        v_bank = bank_v[:, :local_end_index_bank_]
+                    else:
+                        # Skip bank entirely when it hasn't been populated yet
+                        k_bank = bank_k[:, :0]
+                        v_bank = bank_v[:, :0]
+
                     if not self.SMA:
                         k_cat = torch.cat([k_sink, k_bank, k_local], dim=1)
                         v_cat = torch.cat([v_sink, v_bank, v_local], dim=1)
@@ -464,13 +474,15 @@ class CausalWanSelfAttention(nn.Module):
                         k_global = torch.cat([k_sink, k_bank], dim=1)
                         v_global = torch.cat([v_sink, v_bank], dim=1)
 
-                        k_global, v_global = self.dynamic_topk_routing_attention(
-                            query=roped_query,
-                            key=k_global,
-                            value=v_global,
-                            chunk_size=frame_seqlen,
-                            top_k=3
-                        )
+                        # Only use dynamic routing if we have bank data to route
+                        if bank_has_data:
+                            k_global, v_global = self.dynamic_topk_routing_attention(
+                                query=roped_query,
+                                key=k_global,
+                                value=v_global,
+                                chunk_size=frame_seqlen,
+                                top_k=3
+                            )
                         k_cat = torch.cat([k_global, k_local], dim=1)
                         v_cat = torch.cat([v_global, v_local], dim=1)
 
