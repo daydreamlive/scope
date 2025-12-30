@@ -20,11 +20,6 @@ import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
-import {
-  PIPELINES,
-  pipelineSupportsLoRA,
-  pipelineSupportsVACE,
-} from "../data/pipelines";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import {
@@ -38,13 +33,16 @@ import type {
   LoraMergeStrategy,
   SettingsState,
   InputMode,
+  PipelineInfo,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
 
-const MIN_DIMENSION = 16;
+// Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
+const DEFAULT_MIN_DIMENSION = 1;
 
 interface SettingsPanelProps {
   className?: string;
+  pipelines: Record<string, PipelineInfo> | null;
   pipelineId: PipelineId;
   onPipelineIdChange?: (pipelineId: PipelineId) => void;
   isStreaming?: boolean;
@@ -93,6 +91,7 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({
   className = "",
+  pipelines,
   pipelineId,
   onPipelineIdChange,
   isStreaming = false,
@@ -154,7 +153,7 @@ export function SettingsPanel({
       : null;
 
   const handlePipelineIdChange = (value: string) => {
-    if (value in PIPELINES) {
+    if (pipelines && value in pipelines) {
       onPipelineIdChange?.(value as PipelineId);
     }
   };
@@ -163,13 +162,9 @@ export function SettingsPanel({
     dimension: "height" | "width",
     value: number
   ) => {
-    const minValue =
-      pipelineId === "longlive" ||
-      pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video" ||
-      pipelineId === "reward-forcing"
-        ? MIN_DIMENSION
-        : 1;
+    // Get min dimension from pipeline schema, fallback to default
+    const currentPipeline = pipelines?.[pipelineId];
+    const minValue = currentPipeline?.minDimension ?? DEFAULT_MIN_DIMENSION;
     const maxValue = 2048;
 
     // Validate and set error state
@@ -208,13 +203,9 @@ export function SettingsPanel({
   };
 
   const decrementResolution = (dimension: "height" | "width") => {
-    const minValue =
-      pipelineId === "longlive" ||
-      pipelineId === "streamdiffusionv2" ||
-      pipelineId === "krea-realtime-video" ||
-      pipelineId === "reward-forcing"
-        ? MIN_DIMENSION
-        : 1;
+    // Get min dimension from pipeline schema, fallback to default
+    const currentPipeline = pipelines?.[pipelineId];
+    const minValue = currentPipeline?.minDimension ?? DEFAULT_MIN_DIMENSION;
     const newValue = Math.max(minValue, resolution[dimension] - 1);
     handleResolutionChange(dimension, newValue);
   };
@@ -248,7 +239,7 @@ export function SettingsPanel({
     handleSeedChange(newValue);
   };
 
-  const currentPipeline = PIPELINES[pipelineId];
+  const currentPipeline = pipelines?.[pipelineId];
 
   return (
     <Card className={`h-full flex flex-col ${className}`}>
@@ -267,11 +258,12 @@ export function SettingsPanel({
               <SelectValue placeholder="Select a pipeline" />
             </SelectTrigger>
             <SelectContent>
-              {Object.keys(PIPELINES).map(id => (
-                <SelectItem key={id} value={id}>
-                  {id}
-                </SelectItem>
-              ))}
+              {pipelines &&
+                Object.keys(pipelines).map(id => (
+                  <SelectItem key={id} value={id}>
+                    {id}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -350,7 +342,7 @@ export function SettingsPanel({
         )}
 
         {/* VACE Toggle */}
-        {pipelineSupportsVACE(pipelineId) && (
+        {currentPipeline?.supportsVACE && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
@@ -397,7 +389,7 @@ export function SettingsPanel({
           </div>
         )}
 
-        {pipelineSupportsLoRA(pipelineId) && (
+        {currentPipeline?.supportsLoRA && (
           <div className="space-y-4">
             <LoRAManager
               loras={loras}
@@ -409,10 +401,8 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
+        {/* Resolution controls - shown for pipelines that support quantization (implies they need resolution config) */}
+        {pipelines?.[pipelineId]?.supportsQuantization && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2">
@@ -446,7 +436,10 @@ export function SettingsPanel({
                         }}
                         disabled={isStreaming}
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        min={MIN_DIMENSION}
+                        min={
+                          pipelines?.[pipelineId]?.minDimension ??
+                          DEFAULT_MIN_DIMENSION
+                        }
                         max={2048}
                       />
                       <Button
@@ -495,7 +488,10 @@ export function SettingsPanel({
                         }}
                         disabled={isStreaming}
                         className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        min={MIN_DIMENSION}
+                        min={
+                          pipelines?.[pipelineId]?.minDimension ??
+                          DEFAULT_MIN_DIMENSION
+                        }
                         max={2048}
                       />
                       <Button
@@ -575,14 +571,13 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
+        {/* Cache management controls - shown for pipelines that support it */}
+        {pipelines?.[pipelineId]?.supportsCacheManagement && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
-                {pipelineId === "krea-realtime-video" && (
+                {/* KV Cache bias control - shown for pipelines that support it */}
+                {pipelines?.[pipelineId]?.supportsKvCacheBias && (
                   <SliderWithInput
                     label={PARAMETER_METADATA.kvCacheAttentionBias.label}
                     tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
@@ -638,10 +633,8 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
+        {/* Denoising steps - shown for pipelines that support quantization (implies advanced diffusion features) */}
+        {pipelines?.[pipelineId]?.supportsQuantization && (
           <DenoisingStepsSlider
             value={denoisingSteps}
             onChange={onDenoisingStepsChange || (() => {})}
@@ -693,10 +686,8 @@ export function SettingsPanel({
           </div>
         )}
 
-        {(pipelineId === "longlive" ||
-          pipelineId === "streamdiffusionv2" ||
-          pipelineId === "krea-realtime-video" ||
-          pipelineId === "reward-forcing") && (
+        {/* Quantization controls - shown for pipelines that support it */}
+        {pipelines?.[pipelineId]?.supportsQuantization && (
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
