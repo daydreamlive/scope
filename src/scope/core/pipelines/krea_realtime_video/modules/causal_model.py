@@ -309,9 +309,10 @@ class CausalWanSelfAttention(nn.Module):
 
         q, k, v = qkv_fn(x)
 
-        if kv_cache is None or block_mask is not None:
-            # if it is teacher forcing training?
-            # is_tf = (s == seq_lens[0].item() * 2)
+        if kv_cache is None:
+            # Non-caching path: used for training or VACE forward (which passes kv_cache=None)
+            # Note: block_mask being set does NOT mean we should bypass KV cache
+            # VACE forward explicitly passes kv_cache=None when it doesn't want caching
             is_tf = False
             if is_tf:
                 print("Teacher forcing training")

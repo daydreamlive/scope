@@ -91,6 +91,24 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="Conditioning embeddings to condition denoising",
             ),
+            InputParam(
+                "vace_context",
+                default=None,
+                type_hint=list | None,
+                description="VACE context for conditioning (R2V reference images or depth/flow/etc.)",
+            ),
+            InputParam(
+                "vace_context_scale",
+                default=1.0,
+                type_hint=float,
+                description="Scaling factor for VACE hint injection",
+            ),
+            InputParam(
+                "conditioning_embeds_updated",
+                default=False,
+                type_hint=bool,
+                description="Whether conditioning_embeds were updated (requires cache recomputation)",
+            ),
         ]
 
     @property
@@ -182,6 +200,13 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             self.set_block_state(state, block_state)
             return components, state
 
+        # Only recompute KV cache if conditioning_embeds were updated (prompt changed)
+        # This preserves VACE hints (R2V reference image conditioning) in the cache
+        # across chunks, allowing the reference image to naturally animate with the prompt
+        if not block_state.conditioning_embeds_updated:
+            self.set_block_state(state, block_state)
+            return components, state
+
         scale_size = (
             components.config.vae_spatial_downsample_factor
             * components.config.patch_embedding_spatial_downsample_factor
@@ -224,6 +249,8 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
         )
 
         # Cache recomputation: no bias to faithfully store context frames
+        # Pass vace_context to ensure VACE hints are included in KV cache recomputation
+        # This is critical for R2V mode where reference image conditioning must persist
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
         components.generator(
             noisy_image_or_video=context_frames,
@@ -232,6 +259,8 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
             current_start=start_frame * frame_seq_length,
+            vace_context=block_state.vace_context,
+            vace_context_scale=block_state.vace_context_scale,
         )
 
         components.generator.model.block_mask = None
