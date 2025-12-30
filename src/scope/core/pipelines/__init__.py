@@ -24,6 +24,10 @@ def __getattr__(name):
         from .passthrough.pipeline import PassthroughPipeline
 
         return PassthroughPipeline
+    elif name == "MemFlowPipeline":
+        from .memflow.pipeline import MemFlowPipeline
+
+        return MemFlowPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -63,6 +67,7 @@ __all__ = [
     "RewardForcingPipeline",
     "StreamDiffusionV2Pipeline",
     "PassthroughPipeline",
+    "MemFlowPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",

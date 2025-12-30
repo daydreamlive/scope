@@ -130,6 +130,7 @@ def _register_pipelines():
             ".reward_forcing.pipeline",
             "RewardForcingPipeline",
         ),
+        ("memflow", ".memflow.pipeline", "MemFlowPipeline"),
         ("passthrough", ".passthrough.pipeline", "PassthroughPipeline"),
     ]
 

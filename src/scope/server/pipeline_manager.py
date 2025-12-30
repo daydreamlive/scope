@@ -330,6 +330,7 @@ class PipelineManager:
             "longlive",
             "krea-realtime-video",
             "reward-forcing",
+            "memflow",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -589,6 +590,66 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("RewardForcing pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "memflow":
+            from scope.core.pipelines import (
+                MemFlowPipeline,
+            )
+
+            from .models_config import get_model_file_path, get_models_dir
+
+            models_dir = get_models_dir()
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                    "generator_path": str(
+                        get_model_file_path("MemFlow/base.pt")
+                    ),
+                    "lora_path": str(
+                        get_model_file_path("MemFlow/lora.pt")
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                }
+            )
+
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                self._configure_vace(config, load_params)
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
+
+            # Apply load parameters (resolution, seed, LoRAs) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=320,
+                default_width=576,
+                default_seed=42,
+            )
+
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
+            pipeline = MemFlowPipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("MemFlow pipeline initialized")
             return pipeline
 
         else:
