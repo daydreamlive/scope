@@ -829,7 +829,6 @@ export function StreamPage() {
       );
       if ("vace_ref_images" in vaceParams) {
         initialParameters.vace_ref_images = vaceParams.vace_ref_images;
-        initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         initialParameters.vace_context_scale = vaceParams.vace_context_scale;
       }
 
