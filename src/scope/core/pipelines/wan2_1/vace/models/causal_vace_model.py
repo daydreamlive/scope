@@ -1,6 +1,7 @@
 # Modified from https://github.com/ali-vilab/VACE/blob/48eb44f1c4be87cc65a98bff985a26976841e9f3/vace/models/wan/modules/model.py
 # Adapted for causal/autoregressive generation with factory pattern
 # Pipeline-agnostic using duck typing - works with any CausalWanModel
+import inspect
 import math
 
 import torch
@@ -109,6 +110,10 @@ class CausalVaceWanModel(nn.Module):
             stride=self.patch_size,
         )
 
+        # Cache block forward signature for dynamic parameter filtering
+        # This allows the VACE model to work with any CausalWanModel implementation
+        self._block_forward_params = self._get_block_forward_params()
+
     def _get_block_init_kwargs(self):
         """Get initialization kwargs for creating new blocks.
 
@@ -130,8 +135,6 @@ class CausalVaceWanModel(nn.Module):
         }
 
         # Add pipeline-specific kwargs based on what the original block class expects
-        import inspect
-
         sig = inspect.signature(self._original_block_class.__init__)
         params = sig.parameters
 
@@ -143,6 +146,65 @@ class CausalVaceWanModel(nn.Module):
             kwargs["window_size"] = self.window_size
 
         return kwargs
+
+    def _get_block_forward_params(self):
+        """Get the set of parameter names accepted by the block's forward method.
+
+        Inspects the original block class's forward signature to determine which
+        parameters should be passed through to blocks. This allows the VACE model
+        to work with any CausalWanModel implementation without hardcoding parameter names.
+
+        Returns:
+            set: Parameter names accepted by block.forward(), or None if the block
+                 accepts **kwargs (VAR_KEYWORD) and can handle any parameters.
+        """
+        sig = inspect.signature(self._original_block_class.forward)
+
+        # If block accepts **kwargs, return None to indicate all params are accepted
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        if has_var_keyword:
+            return None
+
+        return set(sig.parameters.keys())
+
+    def _filter_block_kwargs(self, block_kwargs, block_index):
+        """Filter and prepare kwargs for a specific block.
+
+        Handles two types of parameters:
+        1. Per-block indexed: Lists with length matching num_blocks (e.g., kv_bank)
+           These get indexed with block_index.
+        2. Shared: Scalar/other values passed to all blocks as-is
+
+        Only includes parameters that the block's forward method accepts.
+
+        Args:
+            block_kwargs: Dict of additional kwargs from _forward_inference
+            block_index: Index of the current block
+
+        Returns:
+            Dict of kwargs filtered and prepared for this specific block
+        """
+        if not block_kwargs:
+            return {}
+
+        filtered = {}
+        for key, value in block_kwargs.items():
+            # Skip if block doesn't accept this parameter
+            if (
+                self._block_forward_params is not None
+                and key not in self._block_forward_params
+            ):
+                continue
+
+            # Check if this is a per-block indexed parameter (list matching block count)
+            if isinstance(value, list | tuple) and len(value) == self.num_layers:
+                filtered[key] = value[block_index]
+            else:
+                filtered[key] = value
+
+        return filtered
 
     def _replace_blocks_with_hint_injection_support(self):
         """Replace blocks with BaseWanAttentionBlock to support hint injection.
@@ -353,8 +415,8 @@ class CausalVaceWanModel(nn.Module):
                 crossattn_cache,
             )
 
-        # Arguments for transformer blocks
-        kwargs = {
+        # Base arguments for transformer blocks (shared across all blocks)
+        base_kwargs = {
             "e": e0,
             "seq_lens": seq_lens,
             "grid_sizes": grid_sizes,
@@ -375,14 +437,19 @@ class CausalVaceWanModel(nn.Module):
         # Process through blocks
         cache_update_infos = []
         for block_index, block in enumerate(self.blocks):
+            # Build per-block kwargs:
+            # - kv_cache/crossattn_cache are always per-block indexed
+            # - Additional block_kwargs are dynamically filtered based on block's signature
+            #   and automatically indexed if they're per-block lists
+            filtered_block_kwargs = self._filter_block_kwargs(block_kwargs, block_index)
+            per_block_kwargs = {
+                "kv_cache": kv_cache[block_index],
+                "current_start": current_start,
+                **filtered_block_kwargs,
+            }
+
             if torch.is_grad_enabled() and self.causal_wan_model.gradient_checkpointing:
-                kwargs.update(
-                    {
-                        "kv_cache": kv_cache[block_index],
-                        "current_start": current_start,
-                        **block_kwargs,
-                    }
-                )
+                kwargs = {**base_kwargs, **per_block_kwargs}
                 result = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x,
@@ -395,14 +462,8 @@ class CausalVaceWanModel(nn.Module):
                 else:
                     x = result
             else:
-                kwargs.update(
-                    {
-                        "kv_cache": kv_cache[block_index],
-                        "crossattn_cache": crossattn_cache[block_index],
-                        "current_start": current_start,
-                        **block_kwargs,
-                    }
-                )
+                per_block_kwargs["crossattn_cache"] = crossattn_cache[block_index]
+                kwargs = {**base_kwargs, **per_block_kwargs}
                 result = block(x, **kwargs)
                 if kv_cache is not None and isinstance(result, tuple):
                     x, block_cache_update_info = result
@@ -411,7 +472,9 @@ class CausalVaceWanModel(nn.Module):
                     x = result
 
         if kv_cache is not None and cache_update_infos:
-            self.causal_wan_model._apply_cache_updates(kv_cache, cache_update_infos)
+            self.causal_wan_model._apply_cache_updates(
+                kv_cache, cache_update_infos, **block_kwargs
+            )
 
         x = self.causal_wan_model.head(
             x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2)

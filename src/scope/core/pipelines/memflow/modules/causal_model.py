@@ -1024,12 +1024,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         return block_mask
 
-    def _apply_cache_updates(self, kv_cache, cache_update_infos, kv_bank, update_bank=True):
+    def _apply_cache_updates(self, kv_cache, cache_update_infos, kv_bank=None, update_bank=True, **kwargs):
         """
         Applies cache updates collected from multiple blocks.
         Args:
             kv_cache: List of cache dictionaries for each block
             cache_update_infos: List of (block_index, cache_update_info) tuples
+            kv_bank: KV bank for each block
+            update_bank: Whether to update the bank
+            **kwargs: Additional arguments (ignored, for compatibility with VACE wrapper)
         """
         for block_index, (current_end, local_end_index, update_info) in cache_update_infos:
             if update_info is not None:

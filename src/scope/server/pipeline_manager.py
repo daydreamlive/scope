@@ -603,12 +603,8 @@ class PipelineManager:
             config = OmegaConf.create(
                 {
                     "model_dir": str(models_dir),
-                    "generator_path": str(
-                        get_model_file_path("MemFlow/base.pt")
-                    ),
-                    "lora_path": str(
-                        get_model_file_path("MemFlow/lora.pt")
-                    ),
+                    "generator_path": str(get_model_file_path("MemFlow/base.pt")),
+                    "lora_path": str(get_model_file_path("MemFlow/lora.pt")),
                     "text_encoder_path": str(
                         get_model_file_path(
                             "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
