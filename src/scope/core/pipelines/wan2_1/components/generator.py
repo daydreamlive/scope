@@ -193,9 +193,17 @@ class WanDiffusionWrapper(torch.nn.Module):
         # As a workaround we inspect the internal _forward_inference() function to determine what the accepted params are
         # This allows us to filter out params that might not work with the underlying CausalWanModel impl
         sig = inspect.signature(self.model._forward_inference)
-        accepted = {
-            name: value for name, value in kwargs.items() if name in sig.parameters
-        }
+
+        # Check if the signature accepts **kwargs (VAR_KEYWORD), if so pass all parameters through
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        if has_var_keyword:
+            accepted = kwargs
+        else:
+            accepted = {
+                name: value for name, value in kwargs.items() if name in sig.parameters
+            }
         return self.model(*args, **accepted)
 
     def forward(
