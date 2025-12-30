@@ -301,7 +301,7 @@ class CausalWanSelfAttention(nn.Module):
                 k, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
 
             current_end = current_start + roped_query.shape[1]
-            current_end_bank = ((current_end//(1560*3)-1)//self.record_interval+1)*1560
+            current_end_bank = ((current_end//(frame_seqlen*3)-1)//self.record_interval+1)*frame_seqlen
             sink_tokens = self.sink_size * frame_seqlen
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
@@ -382,7 +382,8 @@ class CausalWanSelfAttention(nn.Module):
                     "new_v": v[:, roped_offset:roped_offset + write_len],
                     "current_end": current_end,
                     "current_end_bank": current_end_bank,
-                    "is_recompute": is_recompute
+                    "is_recompute": is_recompute,
+                    "frame_seqlen": frame_seqlen
                 }
 
                 # if (not dist.is_initialized() or dist.get_rank() == 0) and DEBUG:
@@ -425,7 +426,8 @@ class CausalWanSelfAttention(nn.Module):
                     "new_v": v[:, roped_offset:roped_offset + write_len],
                     "current_end": current_end,
                     "current_end_bank": current_end_bank,
-                    "is_recompute": is_recompute
+                    "is_recompute": is_recompute,
+                    "frame_seqlen": frame_seqlen
                 }
 
             # if (not dist.is_initialized() or dist.get_rank() == 0) and DEBUG:
@@ -445,7 +447,7 @@ class CausalWanSelfAttention(nn.Module):
                     v_local = temp_v[:, local_start_for_window:local_end_index]
 
                     if not is_recache:
-                        is_update_bank = (current_start//(3*1560))%self.record_interval==0
+                        is_update_bank = (current_start//(3*frame_seqlen))%self.record_interval==0
                     else:
                         is_update_bank = False
                     if is_update_bank:
@@ -466,7 +468,7 @@ class CausalWanSelfAttention(nn.Module):
                             query=roped_query,
                             key=k_global,
                             value=v_global,
-                            chunk_size=1560,
+                            chunk_size=frame_seqlen,
                             top_k=3
                         )
                         k_cat = torch.cat([k_global, k_local], dim=1)
@@ -791,9 +793,21 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1
     ) -> BlockMask:
         """
-        we will divide the token sequence into the following format
-        [1 latent frame] [1 latent frame] ... [1 latent frame]
-        We use flexattention to construct the attention mask
+        Prepare blockwise causal attention mask for video sequences.
+
+        Args:
+            device: Device to create mask on
+            num_frames: Number of frames in the video
+            frame_seqlen: Number of tokens per frame
+            num_frame_per_block: Number of frames per attention block
+            local_attn_size: Local attention window size (-1 for global)
+
+        Returns:
+            BlockMask for flex_attention
+
+        Note:
+            The token sequence is divided into blocks: [1 latent frame] [1 latent frame] ...
+            We use flexattention to construct the attention mask.
         """
         total_length = num_frames * frame_seqlen
 
@@ -847,9 +861,20 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         frame_seqlen: int = 1560, num_frame_per_block=1
     ) -> BlockMask:
         """
-        we will divide the token sequence into the following format
-        [1 latent frame] [1 latent frame] ... [1 latent frame]
-        We use flexattention to construct the attention mask
+        Prepare teacher forcing attention mask for training.
+
+        Args:
+            device: Device to create mask on
+            num_frames: Number of frames in the video
+            frame_seqlen: Number of tokens per frame
+            num_frame_per_block: Number of frames per attention block
+
+        Returns:
+            BlockMask for flex_attention
+
+        Note:
+            The token sequence is divided into blocks: [1 latent frame] [1 latent frame] ...
+            We use flexattention to construct the attention mask.
         """
         # # debug
         # DEBUG = False
@@ -934,10 +959,22 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         frame_seqlen: int = 1560, num_frame_per_block=4, local_attn_size=-1
     ) -> BlockMask:
         """
-        we will divide the token sequence into the following format
-        [1 latent frame] [N latent frame] ... [N latent frame]
-        The first frame is separated out to support I2V generation
-        We use flexattention to construct the attention mask
+        Prepare blockwise causal attention mask for image-to-video generation.
+
+        Args:
+            device: Device to create mask on
+            num_frames: Number of frames in the video
+            frame_seqlen: Number of tokens per frame
+            num_frame_per_block: Number of frames per attention block
+            local_attn_size: Local attention window size (-1 for global)
+
+        Returns:
+            BlockMask for flex_attention
+
+        Note:
+            The token sequence is divided into blocks: [1 latent frame] [N latent frames] ...
+            The first frame is separated out to support I2V generation.
+            We use flexattention to construct the attention mask.
         """
         total_length = num_frames * frame_seqlen
 
@@ -999,6 +1036,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 cache = kv_cache[block_index]
                 bank = kv_bank[block_index]
 
+                # Extract frame_seqlen from update_info
+                frame_seqlen = update_info.get("frame_seqlen")
+
                 if update_info["action"] == "roll_and_insert":
                     # Apply rolling update
                     sink_tokens = update_info["sink_tokens"]
@@ -1027,8 +1067,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         cache["k"][:, write_start_index:write_end_index] = new_k
                         cache["v"][:, write_start_index:write_end_index] = new_v
                         if update_bank:
-                            bank["k_new"][:,:] = new_k[:, :1560]
-                            bank["v_new"][:,:] = new_v[:, :1560]
+                            bank["k_new"][:,:] = new_k[:, :frame_seqlen]
+                            bank["v_new"][:,:] = new_v[:, :frame_seqlen]
 
                 elif update_info["action"] == "direct_insert":
                     # Direct insert
@@ -1049,8 +1089,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         cache["k"][:, write_start_index:write_end_index] = new_k
                         cache["v"][:, write_start_index:write_end_index] = new_v
                         if update_bank:
-                            bank["k_new"][:,:] = new_k[:, :1560]
-                            bank["v_new"][:,:] = new_v[:, :1560]
+                            bank["k_new"][:,:] = new_k[:, :frame_seqlen]
+                            bank["v_new"][:,:] = new_v[:, :frame_seqlen]
 
             # Update indices: do not roll back pointers during recomputation
             is_recompute = False if update_info is None else update_info.get("is_recompute", False)
@@ -1062,19 +1102,21 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                     kv_bank[block_index]["local_end_index"].fill_(local_end_index_bank)
 
 
-    def _apply_cache_updates_before(self, kv_bank, crossattn_cache):
+    def _apply_cache_updates_before(self, kv_bank, crossattn_cache, frame_seqlen: int):
         """
         Applies cache updates collected from multiple blocks.
+
         Args:
-            kv_cache: List of cache dictionaries for each block
-            cache_update_infos: List of (block_index, cache_update_info) tuples
+            kv_bank: List of cache dictionaries for each block
+            crossattn_cache: Cross attention cache
+            frame_seqlen: Number of tokens per frame
         """
         for block_index, block in enumerate(self.blocks):
             bank = kv_bank[block_index]
             crossattn_cache_block = crossattn_cache[block_index]
             write_end_index_bank = kv_bank[block_index]["local_end_index"]
-            if write_end_index_bank >= 1560:
-                write_start_index_bank = write_end_index_bank - 1560
+            if write_end_index_bank >= frame_seqlen:
+                write_start_index_bank = write_end_index_bank - frame_seqlen
                 new_k = bank["k_new"].clone()
                 new_v = bank["v_new"].clone()
                 with torch.no_grad():
@@ -1087,7 +1129,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                             new_k=new_k,
                             new_v=new_v,
                             crossattn_cache=crossattn_cache_block,
-                            tokens_per_block=1560,
+                            tokens_per_block=frame_seqlen,
                             memory_budget_in_blocks=self.bank_size,
                             num_prototypes_in_blocks=1,
                         )
@@ -1209,7 +1251,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         Run the diffusion model with kv caching.
         See Algorithm 2 of CausVid paper https://arxiv.org/abs/2412.07772 for details.
         This function will be run for num_frame times.
-        Process the latent frames one by one (1560 tokens each)
+        Process the latent frames one by one (frame_seqlen tokens each, dynamically calculated)
 
         Args:
             x (List[Tensor]):
@@ -1297,7 +1339,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 return module(*inputs, **kwargs)
             return custom_forward
         if kv_bank is not None and q_bank:
-            self._apply_cache_updates_before(kv_bank, crossattn_cache)
+            # Calculate frame_seqlen for cache update operations
+            frame_seqlen = math.prod(grid_sizes[0][1:]).item()
+            self._apply_cache_updates_before(kv_bank, crossattn_cache, frame_seqlen)
 
         cache_update_info = None
         cache_update_infos = []  # Collect cache update info for all blocks
