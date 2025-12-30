@@ -177,7 +177,9 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
         if every_n > 1 and block_state.current_start_frame > 0:
             if block_state.current_start_frame >= components.config.kv_cache_num_frames:
                 num_frame_per_block = int(components.config.num_frame_per_block)
-                block_idx = int(block_state.current_start_frame) // max(1, num_frame_per_block)
+                block_idx = int(block_state.current_start_frame) // max(
+                    1, num_frame_per_block
+                )
                 if (block_idx % every_n) != 0:
                     self.set_block_state(state, block_state)
                     return components, state
@@ -252,13 +254,15 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
 
         # Prepare blockwise causal mask
         block_mask_model = _get_block_mask_model(components.generator.model)
-        block_mask_model.block_mask = block_mask_model._prepare_blockwise_causal_attn_mask(
+        block_mask_model.block_mask = (
+            block_mask_model._prepare_blockwise_causal_attn_mask(
                 device=context_frames.device,
                 num_frames=num_context_frames,
                 frame_seqlen=frame_seq_length,
                 num_frame_per_block=components.config.num_frame_per_block,
                 local_attn_size=-1,
             )
+        )
 
         context_timestep = torch.zeros(
             [1, num_context_frames],

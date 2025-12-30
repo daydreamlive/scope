@@ -142,7 +142,9 @@ class SetupCachesBlock(ModularPipelineBlocks):
         soft_transitioning = block_state.soft_transition_active
 
         if init_cache:
-            logger.info("HARD CUT: SetupCachesBlock received init_cache=True, will reset KV cache")
+            logger.info(
+                "HARD CUT: SetupCachesBlock received init_cache=True, will reset KV cache"
+            )
 
         max_current_start = (
             components.config.max_rope_freq_table_seq_len
@@ -153,7 +155,9 @@ class SetupCachesBlock(ModularPipelineBlocks):
 
         # Clear KV cache when conditioning changes outside of a transition if manage_cache is enabled and video input is present.
         # Transitions include: embedding blending (_transition_active) and soft transitions (KV bias lowering).
-        transitioning_context = is_transitioning or was_transitioning or soft_transitioning
+        transitioning_context = (
+            is_transitioning or was_transitioning or soft_transitioning
+        )
         if (
             block_state.conditioning_embeds_updated
             and not transitioning_context

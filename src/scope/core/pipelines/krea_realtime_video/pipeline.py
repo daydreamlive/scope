@@ -44,6 +44,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
     _stored_device: torch.device | None = None
     _stored_dtype: torch.dtype | None = None
     _stored_model_dir: str | None = None
+
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return KreaRealtimeVideoConfig
@@ -236,11 +237,15 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # and can run on CPU while outputting embeddings to GPU
         # NOTE: Must cast to BF16 first since FP8 doesn't work on CPU
         logger.info("_enable_vace: Offloading text encoder to CPU to free VRAM...")
-        self.components.text_encoder.output_device = self._stored_device  # Keep outputs on GPU
+        self.components.text_encoder.output_device = (
+            self._stored_device
+        )  # Keep outputs on GPU
         # Cast to bfloat16 before moving to CPU (FP8 is GPU-only)
         self.components.text_encoder.to(dtype=torch.bfloat16, device="cpu")
         torch.cuda.empty_cache()
-        logger.info("_enable_vace: Text encoder offloaded to CPU (as bf16), CUDA cache cleared")
+        logger.info(
+            "_enable_vace: Text encoder offloaded to CPU (as bf16), CUDA cache cleared"
+        )
 
         # Get the current generator model
         base_model = self.components.generator.model
@@ -268,7 +273,9 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
 
         # Move VACE components to GPU and quantize to FP8 (same as main model)
         # This provides memory efficiency while keeping VACE on GPU for fast inference
-        logger.info("_enable_vace: Moving VACE components to GPU and quantizing to FP8...")
+        logger.info(
+            "_enable_vace: Moving VACE components to GPU and quantizing to FP8..."
+        )
         vace_wrapped_model.vace_patch_embedding.to(
             device=self._stored_device, dtype=self._stored_dtype
         )
@@ -294,7 +301,9 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
             Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
             device=self._stored_device,
         )
-        logger.info(f"_enable_vace: Quantized VACE to FP8 in {time.time() - start:.3f}s")
+        logger.info(
+            f"_enable_vace: Quantized VACE to FP8 in {time.time() - start:.3f}s"
+        )
 
         # Replace generator model
         logger.info("_enable_vace: Setting wrapped model as generator...")

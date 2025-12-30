@@ -215,7 +215,7 @@ class CausalVaceWanModel(nn.Module):
         Creates new block instances of the factory-generated class and copies
         weights from the original blocks. Uses proper inheritance (not composition),
         so state_dict paths are preserved.
-        
+
         Memory-optimized: replaces blocks one at a time to avoid doubling memory usage.
         """
         original_blocks = self.causal_wan_model.blocks
@@ -230,48 +230,48 @@ class CausalVaceWanModel(nn.Module):
         # Replace blocks ONE AT A TIME to minimize peak memory usage
         # This avoids having both old and new blocks in memory simultaneously
         new_blocks = nn.ModuleList()
-        
+
         for i in range(self.num_layers):
             block_id = self.vace_layers_mapping[i] if i in self.vace_layers else None
             orig_block = original_blocks[i]
-            
+
             # Create new block on CPU first to avoid GPU memory spike
             with torch.device("cpu"):
                 new_block = self._BaseWanAttentionBlock(
                     **block_kwargs,
                     block_id=block_id,
                 )
-            
+
             # Get state dict from original (on GPU) and copy to new block (on CPU)
             orig_state = orig_block.state_dict()
             new_state = new_block.state_dict()
             saved_block_id = new_block.block_id
-            
+
             for key in orig_state.keys():
                 if key in new_state:
                     # Copy to CPU (where new_block is)
                     new_state[key] = orig_state[key].to("cpu")
-            
+
             new_block.load_state_dict(new_state, strict=False, assign=True)
             new_block.block_id = saved_block_id
-            
+
             # Move new block to target device/dtype
             new_block = new_block.to(device=orig_device, dtype=orig_dtype)
             new_block.eval()
-            
+
             # Clear the original block's parameters to free GPU memory immediately
             # This is safe because we've already copied the weights
             orig_block.to("cpu")
-            
+
             new_blocks.append(new_block)
-            
+
             # Clear CUDA cache periodically to help with fragmentation
             if i % 10 == 0:
                 torch.cuda.empty_cache()
 
         # Final cache clear
         torch.cuda.empty_cache()
-        
+
         # Replace blocks in wrapped model
         self.causal_wan_model.blocks = new_blocks
 
@@ -280,7 +280,7 @@ class CausalVaceWanModel(nn.Module):
 
     def _create_vace_blocks(self):
         """Create VACE blocks for parallel processing of reference images.
-        
+
         Creates blocks on CPU by default to save GPU memory.
         They will be populated with weights later via load_vace_weights_only().
         """

@@ -833,7 +833,7 @@ export function StreamPage() {
       }
 
       // Explicitly pass vace_enabled state
-      initialParameters.vace_enabled = vaceEnabled;
+      initialParameters.vace_enabled = settings.vaceEnabled ?? false;
 
       // Video mode parameters - applies to all pipelines in video mode
       if (currentMode === "video") {
