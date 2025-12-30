@@ -19,7 +19,8 @@ from ..wan2_1.vace.blocks import VaceEncodingBlock
 logger = diffusers_logging.get_logger(__name__)
 
 # Main pipeline blocks with multi-mode support (text-to-video and video-to-video)
-# AutoPreprocessVideoBlock: Routes to video preprocessing when 'video' input provided
+# SetupCachesBlock: Sets up caches (may reset current_start_frame when prompts change)
+# AutoPreprocessVideoBlock: Routes to video preprocessing when 'video' input provided (runs after SetupCachesBlock)
 # AutoPrepareLatentsBlock: Routes to PrepareVideoLatentsBlock or PrepareLatentsBlock
 # VaceEncodingBlock: Encodes VACE context for conditioning
 ALL_BLOCKS = InsertableDict(
@@ -27,8 +28,8 @@ ALL_BLOCKS = InsertableDict(
         ("text_conditioning", TextConditioningBlock),
         ("embedding_blending", EmbeddingBlendingBlock),
         ("set_timesteps", SetTimestepsBlock),
-        ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("setup_caches", SetupCachesBlock),
+        ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("auto_prepare_latents", AutoPrepareLatentsBlock),
         ("vace_encoding", VaceEncodingBlock),
         ("denoise", DenoiseBlock),
