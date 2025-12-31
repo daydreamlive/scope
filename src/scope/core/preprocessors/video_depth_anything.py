@@ -10,9 +10,15 @@ Paper: Video Depth Anything: Consistent Depth Estimation for Super-Long Videos (
 Setup:
     The Video-Depth-Anything model code is automatically cloned from GitHub
     on first use. Model weights are downloaded from HuggingFace Hub.
+
+Performance notes:
+    - Set DEPTH_STREAMING_MODE=True for real-time V2V (processes frame-by-frame with caching)
+    - Set DEPTH_INPUT_SIZE to lower values (e.g., 308, 392) for faster inference
+    - The "vits" encoder is fastest, "vitl" is most accurate
 """
 
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +29,11 @@ import torch.nn.functional as TF
 from huggingface_hub import hf_hub_download
 
 logger = logging.getLogger(__name__)
+
+# Performance tuning: use streaming mode for real-time V2V
+DEPTH_STREAMING_MODE = os.environ.get("DEPTH_STREAMING_MODE", "true").lower() in ("true", "1", "yes")
+# Input size for depth model (lower = faster, 518 is default, try 308 or 392 for speed)
+DEPTH_INPUT_SIZE = int(os.environ.get("DEPTH_INPUT_SIZE", "392"))
 
 # Where to clone the Video-Depth-Anything repo
 VDA_REPO_URL = "https://github.com/DepthAnything/Video-Depth-Anything.git"
@@ -86,8 +97,9 @@ class VideoDepthAnything:
         encoder: Model encoder size ("vits", "vitb", or "vitl")
         device: Torch device to run inference on
         dtype: Data type for inference (default: torch.float16)
-        input_size: Input size for the model (default: 518)
+        input_size: Input size for the model (default: 518, or DEPTH_INPUT_SIZE env var)
         max_res: Maximum resolution for input (default: 1280)
+        streaming: Use streaming mode for real-time processing (default: DEPTH_STREAMING_MODE)
 
     Example:
         >>> depth_model = VideoDepthAnything(encoder="vitl", device="cuda")
@@ -99,8 +111,9 @@ class VideoDepthAnything:
         encoder: str = "vitl",
         device: torch.device | str = "cuda",
         dtype: torch.dtype = torch.float16,
-        input_size: int = 518,
+        input_size: int | None = None,
         max_res: int = 1280,
+        streaming: bool | None = None,
     ):
         if encoder not in MODEL_CONFIGS:
             raise ValueError(
@@ -110,11 +123,18 @@ class VideoDepthAnything:
         self.encoder = encoder
         self.device = torch.device(device) if isinstance(device, str) else device
         self.dtype = dtype
-        self.input_size = input_size
+        self.input_size = input_size if input_size is not None else DEPTH_INPUT_SIZE
         self.max_res = max_res
+        self.streaming = streaming if streaming is not None else DEPTH_STREAMING_MODE
 
         self.model = None
+        self.streaming_model = None  # Separate model instance for streaming
         self._model_loaded = False
+
+        logger.info(
+            f"VideoDepthAnything config: encoder={encoder}, input_size={self.input_size}, "
+            f"streaming={self.streaming}"
+        )
 
     def _download_weights(self) -> Path:
         """Download model weights from HuggingFace Hub."""
@@ -137,33 +157,51 @@ class VideoDepthAnything:
         _ensure_repo_cloned()
         _add_repo_to_path()
 
-        # Import from the cloned repo
-        from video_depth_anything.video_depth import VideoDepthAnything as VDAModel
-
         config = MODEL_CONFIGS[self.encoder]
         weights_path = self._download_weights()
 
-        logger.info(f"Loading Video-Depth-Anything model ({self.encoder})...")
+        if self.streaming:
+            # Use streaming model for real-time processing (frame-by-frame with caching)
+            from video_depth_anything.video_depth_stream import VideoDepthAnything as VDAStreamModel
 
-        # Create model using the official implementation
-        self.model = VDAModel(
-            encoder=config["encoder"],
-            features=config["features"],
-            out_channels=config["out_channels"],
-        )
+            logger.info(f"Loading Video-Depth-Anything STREAMING model ({self.encoder})...")
 
-        # Load weights
-        state_dict = torch.load(weights_path, map_location="cpu", weights_only=False)
-        self.model.load_state_dict(state_dict)
+            self.streaming_model = VDAStreamModel(
+                encoder=config["encoder"],
+                features=config["features"],
+                out_channels=config["out_channels"],
+            )
 
-        # Note: We use float32 for the model because the VDA code has mixed precision
-        # operations that require float32 compatibility. The fp16/fp32 selection
-        # is handled internally by autocast during inference.
-        self.model = self.model.to(device=self.device, dtype=torch.float32)
-        self.model.eval()
+            state_dict = torch.load(weights_path, map_location="cpu", weights_only=False)
+            self.streaming_model.load_state_dict(state_dict)
+            self.streaming_model = self.streaming_model.to(device=self.device, dtype=torch.float32)
+            self.streaming_model.eval()
+
+            logger.info("Video-Depth-Anything STREAMING model loaded successfully")
+        else:
+            # Use batch model for offline processing
+            from video_depth_anything.video_depth import VideoDepthAnything as VDAModel
+
+            logger.info(f"Loading Video-Depth-Anything model ({self.encoder})...")
+
+            self.model = VDAModel(
+                encoder=config["encoder"],
+                features=config["features"],
+                out_channels=config["out_channels"],
+            )
+
+            state_dict = torch.load(weights_path, map_location="cpu", weights_only=False)
+            self.model.load_state_dict(state_dict)
+
+            # Note: We use float32 for the model because the VDA code has mixed precision
+            # operations that require float32 compatibility. The fp16/fp32 selection
+            # is handled internally by autocast during inference.
+            self.model = self.model.to(device=self.device, dtype=torch.float32)
+            self.model.eval()
+
+            logger.info("Video-Depth-Anything model loaded successfully")
 
         self._model_loaded = True
-        logger.info("Video-Depth-Anything model loaded successfully")
 
     @torch.no_grad()
     def infer(
@@ -207,14 +245,28 @@ class VideoDepthAnything:
         # The VDA model expects numpy array of shape [F, H, W, C]
         frames_np = frames.cpu().numpy().astype(np.uint8)
 
-        # Use the model's infer_video_depth method
-        depths, _ = self.model.infer_video_depth(
-            frames_np,
-            target_fps=-1,  # Not used for output
-            input_size=self.input_size,
-            device=str(self.device),
-            fp32=(self.dtype == torch.float32),
-        )
+        if self.streaming and self.streaming_model is not None:
+            # Use streaming mode - process frame by frame with caching
+            depth_list = []
+            for i in range(num_frames):
+                frame_depth = self.streaming_model.infer_video_depth_one(
+                    frames_np[i],
+                    input_size=self.input_size,
+                    device=str(self.device),
+                    fp32=(self.dtype == torch.float32),
+                )
+                depth_list.append(frame_depth)
+
+            depths = np.stack(depth_list, axis=0)
+        else:
+            # Use batch mode
+            depths, _ = self.model.infer_video_depth(
+                frames_np,
+                target_fps=-1,  # Not used for output
+                input_size=self.input_size,
+                device=str(self.device),
+                fp32=(self.dtype == torch.float32),
+            )
 
         # depths is numpy array [F, H, W] of depth values
         depth = torch.from_numpy(depths).float()
@@ -303,6 +355,19 @@ class VideoDepthAnything:
         """
         if self.model is not None:
             self.model = self.model.cpu()
-            torch.cuda.empty_cache()
-            logger.info("Video-Depth-Anything model offloaded to CPU")
+        if self.streaming_model is not None:
+            self.streaming_model = self.streaming_model.cpu()
+        torch.cuda.empty_cache()
+        logger.info("Video-Depth-Anything model offloaded to CPU")
 
+    def reset_streaming_state(self):
+        """Reset the streaming model's internal cache state.
+
+        Call this when starting a new video stream to clear cached hidden states.
+        """
+        if self.streaming_model is not None:
+            self.streaming_model.transform = None
+            self.streaming_model.frame_id_list = []
+            self.streaming_model.frame_cache_list = []
+            self.streaming_model.id = -1
+            logger.debug("Streaming model state reset")

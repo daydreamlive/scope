@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # ZeroMQ socket configuration
 ZMQ_TIMEOUT_MS = 1000  # 1 second timeout for recv
+ZMQ_HWM = 100  # High water mark for socket buffers (number of messages)
 
 
 def _find_free_port() -> int:
@@ -124,11 +125,13 @@ def _run_depth_worker(
 
     # Pull socket for receiving frames
     input_socket = context.socket(zmq.PULL)
+    input_socket.setsockopt(zmq.RCVHWM, ZMQ_HWM)  # Set high water mark
     input_socket.bind(f"tcp://*:{input_port}")
     input_socket.setsockopt(zmq.RCVTIMEO, ZMQ_TIMEOUT_MS)
 
     # Push socket for sending results
     output_socket = context.socket(zmq.PUSH)
+    output_socket.setsockopt(zmq.SNDHWM, ZMQ_HWM)  # Set high water mark
     output_socket.bind(f"tcp://*:{output_port}")
 
     logger.info(
@@ -162,10 +165,11 @@ def _run_depth_worker(
                 start_time = time.time()
                 depth = depth_model.infer(frames_tensor)  # [F, H, W]
                 inference_time = time.time() - start_time
+                num_frames = frames.shape[0]
 
-                logger.debug(
-                    f"[DepthWorker] Chunk {chunk_id} inference time: "
-                    f"{inference_time:.3f}s"
+                logger.info(
+                    f"[DepthWorker] Chunk {chunk_id}: {num_frames} frames in "
+                    f"{inference_time:.3f}s ({num_frames / inference_time:.1f} FPS)"
                 )
 
                 # Post-process depth for VACE
@@ -263,7 +267,7 @@ class DepthPreprocessorClient:
         encoder: str = "vitl",
         input_port: int | None = None,
         output_port: int | None = None,
-        result_buffer_size: int = 4,
+        result_buffer_size: int = 16,  # Increased from 4 for better buffering
     ):
         self.encoder = encoder
         # Ports will be dynamically allocated in start() if not provided
@@ -362,10 +366,12 @@ class DepthPreprocessorClient:
 
         # Push socket for sending frames
         self._input_socket = self._context.socket(zmq.PUSH)
+        self._input_socket.setsockopt(zmq.SNDHWM, ZMQ_HWM)  # Set high water mark
         self._input_socket.connect(f"tcp://localhost:{self.input_port}")
 
         # Pull socket for receiving results
         self._output_socket = self._context.socket(zmq.PULL)
+        self._output_socket.setsockopt(zmq.RCVHWM, ZMQ_HWM)  # Set high water mark
         self._output_socket.connect(f"tcp://localhost:{self.output_port}")
         self._output_socket.setsockopt(zmq.RCVTIMEO, ZMQ_TIMEOUT_MS)
 

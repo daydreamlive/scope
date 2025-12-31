@@ -22,7 +22,7 @@ DEPTH_BENCHMARK_MODE = os.environ.get("DEPTH_BENCHMARK_MODE", "").lower() in ("t
 
 
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
-OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
+OUTPUT_QUEUE_MAX_SIZE_FACTOR = 5  # Increased from 3 to handle faster production rates
 
 # FPS calculation constants
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
@@ -51,7 +51,7 @@ class FrameProcessor:
     def __init__(
         self,
         pipeline_manager: PipelineManager,
-        max_output_queue_size: int = 8,
+        max_output_queue_size: int = 60,  # Increased from 8 to handle burst production
         max_parameter_queue_size: int = 8,
         max_buffer_size: int = 30,
         initial_parameters: dict = None,
@@ -756,18 +756,34 @@ class FrameProcessor:
                         # Submit current frames for processing (non-blocking)
                         # Use cached depth result from previous submission
                         width, height = self._get_pipeline_dimensions()
+                        depth_submit_time = time.time()
                         async_depth_client.submit_frames(
                             video_input,
                             target_height=height,
                             target_width=width,
                         )
 
-                        # Get the latest available depth result
-                        depth_result = async_depth_client.get_latest_depth_result()
-                        if depth_result is not None:
-                            # Cache the result for future use
-                            with self._depth_result_lock:
-                                self._latest_depth_result = depth_result.depth
+                        # In benchmark mode, wait for actual result to measure true depth FPS
+                        if DEPTH_BENCHMARK_MODE:
+                            depth_result = async_depth_client.get_depth_result(
+                                wait=True, timeout=5.0
+                            )
+                            if depth_result is not None:
+                                depth_latency = time.time() - depth_submit_time
+                                num_frames = len(video_input)
+                                logger.info(
+                                    f"[DEPTH BENCHMARK] Depth round-trip: {num_frames} frames in "
+                                    f"{depth_latency:.3f}s ({num_frames / depth_latency:.1f} FPS)"
+                                )
+                                with self._depth_result_lock:
+                                    self._latest_depth_result = depth_result.depth
+                        else:
+                            # Normal mode: get latest available (non-blocking)
+                            depth_result = async_depth_client.get_latest_depth_result()
+                            if depth_result is not None:
+                                # Cache the result for future use
+                                with self._depth_result_lock:
+                                    self._latest_depth_result = depth_result.depth
 
                         # Use cached depth result (may be from previous chunk)
                         with self._depth_result_lock:
