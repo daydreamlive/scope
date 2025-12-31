@@ -12,6 +12,9 @@ from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
+# Flag to enable async depth preprocessing (runs in separate process)
+ASYNC_DEPTH_PREPROCESSING = True
+
 
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
@@ -107,6 +110,13 @@ class FrameProcessor:
         # Input mode is signaled by the frontend at stream start.
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
+
+        # Async depth preprocessing state
+        self._async_depth_enabled = False
+        self._latest_depth_result = None  # Cached depth result for use in pipeline
+        self._depth_submit_chunk_id = 0  # Counter for submitted chunks
+        self._last_depth_submit_time = 0.0
+        self._depth_result_lock = threading.Lock()
 
     def start(self):
         if self.running:
@@ -728,47 +738,115 @@ class FrameProcessor:
 
                 # Handle depth preprocessing
                 if depth_preprocessor_enabled:
-                    depth_preprocessor = self.pipeline_manager.depth_preprocessor
-                    if depth_preprocessor is not None:
-                        # Apply depth preprocessing to video input
-                        depth_input = self._apply_depth_preprocessing(
-                            video_input, depth_preprocessor
-                        )
-                        logger.info(
-                            f"Applied depth preprocessing (mode={depth_mode}), "
-                            f"output shape: {depth_input.shape}"
+                    # Check for async depth preprocessor first
+                    async_depth_client = self.pipeline_manager.async_depth_preprocessor
+                    use_async = (
+                        ASYNC_DEPTH_PREPROCESSING
+                        and async_depth_client is not None
+                        and async_depth_client.is_running()
+                    )
+
+                    if use_async:
+                        # === ASYNC DEPTH PREPROCESSING ===
+                        # Submit current frames for processing (non-blocking)
+                        # Use cached depth result from previous submission
+                        width, height = self._get_pipeline_dimensions()
+                        async_depth_client.submit_frames(
+                            video_input,
+                            target_height=height,
+                            target_width=width,
                         )
 
-                        if depth_mode == "depth_only":
-                            # Depth-only mode: generate from depth structure only
-                            if vace_enabled:
-                                # Use VACE conditioning with depth maps
-                                call_params["vace_input_frames"] = depth_input
+                        # Get the latest available depth result
+                        depth_result = async_depth_client.get_latest_depth_result()
+                        if depth_result is not None:
+                            # Cache the result for future use
+                            with self._depth_result_lock:
+                                self._latest_depth_result = depth_result.depth
+
+                        # Use cached depth result (may be from previous chunk)
+                        with self._depth_result_lock:
+                            depth_input = self._latest_depth_result
+
+                        if depth_input is not None:
+                            # Move to correct device and dtype
+                            depth_input = depth_input.to(
+                                device=torch.device("cuda"),
+                                dtype=torch.bfloat16,
+                            )
+
+                            logger.debug(
+                                f"Using async depth (mode={depth_mode}), "
+                                f"shape: {depth_input.shape}"
+                            )
+
+                            if depth_mode == "depth_only":
+                                if vace_enabled:
+                                    call_params["vace_input_frames"] = depth_input
+                                else:
+                                    call_params["video"] = depth_input
                             else:
-                                # No VACE: pass depth directly as video input
-                                # The depth map becomes the "video" to transform from
-                                call_params["video"] = depth_input
+                                if vace_enabled:
+                                    call_params["vace_input_frames"] = depth_input
+                                    call_params["video"] = video_input
+                                else:
+                                    logger.warning(
+                                        "V2V + Depth mode requires VACE. "
+                                        "Falling back to depth-only (no VACE)."
+                                    )
+                                    call_params["video"] = depth_input
                         else:
-                            # V2V + Depth mode: requires VACE
+                            # No depth result available yet, fall back to video input
+                            logger.debug(
+                                "No async depth result available yet, using video input"
+                            )
                             if vace_enabled:
-                                # Pass depth to VACE, video to V2V path
-                                call_params["vace_input_frames"] = depth_input
+                                call_params["vace_input_frames"] = video_input
+                            else:
                                 call_params["video"] = video_input
-                            else:
-                                logger.warning(
-                                    "V2V + Depth mode requires VACE. "
-                                    "Falling back to depth-only (no VACE)."
-                                )
-                                call_params["video"] = depth_input
                     else:
-                        logger.warning(
-                            "Depth preprocessor enabled but model not loaded"
-                        )
-                        # Fall back to regular mode
-                        if vace_enabled:
-                            call_params["vace_input_frames"] = video_input
+                        # === SYNC DEPTH PREPROCESSING (fallback) ===
+                        depth_preprocessor = self.pipeline_manager.depth_preprocessor
+                        if depth_preprocessor is not None:
+                            # Apply depth preprocessing to video input
+                            depth_input = self._apply_depth_preprocessing(
+                                video_input, depth_preprocessor
+                            )
+                            logger.info(
+                                f"Applied depth preprocessing (mode={depth_mode}), "
+                                f"output shape: {depth_input.shape}"
+                            )
+
+                            if depth_mode == "depth_only":
+                                # Depth-only mode: generate from depth structure only
+                                if vace_enabled:
+                                    # Use VACE conditioning with depth maps
+                                    call_params["vace_input_frames"] = depth_input
+                                else:
+                                    # No VACE: pass depth directly as video input
+                                    # The depth map becomes the "video" to transform from
+                                    call_params["video"] = depth_input
+                            else:
+                                # V2V + Depth mode: requires VACE
+                                if vace_enabled:
+                                    # Pass depth to VACE, video to V2V path
+                                    call_params["vace_input_frames"] = depth_input
+                                    call_params["video"] = video_input
+                                else:
+                                    logger.warning(
+                                        "V2V + Depth mode requires VACE. "
+                                        "Falling back to depth-only (no VACE)."
+                                    )
+                                    call_params["video"] = depth_input
                         else:
-                            call_params["video"] = video_input
+                            logger.warning(
+                                "Depth preprocessor enabled but model not loaded"
+                            )
+                            # Fall back to regular mode
+                            if vace_enabled:
+                                call_params["vace_input_frames"] = video_input
+                            else:
+                                call_params["video"] = video_input
                 elif vace_enabled:
                     # Regular VACE V2V editing mode: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input

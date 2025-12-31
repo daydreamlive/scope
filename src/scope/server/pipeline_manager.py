@@ -44,7 +44,8 @@ class PipelineManager:
         self._load_params = None
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
-        self._depth_preprocessor = None  # Video-Depth-Anything preprocessor
+        self._depth_preprocessor = None  # Video-Depth-Anything preprocessor (sync)
+        self._async_depth_preprocessor = None  # Async depth preprocessor client
 
     @property
     def status(self) -> PipelineStatus:
@@ -63,8 +64,13 @@ class PipelineManager:
 
     @property
     def depth_preprocessor(self):
-        """Get the loaded depth preprocessor (if any)."""
+        """Get the loaded sync depth preprocessor (if any)."""
         return self._depth_preprocessor
+
+    @property
+    def async_depth_preprocessor(self):
+        """Get the async depth preprocessor client (if any)."""
+        return self._async_depth_preprocessor
 
     def get_pipeline(self):
         """Get the loaded pipeline instance (thread-safe)."""
@@ -303,9 +309,15 @@ class PipelineManager:
         if self._pipeline:
             logger.info(f"Unloading pipeline: {self._pipeline_id}")
 
-        # Unload depth preprocessor if loaded
+        # Unload async depth preprocessor if loaded
+        if self._async_depth_preprocessor is not None:
+            logger.info("Stopping async depth preprocessor")
+            self._async_depth_preprocessor.stop()
+            self._async_depth_preprocessor = None
+
+        # Unload sync depth preprocessor if loaded
         if self._depth_preprocessor is not None:
-            logger.info("Unloading depth preprocessor")
+            logger.info("Unloading sync depth preprocessor")
             self._depth_preprocessor.offload()
             self._depth_preprocessor = None
 
@@ -326,22 +338,49 @@ class PipelineManager:
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")
 
-    def _load_depth_preprocessor(self, encoder: str) -> None:
+    def _load_depth_preprocessor(self, encoder: str, use_async: bool = True) -> None:
         """Load the Video-Depth-Anything preprocessor.
+
+        Args:
+            encoder: Encoder size ("vits", "vitb", or "vitl")
+            use_async: If True, use async preprocessor (separate process with ZeroMQ)
+        """
+        if use_async:
+            # Load async depth preprocessor (runs in separate process)
+            from scope.core.preprocessors import DepthPreprocessorClient
+
+            logger.info(
+                f"Loading async Video-Depth-Anything preprocessor with encoder: {encoder}"
+            )
+            self._async_depth_preprocessor = DepthPreprocessorClient(
+                encoder=encoder,
+            )
+            if self._async_depth_preprocessor.start():
+                logger.info("Async Video-Depth-Anything preprocessor started")
+            else:
+                logger.error("Failed to start async depth preprocessor, falling back to sync")
+                self._async_depth_preprocessor = None
+                # Fall back to sync preprocessor
+                self._load_sync_depth_preprocessor(encoder)
+        else:
+            self._load_sync_depth_preprocessor(encoder)
+
+    def _load_sync_depth_preprocessor(self, encoder: str) -> None:
+        """Load the synchronous Video-Depth-Anything preprocessor.
 
         Args:
             encoder: Encoder size ("vits", "vitb", or "vitl")
         """
         from scope.core.preprocessors import VideoDepthAnything
 
-        logger.info(f"Loading Video-Depth-Anything preprocessor with encoder: {encoder}")
+        logger.info(f"Loading sync Video-Depth-Anything preprocessor with encoder: {encoder}")
         self._depth_preprocessor = VideoDepthAnything(
             encoder=encoder,
             device=torch.device("cuda"),
             dtype=torch.float16,  # VDA uses fp16
         )
         self._depth_preprocessor.load_model()
-        logger.info("Video-Depth-Anything preprocessor loaded")
+        logger.info("Sync Video-Depth-Anything preprocessor loaded")
 
     def _load_pipeline_implementation(
         self, pipeline_id: str, load_params: dict | None = None
