@@ -30,6 +30,10 @@ from .pipeline import LongLivePipeline
 # ============================= CONFIGURATION =============================
 
 CONFIG = {
+    # ===== MODE SELECTION =====
+    # "depth_only": Generate NEW video guided by depth structure (T2V + depth)
+    # "v2v_depth": Transform input video with depth guidance (V2V + depth)
+    "mode": "v2v_depth",  # Options: "depth_only" or "v2v_depth"
     # ===== INPUT =====
     # Path to input video for V2V processing
     "input_video": "frontend/public/assets/test.mp4",
@@ -46,7 +50,7 @@ CONFIG = {
     "height": 512,
     "width": 512,
     "vace_context_scale": 0.7,  # VACE conditioning strength (0.0-1.0)
-    # ===== V2V MODE SETTINGS =====
+    # ===== V2V MODE SETTINGS (only used when mode="v2v_depth") =====
     # Noise scale for V2V (0.0-1.0, higher = more transformation)
     "noise_scale": 0.7,
     "noise_controller": True,
@@ -171,10 +175,13 @@ def extract_video_chunk(
 
 def main():
     print("=" * 80)
-    print("  Video-Depth-Anything + LongLive V2V Test")
+    print("  Video-Depth-Anything + LongLive Test")
     print("=" * 80)
 
     config = CONFIG
+    mode = config.get("mode", "depth_only")
+    use_v2v = mode == "v2v_depth"
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Setup paths
@@ -184,12 +191,18 @@ def main():
     output_dir.mkdir(exist_ok=True, parents=True)
 
     print(f"\nConfiguration:")
+    print(f"  Mode: {mode}")
+    if use_v2v:
+        print(f"    → V2V + Depth: Transform input video with depth guidance")
+    else:
+        print(f"    → Depth-only: Generate new video guided by depth structure")
     print(f"  Input video: {config['input_video']}")
     print(f"  Depth encoder: {config['depth_encoder']}")
     print(f"  Resolution: {config['height']}x{config['width']}")
     print(f"  Chunks: {config['num_chunks']} x {config['frames_per_chunk']} frames")
     print(f"  VACE scale: {config['vace_context_scale']}")
-    print(f"  Noise scale: {config['noise_scale']}")
+    if use_v2v:
+        print(f"  Noise scale: {config['noise_scale']}")
     print(f"  Output: {output_dir}")
     print(f"  Device: {device}\n")
 
@@ -298,7 +311,8 @@ def main():
 
     # ===== Step 4: Generate video =====
     print("=" * 40)
-    print("Step 4: Generating video with V2V + Depth")
+    mode_desc = "V2V + Depth" if use_v2v else "Depth-only (T2V)"
+    print(f"Step 4: Generating video ({mode_desc})")
     print("=" * 40)
 
     outputs = []
@@ -317,29 +331,28 @@ def main():
             frames_per_chunk,
         )
 
-        # Get video chunk for V2V
-        video_chunk = extract_video_chunk(
-            video_frames_list,
-            chunk_index,
-            frames_per_chunk,
-        )
-
         # Prepare pipeline kwargs
-        # Depth-only mode: depth maps guide structure, prompt drives content
-        # To enable V2V + Depth mode, uncomment "video" and noise params below
         kwargs = {
             "prompts": [{"text": config["prompt"], "weight": 100}],
-            # "video": video_chunk,  # Uncomment for V2V + Depth mode
             "vace_input_frames": depth_chunk,  # Depth conditioning from Video-Depth-Anything
             "vace_context_scale": config["vace_context_scale"],
-            # "noise_scale": config["noise_scale"],  # V2V only
-            # "noise_controller": config["noise_controller"],  # V2V only
             "init_cache": chunk_index == 0,  # Reset cache on first chunk
         }
 
+        # Add V2V parameters if in v2v_depth mode
+        if use_v2v:
+            video_chunk = extract_video_chunk(
+                video_frames_list,
+                chunk_index,
+                frames_per_chunk,
+            )
+            kwargs["video"] = video_chunk
+            kwargs["noise_scale"] = config["noise_scale"]
+            kwargs["noise_controller"] = config["noise_controller"]
+
         print(
-            f"Chunk {chunk_index}: Processing {len(video_chunk)} frames "
-            f"with depth shape={depth_chunk.shape}"
+            f"Chunk {chunk_index}: {'V2V + ' if use_v2v else ''}Depth mode, "
+            f"depth shape={depth_chunk.shape}"
         )
 
         # Generate
@@ -367,7 +380,8 @@ def main():
     output_video_np = output_video.contiguous().numpy()
     output_video_np = np.clip(output_video_np, 0.0, 1.0)
 
-    output_path = output_dir / "output_v2v_depth.mp4"
+    output_filename = f"output_{mode}.mp4"
+    output_path = output_dir / output_filename
     export_to_video(output_video_np, output_path, fps=16)
     print(f"\nSaved output: {output_path}")
 
@@ -397,7 +411,7 @@ def main():
     print(f"\nResults saved to: {output_dir}")
     print(f"  - Input video: input_video.mp4")
     print(f"  - Depth maps: depth_visualization.mp4")
-    print(f"  - Output: output_v2v_depth.mp4")
+    print(f"  - Output: {output_filename}")
 
 
 if __name__ == "__main__":
