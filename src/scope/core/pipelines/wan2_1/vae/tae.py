@@ -572,6 +572,10 @@ class TAEWrapper(nn.Module):
             TAE produces approximately Gaussian latents directly without additional
             normalization. The latent space is similar to but not identical to WanVAE.
 
+            For LightTAE, normalization is applied to match WanVAE's latent space
+            distribution, following LightX2V's approach. This ensures compatibility
+            with the diffusion model trained on WanVAE latents.
+
             In streaming mode (use_cache=True), TAE maintains MemBlock state across
             calls for smooth temporal continuity at chunk boundaries.
         """
@@ -592,6 +596,25 @@ class TAEWrapper(nn.Module):
             latent = self.model.encode_video(
                 pixel_ntchw, parallel=True, show_progress_bar=False
             )
+
+        # Apply normalization for LightTAE to match WanVAE latent space
+        # This follows LightX2V's approach: normalized = (latent - mean) / std
+        if self.use_lighttae:
+            # Convert to [batch, channels, frames, h, w] format for normalization
+            latent = latent.permute(0, 2, 1, 3, 4)
+
+            device, dtype = latent.device, latent.dtype
+            mean = self.mean.to(device=device, dtype=dtype)
+            std = self.std.to(device=device, dtype=dtype)
+
+            # Normalize: (latent - mean) / std
+            # Latent is [batch, channels, frames, h, w], so view as (1, z_dim, 1, 1, 1)
+            latent = (latent - mean.view(1, self.z_dim, 1, 1, 1)) / std.view(
+                1, self.z_dim, 1, 1, 1
+            )
+
+            # Convert back to [batch, frames, channels, h, w] format for return
+            latent = latent.permute(0, 2, 1, 3, 4)
 
         # Return in [batch, frames, channels, h, w] format
         return latent
@@ -627,23 +650,23 @@ class TAEWrapper(nn.Module):
             each batch for speed. The first call may have fewer output frames due
             to TGrow temporal expansion and frame trimming.
 
-            For LightTAE (use_lighttae=True), normalization is applied during decode
-            to match WanVAE's latent space distribution.
+            For LightTAE (use_lighttae=True), denormalization is applied during decode
+            to convert from the normalized latent space back to WanVAE's latent space
+            distribution, following LightX2V's formula: latent * std + mean
         """
-        # Apply normalization for LightTAE (denormalize from WanVAE latent space)
-        # LightX2V normalizes when latents are in [batch, channels, frames, h, w] format
-        # So we permute first, normalize, then pass to decode
+        # Apply denormalization for LightTAE (reverse of encoding normalization)
         if self.use_lighttae:
             # [batch, frames, channels, h, w] -> [batch, channels, frames, h, w] (match LightX2V format)
             latent = latent.permute(0, 2, 1, 3, 4)
 
             device, dtype = latent.device, latent.dtype
-            scale = self._get_scale(device, dtype)
+            mean = self.mean.to(device=device, dtype=dtype)
+            std = self.std.to(device=device, dtype=dtype)
 
-            # Denormalize: normalized = (latent - mean) / std
-            # So: latent = normalized * std + mean
-            # Latent is now [batch, channels, frames, h, w], so view as (1, z_dim, 1, 1, 1) like LightX2V
-            latent = latent * scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
+            # Denormalize: latent * std + mean (inverse of encoding normalization)
+            # This matches LightX2V's formula: latents / (1/std) + mean = latents * std + mean
+            # Latent is [batch, channels, frames, h, w], so view as (1, z_dim, 1, 1, 1)
+            latent = latent * std.view(1, self.z_dim, 1, 1, 1) + mean.view(
                 1, self.z_dim, 1, 1, 1
             )
 
