@@ -285,7 +285,7 @@ class DepthPreprocessorClient:
         self._input_socket = None
         self._output_socket = None
 
-        # Result buffer
+        # Result buffer - stores DepthResult with torch tensors (converted in receiver thread)
         self._result_buffer: deque[DepthResult] = deque(maxlen=result_buffer_size)
         self._result_lock = threading.Lock()
 
@@ -299,6 +299,11 @@ class DepthPreprocessorClient:
         self._next_chunk_id = 0
 
         self._started = False
+
+        # Throttling: track consumption rate to slow down worker when buffer is full
+        self._last_result_consumed_time = 0.0
+        self._target_fps: float | None = None  # Target FPS from main pipeline
+        self._throttle_lock = threading.Lock()
 
     def start(self, timeout: float = 60.0) -> bool:
         """Start the depth worker process and connect sockets.
@@ -437,11 +442,14 @@ class DepthPreprocessorClient:
         frames: "np.ndarray | list",
         target_height: int,
         target_width: int,
-    ) -> int:
+    ) -> int | None:
         """Submit frames for depth processing.
 
         This method is non-blocking and returns immediately after queuing the frames.
         The chunk_id can be used to track which result corresponds to which input.
+
+        Implements throttling: if buffer is nearly full, skips submission to create
+        backpressure and reduce GPU contention with main pipeline.
 
         Args:
             frames: Video frames as numpy array [F, H, W, C] in [0, 255] range,
@@ -450,7 +458,7 @@ class DepthPreprocessorClient:
             target_width: Target output width for depth maps
 
         Returns:
-            chunk_id: Unique identifier for this submission
+            chunk_id: Unique identifier for this submission, or None if skipped due to throttling
 
         Raises:
             RuntimeError: If client is not started
@@ -459,6 +467,18 @@ class DepthPreprocessorClient:
             raise RuntimeError("DepthPreprocessorClient not started")
 
         import torch
+
+        # Throttling: skip submission if buffer is getting full
+        # This reduces GPU contention with main pipeline
+        with self._result_lock:
+            buffer_size = len(self._result_buffer)
+
+        # Skip if buffer is more than half full (depth is ahead of consumer)
+        if buffer_size > self.result_buffer_size // 2:
+            logger.debug(
+                f"Throttling depth submission, buffer {buffer_size}/{self.result_buffer_size}"
+            )
+            return None
 
         # Convert list of tensors to numpy array if needed
         if isinstance(frames, list):
@@ -510,34 +530,24 @@ class DepthPreprocessorClient:
         Returns:
             DepthResult with depth tensor, or None if no result available
         """
-        import torch
-
         if wait:
             start_time = time.time()
             while time.time() - start_time < timeout:
                 with self._result_lock:
                     if self._result_buffer:
-                        result_dict = self._result_buffer.popleft()
-                        # Convert numpy back to torch tensor
-                        depth_tensor = torch.from_numpy(result_dict["depth"])
-                        return DepthResult(
-                            chunk_id=result_dict["chunk_id"],
-                            depth=depth_tensor,
-                            timestamp=result_dict["timestamp"],
-                        )
+                        # Buffer now stores DepthResult directly (tensor already converted)
+                        result = self._result_buffer.popleft()
+                        self._last_result_consumed_time = time.time()
+                        return result
                 time.sleep(0.01)
             return None
 
         with self._result_lock:
             if self._result_buffer:
-                result_dict = self._result_buffer.popleft()
-                # Convert numpy back to torch tensor
-                depth_tensor = torch.from_numpy(result_dict["depth"])
-                return DepthResult(
-                    chunk_id=result_dict["chunk_id"],
-                    depth=depth_tensor,
-                    timestamp=result_dict["timestamp"],
-                )
+                # Buffer now stores DepthResult directly (tensor already converted)
+                result = self._result_buffer.popleft()
+                self._last_result_consumed_time = time.time()
+                return result
         return None
 
     def get_latest_depth_result(self) -> DepthResult | None:
@@ -546,25 +556,18 @@ class DepthPreprocessorClient:
         Returns:
             Most recent DepthResult, or None if no results available
         """
-        import torch
-
         with self._result_lock:
             if not self._result_buffer:
                 return None
 
-            # Get the latest result
-            result_dict = self._result_buffer[-1]
+            # Get the latest result (tensor already converted in receiver thread)
+            result = self._result_buffer[-1]
 
             # Clear all older results
             self._result_buffer.clear()
 
-            # Convert numpy back to torch tensor
-            depth_tensor = torch.from_numpy(result_dict["depth"])
-            return DepthResult(
-                chunk_id=result_dict["chunk_id"],
-                depth=depth_tensor,
-                timestamp=result_dict["timestamp"],
-            )
+            self._last_result_consumed_time = time.time()
+            return result
 
     def has_pending_results(self) -> bool:
         """Check if there are pending chunks being processed."""
@@ -580,12 +583,42 @@ class DepthPreprocessorClient:
         """Check if the client is running."""
         return self._started and self._worker_process is not None and self._worker_process.is_alive()
 
+    def set_target_fps(self, fps: float | None):
+        """Set target FPS to throttle depth processing to match main pipeline.
+
+        When the depth worker is running much faster than the main pipeline,
+        this creates backpressure to avoid wasting GPU resources.
+
+        Args:
+            fps: Target FPS (e.g., from main pipeline), or None to disable throttling
+        """
+        with self._throttle_lock:
+            self._target_fps = fps
+            if fps is not None:
+                logger.debug(f"Depth throttle target set to {fps:.1f} FPS")
+
     def _receiver_loop(self):
-        """Background thread that receives results from the worker."""
+        """Background thread that receives results from the worker.
+
+        Performs numpy→torch conversion here (async) to avoid blocking main thread.
+        Also implements throttling by sleeping when buffer is full.
+        """
+        import torch
+
         logger.info("Depth result receiver thread started")
 
         while self._receiver_running:
             try:
+                # Throttle: if buffer is getting full, slow down to match consumption rate
+                with self._result_lock:
+                    buffer_size = len(self._result_buffer)
+
+                if buffer_size >= self.result_buffer_size - 1:
+                    # Buffer nearly full, sleep to allow consumer to catch up
+                    # This creates backpressure to the worker
+                    time.sleep(0.05)
+                    continue
+
                 # Receive result (with timeout to allow checking running flag)
                 import zmq
 
@@ -598,9 +631,25 @@ class DepthPreprocessorClient:
                 with self._pending_lock:
                     self._pending_chunks.discard(chunk_id)
 
+                # Convert numpy to torch tensor HERE (async, not in main thread)
+                # This is the expensive operation we want to do in background
+                depth_tensor = torch.from_numpy(result["depth"])
+
+                # Pin memory for faster GPU transfer when .to(device) is called later
+                # This makes the subsequent cuda() call non-blocking and faster
+                if torch.cuda.is_available():
+                    depth_tensor = depth_tensor.pin_memory()
+
+                # Create DepthResult with tensor already converted
+                depth_result = DepthResult(
+                    chunk_id=chunk_id,
+                    depth=depth_tensor,
+                    timestamp=result["timestamp"],
+                )
+
                 # Add to result buffer
                 with self._result_lock:
-                    self._result_buffer.append(result)
+                    self._result_buffer.append(depth_result)
 
                 logger.debug(
                     f"Received depth result for chunk {chunk_id}, "

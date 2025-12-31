@@ -258,7 +258,20 @@ class FrameProcessor:
             return pipeline_fps
 
         # Use minimum to respect both input rate and pipeline capacity
-        return min(input_fps, pipeline_fps)
+        output_fps = min(input_fps, pipeline_fps)
+
+        # Log FPS breakdown occasionally for debugging
+        if hasattr(self, '_last_fps_log_time'):
+            if time.time() - self._last_fps_log_time > 5.0:
+                logger.info(
+                    f"[FPS] Input: {input_fps:.1f}, Pipeline: {pipeline_fps:.1f}, "
+                    f"Output: {output_fps:.1f}"
+                )
+                self._last_fps_log_time = time.time()
+        else:
+            self._last_fps_log_time = time.time()
+
+        return output_fps
 
     def _get_input_fps(self) -> float | None:
         """Get the current measured input FPS.
@@ -717,7 +730,11 @@ class FrameProcessor:
                     # Sleep briefly to avoid busy waiting
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
+                prepare_start = time.time()
                 video_input = self.prepare_chunk(current_chunk_size)
+                prepare_time = time.time() - prepare_start
+                if prepare_time > 0.01:
+                    logger.debug(f"[Overhead] prepare_chunk: {prepare_time*1000:.1f}ms")
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
@@ -753,15 +770,32 @@ class FrameProcessor:
 
                     if use_async:
                         # === ASYNC DEPTH PREPROCESSING ===
-                        # Submit current frames for processing (non-blocking)
-                        # Use cached depth result from previous submission
-                        width, height = self._get_pipeline_dimensions()
-                        depth_submit_time = time.time()
-                        async_depth_client.submit_frames(
-                            video_input,
-                            target_height=height,
-                            target_width=width,
-                        )
+                        # Provide FPS feedback to throttle depth worker
+                        pipeline_fps = self.get_current_pipeline_fps()
+                        async_depth_client.set_target_fps(pipeline_fps)
+
+                        # Only submit new frames if we don't have a recent cached result
+                        # This reduces overhead (tensor→numpy conversion) and GPU contention
+                        # Since depth runs ~5x faster than pipeline, we can skip some submissions
+                        should_submit = True
+                        with self._depth_result_lock:
+                            if self._latest_depth_result is not None:
+                                # Skip if we have a cached result and buffer has more results pending
+                                if async_depth_client.get_buffer_size() > 0:
+                                    should_submit = False
+
+                        if should_submit:
+                            # Submit current frames for processing (non-blocking)
+                            width, height = self._get_pipeline_dimensions()
+                            depth_submit_time = time.time()
+                            async_depth_client.submit_frames(
+                                video_input,
+                                target_height=height,
+                                target_width=width,
+                            )
+                            submit_overhead = time.time() - depth_submit_time
+                            if submit_overhead > 0.05:
+                                logger.debug(f"[Overhead] Depth submit: {submit_overhead*1000:.1f}ms")
 
                         # In benchmark mode, wait for actual result to measure true depth FPS
                         if DEPTH_BENCHMARK_MODE:
@@ -791,10 +825,16 @@ class FrameProcessor:
 
                         if depth_input is not None:
                             # Move to correct device and dtype
+                            # non_blocking=True since memory is pinned in receiver thread
+                            gpu_start = time.time()
                             depth_input = depth_input.to(
                                 device=torch.device("cuda"),
                                 dtype=torch.bfloat16,
+                                non_blocking=True,
                             )
+                            gpu_time = time.time() - gpu_start
+                            if gpu_time > 0.01:
+                                logger.debug(f"[Overhead] Depth GPU transfer: {gpu_time*1000:.1f}ms")
 
                             logger.debug(
                                 f"Using async depth (mode={depth_mode}), "
@@ -945,10 +985,16 @@ class FrameProcessor:
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
 
-            processing_time = time.time() - start_time
+            pipeline_end_time = time.time()
+            processing_time = pipeline_end_time - start_time
             num_frames = output.shape[0]
-            logger.debug(
-                f"Processed pipeline in {processing_time:.4f}s, {num_frames} frames"
+
+            # Calculate overhead (time before pipeline call)
+            # start_time is set at beginning of process_chunk
+            # pipeline call happens after parameter handling, prepare, and depth processing
+            logger.info(
+                f"[Pipeline] Chunk: {num_frames} frames in {processing_time:.3f}s "
+                f"({num_frames / processing_time:.1f} FPS)"
             )
 
             # Normalize to [0, 255] and convert to uint8
