@@ -1,11 +1,12 @@
 """Asynchronous depth preprocessor using ZeroMQ for parallel processing.
 
-This module provides a depth preprocessing solution that runs in a separate process,
-allowing the main pipeline to process frames in parallel with depth estimation.
+This module provides a depth preprocessing solution that runs in a completely
+separate process (not subprocess), allowing the main pipeline to process frames
+in parallel with depth estimation while maintaining complete CUDA context isolation.
 
 Architecture:
-    - DepthPreprocessorWorker: Runs in a separate process, loads the depth model,
-      and processes frames received via ZeroMQ
+    - depth_worker_process.py: Runs as an independent process via subprocess.Popen,
+      loads the depth model, and processes frames received via ZeroMQ
     - DepthPreprocessorClient: Runs in the main process, sends frames to the worker
       and receives depth maps asynchronously
 
@@ -25,9 +26,11 @@ Usage:
 """
 
 import logging
-import multiprocessing as mp
 import pickle
-import queue
+import signal
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -64,172 +67,6 @@ class DepthResult:
     timestamp: float
 
 
-def _run_depth_worker(
-    encoder: str,
-    input_port: int,
-    output_port: int,
-    ready_event: mp.Event,
-    stop_event: mp.Event,
-):
-    """Worker process function that runs the depth model.
-
-    This function runs in a separate process and handles:
-    - Loading the depth model
-    - Receiving frames via ZeroMQ
-    - Processing frames through the depth model
-    - Sending depth results back via ZeroMQ
-
-    Args:
-        encoder: Encoder size ("vits", "vitb", or "vitl")
-        input_port: ZeroMQ port for receiving frames
-        output_port: ZeroMQ port for sending results
-        ready_event: Event to signal when model is loaded
-        stop_event: Event to signal shutdown
-    """
-    import torch
-    import zmq
-
-    # Configure logging for worker process
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-
-    logger.info(f"[DepthWorker] Starting depth worker process (encoder={encoder}, PID={mp.current_process().pid})")
-
-    # Ensure CUDA is initialized in this process
-    if torch.cuda.is_available():
-        logger.info(f"[DepthWorker] CUDA available: {torch.cuda.get_device_name(0)}")
-    else:
-        logger.warning("[DepthWorker] CUDA not available, falling back to CPU")
-
-    # Import and load the depth model
-    from scope.core.preprocessors import VideoDepthAnything
-
-    try:
-        logger.info("[DepthWorker] Initializing depth model...")
-        depth_model = VideoDepthAnything(
-            encoder=encoder,
-            device=torch.device("cuda"),
-            dtype=torch.float16,
-        )
-        logger.info("[DepthWorker] Loading depth model weights...")
-        depth_model.load_model()
-        logger.info("[DepthWorker] Depth model loaded successfully!")
-    except Exception as e:
-        logger.error(f"[DepthWorker] Failed to load depth model: {e}", exc_info=True)
-        raise
-
-    # Setup ZeroMQ sockets
-    context = zmq.Context()
-
-    # Pull socket for receiving frames
-    input_socket = context.socket(zmq.PULL)
-    input_socket.setsockopt(zmq.RCVHWM, ZMQ_HWM)  # Set high water mark
-    input_socket.bind(f"tcp://*:{input_port}")
-    input_socket.setsockopt(zmq.RCVTIMEO, ZMQ_TIMEOUT_MS)
-
-    # Push socket for sending results
-    output_socket = context.socket(zmq.PUSH)
-    output_socket.setsockopt(zmq.SNDHWM, ZMQ_HWM)  # Set high water mark
-    output_socket.bind(f"tcp://*:{output_port}")
-
-    logger.info(
-        f"[DepthWorker] ZeroMQ sockets bound (input={input_port}, output={output_port})"
-    )
-
-    # Signal that we're ready
-    ready_event.set()
-
-    try:
-        while not stop_event.is_set():
-            try:
-                # Receive frame data (non-blocking with timeout)
-                message = input_socket.recv()
-                data = pickle.loads(message)
-
-                chunk_id = data["chunk_id"]
-                frames = data["frames"]  # numpy array [F, H, W, C]
-                target_height = data["target_height"]
-                target_width = data["target_width"]
-
-                logger.debug(
-                    f"[DepthWorker] Received chunk {chunk_id}, "
-                    f"frames shape: {frames.shape}"
-                )
-
-                # Convert numpy to torch tensor
-                frames_tensor = torch.from_numpy(frames).float()
-
-                # Run depth estimation
-                start_time = time.time()
-                depth = depth_model.infer(frames_tensor)  # [F, H, W]
-                inference_time = time.time() - start_time
-                num_frames = frames.shape[0]
-
-                logger.info(
-                    f"[DepthWorker] Chunk {chunk_id}: {num_frames} frames in "
-                    f"{inference_time:.3f}s ({num_frames / inference_time:.1f} FPS)"
-                )
-
-                # Post-process depth for VACE
-                import torch.nn.functional as F
-
-                F_dim, H, W = depth.shape
-
-                # Resize to target dimensions if needed
-                if H != target_height or W != target_width:
-                    depth = depth.unsqueeze(1)  # [F, 1, H, W]
-                    depth = F.interpolate(
-                        depth,
-                        size=(target_height, target_width),
-                        mode="bilinear",
-                        align_corners=False,
-                    )
-                    depth = depth.squeeze(1)  # [F, H, W]
-
-                # Convert single-channel to 3-channel RGB (replicate)
-                depth = depth.unsqueeze(1).repeat(1, 3, 1, 1)  # [F, 3, H, W]
-
-                # Normalize to [-1, 1] for VAE encoding
-                depth = depth * 2.0 - 1.0
-
-                # Add batch dimension and rearrange to [1, 3, F, H, W]
-                depth = depth.unsqueeze(0).permute(0, 2, 1, 3, 4)
-
-                # Keep as float32 for numpy serialization (numpy doesn't support bfloat16)
-                # The client will convert to bfloat16 when moving to GPU
-                depth_cpu = depth.float().cpu()
-
-                # Send result
-                result = {
-                    "chunk_id": chunk_id,
-                    "depth": depth_cpu.numpy(),  # Convert to numpy for serialization
-                    "timestamp": time.time(),
-                }
-                output_socket.send(pickle.dumps(result))
-
-                logger.debug(
-                    f"[DepthWorker] Sent result for chunk {chunk_id}, "
-                    f"depth shape: {depth_cpu.shape}"
-                )
-
-            except zmq.error.Again:
-                # Timeout, continue to check stop event
-                continue
-            except Exception as e:
-                logger.error(f"[DepthWorker] Error processing frame: {e}")
-                continue
-
-    except Exception as e:
-        logger.error(f"[DepthWorker] Fatal error: {e}")
-    finally:
-        logger.info("[DepthWorker] Shutting down...")
-        input_socket.close()
-        output_socket.close()
-        context.term()
-        depth_model.offload()
-        logger.info("[DepthWorker] Shutdown complete")
 
 
 class DepthPreprocessorClient:
@@ -237,6 +74,9 @@ class DepthPreprocessorClient:
 
     This class manages communication with the depth worker process and provides
     a non-blocking interface for submitting frames and retrieving depth results.
+
+    The worker runs as a completely separate process (via subprocess.Popen) for
+    complete CUDA context isolation from the main pipeline.
 
     The client maintains a result buffer that stores the most recent depth results,
     allowing the main pipeline to retrieve depth maps without blocking on computation.
@@ -275,10 +115,10 @@ class DepthPreprocessorClient:
         self.output_port = output_port
         self.result_buffer_size = result_buffer_size
 
-        # Process management
-        self._worker_process: mp.Process | None = None
-        self._ready_event: mp.Event | None = None
-        self._stop_event: mp.Event | None = None
+        # Process management (using subprocess.Popen for complete process isolation)
+        self._worker_process: subprocess.Popen | None = None
+        self._ready_file: Path | None = None  # File-based ready signal
+        self._temp_dir: tempfile.TemporaryDirectory | None = None
 
         # ZeroMQ sockets (initialized in start())
         self._context = None
@@ -308,6 +148,9 @@ class DepthPreprocessorClient:
     def start(self, timeout: float = 60.0) -> bool:
         """Start the depth worker process and connect sockets.
 
+        The worker is started as a completely separate process using subprocess.Popen,
+        ensuring complete CUDA context isolation from the main pipeline.
+
         Args:
             timeout: Maximum time to wait for worker to be ready (seconds)
 
@@ -330,32 +173,61 @@ class DepthPreprocessorClient:
             f"Using ports: input={self.input_port}, output={self.output_port}"
         )
 
-        # Use 'spawn' context for CUDA compatibility
-        # (CUDA cannot be re-initialized in forked subprocesses)
-        ctx = mp.get_context("spawn")
+        # Create temporary directory for ready file
+        self._temp_dir = tempfile.TemporaryDirectory(prefix="depth_worker_")
+        self._ready_file = Path(self._temp_dir.name) / "ready"
 
-        # Create multiprocessing events using spawn context
-        self._ready_event = ctx.Event()
-        self._stop_event = ctx.Event()
+        # Start the worker as a completely separate process using subprocess.Popen
+        # This ensures complete CUDA context isolation
+        worker_module = "scope.core.preprocessors.depth_worker_process"
+        cmd = [
+            sys.executable, "-m", worker_module,
+            "--encoder", self.encoder,
+            "--input-port", str(self.input_port),
+            "--output-port", str(self.output_port),
+            "--ready-file", str(self._ready_file),
+        ]
 
-        # Start the worker process using spawn context
-        self._worker_process = ctx.Process(
-            target=_run_depth_worker,
-            args=(
-                self.encoder,
-                self.input_port,
-                self.output_port,
-                self._ready_event,
-                self._stop_event,
-            ),
-            daemon=True,
+        logger.info(f"Starting separate worker process: {' '.join(cmd)}")
+
+        # Start the worker process
+        self._worker_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,  # Line buffered
         )
-        self._worker_process.start()
 
-        # Wait for worker to be ready
+        # Start a thread to forward worker stdout to our logger
+        self._stdout_thread = threading.Thread(
+            target=self._forward_stdout, daemon=True
+        )
+        self._stdout_thread.start()
+
+        logger.info(f"Worker process started (PID={self._worker_process.pid})")
+
+        # Wait for worker to be ready (file-based signaling)
         logger.info(f"Waiting for depth worker to initialize (timeout={timeout}s)...")
         start_wait = time.time()
-        if not self._ready_event.wait(timeout=timeout):
+
+        while time.time() - start_wait < timeout:
+            # Check if process died
+            if self._worker_process.poll() is not None:
+                wait_time = time.time() - start_wait
+                logger.error(
+                    f"Worker process died during startup (exit code: {self._worker_process.returncode}) "
+                    f"after {wait_time:.1f}s"
+                )
+                self.stop()
+                return False
+
+            # Check if ready file exists
+            if self._ready_file.exists():
+                break
+
+            time.sleep(0.1)
+        else:
             wait_time = time.time() - start_wait
             logger.error(f"Depth worker failed to start within timeout ({wait_time:.1f}s)")
             self.stop()
@@ -391,6 +263,17 @@ class DepthPreprocessorClient:
         logger.info("DepthPreprocessorClient started successfully")
         return True
 
+    def _forward_stdout(self):
+        """Forward worker stdout to our logger."""
+        try:
+            if self._worker_process and self._worker_process.stdout:
+                for line in self._worker_process.stdout:
+                    line = line.rstrip()
+                    if line:
+                        logger.info(f"[DepthWorker] {line}")
+        except Exception:
+            pass  # Process closed
+
     def stop(self):
         """Stop the depth worker and clean up resources."""
         if not self._started and self._worker_process is None:
@@ -404,11 +287,7 @@ class DepthPreprocessorClient:
             self._receiver_thread.join(timeout=2.0)
             self._receiver_thread = None
 
-        # Signal worker to stop
-        if self._stop_event is not None:
-            self._stop_event.set()
-
-        # Clean up ZeroMQ
+        # Clean up ZeroMQ first (so worker recv() fails and can notice SIGTERM)
         if self._input_socket is not None:
             self._input_socket.close()
             self._input_socket = None
@@ -419,14 +298,42 @@ class DepthPreprocessorClient:
             self._context.term()
             self._context = None
 
-        # Wait for worker process
+        # Signal worker to stop using SIGTERM
         if self._worker_process is not None:
-            self._worker_process.join(timeout=5.0)
-            if self._worker_process.is_alive():
-                logger.warning("Worker process did not exit gracefully, terminating...")
-                self._worker_process.terminate()
-                self._worker_process.join(timeout=2.0)
+            if self._worker_process.poll() is None:  # Still running
+                logger.info(f"Sending SIGTERM to worker process (PID={self._worker_process.pid})...")
+                try:
+                    self._worker_process.send_signal(signal.SIGTERM)
+                except OSError:
+                    pass  # Process already dead
+
+                # Wait for graceful shutdown
+                try:
+                    self._worker_process.wait(timeout=5.0)
+                    logger.info(f"Worker process exited with code {self._worker_process.returncode}")
+                except subprocess.TimeoutExpired:
+                    logger.warning("Worker process did not exit gracefully, killing...")
+                    self._worker_process.kill()
+                    try:
+                        self._worker_process.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
+                        pass
+
             self._worker_process = None
+
+        # Clean up stdout forwarding thread
+        if hasattr(self, '_stdout_thread') and self._stdout_thread is not None:
+            self._stdout_thread.join(timeout=1.0)
+            self._stdout_thread = None
+
+        # Clean up temp directory
+        if self._temp_dir is not None:
+            try:
+                self._temp_dir.cleanup()
+            except Exception:
+                pass
+            self._temp_dir = None
+            self._ready_file = None
 
         # Clear buffers
         with self._result_lock:
@@ -581,7 +488,11 @@ class DepthPreprocessorClient:
 
     def is_running(self) -> bool:
         """Check if the client is running."""
-        return self._started and self._worker_process is not None and self._worker_process.is_alive()
+        return (
+            self._started
+            and self._worker_process is not None
+            and self._worker_process.poll() is None  # poll() returns None if still running
+        )
 
     def set_target_fps(self, fps: float | None):
         """Set target FPS to throttle depth processing to match main pipeline.
