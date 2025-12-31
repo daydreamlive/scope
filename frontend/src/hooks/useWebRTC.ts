@@ -19,6 +19,8 @@ interface InitialParameters {
   kv_cache_attention_bias?: number;
   vace_ref_images?: string[];
   vace_context_scale?: number;
+  depth_preprocessor?: boolean;
+  depth_preprocessor_mode?: "v2v_depth" | "depth_only";
 }
 
 interface UseWebRTCOptions {
@@ -327,6 +329,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       spout_receiver?: { enabled: boolean; name: string };
       vace_ref_images?: string[];
       vace_context_scale?: number;
+      depth_preprocessor?: boolean;
+      depth_preprocessor_mode?: "v2v_depth" | "depth_only";
     }) => {
       if (
         dataChannelRef.current &&

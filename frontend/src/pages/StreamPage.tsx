@@ -508,6 +508,35 @@ export function StreamPage() {
     }
   };
 
+  const handleDepthPreprocessorChange = (enabled: boolean) => {
+    updateSettings({ depthPreprocessor: enabled });
+    // Send depth preprocessor update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        depth_preprocessor: enabled,
+      });
+    }
+  };
+
+  const handleDepthPreprocessorEncoderChange = (
+    encoder: "vits" | "vitb" | "vitl"
+  ) => {
+    updateSettings({ depthPreprocessorEncoder: encoder });
+    // Note: Changing encoder requires pipeline reload, so we don't send parameter update here
+  };
+
+  const handleDepthPreprocessorModeChange = (
+    mode: "v2v_depth" | "depth_only"
+  ) => {
+    updateSettings({ depthPreprocessorMode: mode });
+    // Send mode update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        depth_preprocessor_mode: mode,
+      });
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -738,7 +767,14 @@ export function StreamPage() {
 
         // Add VACE parameters if pipeline supports VACE
         if (currentPipeline?.supportsVACE) {
-          const vaceEnabled = settings.vaceEnabled ?? currentMode !== "video";
+          // Check if depth preprocessor is enabled
+          const depthPreprocessorActive = settings.depthPreprocessor ?? false;
+
+          // When depth preprocessor is enabled, VACE should be enabled for best results
+          // (though depth-only mode can work without VACE)
+          const vaceEnabled =
+            depthPreprocessorActive ||
+            (settings.vaceEnabled ?? currentMode !== "video");
           loadParams.vace_enabled = vaceEnabled;
 
           // Add VACE reference images if provided
@@ -747,6 +783,12 @@ export function StreamPage() {
             settings.vaceContextScale
           );
           loadParams = { ...loadParams, ...vaceParams };
+
+          // Add depth preprocessor encoder if enabled (use default if not set)
+          if (depthPreprocessorActive) {
+            loadParams.depth_preprocessor_encoder =
+              settings.depthPreprocessorEncoder ?? "vitl";
+          }
         }
 
         console.log(
@@ -791,6 +833,8 @@ export function StreamPage() {
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_context_scale?: number;
+        depth_preprocessor?: boolean;
+        depth_preprocessor_mode?: "v2v_depth" | "depth_only";
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -831,6 +875,13 @@ export function StreamPage() {
       if (currentMode === "video") {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
+
+        // Include depth preprocessor settings if enabled
+        if (settings.depthPreprocessor) {
+          initialParameters.depth_preprocessor = true;
+          initialParameters.depth_preprocessor_mode =
+            settings.depthPreprocessorMode ?? "v2v_depth";
+        }
       }
 
       // Spout settings - send if enabled
@@ -1117,6 +1168,12 @@ export function StreamPage() {
             onVaceEnabledChange={handleVaceEnabledChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
+            depthPreprocessor={settings.depthPreprocessor ?? false}
+            onDepthPreprocessorChange={handleDepthPreprocessorChange}
+            depthPreprocessorEncoder={settings.depthPreprocessorEncoder ?? "vitl"}
+            onDepthPreprocessorEncoderChange={handleDepthPreprocessorEncoderChange}
+            depthPreprocessorMode={settings.depthPreprocessorMode ?? "v2v_depth"}
+            onDepthPreprocessorModeChange={handleDepthPreprocessorModeChange}
           />
         </div>
       </div>

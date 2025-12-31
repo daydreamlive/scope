@@ -44,6 +44,7 @@ class PipelineManager:
         self._load_params = None
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
+        self._depth_preprocessor = None  # Video-Depth-Anything preprocessor
 
     @property
     def status(self) -> PipelineStatus:
@@ -59,6 +60,11 @@ class PipelineManager:
     def error_message(self) -> str | None:
         """Get last error message."""
         return self._error_message
+
+    @property
+    def depth_preprocessor(self):
+        """Get the loaded depth preprocessor (if any)."""
+        return self._depth_preprocessor
 
     def get_pipeline(self):
         """Get the loaded pipeline instance (thread-safe)."""
@@ -297,6 +303,12 @@ class PipelineManager:
         if self._pipeline:
             logger.info(f"Unloading pipeline: {self._pipeline_id}")
 
+        # Unload depth preprocessor if loaded
+        if self._depth_preprocessor is not None:
+            logger.info("Unloading depth preprocessor")
+            self._depth_preprocessor.offload()
+            self._depth_preprocessor = None
+
         # Change status and pipeline atomically
         self._status = PipelineStatus.NOT_LOADED
         self._pipeline = None
@@ -313,6 +325,23 @@ class PipelineManager:
                 logger.info("CUDA cache cleared")
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")
+
+    def _load_depth_preprocessor(self, encoder: str) -> None:
+        """Load the Video-Depth-Anything preprocessor.
+
+        Args:
+            encoder: Encoder size ("vits", "vitb", or "vitl")
+        """
+        from scope.core.preprocessors import VideoDepthAnything
+
+        logger.info(f"Loading Video-Depth-Anything preprocessor with encoder: {encoder}")
+        self._depth_preprocessor = VideoDepthAnything(
+            encoder=encoder,
+            device=torch.device("cuda"),
+            dtype=torch.float16,  # VDA uses fp16
+        )
+        self._depth_preprocessor.load_model()
+        logger.info("Video-Depth-Anything preprocessor loaded")
 
     def _load_pipeline_implementation(
         self, pipeline_id: str, load_params: dict | None = None
@@ -398,6 +427,14 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
+
+            # Load depth preprocessor if specified
+            depth_encoder = None
+            if load_params:
+                depth_encoder = load_params.get("depth_preprocessor_encoder", None)
+            if depth_encoder:
+                self._load_depth_preprocessor(depth_encoder)
+
             return pipeline
 
         elif pipeline_id == "passthrough":
@@ -475,6 +512,14 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("LongLive pipeline initialized")
+
+            # Load depth preprocessor if specified
+            depth_encoder = None
+            if load_params:
+                depth_encoder = load_params.get("depth_preprocessor_encoder", None)
+            if depth_encoder:
+                self._load_depth_preprocessor(depth_encoder)
+
             return pipeline
 
         elif pipeline_id == "krea-realtime-video":

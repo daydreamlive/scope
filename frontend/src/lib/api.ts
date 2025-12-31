@@ -25,6 +25,8 @@ export interface WebRTCOfferRequest {
     kv_cache_attention_bias?: number;
     vace_ref_images?: string[];
     vace_context_scale?: number;
+    depth_preprocessor?: boolean;
+    depth_preprocessor_mode?: "v2v_depth" | "depth_only";
   };
 }
 

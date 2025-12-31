@@ -113,6 +113,14 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    depth_preprocessor: bool = Field(
+        default=False,
+        description="Enable Video-Depth-Anything preprocessor. Extracts depth maps from video input to use as VACE structural conditioning.",
+    )
+    depth_preprocessor_mode: Literal["v2v_depth", "depth_only"] = Field(
+        default="v2v_depth",
+        description="Depth preprocessor mode. 'v2v_depth': Transform input video guided by depth. 'depth_only': Generate new video from depth structure + prompt only.",
+    )
 
 
 class SpoutConfig(BaseModel):
@@ -211,6 +219,14 @@ class LoRAMergeMode(str, Enum):
     PERMANENT_MERGE = "permanent_merge"
 
 
+class DepthPreprocessorEncoder(str, Enum):
+    """Depth preprocessor encoder size options."""
+
+    VITS = "vits"  # Small - fastest, lower quality
+    VITB = "vitb"  # Base - balanced
+    VITL = "vitl"  # Large - best quality, slower
+
+
 class LoRAConfig(BaseModel):
     """Configuration for a LoRA (Low-Rank Adaptation) adapter."""
 
@@ -306,6 +322,10 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
         default=True,
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
     )
+    depth_preprocessor_encoder: DepthPreprocessorEncoder | None = Field(
+        default=None,
+        description="Load Video-Depth-Anything preprocessor with specified encoder size. None = don't load. Options: vits (fast), vitb (balanced), vitl (best quality).",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -344,6 +364,10 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     vace_enabled: bool = Field(
         default=True,
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+    )
+    depth_preprocessor_encoder: DepthPreprocessorEncoder | None = Field(
+        default=None,
+        description="Load Video-Depth-Anything preprocessor with specified encoder size. None = don't load. Options: vits (fast), vitb (balanced), vitl (best quality).",
     )
 
 

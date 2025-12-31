@@ -73,6 +73,10 @@ export interface SettingsState {
   vaceEnabled?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
+  // Depth preprocessor settings
+  depthPreprocessor?: boolean;
+  depthPreprocessorEncoder?: "vits" | "vitb" | "vitl";
+  depthPreprocessorMode?: "v2v_depth" | "depth_only";
 }
 
 export interface PipelineInfo {
