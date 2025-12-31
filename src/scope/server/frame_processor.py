@@ -1,4 +1,5 @@
 import logging
+import os
 import queue
 import threading
 import time
@@ -14,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Flag to enable async depth preprocessing (runs in separate process)
 ASYNC_DEPTH_PREPROCESSING = True
+
+# Flag to benchmark depth preprocessing only (skip main pipeline)
+# Set DEPTH_BENCHMARK_MODE=True environment variable to measure depth FPS without V2V processing
+DEPTH_BENCHMARK_MODE = os.environ.get("DEPTH_BENCHMARK_MODE", "").lower() in ("true", "1", "yes")
 
 
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
@@ -853,6 +858,55 @@ class FrameProcessor:
                 else:
                     # Normal V2V mode: route to video
                     call_params["video"] = video_input
+
+            # === DEPTH BENCHMARK MODE ===
+            # Skip main pipeline and output depth frames directly to measure depth FPS
+            if DEPTH_BENCHMARK_MODE and depth_preprocessor_enabled and video_input is not None:
+                # Get depth from call_params (either vace_input_frames or video depending on mode)
+                # Note: can't use `or` with tensors, must check None explicitly
+                depth_output = call_params.get("vace_input_frames")
+                if depth_output is None:
+                    depth_output = call_params.get("video")
+
+                if depth_output is not None and isinstance(depth_output, torch.Tensor):
+                    # depth_output is [1, 3, F, H, W] in [-1, 1]
+                    # Convert to [F, H, W, C] in [0, 1] for output
+                    depth_frames = depth_output.squeeze(0)  # [3, F, H, W]
+                    depth_frames = depth_frames.permute(1, 2, 3, 0)  # [F, H, W, 3]
+                    depth_frames = (depth_frames + 1.0) / 2.0  # [-1, 1] -> [0, 1]
+
+                    output = depth_frames.float()  # [F, H, W, C] in [0, 1]
+
+                    processing_time = time.time() - start_time
+                    num_frames = output.shape[0]
+                    logger.info(
+                        f"[DEPTH BENCHMARK] Processed {num_frames} frames in {processing_time:.4f}s "
+                        f"({num_frames / processing_time:.1f} FPS)"
+                    )
+
+                    # Normalize to [0, 255] and convert to uint8
+                    output = (
+                        (output * 255.0)
+                        .clamp(0, 255)
+                        .to(dtype=torch.uint8)
+                        .contiguous()
+                        .detach()
+                        .cpu()
+                    )
+
+                    for frame in output:
+                        try:
+                            self.output_queue.put_nowait(frame)
+                        except queue.Full:
+                            logger.warning("Output queue full, dropping processed frame")
+                            continue
+
+                    # Update FPS calculation
+                    self._calculate_pipeline_fps(start_time, num_frames)
+                    self.is_prepared = True
+                    return
+                else:
+                    logger.warning("[DEPTH BENCHMARK] No depth output available, falling through to pipeline")
 
             output = pipeline(**call_params)
 
