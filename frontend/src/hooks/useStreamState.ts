@@ -148,6 +148,7 @@ export function useStreamState() {
     paused: false,
     loraMergeStrategy: "permanent_merge",
     inputMode: initialDefaults.inputMode,
+    rifeEnabled: true, // RIFE enabled by default
   });
 
   const [promptData, setPromptData] = useState<PromptData>({

@@ -113,6 +113,10 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    rife_enabled: bool | None = Field(
+        default=None,
+        description="Enable RIFE (Real-Time Intermediate Flow Estimation) frame interpolation to double the frame rate of the output video. This increases smoothness but may add latency.",
+    )
 
 
 class SpoutConfig(BaseModel):
@@ -344,6 +348,10 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     vace_enabled: bool = Field(
         default=True,
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+    )
+    rife_enabled: bool = Field(
+        default=True,
+        description="Enable RIFE (Real-Time Intermediate Flow Estimation) frame interpolation to double the frame rate of the output video. This increases smoothness but may add latency.",
     )
 
 

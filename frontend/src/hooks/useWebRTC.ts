@@ -19,6 +19,7 @@ interface InitialParameters {
   kv_cache_attention_bias?: number;
   vace_ref_images?: string[];
   vace_context_scale?: number;
+  rife_enabled?: boolean;
 }
 
 interface UseWebRTCOptions {
@@ -38,6 +39,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     useState<RTCPeerConnectionState>("new");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [originalFPS, setOriginalFPS] = useState<number | null>(null);
+  const [interpolatedFPS, setInterpolatedFPS] = useState<number | null>(null);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -115,9 +118,26 @@ export function useWebRTC(options?: UseWebRTCOptions) {
                 peerConnectionRef.current.close();
                 peerConnectionRef.current = null;
               }
+              // Reset FPS data
+              setOriginalFPS(null);
+              setInterpolatedFPS(null);
+
               // Notify parent component
               if (options?.onStreamStop) {
                 options.onStreamStop();
+              }
+            }
+
+            // Handle FPS update notification from backend
+            if (data.type === "fps_update") {
+              if (typeof data.original_fps === "number") {
+                setOriginalFPS(data.original_fps);
+              }
+              if (typeof data.interpolated_fps === "number") {
+                setInterpolatedFPS(data.interpolated_fps);
+              } else {
+                // Clear interpolated FPS if not provided (RIFE disabled)
+                setInterpolatedFPS(null);
               }
             }
           } catch (error) {
@@ -327,6 +347,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       spout_receiver?: { enabled: boolean; name: string };
       vace_ref_images?: string[];
       vace_context_scale?: number;
+      rife_enabled?: boolean;
     }) => {
       if (
         dataChannelRef.current &&
@@ -373,6 +394,10 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     // Clear any queued ICE candidates
     queuedCandidatesRef.current = [];
 
+    // Reset FPS data
+    setOriginalFPS(null);
+    setInterpolatedFPS(null);
+
     setRemoteStream(null);
     setConnectionState("new");
     setIsStreaming(false);
@@ -397,5 +422,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     stopStream,
     updateVideoTrack,
     sendParameterUpdate,
+    originalFPS,
+    interpolatedFPS,
   };
 }
