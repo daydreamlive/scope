@@ -16,38 +16,7 @@ Usage:
     vae = create_vae(model_dir="wan_models", vae_path="/path/to/custom_vae.pth")
 """
 
-from dataclasses import dataclass
-
 from .wan import WanVAEWrapper
-
-
-@dataclass(frozen=True)
-class VAEMetadata:
-    """Metadata for a VAE type (filenames, download sources)."""
-
-    filename: str
-    download_repo: str | None = None  # None = bundled with main model repo
-    download_file: str | None = None  # None = no separate download needed
-
-
-# Single source of truth for VAE metadata
-VAE_METADATA: dict[str, VAEMetadata] = {
-    "wan": VAEMetadata(
-        filename="Wan2.1_VAE.pth",
-        download_repo="Wan-AI/Wan2.1-T2V-1.3B",
-        download_file="Wan2.1_VAE.pth",
-    ),
-    "lightvae": VAEMetadata(
-        filename="lightvaew2_1.pth",
-        download_repo="lightx2v/Autoencoders",
-        download_file="lightvaew2_1.pth",
-    ),
-    "tae": VAEMetadata(
-        filename="taew2_1.pth",
-        download_repo="lightx2v/Autoencoders",
-        download_file="taew2_1.pth",
-    ),
-}
 
 # Registry mapping type names to VAE classes
 # UI dropdowns will use these keys
@@ -100,10 +69,8 @@ def list_vae_types() -> list[str]:
 
 __all__ = [
     "WanVAEWrapper",
-    "VAEMetadata",
-    "VAE_METADATA",
-    "VAE_REGISTRY",
-    "DEFAULT_VAE_TYPE",
     "create_vae",
     "list_vae_types",
+    "VAE_REGISTRY",
+    "DEFAULT_VAE_TYPE",
 ]
