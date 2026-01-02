@@ -1,4 +1,5 @@
 # Modified from https://github.com/chenfengxu714/StreamdiffusionV2
+# Pruning functionality adapted from https://github.com/ModelTC/LightX2V
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import logging
 

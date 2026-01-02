@@ -8,11 +8,8 @@ from pydantic import BaseModel, Field
 from scope.core.pipelines.krea_realtime_video.schema import KreaRealtimeVideoConfig
 from scope.core.pipelines.longlive.schema import LongLiveConfig
 from scope.core.pipelines.streamdiffusionv2.schema import StreamDiffusionV2Config
-from scope.core.pipelines.utils import Quantization
+from scope.core.pipelines.utils import Quantization, VaeType
 from scope.core.pipelines.wan2_1.vae import DEFAULT_VAE_TYPE
-
-# VAE type literal based on available VAE types
-VaeType = Literal["wan", "lightvae"]
 
 
 class HealthResponse(BaseModel):
@@ -20,12 +17,6 @@ class HealthResponse(BaseModel):
 
     status: str = Field(default="healthy")
     timestamp: str
-
-
-class VaeTypesResponse(BaseModel):
-    """Response containing available VAE types from the registry."""
-
-    vae_types: list[str]
 
 
 class PromptItem(BaseModel):

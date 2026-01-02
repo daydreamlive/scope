@@ -41,10 +41,12 @@ export function usePipelines() {
             supportsCacheManagement: schema.supports_cache_management,
             supportsKvCacheBias: schema.supports_kv_cache_bias,
             supportsQuantization: schema.supports_quantization,
+            supportsVaeType: schema.supports_vae_type,
             minDimension: schema.min_dimension,
             recommendedQuantizationVramThreshold:
               schema.recommended_quantization_vram_threshold ?? undefined,
             modified: schema.modified,
+            vaeTypes: schema.vae_types ?? undefined,
           };
         }
 
