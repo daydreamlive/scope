@@ -44,7 +44,7 @@ class PipelineManager:
         self._load_params = None
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
-        self._async_depth_preprocessor = None  # Async depth preprocessor client
+        self._async_preprocessor = None  # Async preprocessor client (depthanything, etc.)
 
     @property
     def status(self) -> PipelineStatus:
@@ -62,9 +62,9 @@ class PipelineManager:
         return self._error_message
 
     @property
-    def async_depth_preprocessor(self):
-        """Get the async depth preprocessor client (if any)."""
-        return self._async_depth_preprocessor
+    def async_preprocessor(self):
+        """Get the async preprocessor client (if any)."""
+        return self._async_preprocessor
 
 
     def get_pipeline(self):
@@ -304,11 +304,11 @@ class PipelineManager:
         if self._pipeline:
             logger.info(f"Unloading pipeline: {self._pipeline_id}")
 
-        # Unload async depth preprocessor if loaded
-        if self._async_depth_preprocessor is not None:
-            logger.info("Stopping async depth preprocessor")
-            self._async_depth_preprocessor.stop()
-            self._async_depth_preprocessor = None
+        # Unload async preprocessor if loaded
+        if self._async_preprocessor is not None:
+            logger.info("Stopping async preprocessor")
+            self._async_preprocessor.stop()
+            self._async_preprocessor = None
 
         # Change status and pipeline atomically
         self._status = PipelineStatus.NOT_LOADED
@@ -327,30 +327,30 @@ class PipelineManager:
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")
 
-    def _load_depth_preprocessor(self, encoder: str, use_async: bool = True) -> None:
-        """Load the async Video-Depth-Anything preprocessor.
-
-        Uses DepthAnythingPipeline model via the async worker process.
+    def _load_preprocessor(self, preprocessor_type: str, encoder: str | None = None) -> None:
+        """Load a preprocessor based on type.
 
         Args:
-            encoder: Encoder size ("vits", "vitb", or "vitl")
-            use_async: If True, use async preprocessor (separate process with ZeroMQ)
+            preprocessor_type: Type of preprocessor ("depthanything", "passthrough", etc.)
+            encoder: For depthanything, encoder size ("vits", "vitb", or "vitl"). Defaults to "vits".
         """
-        if use_async:
-            # Load async depth preprocessor (runs in separate process)
-            from scope.core.preprocessors import DepthPreprocessorClient
+        # All preprocessors run in separate processes
+        from scope.core.preprocessors import AsyncPreprocessorClient
 
-            logger.info(
-                f"Loading async Video-Depth-Anything preprocessor with encoder: {encoder}"
-            )
-            self._async_depth_preprocessor = DepthPreprocessorClient(
-                encoder=encoder,
-            )
-            if self._async_depth_preprocessor.start():
-                logger.info("Async Video-Depth-Anything preprocessor started")
-            else:
-                logger.error("Failed to start async depth preprocessor")
-                self._async_depth_preprocessor = None
+        encoder = encoder or "vits"  # Default encoder for depthanything
+        logger.info(
+            f"Loading async {preprocessor_type} preprocessor"
+            + (f" with encoder: {encoder}" if preprocessor_type == "depthanything" else "")
+        )
+        self._async_preprocessor = AsyncPreprocessorClient(
+            preprocessor_type=preprocessor_type,
+            encoder=encoder if preprocessor_type == "depthanything" else None,
+        )
+        if self._async_preprocessor.start():
+            logger.info(f"Async {preprocessor_type} preprocessor started")
+        else:
+            logger.error(f"Failed to start async {preprocessor_type} preprocessor")
+            self._async_preprocessor = None
 
     def _load_pipeline_implementation(
         self, pipeline_id: str, load_params: dict | None = None
@@ -488,13 +488,6 @@ class PipelineManager:
                 output_format=output_format,
             )
             logger.info("DepthAnything pipeline initialized")
-            # Load async depth preprocessor if specified
-            depth_encoder = None
-            if load_params:
-                depth_encoder = load_params.get("depth_preprocessor_encoder", None)
-            if depth_encoder:
-                self._load_depth_preprocessor(depth_encoder)
-
             return pipeline
 
         elif pipeline_id == "longlive":
@@ -553,14 +546,6 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("LongLive pipeline initialized")
-
-            # Load async depth preprocessor if specified
-            depth_encoder = None
-            if load_params:
-                depth_encoder = load_params.get("depth_preprocessor_encoder", None)
-            if depth_encoder:
-                self._load_depth_preprocessor(depth_encoder)
-
             return pipeline
 
         elif pipeline_id == "krea-realtime-video":

@@ -108,12 +108,12 @@ class FrameProcessor:
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Async depth preprocessing state
-        self._async_depth_enabled = False
-        self._latest_depth_result = None  # Cached depth result for use in pipeline
-        self._depth_submit_chunk_id = 0  # Counter for submitted chunks
-        self._last_depth_submit_time = 0.0
-        self._depth_result_lock = threading.Lock()
+        # Async preprocessing state
+        self._preprocessor_type = None  # Current preprocessor type ("depthanything", "passthrough", etc.)
+        self._latest_preprocessor_result = None  # Cached preprocessor result for use in pipeline
+        self._preprocessor_submit_chunk_id = 0  # Counter for submitted chunks
+        self._last_preprocessor_submit_time = 0.0
+        self._preprocessor_result_lock = threading.Lock()
 
     def start(self):
         if self.running:
@@ -130,6 +130,16 @@ class FrameProcessor:
         if "spout_receiver" in self.parameters:
             spout_config = self.parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
+
+        # Load preprocessor from initial parameters if specified
+        if "preprocessor_type" in self.parameters:
+            preprocessor_type = self.parameters.get("preprocessor_type")
+            if preprocessor_type is not None:
+                self.pipeline_manager._load_preprocessor(
+                    preprocessor_type,
+                    encoder="vits" if preprocessor_type == "depthanything" else None
+                )
+                self._preprocessor_type = preprocessor_type
 
         self.worker_thread = threading.Thread(target=self.worker_loop, daemon=True)
         self.worker_thread.start()
@@ -671,6 +681,24 @@ class FrameProcessor:
                 if "input_mode" in new_parameters:
                     self._video_mode = new_parameters.get("input_mode") == "video"
 
+                # Handle preprocessor type changes
+                if "preprocessor_type" in new_parameters:
+                    new_preprocessor_type = new_parameters.get("preprocessor_type")
+                    if new_preprocessor_type != self._preprocessor_type:
+                        # Unload old preprocessor
+                        if self._preprocessor_type is not None:
+                            if self.pipeline_manager.async_preprocessor is not None:
+                                self.pipeline_manager.async_preprocessor.stop()
+                                self.pipeline_manager._async_preprocessor = None
+                            self._preprocessor_type = None
+                            with self._preprocessor_result_lock:
+                                self._latest_preprocessor_result = None
+
+                        # Load new preprocessor if needed
+                        if new_preprocessor_type is not None:
+                            self.pipeline_manager._load_preprocessor(new_preprocessor_type, encoder="vits" if new_preprocessor_type == "depthanything" else None)
+                            self._preprocessor_type = new_preprocessor_type
+
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
         except queue.Empty:
@@ -740,83 +768,81 @@ class FrameProcessor:
             if lora_scales is not None:
                 call_params["lora_scales"] = lora_scales
 
-            # Route video input based on VACE status and depth preprocessing
+            # Route video input based on VACE status and preprocessing
             if video_input is not None:
                 vace_enabled = getattr(pipeline, "vace_enabled", False)
-                depth_preprocessor_enabled = self.parameters.get(
-                    "depth_preprocessor", False
-                )
+                preprocessor_type = self.parameters.get("preprocessor_type", None)
 
-                # Handle depth preprocessing (always async)
-                if depth_preprocessor_enabled:
-                    async_depth_client = self.pipeline_manager.async_depth_preprocessor
+                # Handle preprocessing (all preprocessors use the same async interface)
+                if preprocessor_type is not None:
+                    async_preprocessor_client = self.pipeline_manager.async_preprocessor
 
-                    if async_depth_client is None or not async_depth_client.is_running():
+                    if async_preprocessor_client is None or not async_preprocessor_client.is_running():
                         raise RuntimeError(
-                            "Depth preprocessing is enabled but async depth preprocessor is not available or not running"
+                            f"Preprocessor {preprocessor_type} is enabled but async preprocessor is not available or not running"
                         )
 
-                    # === ASYNC DEPTH PREPROCESSING ===
+                    # === ASYNC PREPROCESSING ===
                     # Only submit new frames if we don't have a recent cached result
                     # This reduces overhead (tensor→numpy conversion) and GPU contention
-                    # Since depth runs ~5x faster than pipeline, we can skip some submissions
+                    # Since preprocessor runs faster than pipeline, we can skip some submissions
                     should_submit = True
-                    with self._depth_result_lock:
-                        if self._latest_depth_result is not None:
+                    with self._preprocessor_result_lock:
+                        if self._latest_preprocessor_result is not None:
                             # Skip if we have a cached result and buffer has more results pending
-                            if async_depth_client.get_buffer_size() > 0:
+                            if async_preprocessor_client.get_buffer_size() > 0:
                                 should_submit = False
 
                     if should_submit:
                         # Submit current frames for processing (non-blocking)
                         width, height = self._get_pipeline_dimensions()
-                        depth_submit_time = time.time()
-                        async_depth_client.submit_frames(
+                        preprocessor_submit_time = time.time()
+                        async_preprocessor_client.submit_frames(
                             video_input,
                             target_height=height,
                             target_width=width,
                         )
-                        submit_overhead = time.time() - depth_submit_time
+                        submit_overhead = time.time() - preprocessor_submit_time
                         if submit_overhead > 0.05:
-                            logger.debug(f"[Overhead] Depth submit: {submit_overhead*1000:.1f}ms")
+                            logger.debug(f"[Overhead] Preprocessor submit: {submit_overhead*1000:.1f}ms")
 
                     # Get latest available (non-blocking)
-                    depth_result = async_depth_client.get_latest_depth_result()
-                    if depth_result is not None:
+                    preprocessor_result = async_preprocessor_client.get_latest_result()
+                    if preprocessor_result is not None:
                         # Cache the result for future use
-                        with self._depth_result_lock:
-                            self._latest_depth_result = depth_result.depth
+                        with self._preprocessor_result_lock:
+                            self._latest_preprocessor_result = preprocessor_result.data
 
-                    # Use cached depth result (may be from previous chunk)
-                    with self._depth_result_lock:
-                        depth_input = self._latest_depth_result
+                    # Use cached preprocessor result (may be from previous chunk)
+                    with self._preprocessor_result_lock:
+                        preprocessed_input = self._latest_preprocessor_result
 
-                    if depth_input is not None:
+                    if preprocessed_input is not None:
                         # Move to correct device and dtype
                         # non_blocking=True since memory is pinned in receiver thread
                         gpu_start = time.time()
-                        depth_input = depth_input.to(
+                        preprocessed_input = preprocessed_input.to(
                             device=torch.device("cuda"),
                             dtype=torch.bfloat16,
                             non_blocking=True,
                         )
                         gpu_time = time.time() - gpu_start
                         if gpu_time > 0.01:
-                            logger.debug(f"[Overhead] Depth GPU transfer: {gpu_time*1000:.1f}ms")
+                            logger.debug(f"[Overhead] Preprocessor GPU transfer: {gpu_time*1000:.1f}ms")
 
-                            logger.debug(
-                                f"Using async depth, shape: {depth_input.shape}"
-                            )
-
-                        # Depth-only mode: generate from depth structure only
-                        if vace_enabled:
-                            call_params["vace_input_frames"] = depth_input
-                        else:
-                            call_params["video"] = depth_input
-                    else:
-                        # No depth result available yet, fall back to video input
                         logger.debug(
-                            "No async depth result available yet, using video input"
+                            f"Using async {preprocessor_type} preprocessor, shape: {preprocessed_input.shape}"
+                        )
+
+                        # Use preprocessed input
+                        if vace_enabled:
+                            call_params["vace_input_frames"] = preprocessed_input
+                        else:
+                            call_params["video"] = preprocessed_input
+                    else:
+                        # No preprocessor result available yet, fall back to video input
+                        logger.debug(
+                            "No async preprocessor result available yet, using video input"
                         )
                         if vace_enabled:
                             call_params["vace_input_frames"] = video_input

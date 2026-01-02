@@ -113,9 +113,9 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
-    depth_preprocessor: bool = Field(
-        default=False,
-        description="Enable Video-Depth-Anything preprocessor. Extracts depth maps from video input to use as VACE structural conditioning.",
+    preprocessor_type: str | None = Field(
+        default=None,
+        description="Preprocessor type to use for video input. Options: 'depthanything' (extracts depth maps), 'passthrough' (passes through unchanged), None (no preprocessing).",
     )
 
 

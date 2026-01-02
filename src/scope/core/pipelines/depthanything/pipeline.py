@@ -130,7 +130,6 @@ class DepthAnythingPipeline(Pipeline):
         Returns:
             Depth maps in [T, H, W, C] format, values in [0, 1] range
         """
-        logger.info("### DepthAnythingPipeline __call__")
         input_frames = kwargs.get("video")
 
         if input_frames is None:

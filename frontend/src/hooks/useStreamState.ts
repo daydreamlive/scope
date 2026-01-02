@@ -148,10 +148,9 @@ export function useStreamState() {
     paused: false,
     loraMergeStrategy: "permanent_merge",
     inputMode: initialDefaults.inputMode,
-    // VACE and Depth defaults
+    // VACE and Preprocessor defaults
     vaceEnabled: true,
-    depthPreprocessor: true,
-    depthPreprocessorEncoder: "vits", // small model
+    preprocessorType: null, // No preprocessor by default
   });
 
   const [promptData, setPromptData] = useState<PromptData>({

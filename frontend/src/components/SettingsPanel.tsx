@@ -87,13 +87,9 @@ interface SettingsPanelProps {
   onVaceEnabledChange?: (enabled: boolean) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
-  // Depth preprocessor settings
-  depthPreprocessor?: boolean;
-  onDepthPreprocessorChange?: (enabled: boolean) => void;
-  depthPreprocessorEncoder?: "vits" | "vitb" | "vitl";
-  onDepthPreprocessorEncoderChange?: (
-    encoder: "vits" | "vitb" | "vitl"
-  ) => void;
+  // Preprocessor settings
+  preprocessorType?: "depthanything" | "passthrough" | null;
+  onPreprocessorTypeChange?: (type: "depthanything" | "passthrough" | null) => void;
 }
 
 export function SettingsPanel({
@@ -133,10 +129,8 @@ export function SettingsPanel({
   onVaceEnabledChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
-  depthPreprocessor = false,
-  onDepthPreprocessorChange,
-  depthPreprocessorEncoder = "vitl",
-  onDepthPreprocessorEncoderChange,
+  preprocessorType = null,
+  onPreprocessorTypeChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -398,58 +392,34 @@ export function SettingsPanel({
               </div>
             )}
 
-            {/* Depth Preprocessor - only shown in video mode when VACE is enabled */}
+            {/* Preprocessor - only shown in video mode */}
             {inputMode === "video" && (
               <div className="rounded-lg border bg-card p-3">
-                <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
                   <LabelWithTooltip
-                    label={PARAMETER_METADATA.depthPreprocessor.label}
-                    tooltip={PARAMETER_METADATA.depthPreprocessor.tooltip}
-                    className="text-xs text-muted-foreground"
+                    label={PARAMETER_METADATA.preprocessorType.label}
+                    tooltip={PARAMETER_METADATA.preprocessorType.tooltip}
+                    className="text-xs text-muted-foreground w-32"
                   />
-                  <Toggle
-                    pressed={depthPreprocessor}
-                    onPressedChange={onDepthPreprocessorChange || (() => {})}
-                    variant="outline"
-                    size="sm"
-                    className="h-6"
+                  <Select
+                    value={preprocessorType || "none"}
+                    onValueChange={value =>
+                      onPreprocessorTypeChange?.(
+                        value === "none" ? null : (value as "depthanything" | "passthrough")
+                      )
+                    }
                     disabled={isStreaming || isLoading}
                   >
-                    {depthPreprocessor ? "ON" : "OFF"}
-                  </Toggle>
+                    <SelectTrigger className="flex-1 h-7">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="depthanything">Depth Anything</SelectItem>
+                      <SelectItem value="passthrough">Passthrough</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-
-                {depthPreprocessor && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <LabelWithTooltip
-                        label={PARAMETER_METADATA.depthPreprocessorEncoder.label}
-                        tooltip={
-                          PARAMETER_METADATA.depthPreprocessorEncoder.tooltip
-                        }
-                        className="text-xs text-muted-foreground w-16"
-                      />
-                      <Select
-                        value={depthPreprocessorEncoder}
-                        onValueChange={value =>
-                          onDepthPreprocessorEncoderChange?.(
-                            value as "vits" | "vitb" | "vitl"
-                          )
-                        }
-                        disabled={isStreaming || isLoading}
-                      >
-                        <SelectTrigger className="flex-1 h-7">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="vits">vits (fast)</SelectItem>
-                          <SelectItem value="vitb">vitb (balanced)</SelectItem>
-                          <SelectItem value="vitl">vitl (best)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>

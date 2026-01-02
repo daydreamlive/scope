@@ -82,14 +82,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "The configuration of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS.",
   },
-  depthPreprocessor: {
-    label: "Depth Preprocessor:",
+  preprocessorType: {
+    label: "Preprocessor:",
     tooltip:
-      "Extract depth maps from input video to use as VACE structural conditioning. Requires video input mode.",
-  },
-  depthPreprocessorEncoder: {
-    label: "Model:",
-    tooltip:
-      "Depth model size. vits: fastest, lower quality. vitb: balanced. vitl: best quality, slower.",
+      "Select a preprocessor to apply to video input. Depth Anything: extracts depth maps for VACE structural conditioning. Passthrough: passes video through unchanged. None: no preprocessing.",
   },
 };

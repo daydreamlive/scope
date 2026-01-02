@@ -1,25 +1,25 @@
-"""Asynchronous depth preprocessor using ZeroMQ for parallel processing.
+"""Asynchronous preprocessor using ZeroMQ for parallel processing.
 
-This module provides a depth preprocessing solution that runs in a completely
+This module provides a preprocessing solution that runs in a completely
 separate process (not subprocess), allowing the main pipeline to process frames
-in parallel with depth estimation while maintaining complete CUDA context isolation.
+in parallel with preprocessing while maintaining complete CUDA context isolation.
 
 Architecture:
-    - depth_worker_process.py: Runs as an independent process via subprocess.Popen,
-      loads the depth model, and processes frames received via ZeroMQ
-    - DepthPreprocessorClient: Runs in the main process, sends frames to the worker
-      and receives depth maps asynchronously
+    - preprocessor_worker_process.py: Runs as an independent process via subprocess.Popen,
+      loads the preprocessor pipeline, and processes frames received via ZeroMQ
+    - AsyncPreprocessorClient: Runs in the main process, sends frames to the worker
+      and receives preprocessed results asynchronously
 
 Usage:
     # Start the worker process
-    client = DepthPreprocessorClient(encoder="vitl")
+    client = AsyncPreprocessorClient(preprocessor_type="depthanything", encoder="vits")
     client.start()
 
     # Send frames for processing (non-blocking)
-    client.submit_frames(frames, chunk_id=0)
+    client.submit_frames(frames, target_height=512, target_width=512)
 
-    # Get processed depth maps (returns latest available)
-    depth_result = client.get_depth_result()
+    # Get processed results (returns latest available)
+    result = client.get_latest_result()
 
     # Stop the worker
     client.stop()
@@ -59,57 +59,60 @@ def _find_free_port() -> int:
 
 
 @dataclass
-class DepthResult:
-    """Container for depth estimation result."""
+class PreprocessorResult:
+    """Container for preprocessor result."""
 
     chunk_id: int
-    depth: Any  # torch.Tensor [1, 3, F, H, W] in [-1, 1]
+    data: Any  # torch.Tensor [1, C, F, H, W] in [-1, 1]
     timestamp: float
 
 
 
 
-class DepthPreprocessorClient:
-    """Client for asynchronous depth preprocessing.
+class AsyncPreprocessorClient:
+    """Client for asynchronous preprocessing.
 
-    This class manages communication with the depth worker process and provides
-    a non-blocking interface for submitting frames and retrieving depth results.
+    This class manages communication with the preprocessor worker process and provides
+    a non-blocking interface for submitting frames and retrieving preprocessed results.
 
     The worker runs as a completely separate process (via subprocess.Popen) for
     complete CUDA context isolation from the main pipeline.
 
-    The client maintains a result buffer that stores the most recent depth results,
-    allowing the main pipeline to retrieve depth maps without blocking on computation.
+    The client maintains a result buffer that stores the most recent preprocessor results,
+    allowing the main pipeline to retrieve preprocessed frames without blocking on computation.
 
     Args:
-        encoder: Encoder size ("vits", "vitb", or "vitl")
+        preprocessor_type: Type of preprocessor ("depthanything", "passthrough", etc.)
+        encoder: For depthanything, encoder size ("vits", "vitb", or "vitl"). Ignored for other types.
         input_port: ZeroMQ port for sending frames to worker
         output_port: ZeroMQ port for receiving results from worker
         result_buffer_size: Maximum number of results to buffer
 
     Example:
-        client = DepthPreprocessorClient(encoder="vitl")
+        client = AsyncPreprocessorClient(preprocessor_type="depthanything", encoder="vits")
         client.start()
 
         # Submit frames for processing (returns immediately)
-        client.submit_frames(frames, chunk_id=0)
+        client.submit_frames(frames, target_height=512, target_width=512)
 
         # Later, retrieve the result (non-blocking)
-        result = client.get_depth_result()
+        result = client.get_latest_result()
         if result is not None:
-            depth_tensor = result.depth  # Use in pipeline
+            preprocessed_tensor = result.data  # Use in pipeline
 
         client.stop()
     """
 
     def __init__(
         self,
-        encoder: str = "vits",
+        preprocessor_type: str,
+        encoder: str | None = None,
         input_port: int | None = None,
         output_port: int | None = None,
         result_buffer_size: int = 16,  # Increased from 4 for better buffering
     ):
-        self.encoder = encoder
+        self.preprocessor_type = preprocessor_type
+        self.encoder = encoder or "vits"  # Default encoder for depthanything
         # Ports will be dynamically allocated in start() if not provided
         self.input_port = input_port
         self.output_port = output_port
@@ -125,8 +128,8 @@ class DepthPreprocessorClient:
         self._input_socket = None
         self._output_socket = None
 
-        # Result buffer - stores DepthResult with torch tensors (converted in receiver thread)
-        self._result_buffer: deque[DepthResult] = deque(maxlen=result_buffer_size)
+        # Result buffer - stores PreprocessorResult with torch tensors (converted in receiver thread)
+        self._result_buffer: deque[PreprocessorResult] = deque(maxlen=result_buffer_size)
         self._result_lock = threading.Lock()
 
         # Receiver thread
@@ -146,7 +149,7 @@ class DepthPreprocessorClient:
         self._throttle_lock = threading.Lock()
 
     def start(self, timeout: float = 60.0) -> bool:
-        """Start the depth worker process and connect sockets.
+        """Start the preprocessor worker process and connect sockets.
 
         The worker is started as a completely separate process using subprocess.Popen,
         ensuring complete CUDA context isolation from the main pipeline.
@@ -158,10 +161,10 @@ class DepthPreprocessorClient:
             True if started successfully, False otherwise
         """
         if self._started:
-            logger.warning("DepthPreprocessorClient already started")
+            logger.warning("AsyncPreprocessorClient already started")
             return True
 
-        logger.info("Starting DepthPreprocessorClient...")
+        logger.info(f"Starting AsyncPreprocessorClient for {self.preprocessor_type}...")
 
         # Dynamically allocate ports if not provided
         if self.input_port is None:
@@ -174,19 +177,22 @@ class DepthPreprocessorClient:
         )
 
         # Create temporary directory for ready file
-        self._temp_dir = tempfile.TemporaryDirectory(prefix="depth_worker_")
+        self._temp_dir = tempfile.TemporaryDirectory(prefix="preprocessor_worker_")
         self._ready_file = Path(self._temp_dir.name) / "ready"
 
         # Start the worker as a completely separate process using subprocess.Popen
         # This ensures complete CUDA context isolation
-        worker_module = "scope.core.preprocessors.depth_worker_process"
+        worker_module = "scope.core.preprocessors.preprocessor_worker_process"
         cmd = [
             sys.executable, "-m", worker_module,
-            "--encoder", self.encoder,
+            "--preprocessor-type", self.preprocessor_type,
             "--input-port", str(self.input_port),
             "--output-port", str(self.output_port),
             "--ready-file", str(self._ready_file),
         ]
+        # Add encoder argument only for depthanything
+        if self.preprocessor_type == "depthanything":
+            cmd.extend(["--encoder", self.encoder])
 
         logger.info(f"Starting separate worker process: {' '.join(cmd)}")
 
@@ -208,7 +214,7 @@ class DepthPreprocessorClient:
         logger.info(f"Worker process started (PID={self._worker_process.pid})")
 
         # Wait for worker to be ready (file-based signaling)
-        logger.info(f"Waiting for depth worker to initialize (timeout={timeout}s)...")
+        logger.info(f"Waiting for preprocessor worker to initialize (timeout={timeout}s)...")
         start_wait = time.time()
 
         while time.time() - start_wait < timeout:
@@ -229,12 +235,12 @@ class DepthPreprocessorClient:
             time.sleep(0.1)
         else:
             wait_time = time.time() - start_wait
-            logger.error(f"Depth worker failed to start within timeout ({wait_time:.1f}s)")
+            logger.error(f"Preprocessor worker failed to start within timeout ({wait_time:.1f}s)")
             self.stop()
             return False
 
         wait_time = time.time() - start_wait
-        logger.info(f"Depth worker ready after {wait_time:.1f}s, connecting sockets...")
+        logger.info(f"Preprocessor worker ready after {wait_time:.1f}s, connecting sockets...")
 
         # Setup ZeroMQ client sockets
         import zmq
@@ -260,7 +266,7 @@ class DepthPreprocessorClient:
         self._receiver_thread.start()
 
         self._started = True
-        logger.info("DepthPreprocessorClient started successfully")
+        logger.info("AsyncPreprocessorClient started successfully")
         return True
 
     def _forward_stdout(self):
@@ -270,16 +276,16 @@ class DepthPreprocessorClient:
                 for line in self._worker_process.stdout:
                     line = line.rstrip()
                     if line:
-                        logger.info(f"[DepthWorker] {line}")
+                        logger.info(f"[PreprocessorWorker] {line}")
         except Exception:
             pass  # Process closed
 
     def stop(self):
-        """Stop the depth worker and clean up resources."""
+        """Stop the preprocessor worker and clean up resources."""
         if not self._started and self._worker_process is None:
             return
 
-        logger.info("Stopping DepthPreprocessorClient...")
+        logger.info("Stopping AsyncPreprocessorClient...")
 
         # Stop receiver thread
         self._receiver_running = False
@@ -342,7 +348,7 @@ class DepthPreprocessorClient:
             self._pending_chunks.clear()
 
         self._started = False
-        logger.info("DepthPreprocessorClient stopped")
+        logger.info("AsyncPreprocessorClient stopped")
 
     def submit_frames(
         self,
@@ -350,7 +356,7 @@ class DepthPreprocessorClient:
         target_height: int,
         target_width: int,
     ) -> int | None:
-        """Submit frames for depth processing.
+        """Submit frames for preprocessing.
 
         This method is non-blocking and returns immediately after queuing the frames.
         The chunk_id can be used to track which result corresponds to which input.
@@ -361,8 +367,8 @@ class DepthPreprocessorClient:
         Args:
             frames: Video frames as numpy array [F, H, W, C] in [0, 255] range,
                    or list of tensors that will be converted
-            target_height: Target output height for depth maps
-            target_width: Target output width for depth maps
+            target_height: Target output height for preprocessed frames
+            target_width: Target output width for preprocessed frames
 
         Returns:
             chunk_id: Unique identifier for this submission, or None if skipped due to throttling
@@ -371,7 +377,7 @@ class DepthPreprocessorClient:
             RuntimeError: If client is not started
         """
         if not self._started:
-            raise RuntimeError("DepthPreprocessorClient not started")
+            raise RuntimeError("AsyncPreprocessorClient not started")
 
         import torch
 
@@ -380,10 +386,10 @@ class DepthPreprocessorClient:
         with self._result_lock:
             buffer_size = len(self._result_buffer)
 
-        # Skip if buffer is more than half full (depth is ahead of consumer)
+        # Skip if buffer is more than half full (preprocessor is ahead of consumer)
         if buffer_size > self.result_buffer_size // 2:
             logger.debug(
-                f"Throttling depth submission, buffer {buffer_size}/{self.result_buffer_size}"
+                f"Throttling preprocessor submission, buffer {buffer_size}/{self.result_buffer_size}"
             )
             return None
 
@@ -427,22 +433,22 @@ class DepthPreprocessorClient:
         )
         return chunk_id
 
-    def get_depth_result(self, wait: bool = False, timeout: float = 5.0) -> DepthResult | None:
-        """Get the latest depth result.
+    def get_result(self, wait: bool = False, timeout: float = 5.0) -> PreprocessorResult | None:
+        """Get the latest preprocessor result.
 
         Args:
             wait: If True, wait for a result if none available
             timeout: Maximum time to wait (seconds) if wait=True
 
         Returns:
-            DepthResult with depth tensor, or None if no result available
+            PreprocessorResult with preprocessed tensor, or None if no result available
         """
         if wait:
             start_time = time.time()
             while time.time() - start_time < timeout:
                 with self._result_lock:
                     if self._result_buffer:
-                        # Buffer now stores DepthResult directly (tensor already converted)
+                        # Buffer now stores PreprocessorResult directly (tensor already converted)
                         result = self._result_buffer.popleft()
                         self._last_result_consumed_time = time.time()
                         return result
@@ -451,17 +457,17 @@ class DepthPreprocessorClient:
 
         with self._result_lock:
             if self._result_buffer:
-                # Buffer now stores DepthResult directly (tensor already converted)
+                # Buffer now stores PreprocessorResult directly (tensor already converted)
                 result = self._result_buffer.popleft()
                 self._last_result_consumed_time = time.time()
                 return result
         return None
 
-    def get_latest_depth_result(self) -> DepthResult | None:
-        """Get the most recent depth result, discarding older ones.
+    def get_latest_result(self) -> PreprocessorResult | None:
+        """Get the most recent preprocessor result, discarding older ones.
 
         Returns:
-            Most recent DepthResult, or None if no results available
+            Most recent PreprocessorResult, or None if no results available
         """
         with self._result_lock:
             if not self._result_buffer:
@@ -475,6 +481,15 @@ class DepthPreprocessorClient:
 
             self._last_result_consumed_time = time.time()
             return result
+
+    # Backward compatibility aliases
+    def get_depth_result(self, wait: bool = False, timeout: float = 5.0) -> PreprocessorResult | None:
+        """Backward compatibility alias for get_result()."""
+        return self.get_result(wait, timeout)
+
+    def get_latest_depth_result(self) -> PreprocessorResult | None:
+        """Backward compatibility alias for get_latest_result()."""
+        return self.get_latest_result()
 
     def has_pending_results(self) -> bool:
         """Check if there are pending chunks being processed."""
@@ -495,9 +510,9 @@ class DepthPreprocessorClient:
         )
 
     def set_target_fps(self, fps: float | None):
-        """Set target FPS to throttle depth processing to match main pipeline.
+        """Set target FPS to throttle preprocessor processing to match main pipeline.
 
-        When the depth worker is running much faster than the main pipeline,
+        When the preprocessor worker is running much faster than the main pipeline,
         this creates backpressure to avoid wasting GPU resources.
 
         Args:
@@ -544,26 +559,26 @@ class DepthPreprocessorClient:
 
                 # Convert numpy to torch tensor HERE (async, not in main thread)
                 # This is the expensive operation we want to do in background
-                depth_tensor = torch.from_numpy(result["depth"])
+                preprocessed_tensor = torch.from_numpy(result["data"])
 
                 # Pin memory for faster GPU transfer when .to(device) is called later
                 # This makes the subsequent cuda() call non-blocking and faster
                 if torch.cuda.is_available():
-                    depth_tensor = depth_tensor.pin_memory()
+                    preprocessed_tensor = preprocessed_tensor.pin_memory()
 
-                # Create DepthResult with tensor already converted
-                depth_result = DepthResult(
+                # Create PreprocessorResult with tensor already converted
+                preprocessor_result = PreprocessorResult(
                     chunk_id=chunk_id,
-                    depth=depth_tensor,
+                    data=preprocessed_tensor,
                     timestamp=result["timestamp"],
                 )
 
                 # Add to result buffer
                 with self._result_lock:
-                    self._result_buffer.append(depth_result)
+                    self._result_buffer.append(preprocessor_result)
 
                 logger.debug(
-                    f"Received depth result for chunk {chunk_id}, "
+                    f"Received preprocessor result for chunk {chunk_id}, "
                     f"buffer size: {len(self._result_buffer)}"
                 )
 
@@ -573,7 +588,7 @@ class DepthPreprocessorClient:
                     logger.error(f"Error in receiver loop: {e}")
                 continue
 
-        logger.info("Depth result receiver thread stopped")
+        logger.info("Preprocessor result receiver thread stopped")
 
     def __enter__(self):
         self.start()

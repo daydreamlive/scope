@@ -508,21 +508,16 @@ export function StreamPage() {
     }
   };
 
-  const handleDepthPreprocessorChange = (enabled: boolean) => {
-    updateSettings({ depthPreprocessor: enabled });
-    // Send depth preprocessor update to backend if streaming
+  const handlePreprocessorTypeChange = (
+    type: "depthanything" | "passthrough" | null
+  ) => {
+    updateSettings({ preprocessorType: type });
+    // Send preprocessor type update to backend if streaming
     if (isStreaming) {
       sendParameterUpdate({
-        depth_preprocessor: enabled,
+        preprocessor_type: type,
       });
     }
-  };
-
-  const handleDepthPreprocessorEncoderChange = (
-    encoder: "vits" | "vitb" | "vitl"
-  ) => {
-    updateSettings({ depthPreprocessorEncoder: encoder });
-    // Note: Changing encoder requires pipeline reload, so we don't send parameter update here
   };
 
   const handleResetCache = () => {
@@ -756,7 +751,8 @@ export function StreamPage() {
         // Add VACE parameters if pipeline supports VACE
         if (currentPipeline?.supportsVACE) {
           // Check if depth preprocessor is enabled
-          const depthPreprocessorActive = settings.depthPreprocessor ?? false;
+          const preprocessorType = settings.preprocessorType;
+          const depthPreprocessorActive = preprocessorType === "depthanything";
 
           // When depth preprocessor is enabled, VACE should be enabled for best results
           // (though depth-only mode can work without VACE)
@@ -771,12 +767,6 @@ export function StreamPage() {
             settings.vaceContextScale
           );
           loadParams = { ...loadParams, ...vaceParams };
-
-          // Add depth preprocessor encoder if enabled (use default if not set)
-          if (depthPreprocessorActive) {
-            loadParams.depth_preprocessor_encoder =
-              settings.depthPreprocessorEncoder ?? "vitl";
-          }
         }
 
         console.log(
@@ -821,7 +811,7 @@ export function StreamPage() {
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_context_scale?: number;
-        depth_preprocessor?: boolean;
+        preprocessor_type?: "depthanything" | "passthrough" | null;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -863,9 +853,9 @@ export function StreamPage() {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
 
-        // Include depth preprocessor settings if enabled
-        if (settings.depthPreprocessor) {
-          initialParameters.depth_preprocessor = true;
+        // Include preprocessor settings if enabled
+        if (settings.preprocessorType) {
+          initialParameters.preprocessor_type = settings.preprocessorType;
         }
       }
 
@@ -1153,10 +1143,8 @@ export function StreamPage() {
             onVaceEnabledChange={handleVaceEnabledChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
-            depthPreprocessor={settings.depthPreprocessor ?? false}
-            onDepthPreprocessorChange={handleDepthPreprocessorChange}
-            depthPreprocessorEncoder={settings.depthPreprocessorEncoder ?? "vitl"}
-            onDepthPreprocessorEncoderChange={handleDepthPreprocessorEncoderChange}
+            preprocessorType={settings.preprocessorType ?? null}
+            onPreprocessorTypeChange={handlePreprocessorTypeChange}
           />
         </div>
       </div>
