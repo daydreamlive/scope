@@ -1,8 +1,7 @@
-"""Video-Depth-Anything preprocessor for depth estimation.
+"""Video-Depth-Anything model wrapper for depth estimation.
 
 This module provides a wrapper around Video-Depth-Anything for consistent
-depth estimation on video frames. The depth maps can be used as conditioning
-signals for V2V pipelines (e.g., VACE depth guidance).
+depth estimation on video frames.
 
 Reference: https://github.com/DepthAnything/Video-Depth-Anything
 Paper: Video Depth Anything: Consistent Depth Estimation for Super-Long Videos (CVPR 2025)
@@ -10,11 +9,6 @@ Paper: Video Depth Anything: Consistent Depth Estimation for Super-Long Videos (
 Setup:
     The Video-Depth-Anything model code is automatically cloned from GitHub
     on first use. Model weights are downloaded from HuggingFace Hub.
-
-Performance notes:
-    - Set DEPTH_STREAMING_MODE=True for real-time V2V (processes frame-by-frame with caching)
-    - Set DEPTH_INPUT_SIZE to lower values (e.g., 308, 392) for faster inference
-    - The "vits" encoder is fastest, "vitl" is most accurate
 """
 
 import logging
@@ -31,7 +25,11 @@ from huggingface_hub import hf_hub_download
 logger = logging.getLogger(__name__)
 
 # Performance tuning: use streaming mode for real-time V2V
-DEPTH_STREAMING_MODE = os.environ.get("DEPTH_STREAMING_MODE", "true").lower() in ("true", "1", "yes")
+DEPTH_STREAMING_MODE = os.environ.get("DEPTH_STREAMING_MODE", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 # Input size for depth model (lower = faster, 518 is default, try 308 or 392 for speed)
 DEPTH_INPUT_SIZE = int(os.environ.get("DEPTH_INPUT_SIZE", "392"))
 
@@ -87,7 +85,7 @@ def _add_repo_to_path():
         sys.path.insert(0, repo_path)
 
 
-class VideoDepthAnything:
+class VideoDepthAnythingModel:
     """Video-Depth-Anything depth estimation model wrapper.
 
     This class provides a simple interface to load and run Video-Depth-Anything
@@ -102,7 +100,7 @@ class VideoDepthAnything:
         streaming: Use streaming mode for real-time processing (default: DEPTH_STREAMING_MODE)
 
     Example:
-        >>> depth_model = VideoDepthAnything(encoder="vitl", device="cuda")
+        >>> depth_model = VideoDepthAnythingModel(encoder="vitl", device="cuda")
         >>> depth_frames = depth_model.infer(video_frames)  # [F, H, W] in [0, 1]
     """
 
@@ -132,7 +130,7 @@ class VideoDepthAnything:
         self._model_loaded = False
 
         logger.info(
-            f"VideoDepthAnything config: encoder={encoder}, input_size={self.input_size}, "
+            f"VideoDepthAnythingModel config: encoder={encoder}, input_size={self.input_size}, "
             f"streaming={self.streaming}"
         )
 
@@ -162,9 +160,13 @@ class VideoDepthAnything:
 
         if self.streaming:
             # Use streaming model for real-time processing (frame-by-frame with caching)
-            from video_depth_anything.video_depth_stream import VideoDepthAnything as VDAStreamModel
+            from video_depth_anything.video_depth_stream import (
+                VideoDepthAnything as VDAStreamModel,
+            )
 
-            logger.info(f"Loading Video-Depth-Anything STREAMING model ({self.encoder})...")
+            logger.info(
+                f"Loading Video-Depth-Anything STREAMING model ({self.encoder})..."
+            )
 
             self.streaming_model = VDAStreamModel(
                 encoder=config["encoder"],
@@ -174,13 +176,17 @@ class VideoDepthAnything:
 
             state_dict = torch.load(weights_path, map_location="cpu", weights_only=False)
             self.streaming_model.load_state_dict(state_dict)
-            self.streaming_model = self.streaming_model.to(device=self.device, dtype=torch.float32)
+            self.streaming_model = self.streaming_model.to(
+                device=self.device, dtype=torch.float32
+            )
             self.streaming_model.eval()
 
             logger.info("Video-Depth-Anything STREAMING model loaded successfully")
         else:
             # Use batch model for offline processing
-            from video_depth_anything.video_depth import VideoDepthAnything as VDAModel
+            from video_depth_anything.video_depth import (
+                VideoDepthAnything as VDAModel,
+            )
 
             logger.info(f"Loading Video-Depth-Anything model ({self.encoder})...")
 

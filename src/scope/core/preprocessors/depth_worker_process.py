@@ -65,7 +65,7 @@ def main():
 
     # Load depth model
     logger.info("Loading depth model...")
-    from scope.core.preprocessors import VideoDepthAnything
+    from scope.core.pipelines.depthanything import VideoDepthAnythingModel as VideoDepthAnything
 
     try:
         depth_model = VideoDepthAnything(

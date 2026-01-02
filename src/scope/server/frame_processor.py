@@ -900,9 +900,12 @@ class FrameProcessor:
                                     )
                                     call_params["video"] = depth_input
                         else:
-                            logger.warning(
-                                "Depth preprocessor enabled but model not loaded"
-                            )
+                            # Only warn if not using depthanything pipeline (which doesn't need a preprocessor)
+                            pipeline_id = self.pipeline_manager.pipeline_id
+                            if pipeline_id != "depthanything":
+                                logger.warning(
+                                    "Depth preprocessor enabled but model not loaded"
+                                )
                             # Fall back to regular mode
                             if vace_enabled:
                                 call_params["vace_input_frames"] = video_input

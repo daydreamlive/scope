@@ -395,6 +395,7 @@ class PipelineManager:
         BUILTIN_PIPELINES = {
             "streamdiffusionv2",
             "passthrough",
+            "depthanything",
             "longlive",
             "krea-realtime-video",
             "reward-forcing",
@@ -493,6 +494,37 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("Passthrough pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "depthanything":
+            from scope.core.pipelines.depthanything import DepthAnythingPipeline
+
+            # Use load parameters for resolution and encoder, with defaults
+            height = 480
+            width = 848
+            encoder = "vitl"
+            input_size = 392
+            streaming = True
+            output_format = "grayscale"
+            if load_params:
+                height = load_params.get("height", height)
+                width = load_params.get("width", width)
+                encoder = load_params.get("encoder", encoder)
+                input_size = load_params.get("input_size", input_size)
+                streaming = load_params.get("streaming", streaming)
+                output_format = load_params.get("output_format", output_format)
+
+            pipeline = DepthAnythingPipeline(
+                height=height,
+                width=width,
+                encoder=encoder,
+                device=get_device(),
+                dtype=torch.float16,
+                input_size=input_size,
+                streaming=streaming,
+                output_format=output_format,
+            )
+            logger.info("DepthAnything pipeline initialized")
             return pipeline
 
         elif pipeline_id == "longlive":
