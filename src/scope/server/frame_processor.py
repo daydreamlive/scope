@@ -757,10 +757,6 @@ class FrameProcessor:
                         )
 
                     # === ASYNC DEPTH PREPROCESSING ===
-                    # Provide FPS feedback to throttle depth worker
-                    pipeline_fps = self.get_current_pipeline_fps()
-                    async_depth_client.set_target_fps(pipeline_fps)
-
                     # Only submit new frames if we don't have a recent cached result
                     # This reduces overhead (tensor→numpy conversion) and GPU contention
                     # Since depth runs ~5x faster than pipeline, we can skip some submissions
