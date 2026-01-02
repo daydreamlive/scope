@@ -17,6 +17,7 @@ class LongLiveConfig(BasePipelineConfig):
 
     supports_cache_management = True
     supports_quantization = True
+    supports_vae_type = True
     min_dimension = 16
     modified = True
 

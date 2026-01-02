@@ -399,9 +399,12 @@ export interface PipelineSchemaInfo {
   supports_cache_management: boolean;
   supports_kv_cache_bias: boolean;
   supports_quantization: boolean;
+  supports_vae_type: boolean;
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
+  // Available VAE types from config schema enum
+  vae_types?: string[];
 }
 
 export interface PipelineSchemasResponse {
