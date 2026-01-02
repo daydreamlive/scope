@@ -106,7 +106,7 @@ class VideoDepthAnythingModel:
 
     def __init__(
         self,
-        encoder: str = "vitl",
+        encoder: str = "vits",
         device: torch.device | str = "cuda",
         dtype: torch.dtype = torch.float16,
         input_size: int | None = None,

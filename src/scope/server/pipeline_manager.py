@@ -44,7 +44,6 @@ class PipelineManager:
         self._load_params = None
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
-        self._depth_preprocessor = None  # Video-Depth-Anything preprocessor (sync)
         self._async_depth_preprocessor = None  # Async depth preprocessor client
 
     @property
@@ -63,14 +62,10 @@ class PipelineManager:
         return self._error_message
 
     @property
-    def depth_preprocessor(self):
-        """Get the loaded sync depth preprocessor (if any)."""
-        return self._depth_preprocessor
-
-    @property
     def async_depth_preprocessor(self):
         """Get the async depth preprocessor client (if any)."""
         return self._async_depth_preprocessor
+
 
     def get_pipeline(self):
         """Get the loaded pipeline instance (thread-safe)."""
@@ -315,12 +310,6 @@ class PipelineManager:
             self._async_depth_preprocessor.stop()
             self._async_depth_preprocessor = None
 
-        # Unload sync depth preprocessor if loaded
-        if self._depth_preprocessor is not None:
-            logger.info("Unloading sync depth preprocessor")
-            self._depth_preprocessor.offload()
-            self._depth_preprocessor = None
-
         # Change status and pipeline atomically
         self._status = PipelineStatus.NOT_LOADED
         self._pipeline = None
@@ -339,7 +328,9 @@ class PipelineManager:
                 logger.warning(f"CUDA cleanup failed: {e}")
 
     def _load_depth_preprocessor(self, encoder: str, use_async: bool = True) -> None:
-        """Load the Video-Depth-Anything preprocessor.
+        """Load the async Video-Depth-Anything preprocessor.
+
+        Uses DepthAnythingPipeline model via the async worker process.
 
         Args:
             encoder: Encoder size ("vits", "vitb", or "vitl")
@@ -358,29 +349,8 @@ class PipelineManager:
             if self._async_depth_preprocessor.start():
                 logger.info("Async Video-Depth-Anything preprocessor started")
             else:
-                logger.error("Failed to start async depth preprocessor, falling back to sync")
+                logger.error("Failed to start async depth preprocessor")
                 self._async_depth_preprocessor = None
-                # Fall back to sync preprocessor
-                self._load_sync_depth_preprocessor(encoder)
-        else:
-            self._load_sync_depth_preprocessor(encoder)
-
-    def _load_sync_depth_preprocessor(self, encoder: str) -> None:
-        """Load the synchronous Video-Depth-Anything preprocessor.
-
-        Args:
-            encoder: Encoder size ("vits", "vitb", or "vitl")
-        """
-        from scope.core.preprocessors import VideoDepthAnything
-
-        logger.info(f"Loading sync Video-Depth-Anything preprocessor with encoder: {encoder}")
-        self._depth_preprocessor = VideoDepthAnything(
-            encoder=encoder,
-            device=torch.device("cuda"),
-            dtype=torch.float16,  # VDA uses fp16
-        )
-        self._depth_preprocessor.load_model()
-        logger.info("Sync Video-Depth-Anything preprocessor loaded")
 
     def _load_pipeline_implementation(
         self, pipeline_id: str, load_params: dict | None = None
@@ -468,13 +438,6 @@ class PipelineManager:
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
 
-            # Load depth preprocessor if specified
-            depth_encoder = None
-            if load_params:
-                depth_encoder = load_params.get("depth_preprocessor_encoder", None)
-            if depth_encoder:
-                self._load_depth_preprocessor(depth_encoder)
-
             return pipeline
 
         elif pipeline_id == "passthrough":
@@ -502,7 +465,7 @@ class PipelineManager:
             # Use load parameters for resolution and encoder, with defaults
             height = 480
             width = 848
-            encoder = "vitl"
+            encoder = "vits"
             input_size = 392
             streaming = True
             output_format = "grayscale"
@@ -525,6 +488,13 @@ class PipelineManager:
                 output_format=output_format,
             )
             logger.info("DepthAnything pipeline initialized")
+            # Load async depth preprocessor if specified
+            depth_encoder = None
+            if load_params:
+                depth_encoder = load_params.get("depth_preprocessor_encoder", None)
+            if depth_encoder:
+                self._load_depth_preprocessor(depth_encoder)
+
             return pipeline
 
         elif pipeline_id == "longlive":
@@ -584,7 +554,7 @@ class PipelineManager:
             )
             logger.info("LongLive pipeline initialized")
 
-            # Load depth preprocessor if specified
+            # Load async depth preprocessor if specified
             depth_encoder = None
             if load_params:
                 depth_encoder = load_params.get("depth_preprocessor_encoder", None)

@@ -61,7 +61,7 @@ class DepthAnythingPipeline(Pipeline):
         self,
         height: int = 480,
         width: int = 848,
-        encoder: Literal["vits", "vitb", "vitl"] = "vitl",
+        encoder: Literal["vits", "vitb", "vitl"] = "vits",
         device: torch.device | str | None = None,
         dtype: torch.dtype = torch.float16,
         input_size: int = 392,
@@ -130,6 +130,7 @@ class DepthAnythingPipeline(Pipeline):
         Returns:
             Depth maps in [T, H, W, C] format, values in [0, 1] range
         """
+        logger.info("### DepthAnythingPipeline __call__")
         input_frames = kwargs.get("video")
 
         if input_frames is None:
@@ -137,6 +138,53 @@ class DepthAnythingPipeline(Pipeline):
 
         self._ensure_model_loaded()
 
+        # Optimized path for VACE format: directly use process_video_for_vace
+        # This avoids redundant conversions and double inference
+        if self.output_format == "vace":
+            # Handle list input - convert to tensor [F, H, W, C]
+            if isinstance(input_frames, list):
+                # Stack frames directly without preprocess_chunk overhead
+                # Use torch.stack to create [F, H, W, C] from list of [H, W, C] frames
+                if len(input_frames) == 0:
+                    raise ValueError("Input frames list cannot be empty")
+                # Stack frames: [F, H, W, C] - torch.stack creates new dimension
+                frames = torch.stack(input_frames, dim=0)
+                # Extract dimensions from stacked frames
+                input_height, input_width = frames.shape[1], frames.shape[2]
+            elif input_frames.dim() == 5:
+                # [B, C, T, H, W] -> [T, H, W, C]
+                B, C, T, H, W = input_frames.shape
+                frames = input_frames[0].permute(1, 2, 3, 0)  # [T, H, W, C]
+                input_height, input_width = H, W
+            elif input_frames.dim() == 4:
+                if input_frames.shape[1] == 3:
+                    # [T, C, H, W] -> [T, H, W, C]
+                    T, C, H, W = input_frames.shape
+                    frames = input_frames.permute(0, 2, 3, 1)
+                    input_height, input_width = H, W
+                else:
+                    # Already [T, H, W, C]
+                    T, H, W, C = input_frames.shape
+                    frames = input_frames
+                    input_height, input_width = H, W
+            else:
+                raise ValueError(f"Unexpected input shape: {input_frames.shape}")
+
+            # Convert to [0, 255] range if needed
+            if frames.max() <= 1.0:
+                frames = frames * 255.0
+
+            # Directly use process_video_for_vace - this is the optimized path
+            depth_vace = self._model.process_video_for_vace(
+                frames, input_height, input_width
+            )  # Returns [1, 3, T, H, W] in [-1, 1]
+
+            # Convert to [T, H, W, C] in [0, 1] for consistency with other formats
+            output = depth_vace[0].permute(1, 2, 3, 0)  # [T, H, W, 3]
+            output = (output + 1.0) / 2.0  # [-1, 1] -> [0, 1]
+            return output
+
+        # Standard path for grayscale/rgb formats
         # Convert list to tensor if needed - preserve original input dimensions
         if isinstance(input_frames, list):
             # Preprocess chunk WITHOUT resizing to preserve original input resolution
@@ -179,15 +227,6 @@ class DepthAnythingPipeline(Pipeline):
         elif self.output_format == "rgb":
             # [T, H, W] -> [T, H, W, 3] (replicate to 3 channels)
             output = depth.unsqueeze(-1).repeat(1, 1, 1, 3)
-        elif self.output_format == "vace":
-            # Format for VACE: [1, 3, T, H, W] in [-1, 1]
-            depth_vace = self._model.process_video_for_vace(
-                frames, input_height, input_width
-            )
-            # Convert back to [T, H, W, C] for postprocess_chunk
-            output = depth_vace[0].permute(1, 2, 3, 0)  # [T, H, W, 3]
-            # Rescale from [-1, 1] to [0, 1]
-            output = (output + 1.0) / 2.0
         else:
             raise ValueError(f"Unknown output_format: {self.output_format}")
 

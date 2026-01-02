@@ -104,7 +104,7 @@ class DepthPreprocessorClient:
 
     def __init__(
         self,
-        encoder: str = "vitl",
+        encoder: str = "vits",
         input_port: int | None = None,
         output_port: int | None = None,
         result_buffer_size: int = 16,  # Increased from 4 for better buffering

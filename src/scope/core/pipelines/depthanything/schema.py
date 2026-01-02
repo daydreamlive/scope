@@ -30,8 +30,8 @@ class DepthAnythingConfig(BasePipelineConfig):
     # This pipeline doesn't need prompt input
     supports_prompts = False
 
-    # Estimated VRAM usage (vitl model)
-    estimated_vram_gb = 8.0
+    # Estimated VRAM usage (vits model - small/fast)
+    estimated_vram_gb = 4.0
 
     # Only video mode is supported (requires input frames)
     modes = {"video": ModeDefaults(default=True, input_size=4)}
@@ -42,7 +42,7 @@ class DepthAnythingConfig(BasePipelineConfig):
 
     # Depth model settings
     encoder: Literal["vits", "vitb", "vitl"] = Field(
-        default="vitl",
+        default="vits",
         description="Model encoder size: vits (fastest), vitb (balanced), vitl (most accurate)",
     )
 

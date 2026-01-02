@@ -33,7 +33,7 @@ logger = logging.getLogger("DepthWorkerProcess")
 
 def main():
     parser = argparse.ArgumentParser(description="Depth worker process")
-    parser.add_argument("--encoder", type=str, default="vitl", choices=["vits", "vitb", "vitl"])
+    parser.add_argument("--encoder", type=str, default="vits", choices=["vits", "vitb", "vitl"])
     parser.add_argument("--input-port", type=int, required=True)
     parser.add_argument("--output-port", type=int, required=True)
     parser.add_argument("--ready-file", type=str, required=True,
@@ -63,20 +63,23 @@ def main():
     ZMQ_TIMEOUT_MS = 1000  # 1 second timeout for recv
     ZMQ_HWM = 100  # High water mark for socket buffers
 
-    # Load depth model
-    logger.info("Loading depth model...")
-    from scope.core.pipelines.depthanything import VideoDepthAnythingModel as VideoDepthAnything
+    # Load depth pipeline
+    logger.info("Loading DepthAnythingPipeline...")
+    from scope.core.pipelines.depthanything import DepthAnythingPipeline
 
     try:
-        depth_model = VideoDepthAnything(
+        depth_pipeline = DepthAnythingPipeline(
             encoder=args.encoder,
             device=torch.device("cuda"),
             dtype=torch.float16,
+            input_size=392,  # Default input size
+            streaming=True,  # Use streaming mode for real-time processing
+            output_format="vace",  # Output format for VACE preprocessing
         )
-        depth_model.load_model()
-        logger.info("Depth model loaded successfully!")
+        depth_pipeline.prepare()  # Load the model
+        logger.info("DepthAnythingPipeline loaded successfully!")
     except Exception as e:
-        logger.error(f"Failed to load depth model: {e}", exc_info=True)
+        logger.error(f"Failed to load DepthAnythingPipeline: {e}", exc_info=True)
         sys.exit(1)
 
     # Setup ZeroMQ sockets
@@ -128,12 +131,16 @@ def main():
 
                 logger.debug(f"Received chunk {chunk_id}, frames shape: {frames.shape}")
 
-                # Convert numpy to torch tensor
-                frames_tensor = torch.from_numpy(frames).float()
+                # Convert numpy to torch tensor and prepare as list of frames for pipeline
+                frames_tensor = torch.from_numpy(frames).float()  # [F, H, W, C]
 
-                # Run depth estimation
+                # Convert to list of frames, each with shape [H, W, C]
+                frame_list = [frames_tensor[i] for i in range(frames_tensor.shape[0])]
+
+                # Use the pipeline's __call__ method - it's now optimized for vace format
+                # The pipeline will handle the conversion efficiently
                 start_time = time.time()
-                depth = depth_model.infer(frames_tensor)  # [F, H, W]
+                depth_output = depth_pipeline(video=frame_list)  # Returns [T, H, W, 3] in [0, 1]
                 inference_time = time.time() - start_time
                 num_frames = frames.shape[0]
 
@@ -142,30 +149,29 @@ def main():
                     f"{inference_time:.3f}s ({num_frames / inference_time:.1f} FPS)"
                 )
 
-                # Post-process depth for VACE
-                import torch.nn.functional as F
-
-                F_dim, H, W = depth.shape
+                # Convert pipeline output [T, H, W, 3] in [0, 1] to VACE format [1, 3, T, H, W] in [-1, 1]
+                T, H, W, C = depth_output.shape
 
                 # Resize to target dimensions if needed
                 if H != target_height or W != target_width:
-                    depth = depth.unsqueeze(1)  # [F, 1, H, W]
-                    depth = F.interpolate(
-                        depth,
+                    depth_output = depth_output.permute(0, 3, 1, 2)  # [T, 3, H, W]
+                    import torch.nn.functional as F
+                    depth_output = F.interpolate(
+                        depth_output,
                         size=(target_height, target_width),
                         mode="bilinear",
                         align_corners=False,
                     )
-                    depth = depth.squeeze(1)  # [F, H, W]
+                    depth_output = depth_output.permute(0, 2, 3, 1)  # [T, H, W, 3]
 
-                # Convert single-channel to 3-channel RGB (replicate)
-                depth = depth.unsqueeze(1).repeat(1, 3, 1, 1)  # [F, 3, H, W]
+                # Convert [T, H, W, 3] -> [T, 3, H, W]
+                depth_tensor = depth_output.permute(0, 3, 1, 2)  # [T, 3, H, W]
 
-                # Normalize to [-1, 1] for VAE encoding
-                depth = depth * 2.0 - 1.0
+                # Convert from [0, 1] to [-1, 1]
+                depth_tensor = depth_tensor * 2.0 - 1.0
 
-                # Add batch dimension and rearrange to [1, 3, F, H, W]
-                depth = depth.unsqueeze(0).permute(0, 2, 1, 3, 4)
+                # Add batch dimension and rearrange to [1, 3, T, H, W]
+                depth = depth_tensor.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, 3, T, H, W]
 
                 # Keep as float32 for numpy serialization
                 depth_cpu = depth.float().cpu()
@@ -194,7 +200,7 @@ def main():
         input_socket.close()
         output_socket.close()
         context.term()
-        depth_model.offload()
+        depth_pipeline.offload()
 
         # Remove ready file
         if ready_path.exists():
