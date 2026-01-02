@@ -1036,7 +1036,62 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
         args.append("--no-cache-dir")
     if pre:
         args.append("--pre")
+
+    # Include current project as editable dependency so plugins can depend on daydream-scope
+    project_root = Path(__file__).parent.parent.parent.parent
+    args += ["--editable", str(project_root)]
+
     args += list(packages)
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+@pipelines.command("uninstall", hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=True)
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation (not supported by uv, kept for compatibility)")
+def pipelines_uninstall(packages, yes):
+    """Uninstall a pipeline plugin.
+
+    Can uninstall by pipeline ID (e.g., 'test-generator') or package name (e.g., 'scope-test-generator').
+    """
+    @suppress_init_output
+    def _get_pipeline_package_mapping():
+        """Try to map pipeline IDs to package names."""
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        mapping = {}
+        # Common pattern: pipeline ID -> scope-{id} package name
+        builtin_pipelines = {
+            "streamdiffusionv2", "longlive", "krea-realtime-video",
+            "reward-forcing", "memflow", "passthrough", "depthanything"
+        }
+        for pipeline_id in PipelineRegistry.list_pipelines():
+            # Check if it's a plugin (not built-in)
+            if pipeline_id not in builtin_pipelines:
+                # Try common package name patterns
+                if PipelineRegistry.get(pipeline_id) is not None:
+                    # Try scope-{id} pattern
+                    potential_package = f"scope-{pipeline_id}"
+                    mapping[pipeline_id] = potential_package
+        return mapping
+
+    # Map pipeline IDs to package names if needed
+    package_mapping = _get_pipeline_package_mapping()
+    mapped_packages = []
+    for pkg in packages:
+        if pkg in package_mapping:
+            mapped_packages.append(package_mapping[pkg])
+            click.echo(f"Mapping pipeline ID '{pkg}' to package '{package_mapping[pkg]}'")
+        else:
+            mapped_packages.append(pkg)
+
+    args = ["uv", "pip", "uninstall"]
+    # uv pip uninstall doesn't support --yes flag, it always prompts
+    # The yes option is kept for compatibility but not used
+    args += mapped_packages
 
     result = subprocess.run(args, capture_output=False)
 
@@ -1100,7 +1155,60 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
         args.append("--no-cache-dir")
     if pre:
         args.append("--pre")
+
+    # Include current project as editable dependency so plugins can depend on daydream-scope
+    # This must come before the packages to install
+    project_root = Path(__file__).parent.parent.parent.parent
+    args += ["--editable", str(project_root)]
+
     args += list(packages)
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+@preprocessors.command("uninstall", hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=True)
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation (not supported by uv, kept for compatibility)")
+def preprocessors_uninstall(packages, yes):
+    """Uninstall a preprocessor plugin.
+
+    Can uninstall by preprocessor ID (e.g., 'test-generator') or package name (e.g., 'scope-test-generator').
+    """
+    @suppress_init_output
+    def _get_preprocessor_package_mapping():
+        """Try to map preprocessor IDs to package names."""
+        from scope.core.preprocessors.registry import PreprocessorRegistry
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        mapping = {}
+        # Common pattern: preprocessor ID -> scope-{id} package name
+        for preprocessor_id in PreprocessorRegistry.list_preprocessors():
+            # Check if it's a plugin (not built-in)
+            if preprocessor_id not in {"depthanything", "passthrough"}:
+                # Try common package name patterns
+                if PipelineRegistry.get(preprocessor_id) is not None:
+                    # Try scope-{id} pattern
+                    potential_package = f"scope-{preprocessor_id}"
+                    mapping[preprocessor_id] = potential_package
+        return mapping
+
+    # Map preprocessor IDs to package names if needed
+    package_mapping = _get_preprocessor_package_mapping()
+    mapped_packages = []
+    for pkg in packages:
+        if pkg in package_mapping:
+            mapped_packages.append(package_mapping[pkg])
+            click.echo(f"Mapping preprocessor ID '{pkg}' to package '{package_mapping[pkg]}'")
+        else:
+            mapped_packages.append(pkg)
+
+    args = ["uv", "pip", "uninstall"]
+    # uv pip uninstall doesn't support --yes flag, it always prompts
+    # The yes option is kept for compatibility but not used
+    args += mapped_packages
 
     result = subprocess.run(args, capture_output=False)
 

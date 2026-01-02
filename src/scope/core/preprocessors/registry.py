@@ -51,9 +51,9 @@ class PreprocessorRegistry:
         """Get list of all registered preprocessor IDs.
 
         Returns:
-            List of preprocessor IDs
+            List of preprocessor IDs (only explicitly registered preprocessors)
         """
-        return list(cls._preprocessors.keys())
+        return sorted(list(cls._preprocessors.keys()))
 
 
 # Register all available preprocessors
@@ -92,29 +92,40 @@ def _initialize_registry():
     _register_preprocessors()
 
     # Sync plugin preprocessors from PipelineRegistry
-    # Preprocessors are registered as pipelines via register_pipelines hook,
-    # so we check PipelineRegistry for any pipelines that are also preprocessors
+    # Plugin pipelines registered via register_pipelines hook are available as preprocessors
     try:
         from scope.core.pipelines.registry import PipelineRegistry
 
         # Get all registered pipelines
         all_pipelines = PipelineRegistry.list_pipelines()
 
-        # Known preprocessor IDs (built-in + any plugin preprocessors)
-        # Plugin preprocessors will be in PipelineRegistry if they were registered
-        # We can check if they're already in our registry, and if not but they're
-        # in PipelineRegistry, we can add them (though for now we only track built-ins)
+        # Built-in preprocessor IDs
         builtin_preprocessor_ids = {"depthanything", "passthrough"}
 
-        # Check if any plugin pipelines are preprocessors
-        # For now, we only auto-register built-ins. Plugin preprocessors would need
-        # to be explicitly identified, or we could check PipelineRegistry.get() when needed
+        # Built-in pipeline IDs (that are NOT preprocessors)
+        builtin_pipeline_ids = {
+            "streamdiffusionv2",
+            "longlive",
+            "krea-realtime-video",
+            "reward-forcing",
+            "memflow",
+        }
+
+        # Register plugin pipelines as preprocessors
+        # (exclude built-in pipelines that aren't preprocessors)
         for pipeline_id in all_pipelines:
             if pipeline_id in builtin_preprocessor_ids:
-                # Already registered as built-in
+                # Already registered as built-in preprocessor
                 continue
-            # Plugin preprocessors: could check PipelineRegistry here if needed
-            # For now, PreprocessorRegistry only tracks built-ins explicitly
+            if pipeline_id in builtin_pipeline_ids:
+                # Built-in pipeline that's not a preprocessor, skip
+                continue
+
+            # This is a plugin pipeline - register it as a preprocessor
+            pipeline_class = PipelineRegistry.get(pipeline_id)
+            if pipeline_class is not None:
+                PreprocessorRegistry.register(pipeline_id, pipeline_class)
+                logger.debug(f"Registered plugin pipeline as preprocessor: {pipeline_id}")
 
     except ImportError:
         # PipelineRegistry might not be available in all contexts

@@ -15,16 +15,17 @@ class ScopeHookSpec:
 
         Args:
             register: Callback to register pipeline classes.
-                     Usage: register(PipelineClass)
+                     Usage: register(PipelineClass) or register(PipelineClass, also_preprocessor=True)
 
         Note:
             Preprocessors are pipelines that implement the Pipeline interface
             and can be used to preprocess video input. They are registered
-            through the same hook as regular pipelines.
+            through the same hook as regular pipelines. To make a pipeline
+            also available as a preprocessor, pass also_preprocessor=True.
 
         Example:
             @scope.core.hookimpl
             def register_pipelines(register):
-                register(MyPipeline)
-                register(MyPreprocessor)  # Preprocessors are also pipelines
+                register(MyPipeline)  # Regular pipeline
+                register(MyPreprocessor, also_preprocessor=True)  # Pipeline that's also a preprocessor
         """
