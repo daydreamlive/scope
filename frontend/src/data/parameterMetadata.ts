@@ -82,4 +82,9 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "The configuration of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS.",
   },
+  preprocessorType: {
+    label: "Preprocessor:",
+    tooltip:
+      "Select a preprocessor to apply to video input. Depth Anything: extracts depth maps for VACE structural conditioning. Passthrough: passes video through unchanged. None: no preprocessing.",
+  },
 };

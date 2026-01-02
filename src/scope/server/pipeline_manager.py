@@ -34,6 +34,13 @@ class PipelineStatus(Enum):
     ERROR = "error"
 
 
+# List of built-in preprocessors with custom initialization
+BUILTIN_PREPROCESSORS = {
+    "depthanything",
+    "passthrough",
+}
+
+
 class PipelineManager:
     """Manager for ML pipeline lifecycle."""
 
@@ -44,6 +51,7 @@ class PipelineManager:
         self._load_params = None
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
+        self._async_preprocessors: dict[str, Any] = {}  # Dict of preprocessor_type -> AsyncPreprocessorClient
 
     @property
     def status(self) -> PipelineStatus:
@@ -59,6 +67,19 @@ class PipelineManager:
     def error_message(self) -> str | None:
         """Get last error message."""
         return self._error_message
+
+    @property
+    def async_preprocessor(self):
+        """Get the async preprocessor client (if any). Backward compatibility - returns first preprocessor."""
+        if self._async_preprocessors:
+            return next(iter(self._async_preprocessors.values()))
+        return None
+
+    @property
+    def async_preprocessors(self):
+        """Get all async preprocessor clients."""
+        return self._async_preprocessors
+
 
     def get_pipeline(self):
         """Get the loaded pipeline instance (thread-safe)."""
@@ -297,6 +318,16 @@ class PipelineManager:
         if self._pipeline:
             logger.info(f"Unloading pipeline: {self._pipeline_id}")
 
+        # Unload all async preprocessors if loaded
+        if self._async_preprocessors:
+            logger.info(f"Stopping {len(self._async_preprocessors)} async preprocessor(s)")
+            for preprocessor_type, client in self._async_preprocessors.items():
+                try:
+                    client.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping preprocessor {preprocessor_type}: {e}")
+            self._async_preprocessors.clear()
+
         # Change status and pipeline atomically
         self._status = PipelineStatus.NOT_LOADED
         self._pipeline = None
@@ -314,6 +345,82 @@ class PipelineManager:
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")
 
+    def _load_preprocessors(self, preprocessor_types: list[str] | None, encoder: str | None = None) -> None:
+        """Load preprocessors based on types.
+
+        Args:
+            preprocessor_types: List of preprocessor types (e.g., ["depthanything", "passthrough"])
+            encoder: For depthanything, encoder size ("vits", "vitb", or "vitl"). Defaults to "vits".
+        """
+        from scope.core.preprocessors import PreprocessorRegistry
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        if preprocessor_types is None:
+            preprocessor_types = []
+
+        # Determine which preprocessors to keep, add, and remove
+        current_types = set(self._async_preprocessors.keys())
+        new_types = set(preprocessor_types)
+
+        # Remove preprocessors that are no longer needed
+        to_remove = current_types - new_types
+        for preprocessor_type in to_remove:
+            logger.info(f"Unloading preprocessor: {preprocessor_type}")
+            client = self._async_preprocessors.pop(preprocessor_type)
+            try:
+                client.stop()
+            except Exception as e:
+                logger.error(f"Error stopping preprocessor {preprocessor_type}: {e}")
+
+        # Add new preprocessors
+        to_add = new_types - current_types
+        for preprocessor_type in to_add:
+            # Check if preprocessor is registered (built-in or plugin)
+            preprocessor_class = PreprocessorRegistry.get(preprocessor_type)
+
+            # If not found in PreprocessorRegistry, check PipelineRegistry (for plugin preprocessors)
+            if preprocessor_class is None:
+                preprocessor_class = PipelineRegistry.get(preprocessor_type)
+                if preprocessor_class is not None:
+                    # Plugin preprocessor registered as pipeline
+                    logger.info(f"Loading plugin preprocessor: {preprocessor_type}")
+
+            if preprocessor_class is None:
+                if preprocessor_type not in BUILTIN_PREPROCESSORS:
+                    logger.error(f"Unknown preprocessor type: {preprocessor_type}")
+                    continue
+                # Built-in preprocessor not in registry yet, continue with async client loading
+
+            # All preprocessors run in separate processes
+            from scope.core.preprocessors import AsyncPreprocessorClient
+
+            encoder_val = encoder or "vits"  # Default encoder for depthanything
+            logger.info(
+                f"Loading async {preprocessor_type} preprocessor"
+                + (f" with encoder: {encoder_val}" if preprocessor_type == "depthanything" else "")
+            )
+            client = AsyncPreprocessorClient(
+                preprocessor_type=preprocessor_type,
+                encoder=encoder_val if preprocessor_type == "depthanything" else None,
+            )
+            if client.start():
+                logger.info(f"Async {preprocessor_type} preprocessor started")
+                self._async_preprocessors[preprocessor_type] = client
+            else:
+                logger.error(f"Failed to start async {preprocessor_type} preprocessor")
+
+    def _load_preprocessor(self, preprocessor_type: str, encoder: str | None = None) -> None:
+        """Load a single preprocessor (backward compatibility wrapper).
+
+        Args:
+            preprocessor_type: Type of preprocessor ("depthanything", "passthrough", etc.)
+            encoder: For depthanything, encoder size ("vits", "vitb", or "vitl"). Defaults to "vits".
+        """
+        if preprocessor_type is None:
+            self._load_preprocessors(None, encoder)
+        else:
+            self._load_preprocessors([preprocessor_type], encoder)
+
     def _load_pipeline_implementation(
         self, pipeline_id: str, load_params: dict | None = None
     ):
@@ -327,6 +434,7 @@ class PipelineManager:
         BUILTIN_PIPELINES = {
             "streamdiffusionv2",
             "passthrough",
+            "depthanything",
             "longlive",
             "krea-realtime-video",
             "reward-forcing",
@@ -398,6 +506,7 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
+
             return pipeline
 
         elif pipeline_id == "passthrough":
@@ -417,6 +526,37 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("Passthrough pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "depthanything":
+            from scope.core.pipelines.depthanything import DepthAnythingPipeline
+
+            # Use load parameters for resolution and encoder, with defaults
+            height = 480
+            width = 848
+            encoder = "vits"
+            input_size = 392
+            streaming = True
+            output_format = "grayscale"
+            if load_params:
+                height = load_params.get("height", height)
+                width = load_params.get("width", width)
+                encoder = load_params.get("encoder", encoder)
+                input_size = load_params.get("input_size", input_size)
+                streaming = load_params.get("streaming", streaming)
+                output_format = load_params.get("output_format", output_format)
+
+            pipeline = DepthAnythingPipeline(
+                height=height,
+                width=width,
+                encoder=encoder,
+                device=get_device(),
+                dtype=torch.float16,
+                input_size=input_size,
+                streaming=streaming,
+                output_format=output_format,
+            )
+            logger.info("DepthAnything pipeline initialized")
             return pipeline
 
         elif pipeline_id == "longlive":

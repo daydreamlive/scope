@@ -78,6 +78,7 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    availablePreprocessors,
   } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
@@ -508,6 +509,26 @@ export function StreamPage() {
     }
   };
 
+  const handlePreprocessorTypeChange = (type: string | null) => {
+    updateSettings({ preprocessorType: type });
+    // Send preprocessor type update to backend if streaming (backward compatibility)
+    if (isStreaming) {
+      sendParameterUpdate({
+        preprocessor_type: type,
+      });
+    }
+  };
+
+  const handlePreprocessorTypesChange = (types: string[]) => {
+    updateSettings({ preprocessorTypes: types });
+    // Send preprocessor types update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        preprocessor_types: types.length > 0 ? types : null,
+      });
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -738,7 +759,15 @@ export function StreamPage() {
 
         // Add VACE parameters if pipeline supports VACE
         if (currentPipeline?.supportsVACE) {
-          const vaceEnabled = settings.vaceEnabled ?? currentMode !== "video";
+          // Check if depth preprocessor is enabled
+          const preprocessorTypes = settings.preprocessorTypes || (settings.preprocessorType ? [settings.preprocessorType] : []);
+          const depthPreprocessorActive = preprocessorTypes.includes("depthanything");
+
+          // When depth preprocessor is enabled, VACE should be enabled for best results
+          // (though depth-only mode can work without VACE)
+          const vaceEnabled =
+            depthPreprocessorActive ||
+            (settings.vaceEnabled ?? currentMode !== "video");
           loadParams.vace_enabled = vaceEnabled;
 
           // Add VACE reference images if provided
@@ -791,6 +820,8 @@ export function StreamPage() {
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_context_scale?: number;
+        preprocessor_type?: string | null; // Deprecated, use preprocessor_types
+        preprocessor_types?: string[] | null;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -831,6 +862,14 @@ export function StreamPage() {
       if (currentMode === "video") {
         initialParameters.noise_scale = settings.noiseScale ?? 0.7;
         initialParameters.noise_controller = settings.noiseController ?? true;
+
+        // Include preprocessor settings if enabled
+        if (settings.preprocessorTypes && settings.preprocessorTypes.length > 0) {
+          initialParameters.preprocessor_types = settings.preprocessorTypes;
+        } else if (settings.preprocessorType) {
+          // Backward compatibility: single preprocessor_type
+          initialParameters.preprocessor_type = settings.preprocessorType;
+        }
       }
 
       // Spout settings - send if enabled
@@ -1117,6 +1156,11 @@ export function StreamPage() {
             onVaceEnabledChange={handleVaceEnabledChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
+            preprocessorType={settings.preprocessorType ?? null}
+            onPreprocessorTypeChange={handlePreprocessorTypeChange}
+            preprocessorTypes={settings.preprocessorTypes || []}
+            onPreprocessorTypesChange={handlePreprocessorTypesChange}
+            availablePreprocessors={availablePreprocessors}
           />
         </div>
       </div>

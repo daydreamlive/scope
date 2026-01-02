@@ -25,12 +25,22 @@ def register_plugin_pipelines(registry):
     Args:
         registry: PipelineRegistry to register pipelines with
     """
+    from scope.core.preprocessors.registry import PreprocessorRegistry
 
-    def register_callback(pipeline_class):
-        """Callback function passed to plugins."""
+    def register_callback(pipeline_class, also_preprocessor=False):
+        """Callback function passed to plugins.
+
+        Args:
+            pipeline_class: Pipeline class to register
+            also_preprocessor: If True, also register as a preprocessor
+        """
         config_class = pipeline_class.get_config_class()
         pipeline_id = config_class.pipeline_id
         registry.register(pipeline_id, pipeline_class)
         logger.info(f"Registered plugin pipeline: {pipeline_id}")
+
+        if also_preprocessor:
+            PreprocessorRegistry.register(pipeline_id, pipeline_class)
+            logger.info(f"Registered plugin preprocessor: {pipeline_id}")
 
     pm.hook.register_pipelines(register=register_callback)

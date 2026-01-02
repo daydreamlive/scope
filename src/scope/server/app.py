@@ -51,6 +51,7 @@ from .schema import (
     IceServersResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
+    PreprocessorsResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
@@ -385,6 +386,15 @@ async def get_pipeline_schemas():
             pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
+
+
+@app.get("/api/v1/preprocessors", response_model=PreprocessorsResponse)
+async def get_preprocessors():
+    """Get list of all available preprocessors."""
+    from scope.core.preprocessors.registry import PreprocessorRegistry
+
+    preprocessors = PreprocessorRegistry.list_preprocessors()
+    return PreprocessorsResponse(preprocessors=preprocessors)
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
@@ -1001,8 +1011,17 @@ def plugins():
         click.echo(f"  • {plugin_name}")
 
 
-@main.command()
-def pipelines():
+@main.group(invoke_without_command=True)
+@click.pass_context
+def pipelines(ctx):
+    """Manage pipelines."""
+    # If no subcommand, list pipelines (backward compatibility)
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(pipelines_list)
+
+
+@pipelines.command("list")
+def pipelines_list():
     """List all available pipelines."""
 
     @suppress_init_output
@@ -1024,7 +1043,7 @@ def pipelines():
         click.echo(f"  • {pipeline_id}")
 
 
-@main.command(hidden=not _is_preview_enabled())
+@pipelines.command(hidden=not _is_preview_enabled())
 @click.argument("packages", nargs=-1, required=False)
 @click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
 @click.option(
@@ -1036,7 +1055,7 @@ def pipelines():
     "--pre", is_flag=True, help="Include pre-release and development versions"
 )
 def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
-    """Install a plugin."""
+    """Install a pipeline plugin."""
     args = ["uv", "pip", "install"]
     if upgrade:
         args.append("--upgrade")
@@ -1048,12 +1067,214 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
         args.append("--no-cache-dir")
     if pre:
         args.append("--pre")
+
+    # Include current project as editable dependency so plugins can depend on daydream-scope
+    project_root = Path(__file__).parent.parent.parent.parent
+    args += ["--editable", str(project_root)]
+
     args += list(packages)
 
     result = subprocess.run(args, capture_output=False)
 
     if result.returncode != 0:
         sys.exit(result.returncode)
+
+
+@pipelines.command("uninstall", hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=True)
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation (not supported by uv, kept for compatibility)")
+def pipelines_uninstall(packages, yes):
+    """Uninstall a pipeline plugin.
+
+    Can uninstall by pipeline ID (e.g., 'test-generator') or package name (e.g., 'scope-test-generator').
+    """
+    @suppress_init_output
+    def _get_pipeline_package_mapping():
+        """Try to map pipeline IDs to package names."""
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        mapping = {}
+        # Common pattern: pipeline ID -> scope-{id} package name
+        builtin_pipelines = {
+            "streamdiffusionv2", "longlive", "krea-realtime-video",
+            "reward-forcing", "memflow", "passthrough", "depthanything"
+        }
+        for pipeline_id in PipelineRegistry.list_pipelines():
+            # Check if it's a plugin (not built-in)
+            if pipeline_id not in builtin_pipelines:
+                # Try common package name patterns
+                if PipelineRegistry.get(pipeline_id) is not None:
+                    # Try scope-{id} pattern
+                    potential_package = f"scope-{pipeline_id}"
+                    mapping[pipeline_id] = potential_package
+        return mapping
+
+    # Map pipeline IDs to package names if needed
+    package_mapping = _get_pipeline_package_mapping()
+    mapped_packages = []
+    for pkg in packages:
+        if pkg in package_mapping:
+            mapped_packages.append(package_mapping[pkg])
+            click.echo(f"Mapping pipeline ID '{pkg}' to package '{package_mapping[pkg]}'")
+        else:
+            mapped_packages.append(pkg)
+
+    args = ["uv", "pip", "uninstall"]
+    # uv pip uninstall doesn't support --yes flag, it always prompts
+    # The yes option is kept for compatibility but not used
+    args += mapped_packages
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def preprocessors(ctx):
+    """Manage preprocessors."""
+    # If no subcommand, list preprocessors
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(preprocessors_list)
+
+
+@preprocessors.command("list")
+def preprocessors_list():
+    """List all available preprocessors."""
+
+    @suppress_init_output
+    def _load_preprocessors():
+        from scope.core.preprocessors.registry import PreprocessorRegistry
+
+        return PreprocessorRegistry.list_preprocessors()
+
+    all_preprocessors = _load_preprocessors()
+
+    if not all_preprocessors:
+        click.echo("No preprocessors available.")
+        return
+
+    click.echo(f"{len(all_preprocessors)} preprocessor(s) available:\n")
+
+    # List all preprocessors
+    for preprocessor_id in all_preprocessors:
+        click.echo(f"  • {preprocessor_id}")
+
+
+@preprocessors.command(hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=False)
+@click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
+@click.option(
+    "-e", "--editable", help="Install a project in editable mode from this path"
+)
+@click.option("--force-reinstall", is_flag=True, help="Force reinstall packages")
+@click.option("--no-cache-dir", is_flag=True, help="Disable the cache")
+@click.option(
+    "--pre", is_flag=True, help="Include pre-release and development versions"
+)
+def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
+    """Install a preprocessor plugin."""
+    args = ["uv", "pip", "install"]
+    if upgrade:
+        args.append("--upgrade")
+    if editable:
+        args += ["--editable", editable]
+    if force_reinstall:
+        args.append("--force-reinstall")
+    if no_cache_dir:
+        args.append("--no-cache-dir")
+    if pre:
+        args.append("--pre")
+
+    # Include current project as editable dependency so plugins can depend on daydream-scope
+    # This must come before the packages to install
+    project_root = Path(__file__).parent.parent.parent.parent
+    args += ["--editable", str(project_root)]
+
+    args += list(packages)
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+@preprocessors.command("uninstall", hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=True)
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation (not supported by uv, kept for compatibility)")
+def preprocessors_uninstall(packages, yes):
+    """Uninstall a preprocessor plugin.
+
+    Can uninstall by preprocessor ID (e.g., 'test-generator') or package name (e.g., 'scope-test-generator').
+    """
+    @suppress_init_output
+    def _get_preprocessor_package_mapping():
+        """Try to map preprocessor IDs to package names."""
+        from scope.core.preprocessors.registry import PreprocessorRegistry
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        mapping = {}
+        # Common pattern: preprocessor ID -> scope-{id} package name
+        for preprocessor_id in PreprocessorRegistry.list_preprocessors():
+            # Check if it's a plugin (not built-in)
+            if preprocessor_id not in {"depthanything", "passthrough"}:
+                # Try common package name patterns
+                if PipelineRegistry.get(preprocessor_id) is not None:
+                    # Try scope-{id} pattern
+                    potential_package = f"scope-{preprocessor_id}"
+                    mapping[preprocessor_id] = potential_package
+        return mapping
+
+    # Map preprocessor IDs to package names if needed
+    package_mapping = _get_preprocessor_package_mapping()
+    mapped_packages = []
+    for pkg in packages:
+        if pkg in package_mapping:
+            mapped_packages.append(package_mapping[pkg])
+            click.echo(f"Mapping preprocessor ID '{pkg}' to package '{package_mapping[pkg]}'")
+        else:
+            mapped_packages.append(pkg)
+
+    args = ["uv", "pip", "uninstall"]
+    # uv pip uninstall doesn't support --yes flag, it always prompts
+    # The yes option is kept for compatibility but not used
+    args += mapped_packages
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+# Backward compatibility: keep old commands working
+@main.command()
+def pipelines_legacy():
+    """List all available pipelines (legacy command, use 'pipelines list')."""
+    # Redirect to new command
+    from click import get_current_context
+    ctx = get_current_context()
+    ctx.invoke(pipelines.list)
+
+
+@main.command(hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=False)
+@click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
+@click.option(
+    "-e", "--editable", help="Install a project in editable mode from this path"
+)
+@click.option("--force-reinstall", is_flag=True, help="Force reinstall packages")
+@click.option("--no-cache-dir", is_flag=True, help="Disable the cache")
+@click.option(
+    "--pre", is_flag=True, help="Include pre-release and development versions"
+)
+def install_legacy(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
+    """Install a plugin (legacy command, use 'pipelines install' or 'preprocessors install')."""
+    # Redirect to pipelines install for backward compatibility
+    from click import get_current_context
+    ctx = get_current_context()
+    ctx.invoke(pipelines.install, packages=packages, upgrade=upgrade, editable=editable,
+                force_reinstall=force_reinstall, no_cache_dir=no_cache_dir, pre=pre)
 
 
 @main.command(hidden=not _is_preview_enabled())

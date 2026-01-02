@@ -19,6 +19,7 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
+import { OrderedMultiSelect } from "./ui/ordered-multi-select";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
@@ -87,6 +88,12 @@ interface SettingsPanelProps {
   onVaceEnabledChange?: (enabled: boolean) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
+  // Preprocessor settings
+  preprocessorType?: string | null;
+  onPreprocessorTypeChange?: (type: string | null) => void;
+  preprocessorTypes?: string[];
+  onPreprocessorTypesChange?: (types: string[]) => void;
+  availablePreprocessors?: string[];
 }
 
 export function SettingsPanel({
@@ -126,6 +133,11 @@ export function SettingsPanel({
   onVaceEnabledChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
+  preprocessorType = null,
+  onPreprocessorTypeChange,
+  preprocessorTypes = [],
+  onPreprocessorTypesChange,
+  availablePreprocessors = [],
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -386,6 +398,73 @@ export function SettingsPanel({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Preprocessor - available for all pipelines in video mode */}
+        {inputMode === "video" && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.preprocessorType.label}
+                tooltip={PARAMETER_METADATA.preprocessorType.tooltip + " You can select multiple preprocessors. Each runs in a separate process."}
+                className="text-xs text-muted-foreground w-32"
+              />
+              {onPreprocessorTypesChange ? (
+                <OrderedMultiSelect
+                  options={availablePreprocessors.map((id) => {
+                    // Format preprocessor ID for display
+                    const displayNameMap: Record<string, string> = {
+                      depthanything: "Depth Anything",
+                      passthrough: "Passthrough",
+                    };
+                    const displayName = displayNameMap[id] || id
+                      .split("-")
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(" ");
+                    return { value: id, label: displayName };
+                  })}
+                  value={preprocessorTypes || []}
+                  onChange={onPreprocessorTypesChange}
+                  placeholder="Add preprocessor..."
+                  disabled={isStreaming || isLoading}
+                  className="flex-1"
+                />
+              ) : (
+                // Backward compatibility: single select
+                <Select
+                  value={preprocessorType || "none"}
+                  onValueChange={value =>
+                    onPreprocessorTypeChange?.(
+                      value === "none" ? null : value
+                    )
+                  }
+                  disabled={isStreaming || isLoading}
+                >
+                  <SelectTrigger className="flex-1 h-7">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {availablePreprocessors.map((id) => {
+                      const displayNameMap: Record<string, string> = {
+                        depthanything: "Depth Anything",
+                        passthrough: "Passthrough",
+                      };
+                      const displayName = displayNameMap[id] || id
+                        .split("-")
+                        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                        .join(" ");
+                      return (
+                        <SelectItem key={id} value={id}>
+                          {displayName}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
           </div>
         )}
 

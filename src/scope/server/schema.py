@@ -113,6 +113,14 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    preprocessor_type: str | None = Field(
+        default=None,
+        description="Preprocessor type to use for video input (deprecated, use preprocessor_types). Options: 'depthanything' (extracts depth maps), 'passthrough' (passes through unchanged), None (no preprocessing).",
+    )
+    preprocessor_types: list[str] | None = Field(
+        default=None,
+        description="List of preprocessor types to use for video input. Each preprocessor runs in a separate process. Results are concatenated along the channel dimension. Options: 'depthanything' (extracts depth maps), 'passthrough' (passes through unchanged).",
+    )
 
 
 class SpoutConfig(BaseModel):
@@ -211,6 +219,14 @@ class LoRAMergeMode(str, Enum):
     PERMANENT_MERGE = "permanent_merge"
 
 
+class DepthPreprocessorEncoder(str, Enum):
+    """Depth preprocessor encoder size options."""
+
+    VITS = "vits"  # Small - fastest, lower quality
+    VITB = "vitb"  # Base - balanced
+    VITL = "vitl"  # Large - best quality, slower
+
+
 class LoRAConfig(BaseModel):
     """Configuration for a LoRA (Low-Rank Adaptation) adapter."""
 
@@ -306,6 +322,10 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
         default=True,
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
     )
+    depth_preprocessor_encoder: DepthPreprocessorEncoder | None = Field(
+        default=None,
+        description="Load Video-Depth-Anything preprocessor with specified encoder size. None = don't load. Options: vits (fast), vitb (balanced), vitl (best quality).",
+    )
 
 
 class PassthroughLoadParams(PipelineLoadParams):
@@ -344,6 +364,10 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     vace_enabled: bool = Field(
         default=True,
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+    )
+    depth_preprocessor_encoder: DepthPreprocessorEncoder | None = Field(
+        default=None,
+        description="Load Video-Depth-Anything preprocessor with specified encoder size. None = don't load. Options: vits (fast), vitb (balanced), vitl (best quality).",
     )
 
 
@@ -419,6 +443,12 @@ class PipelineSchemasResponse(BaseModel):
     """
 
     pipelines: dict = Field(..., description="Pipeline schemas keyed by pipeline ID")
+
+
+class PreprocessorsResponse(BaseModel):
+    """Response containing list of available preprocessors."""
+
+    preprocessors: list[str] = Field(..., description="List of preprocessor IDs")
 
 
 class AssetFileInfo(BaseModel):
