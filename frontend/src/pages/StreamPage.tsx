@@ -712,6 +712,11 @@ export function StreamPage() {
       // Build load parameters dynamically based on pipeline capabilities and settings
       // The backend will use only the parameters it needs based on the pipeline schema
       const currentPipeline = pipelines?.[pipelineIdToUse];
+      // Compute VACE enabled state - needed for both loadParams and initialParameters
+      const vaceEnabled = currentPipeline?.supportsVACE
+        ? (settings.vaceEnabled ?? currentMode !== "video")
+        : false;
+
       let loadParams: Record<string, unknown> | null = null;
 
       if (resolution) {
@@ -738,7 +743,6 @@ export function StreamPage() {
 
         // Add VACE parameters if pipeline supports VACE
         if (currentPipeline?.supportsVACE) {
-          const vaceEnabled = settings.vaceEnabled ?? currentMode !== "video";
           loadParams.vace_enabled = vaceEnabled;
 
           // Add VACE reference images if provided
@@ -791,6 +795,7 @@ export function StreamPage() {
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_context_scale?: number;
+        vace_enabled?: boolean;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -825,6 +830,11 @@ export function StreamPage() {
       if ("vace_ref_images" in vaceParams) {
         initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         initialParameters.vace_context_scale = vaceParams.vace_context_scale;
+      }
+
+      // Explicitly pass vace_enabled state
+      if (currentPipeline?.supportsVACE) {
+        initialParameters.vace_enabled = vaceEnabled;
       }
 
       // Video mode parameters - applies to all pipelines in video mode

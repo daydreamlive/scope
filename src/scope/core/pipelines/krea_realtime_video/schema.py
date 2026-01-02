@@ -12,6 +12,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     estimated_vram_gb = 32.0
     requires_models = True
     supports_lora = True
+    supports_vace = True
 
     supports_cache_management = True
     supports_kv_cache_bias = True

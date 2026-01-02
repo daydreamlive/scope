@@ -20,6 +20,12 @@ VACE_ARTIFACT = HuggingfaceRepoArtifact(
     files=["Wan2_1-VACE_module_1_3B_bf16.safetensors"],
 )
 
+VACE_14B_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="Kijai/WanVideo_comfy",
+    # Use BF16 version for CPU offloading compatibility (FP8 doesn't work on CPU)
+    files=["Wan2_1-VACE_module_14B_bf16.safetensors"],
+)
+
 # Pipeline-specific artifacts
 PIPELINE_ARTIFACTS = {
     "streamdiffusionv2": [
@@ -43,6 +49,7 @@ PIPELINE_ARTIFACTS = {
     "krea-realtime-video": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        VACE_14B_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="Wan-AI/Wan2.1-T2V-14B",
             files=["config.json"],
