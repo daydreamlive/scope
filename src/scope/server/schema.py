@@ -117,10 +117,6 @@ class Parameters(BaseModel):
         default=False,
         description="Enable Video-Depth-Anything preprocessor. Extracts depth maps from video input to use as VACE structural conditioning.",
     )
-    depth_preprocessor_mode: Literal["depth_only"] = Field(
-        default="depth_only",
-        description="Depth preprocessor mode. 'depth_only': Generate new video from depth structure + prompt only.",
-    )
 
 
 class SpoutConfig(BaseModel):

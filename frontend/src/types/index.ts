@@ -76,7 +76,6 @@ export interface SettingsState {
   // Depth preprocessor settings
   depthPreprocessor?: boolean;
   depthPreprocessorEncoder?: "vits" | "vitb" | "vitl";
-  depthPreprocessorMode?: "depth_only";
 }
 
 export interface PipelineInfo {

@@ -92,9 +92,4 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Depth model size. vits: fastest, lower quality. vitb: balanced. vitl: best quality, slower.",
   },
-  depthPreprocessorMode: {
-    label: "Mode:",
-    tooltip:
-      "Generate new video using only depth structure and text prompt (ignores original video content).",
-  },
 };

@@ -746,9 +746,6 @@ class FrameProcessor:
                 depth_preprocessor_enabled = self.parameters.get(
                     "depth_preprocessor", False
                 )
-                depth_mode = self.parameters.get(
-                    "depth_preprocessor_mode", "depth_only"
-                )
 
                 # Handle depth preprocessing (always async)
                 if depth_preprocessor_enabled:
@@ -811,10 +808,9 @@ class FrameProcessor:
                         if gpu_time > 0.01:
                             logger.debug(f"[Overhead] Depth GPU transfer: {gpu_time*1000:.1f}ms")
 
-                        logger.debug(
-                            f"Using async depth (mode={depth_mode}), "
-                            f"shape: {depth_input.shape}"
-                        )
+                            logger.debug(
+                                f"Using async depth, shape: {depth_input.shape}"
+                            )
 
                         # Depth-only mode: generate from depth structure only
                         if vace_enabled:

@@ -822,7 +822,6 @@ export function StreamPage() {
         vace_ref_images?: string[];
         vace_context_scale?: number;
         depth_preprocessor?: boolean;
-        depth_preprocessor_mode?: "depth_only";
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -867,8 +866,6 @@ export function StreamPage() {
         // Include depth preprocessor settings if enabled
         if (settings.depthPreprocessor) {
           initialParameters.depth_preprocessor = true;
-          initialParameters.depth_preprocessor_mode =
-            settings.depthPreprocessorMode ?? "depth_only";
         }
       }
 
