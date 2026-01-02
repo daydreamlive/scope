@@ -67,15 +67,9 @@ def create_vae(
     return vae_factory(model_dir=model_dir, model_name=model_name, vae_path=vae_path)
 
 
-def list_vae_types() -> list[str]:
-    """Return list of available VAE types for UI dropdowns."""
-    return list(VAE_REGISTRY.keys())
-
-
 __all__ = [
     "WanVAEWrapper",
     "create_vae",
-    "list_vae_types",
     "VAE_REGISTRY",
     "DEFAULT_VAE_TYPE",
 ]

@@ -399,9 +399,12 @@ export interface PipelineSchemaInfo {
   supports_cache_management: boolean;
   supports_kv_cache_bias: boolean;
   supports_quantization: boolean;
+  supports_vae_type: boolean;
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
+  // Available VAE types from config schema enum
+  vae_types?: string[];
 }
 
 export interface PipelineSchemasResponse {
@@ -425,24 +428,3 @@ export const getPipelineSchemas =
     const result = await response.json();
     return result;
   };
-
-export interface VaeTypesResponse {
-  vae_types: string[];
-}
-
-export const getVaeTypes = async (): Promise<VaeTypesResponse> => {
-  const response = await fetch("/api/v1/vae/types", {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Get VAE types failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};

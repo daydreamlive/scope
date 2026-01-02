@@ -79,7 +79,6 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
-    vaeTypes,
   } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
@@ -1127,7 +1126,7 @@ export function StreamPage() {
             onVaceContextScaleChange={handleVaceContextScaleChange}
             vaeType={settings.vaeType ?? "wan"}
             onVaeTypeChange={handleVaeTypeChange}
-            vaeTypes={vaeTypes}
+            vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes ?? ["wan"]}
           />
         </div>
       </div>

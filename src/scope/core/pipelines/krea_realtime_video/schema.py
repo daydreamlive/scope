@@ -16,6 +16,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     supports_cache_management = True
     supports_kv_cache_bias = True
     supports_quantization = True
+    supports_vae_type = True
     min_dimension = 16
     modified = True
     recommended_quantization_vram_threshold = 40.0

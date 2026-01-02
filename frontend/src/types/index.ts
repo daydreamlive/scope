@@ -103,8 +103,11 @@ export interface PipelineInfo {
   supportsCacheManagement?: boolean;
   supportsKvCacheBias?: boolean;
   supportsQuantization?: boolean;
+  supportsVaeType?: boolean;
   minDimension?: number;
   recommendedQuantizationVramThreshold?: number | null;
+  // Available VAE types from config schema enum
+  vaeTypes?: string[];
 }
 
 export interface DownloadProgress {

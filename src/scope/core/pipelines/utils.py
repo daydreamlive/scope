@@ -14,6 +14,13 @@ class Quantization(str, Enum):
     FP8_E4M3FN = "fp8_e4m3fn"
 
 
+class VaeType(str, Enum):
+    """VAE type enumeration."""
+
+    WAN = "wan"
+    LIGHTVAE = "lightvae"
+
+
 def load_state_dict(weights_path: str) -> dict:
     """Load weights with automatic format detection."""
     if not os.path.exists(weights_path):
