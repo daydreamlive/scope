@@ -267,13 +267,19 @@ class BenchmarkRunner:
 
             try:
                 monitor.start()
+                output = None
                 for _ in range(self.iterations):
                     t0 = time.time()
                     output = pipeline(**inputs)
                     latency = time.time() - t0
                     latencies.append(latency)
                     fps_measures.append(output.shape[0] / latency)
+
+                if output is not None:
+                    output = output.cpu()
                     del output
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
             finally:
                 try:
                     monitor.stop()
@@ -320,7 +326,7 @@ class BenchmarkRunner:
         pid = config["pipeline_id"]
         pipeline_class = PipelineRegistry.get(pid)
 
-        model_config = OmegaConf.load(Path(__file__).parent / "src/scope/core/pipelines" / pid / "model.yaml")
+        model_config = OmegaConf.load(Path(__file__).parent / "src/scope/core/pipelines" / pid.replace("-", "_") / "model.yaml")
         pipeline_config = {
             "model_dir": str(get_models_dir()),
             "model_config": model_config,
@@ -340,19 +346,19 @@ class BenchmarkRunner:
                 "generator_path": model_path("LongLive-1.3B/models/longlive_base.pt"),
                 "lora_path": model_path("LongLive-1.3B/models/lora.pt")
             }
-        elif pid == "krea_realtime_video":
+        elif pid == "krea-realtime-video":
             paths = {
                 "generator_path": model_path("krea-realtime-video/krea-realtime-video-14b.safetensors"),
                 "vae_path": model_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
             }
-        elif pid == "reward_forcing":
+        elif pid == "reward-forcing":
             paths = {"generator_path": model_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")}
 
         pipeline_config.update(paths)
         if "text_encoder_path" not in pipeline_config: pipeline_config["text_encoder_path"] = wan_enc
         if "tokenizer_path" not in pipeline_config: pipeline_config["tokenizer_path"] = wan_tok
 
-        quantization = Quantization.FP8_E4M3FN if pid == "krea_realtime_video" else None
+        quantization = Quantization.FP8_E4M3FN if pid == "krea-realtime-video" else None
         args = {
             "config": OmegaConf.create(pipeline_config),
             "device": self.device,
@@ -361,7 +367,7 @@ class BenchmarkRunner:
         if quantization:
             args.update({"quantization": quantization})
 
-        if pid == "krea_realtime_video":
+        if pid == "krea-realtime-video":
             args["compile"] = self.compile_model
         return pipeline_class(**args)
 
