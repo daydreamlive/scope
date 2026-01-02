@@ -73,7 +73,7 @@ Then:
 
 ```
 # Run from scope directory
-uv run -m score.core.pipelines.longlive.test
+uv run -m scope.core.pipelines.longlive.test
 ```
 
 This will create an `output.mp4` file in the `longlive` directory.
