@@ -247,7 +247,8 @@ class CausalWanSelfAttention(nn.Module):
                     attn_out = attn_out[:, :, :-padded_length]
                 x = attn_out.transpose(2, 1)
         else:
-            frame_seqlen = math.prod(grid_sizes[0][1:]).item()
+            # frame_seqlen = math.prod(grid_sizes[0][1:]).item()
+            frame_seqlen = 1560
             current_start_frame = current_start // frame_seqlen
             roped_query = causal_rope_apply(
                 q, grid_sizes, freqs, start_frame=current_start_frame
@@ -265,31 +266,31 @@ class CausalWanSelfAttention(nn.Module):
             # Compute cache update parameters without modifying kv_cache directly
             cache_update_info = None
             is_recompute = (
-                current_end <= kv_cache["global_end_index"].item() and current_start > 0
+                current_end <= kv_cache["global_end_index"] and current_start > 0
             )
             if (
                 self.local_attn_size != -1
-                and (current_end > kv_cache["global_end_index"].item())
+                and (current_end > kv_cache["global_end_index"])
                 and (
-                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size
+                    num_new_tokens + kv_cache["local_end_index"] > kv_cache_size
                 )
             ):
                 # Calculate the number of new tokens added in this step
                 # Shift existing cache content left to discard oldest tokens
                 num_evicted_tokens = (
-                    num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+                    num_new_tokens + kv_cache["local_end_index"] - kv_cache_size
                 )
                 num_rolled_tokens = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     - num_evicted_tokens
                     - sink_tokens
                 )
 
                 # Compute updated local indices
                 local_end_index = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     + current_end
-                    - kv_cache["global_end_index"].item()
+                    - kv_cache["global_end_index"]
                     - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
@@ -351,9 +352,9 @@ class CausalWanSelfAttention(nn.Module):
             else:
                 # Assign new keys/values directly up to current_end
                 local_end_index = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     + current_end
-                    - kv_cache["global_end_index"].item()
+                    - kv_cache["global_end_index"]
                 )
                 local_start_index = local_end_index - num_new_tokens
 
@@ -1047,8 +1048,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 False if update_info is None else update_info.get("is_recompute", False)
             )
             if not is_recompute:
-                kv_cache[block_index]["global_end_index"].fill_(current_end)
-                kv_cache[block_index]["local_end_index"].fill_(local_end_index)
+                cache = kv_cache[block_index]
+                cache["global_end_index"][0] = current_end
+                cache["local_end_index"][0] = local_end_index
 
     def _forward_inference(
         self,

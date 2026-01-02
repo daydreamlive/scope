@@ -131,6 +131,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
             )
 
             print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
+
+            start = time.time()
+            generator = torch.compile(generator, fullgraph=False)
+            print(f"Compiled generator in {time.time() - start:.3f}s")
         else:
             generator = generator.to(device=device, dtype=dtype)
 
@@ -185,6 +189,25 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
+
+        # Warmup runs to trigger torch.compile compilation
+        if quantization == Quantization.FP8_E4M3FN:
+            self._warmup(num_runs=3)
+
+    def _warmup(self, num_runs: int = 3):
+        """Run warmup iterations to trigger torch.compile compilation."""
+        print(f"Running {num_runs} warmup iterations...")
+        start = time.time()
+
+        warmup_prompt = [{"text": "warmup", "weight": 100}]
+        for i in range(num_runs):
+            _ = self(prompts=warmup_prompt, init_cache=(i == 0))
+
+        # Reset state after warmup
+        self.first_call = True
+        self.last_mode = None
+
+        print(f"Warmup completed in {time.time() - start:.2f}s")
 
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
