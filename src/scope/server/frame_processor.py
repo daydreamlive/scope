@@ -13,11 +13,6 @@ from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
-# Flag to benchmark depth preprocessing only (skip main pipeline)
-# Set DEPTH_BENCHMARK_MODE=True environment variable to measure depth FPS without V2V processing
-DEPTH_BENCHMARK_MODE = os.environ.get("DEPTH_BENCHMARK_MODE", "").lower() in ("true", "1", "yes")
-
-
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 5  # Increased from 3 to handle faster production rates
 
@@ -792,27 +787,12 @@ class FrameProcessor:
                         if submit_overhead > 0.05:
                             logger.debug(f"[Overhead] Depth submit: {submit_overhead*1000:.1f}ms")
 
-                    # In benchmark mode, wait for actual result to measure true depth FPS
-                    if DEPTH_BENCHMARK_MODE:
-                        depth_result = async_depth_client.get_depth_result(
-                            wait=True, timeout=5.0
-                        )
-                        if depth_result is not None:
-                            depth_latency = time.time() - depth_submit_time
-                            num_frames = len(video_input)
-                            logger.info(
-                                f"[DEPTH BENCHMARK] Depth round-trip: {num_frames} frames in "
-                                f"{depth_latency:.3f}s ({num_frames / depth_latency:.1f} FPS)"
-                            )
-                            with self._depth_result_lock:
-                                self._latest_depth_result = depth_result.depth
-                    else:
-                        # Normal mode: get latest available (non-blocking)
-                        depth_result = async_depth_client.get_latest_depth_result()
-                        if depth_result is not None:
-                            # Cache the result for future use
-                            with self._depth_result_lock:
-                                self._latest_depth_result = depth_result.depth
+                    # Get latest available (non-blocking)
+                    depth_result = async_depth_client.get_latest_depth_result()
+                    if depth_result is not None:
+                        # Cache the result for future use
+                        with self._depth_result_lock:
+                            self._latest_depth_result = depth_result.depth
 
                     # Use cached depth result (may be from previous chunk)
                     with self._depth_result_lock:
@@ -856,55 +836,6 @@ class FrameProcessor:
                 else:
                     # Normal V2V mode: route to video
                     call_params["video"] = video_input
-
-            # === DEPTH BENCHMARK MODE ===
-            # Skip main pipeline and output depth frames directly to measure depth FPS
-            if DEPTH_BENCHMARK_MODE and depth_preprocessor_enabled and video_input is not None:
-                # Get depth from call_params (either vace_input_frames or video depending on mode)
-                # Note: can't use `or` with tensors, must check None explicitly
-                depth_output = call_params.get("vace_input_frames")
-                if depth_output is None:
-                    depth_output = call_params.get("video")
-
-                if depth_output is not None and isinstance(depth_output, torch.Tensor):
-                    # depth_output is [1, 3, F, H, W] in [-1, 1]
-                    # Convert to [F, H, W, C] in [0, 1] for output
-                    depth_frames = depth_output.squeeze(0)  # [3, F, H, W]
-                    depth_frames = depth_frames.permute(1, 2, 3, 0)  # [F, H, W, 3]
-                    depth_frames = (depth_frames + 1.0) / 2.0  # [-1, 1] -> [0, 1]
-
-                    output = depth_frames.float()  # [F, H, W, C] in [0, 1]
-
-                    processing_time = time.time() - start_time
-                    num_frames = output.shape[0]
-                    logger.info(
-                        f"[DEPTH BENCHMARK] Processed {num_frames} frames in {processing_time:.4f}s "
-                        f"({num_frames / processing_time:.1f} FPS)"
-                    )
-
-                    # Normalize to [0, 255] and convert to uint8
-                    output = (
-                        (output * 255.0)
-                        .clamp(0, 255)
-                        .to(dtype=torch.uint8)
-                        .contiguous()
-                        .detach()
-                        .cpu()
-                    )
-
-                    for frame in output:
-                        try:
-                            self.output_queue.put_nowait(frame)
-                        except queue.Full:
-                            logger.warning("Output queue full, dropping processed frame")
-                            continue
-
-                    # Update FPS calculation
-                    self._calculate_pipeline_fps(start_time, num_frames)
-                    self.is_prepared = True
-                    return
-                else:
-                    logger.warning("[DEPTH BENCHMARK] No depth output available, falling through to pipeline")
 
             output = pipeline(**call_params)
 
