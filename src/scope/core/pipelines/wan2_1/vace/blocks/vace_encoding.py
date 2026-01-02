@@ -118,20 +118,14 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 description="Spatial control masks [B, 1, F, H, W]: defines WHERE to apply conditioning (white=generate, black=preserve). Defaults to ones (all white) when None. Works with any vace_input_frames type.",
             ),
             InputParam(
-                "extension_mode",
-                default=None,
-                type_hint=str,
-                description="Extension mode for temporal generation: 'firstframe' (ref at start, generate after), 'lastframe' (generate before, ref at end), or 'firstlastframe' (refs at both ends). Applies to specific chunks based on current_start_frame.",
-            ),
-            InputParam(
                 "first_frame_image",
                 default=None,
-                description="Path to first frame reference image for extension mode (used with 'firstframe' or 'firstlastframe')",
+                description="Path to first frame reference image for extension mode. When provided alone, enables 'firstframe' mode (ref at start, generate after). When provided with last_frame_image, enables 'firstlastframe' mode (refs at both ends).",
             ),
             InputParam(
                 "last_frame_image",
                 default=None,
-                description="Path to last frame reference image for extension mode (used with 'lastframe' or 'firstlastframe')",
+                description="Path to last frame reference image for extension mode. When provided alone, enables 'lastframe' mode (generate before, ref at end). When provided with first_frame_image, enables 'firstlastframe' mode (refs at both ends).",
             ),
             InputParam(
                 "height",
@@ -172,7 +166,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         vace_ref_images = block_state.vace_ref_images
         vace_input_frames = block_state.vace_input_frames
-        extension_mode: str | None = block_state.extension_mode
         first_frame_image: str | None = block_state.first_frame_image
         last_frame_image: str | None = block_state.last_frame_image
         current_start = block_state.current_start_frame
@@ -180,35 +173,31 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         # If no inputs provided, skip VACE conditioning
         has_ref_images = vace_ref_images is not None and len(vace_ref_images) > 0
         has_input_frames = vace_input_frames is not None
-        has_extension_mode = extension_mode is not None
+        has_first_frame = first_frame_image is not None
+        has_last_frame = last_frame_image is not None
+        has_extension = has_first_frame or has_last_frame
 
-        if not has_ref_images and not has_input_frames and not has_extension_mode:
+        if not has_ref_images and not has_input_frames and not has_extension:
             block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
             return components, state
 
         # Determine encoding path based on what's provided (implicit mode detection)
-        if has_extension_mode:
+        if has_extension:
             # Extension mode: Generate frames before/after reference frame(s)
-            # Uses explicit first_frame_image and last_frame_image parameters
-            if extension_mode == "firstframe":
-                if first_frame_image is None:
-                    raise ValueError(
-                        "VaceEncodingBlock: extension_mode 'firstframe' requires first_frame_image"
-                    )
-            elif extension_mode == "lastframe":
-                if last_frame_image is None:
-                    raise ValueError(
-                        "VaceEncodingBlock: extension_mode 'lastframe' requires last_frame_image"
-                    )
-            elif extension_mode == "firstlastframe":
-                if first_frame_image is None or last_frame_image is None:
-                    raise ValueError(
-                        "VaceEncodingBlock: extension_mode 'firstlastframe' requires both first_frame_image and last_frame_image"
-                    )
+            # Mode is inferred from which frame images are provided
+            if has_first_frame and has_last_frame:
+                extension_mode = "firstlastframe"
+            elif has_first_frame:
+                extension_mode = "firstframe"
+            else:
+                extension_mode = "lastframe"
+
             block_state.vace_context, block_state.vace_ref_images = (
-                self._encode_extension_mode(components, block_state, current_start)
+                self._encode_extension_mode(
+                    components, block_state, current_start, extension_mode
+                )
             )
         elif has_input_frames:
             # Standard VACE path: conditioning input (depth, flow, pose, etc.)
@@ -297,23 +286,21 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         # Return original paths, not tensors, so they can be reused in subsequent chunks
         return vace_context, ref_image_paths
 
-    def _encode_extension_mode(self, components, block_state, current_start):
+    def _encode_extension_mode(
+        self, components, block_state, current_start, extension_mode: str
+    ):
         """
         Encode VACE context with reference frames and dummy frames for temporal extension.
 
-        Loads reference image based on extension_mode, replicates it across a temporal group,
-        fills remaining frames with zeros (dummy frames), and encodes with masks indicating
-        which frames to inpaint (1=dummy, 0=reference).
+        Loads reference image based on extension_mode (inferred from provided images),
+        replicates it across a temporal group, fills remaining frames with zeros (dummy frames),
+        and encodes with masks indicating which frames to inpaint (1=dummy, 0=reference).
+
+        Args:
+            extension_mode: Inferred mode ('firstframe', 'lastframe', or 'firstlastframe')
         """
-        extension_mode = block_state.extension_mode
         first_frame_image = block_state.first_frame_image
         last_frame_image = block_state.last_frame_image
-
-        if extension_mode not in ["firstframe", "lastframe", "firstlastframe"]:
-            raise ValueError(
-                f"VaceEncodingBlock._encode_extension_mode: Invalid extension_mode '{extension_mode}', "
-                f"must be 'firstframe', 'lastframe', or 'firstlastframe'"
-            )
 
         images_to_load = []
         if extension_mode == "firstframe":

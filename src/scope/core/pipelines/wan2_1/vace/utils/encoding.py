@@ -39,6 +39,10 @@ def vace_encode_frames(
         pad_to_96: Whether to pad to 96 channels (default True). Set False when masks will be added later.
         use_cache: Whether to use streaming encode cache for frames (default True).
                    Set False for one-off encoding (e.g., reference images only mode).
+                   When masks are provided, caching is handled automatically based on
+                   mask content: conditioning mode (all-1s masks) uses cache for both
+                   streams, while extension/inpainting mode (mixed masks) skips cache
+                   for reactive to weaken temporal blending.
         inactive_cache: Explicit encoder cache for inactive stream (TAE only).
                        Create via vae.create_encoder_cache(). Reuse across chunks
                        for temporal continuity. If None, uses VAE's default cache.
@@ -82,12 +86,19 @@ def vace_encode_frames(
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
 
+        # Auto-detect mode based on mask content and handle caching appropriately:
+        # - Conditioning mode (mask all 1s): inactive=zeros, reactive=content → both use cache
+        # - Extension/inpainting mode (mixed mask): reactive skips cache to weaken temporal blending
+        is_conditioning_mode = all((m > 0.5).all() for m in masks)
+
         # Encode with separate caches for temporal continuity without cross-contamination
         inactive_out = vae.encode_to_latent(
             inactive_stacked, use_cache=True, encoder_cache=inactive_cache
         )
         reactive_out = vae.encode_to_latent(
-            reactive_stacked, use_cache=True, encoder_cache=reactive_cache
+            reactive_stacked,
+            use_cache=is_conditioning_mode,
+            encoder_cache=reactive_cache,
         )
 
         # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim

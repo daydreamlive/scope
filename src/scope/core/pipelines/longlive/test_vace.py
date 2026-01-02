@@ -48,7 +48,6 @@ CONFIG = {
     "use_depth": False,  # Depth guidance: structural control via depth maps
     "use_inpainting": False,  # Inpainting: masked video-to-video generation
     "use_extension": True,  # Extension mode: temporal generation (firstframe/lastframe/firstlastframe)
-    "use_inpainting": True,  # Inpainting: masked video-to-video generation
     # ===== INPUT PATHS =====
     # R2V: List of reference image paths (condition entire video, don't appear in output)
     "ref_images": [
