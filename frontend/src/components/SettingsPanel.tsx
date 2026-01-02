@@ -393,54 +393,54 @@ export function SettingsPanel({
                 </div>
               </div>
             )}
+          </div>
+        )}
 
-            {/* Preprocessor - only shown in video mode */}
-            {inputMode === "video" && (
-              <div className="rounded-lg border bg-card p-3">
-                <div className="flex items-center gap-2">
-                  <LabelWithTooltip
-                    label={PARAMETER_METADATA.preprocessorType.label}
-                    tooltip={PARAMETER_METADATA.preprocessorType.tooltip}
-                    className="text-xs text-muted-foreground w-32"
-                  />
-                  <Select
-                    value={preprocessorType || "none"}
-                    onValueChange={value =>
-                      onPreprocessorTypeChange?.(
-                        value === "none" ? null : value
-                      )
-                    }
-                    disabled={isStreaming || isLoading}
-                  >
-                    <SelectTrigger className="flex-1 h-7">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {availablePreprocessors.map((id) => {
-                        // Format preprocessor ID for display
-                        // Handle known preprocessors with special formatting
-                        const displayNameMap: Record<string, string> = {
-                          depthanything: "Depth Anything",
-                          passthrough: "Passthrough",
-                        };
+        {/* Preprocessor - available for all pipelines in video mode */}
+        {inputMode === "video" && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.preprocessorType.label}
+                tooltip={PARAMETER_METADATA.preprocessorType.tooltip}
+                className="text-xs text-muted-foreground w-32"
+              />
+              <Select
+                value={preprocessorType || "none"}
+                onValueChange={value =>
+                  onPreprocessorTypeChange?.(
+                    value === "none" ? null : value
+                  )
+                }
+                disabled={isStreaming || isLoading}
+              >
+                <SelectTrigger className="flex-1 h-7">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {availablePreprocessors.map((id) => {
+                    // Format preprocessor ID for display
+                    // Handle known preprocessors with special formatting
+                    const displayNameMap: Record<string, string> = {
+                      depthanything: "Depth Anything",
+                      passthrough: "Passthrough",
+                    };
 
-                        // Use mapped name if available, otherwise format generically
-                        const displayName = displayNameMap[id] || id
-                          .split("-")
-                          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                          .join(" ");
-                        return (
-                          <SelectItem key={id} value={id}>
-                            {displayName}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
+                    // Use mapped name if available, otherwise format generically
+                    const displayName = displayNameMap[id] || id
+                      .split("-")
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(" ");
+                    return (
+                      <SelectItem key={id} value={id}>
+                        {displayName}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
 
