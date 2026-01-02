@@ -63,7 +63,7 @@ def vace_encode_frames(
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
 
         inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=use_cache)
-        reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=False)
+        reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=use_cache)
 
         inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
         reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
