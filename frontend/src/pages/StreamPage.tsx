@@ -525,18 +525,6 @@ export function StreamPage() {
     // Note: Changing encoder requires pipeline reload, so we don't send parameter update here
   };
 
-  const handleDepthPreprocessorModeChange = (
-    mode: "v2v_depth" | "depth_only"
-  ) => {
-    updateSettings({ depthPreprocessorMode: mode });
-    // Send mode update to backend if streaming
-    if (isStreaming) {
-      sendParameterUpdate({
-        depth_preprocessor_mode: mode,
-      });
-    }
-  };
-
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -834,7 +822,7 @@ export function StreamPage() {
         vace_ref_images?: string[];
         vace_context_scale?: number;
         depth_preprocessor?: boolean;
-        depth_preprocessor_mode?: "v2v_depth" | "depth_only";
+        depth_preprocessor_mode?: "depth_only";
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -880,7 +868,7 @@ export function StreamPage() {
         if (settings.depthPreprocessor) {
           initialParameters.depth_preprocessor = true;
           initialParameters.depth_preprocessor_mode =
-            settings.depthPreprocessorMode ?? "v2v_depth";
+            settings.depthPreprocessorMode ?? "depth_only";
         }
       }
 
@@ -1172,8 +1160,6 @@ export function StreamPage() {
             onDepthPreprocessorChange={handleDepthPreprocessorChange}
             depthPreprocessorEncoder={settings.depthPreprocessorEncoder ?? "vitl"}
             onDepthPreprocessorEncoderChange={handleDepthPreprocessorEncoderChange}
-            depthPreprocessorMode={settings.depthPreprocessorMode ?? "v2v_depth"}
-            onDepthPreprocessorModeChange={handleDepthPreprocessorModeChange}
           />
         </div>
       </div>

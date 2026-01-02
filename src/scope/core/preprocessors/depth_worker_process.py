@@ -74,7 +74,7 @@ def main():
             dtype=torch.float16,
             input_size=392,  # Default input size
             streaming=True,  # Use streaming mode for real-time processing
-            output_format="vace",  # Output format for VACE preprocessing
+            output_format="rgb",  # Output format for depth preprocessing
         )
         depth_pipeline.prepare()  # Load the model
         logger.info("DepthAnythingPipeline loaded successfully!")
@@ -137,8 +137,7 @@ def main():
                 # Convert to list of frames, each with shape [H, W, C]
                 frame_list = [frames_tensor[i] for i in range(frames_tensor.shape[0])]
 
-                # Use the pipeline's __call__ method - it's now optimized for vace format
-                # The pipeline will handle the conversion efficiently
+                # Use the pipeline's __call__ method
                 start_time = time.time()
                 depth_output = depth_pipeline(video=frame_list)  # Returns [T, H, W, 3] in [0, 1]
                 inference_time = time.time() - start_time
@@ -149,7 +148,7 @@ def main():
                     f"{inference_time:.3f}s ({num_frames / inference_time:.1f} FPS)"
                 )
 
-                # Convert pipeline output [T, H, W, 3] in [0, 1] to VACE format [1, 3, T, H, W] in [-1, 1]
+                # Convert pipeline output [T, H, W, 3] in [0, 1] to [1, 3, T, H, W] in [-1, 1]
                 T, H, W, C = depth_output.shape
 
                 # Resize to target dimensions if needed

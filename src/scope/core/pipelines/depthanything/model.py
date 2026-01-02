@@ -313,46 +313,6 @@ class VideoDepthAnythingModel:
 
         return self.infer(stacked, num_frames_per_batch)
 
-    def process_video_for_vace(
-        self,
-        frames: torch.Tensor | np.ndarray | list,
-        target_height: int,
-        target_width: int,
-    ) -> torch.Tensor:
-        """Process video frames and return depth maps formatted for VACE input.
-
-        Args:
-            frames: Video frames [F, H, W, C] or list of frames
-            target_height: Target output height
-            target_width: Target output width
-
-        Returns:
-            Depth tensor [1, 3, F, H, W] in [-1, 1] range, ready for VACE
-        """
-        # Run depth estimation
-        if isinstance(frames, list):
-            depth = self.infer_from_list(frames)
-        else:
-            depth = self.infer(frames)
-
-        # Resize to target resolution
-        num_frames = depth.shape[0]
-        depth = depth.unsqueeze(1)  # [F, 1, H, W]
-        depth = TF.interpolate(
-            depth, size=(target_height, target_width), mode="bilinear", align_corners=False
-        )
-
-        # Convert single-channel to 3-channel RGB (replicate)
-        depth = depth.repeat(1, 3, 1, 1)  # [F, 3, H, W]
-
-        # Normalize to [-1, 1] for VAE encoding
-        depth = depth * 2.0 - 1.0
-
-        # Add batch dimension and rearrange to [1, 3, F, H, W]
-        depth = depth.unsqueeze(0).permute(0, 2, 1, 3, 4)
-
-        return depth.to(device=self.device, dtype=self.dtype)
-
     def offload(self):
         """Offload model from GPU to free memory.
 

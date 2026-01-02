@@ -95,6 +95,6 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   depthPreprocessorMode: {
     label: "Mode:",
     tooltip:
-      "V2V + Depth: Transform input video guided by depth structure. Depth-only: Generate new video using only depth structure and text prompt (ignores original video content).",
+      "Generate new video using only depth structure and text prompt (ignores original video content).",
   },
 };

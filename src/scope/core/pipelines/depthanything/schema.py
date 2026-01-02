@@ -58,7 +58,7 @@ class DepthAnythingConfig(BasePipelineConfig):
         description="Use streaming mode for real-time processing (processes frame-by-frame with caching)",
     )
 
-    output_format: Literal["grayscale", "rgb", "vace"] = Field(
+    output_format: Literal["grayscale", "rgb"] = Field(
         default="grayscale",
-        description="Output format: grayscale (1 channel), rgb (3 channels), or vace (formatted for VACE input)",
+        description="Output format: grayscale (1 channel) or rgb (3 channels)",
     )

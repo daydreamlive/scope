@@ -117,9 +117,9 @@ class Parameters(BaseModel):
         default=False,
         description="Enable Video-Depth-Anything preprocessor. Extracts depth maps from video input to use as VACE structural conditioning.",
     )
-    depth_preprocessor_mode: Literal["v2v_depth", "depth_only"] = Field(
-        default="v2v_depth",
-        description="Depth preprocessor mode. 'v2v_depth': Transform input video guided by depth. 'depth_only': Generate new video from depth structure + prompt only.",
+    depth_preprocessor_mode: Literal["depth_only"] = Field(
+        default="depth_only",
+        description="Depth preprocessor mode. 'depth_only': Generate new video from depth structure + prompt only.",
     )
 
 

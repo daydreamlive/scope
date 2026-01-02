@@ -94,8 +94,6 @@ interface SettingsPanelProps {
   onDepthPreprocessorEncoderChange?: (
     encoder: "vits" | "vitb" | "vitl"
   ) => void;
-  depthPreprocessorMode?: "v2v_depth" | "depth_only";
-  onDepthPreprocessorModeChange?: (mode: "v2v_depth" | "depth_only") => void;
 }
 
 export function SettingsPanel({
@@ -139,8 +137,6 @@ export function SettingsPanel({
   onDepthPreprocessorChange,
   depthPreprocessorEncoder = "vitl",
   onDepthPreprocessorEncoderChange,
-  depthPreprocessorMode = "v2v_depth",
-  onDepthPreprocessorModeChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -449,35 +445,6 @@ export function SettingsPanel({
                           <SelectItem value="vits">vits (fast)</SelectItem>
                           <SelectItem value="vitb">vitb (balanced)</SelectItem>
                           <SelectItem value="vitl">vitl (best)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <LabelWithTooltip
-                        label={PARAMETER_METADATA.depthPreprocessorMode.label}
-                        tooltip={
-                          PARAMETER_METADATA.depthPreprocessorMode.tooltip
-                        }
-                        className="text-xs text-muted-foreground w-16"
-                      />
-                      <Select
-                        value={depthPreprocessorMode}
-                        onValueChange={value =>
-                          onDepthPreprocessorModeChange?.(
-                            value as "v2v_depth" | "depth_only"
-                          )
-                        }
-                      >
-                        <SelectTrigger className="flex-1 h-7">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="v2v_depth">
-                            V2V + Depth
-                          </SelectItem>
-                          <SelectItem value="depth_only">
-                            Depth-only
-                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

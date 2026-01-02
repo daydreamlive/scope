@@ -755,7 +755,7 @@ class FrameProcessor:
                     "depth_preprocessor", False
                 )
                 depth_mode = self.parameters.get(
-                    "depth_preprocessor_mode", "v2v_depth"
+                    "depth_preprocessor_mode", "depth_only"
                 )
 
                 # Handle depth preprocessing
@@ -841,21 +841,11 @@ class FrameProcessor:
                                 f"shape: {depth_input.shape}"
                             )
 
-                            if depth_mode == "depth_only":
-                                if vace_enabled:
-                                    call_params["vace_input_frames"] = depth_input
-                                else:
-                                    call_params["video"] = depth_input
+                            # Depth-only mode: generate from depth structure only
+                            if vace_enabled:
+                                call_params["vace_input_frames"] = depth_input
                             else:
-                                if vace_enabled:
-                                    call_params["vace_input_frames"] = depth_input
-                                    call_params["video"] = video_input
-                                else:
-                                    logger.warning(
-                                        "V2V + Depth mode requires VACE. "
-                                        "Falling back to depth-only (no VACE)."
-                                    )
-                                    call_params["video"] = depth_input
+                                call_params["video"] = depth_input
                         else:
                             # No depth result available yet, fall back to video input
                             logger.debug(
@@ -877,27 +867,14 @@ class FrameProcessor:
                             f"output shape: {depth_input.shape}"
                         )
 
-                        if depth_mode == "depth_only":
-                            # Depth-only mode: generate from depth structure only
-                            if vace_enabled:
-                                # Use VACE conditioning with depth maps
-                                call_params["vace_input_frames"] = depth_input
-                            else:
-                                # No VACE: pass depth directly as video input
-                                # The depth map becomes the "video" to transform from
-                                call_params["video"] = depth_input
+                        # Depth-only mode: generate from depth structure only
+                        if vace_enabled:
+                            # Use VACE conditioning with depth maps
+                            call_params["vace_input_frames"] = depth_input
                         else:
-                            # V2V + Depth mode: requires VACE
-                            if vace_enabled:
-                                # Pass depth to VACE, video to V2V path
-                                call_params["vace_input_frames"] = depth_input
-                                call_params["video"] = video_input
-                            else:
-                                logger.warning(
-                                    "V2V + Depth mode requires VACE. "
-                                    "Falling back to depth-only (no VACE)."
-                                )
-                                call_params["video"] = depth_input
+                            # No VACE: pass depth directly as video input
+                            # The depth map becomes the "video" to transform from
+                            call_params["video"] = depth_input
                 elif vace_enabled:
                     # Regular VACE V2V editing mode: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
@@ -1108,15 +1085,14 @@ class FrameProcessor:
     ) -> torch.Tensor:
         """Apply Video-Depth-Anything preprocessing to video frames.
 
-        Converts video frames to depth maps formatted for VACE conditioning.
-        Uses the DepthAnythingPipeline from pipelines/depthanything.
+        Converts video frames to depth maps using DepthAnythingPipeline.
 
         Args:
             video_input: List of tensor frames, each (1, H, W, C) in [0, 255]
             depth_preprocessor: Unused (kept for compatibility), pipeline is used instead
 
         Returns:
-            Depth tensor [1, 3, F, H, W] in [-1, 1] range, ready for VACE
+            Depth tensor [1, 3, F, H, W] in [-1, 1] range
         """
         from scope.core.pipelines.depthanything import DepthAnythingPipeline
         import torch
@@ -1146,7 +1122,7 @@ class FrameProcessor:
                         dtype=dtype,
                         input_size=input_size,
                         streaming=streaming,
-                        output_format="rgb",  # Use rgb format, we'll convert to VACE format ourselves
+                        output_format="rgb",
                     )
                     depth_pipeline.prepare()
                     # Cache the pipeline instance for reuse
@@ -1167,18 +1143,17 @@ class FrameProcessor:
                     dtype=torch.float16,
                     input_size=input_size,
                     streaming=streaming,
-                    output_format="vace",
+                    output_format="rgb",
                 )
                 depth_pipeline.prepare()
                 self._cached_depth_pipeline = depth_pipeline
             else:
                 depth_pipeline = self._cached_depth_pipeline
 
-        # Use the pipeline's __call__ method - it's now optimized for vace format
-        # The pipeline will handle the conversion efficiently and the log will appear
+        # Use the pipeline's __call__ method
         depth_output = depth_pipeline(video=video_input)  # Returns [T, H, W, 3] in [0, 1]
 
-        # Convert pipeline output [T, H, W, 3] in [0, 1] to VACE format [1, 3, T, H, W] in [-1, 1]
+        # Convert pipeline output [T, H, W, 3] in [0, 1] to [1, 3, T, H, W] in [-1, 1]
         T, H, W, C = depth_output.shape
 
         # Get target dimensions from input frames
@@ -1203,6 +1178,6 @@ class FrameProcessor:
         depth_tensor = depth_tensor * 2.0 - 1.0
 
         # Add batch dimension and rearrange to [1, 3, T, H, W]
-        depth_vace = depth_tensor.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, 3, T, H, W]
+        depth_output = depth_tensor.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, 3, T, H, W]
 
-        return depth_vace.to(dtype=torch.bfloat16)
+        return depth_output.to(dtype=torch.bfloat16)

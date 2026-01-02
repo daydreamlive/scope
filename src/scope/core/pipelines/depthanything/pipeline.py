@@ -1,8 +1,8 @@
 """DepthAnything pipeline for video depth estimation.
 
 This module provides a pipeline wrapper around Video-Depth-Anything for consistent
-depth estimation on video frames. The depth maps can be used as conditioning
-signals for V2V pipelines (e.g., VACE depth guidance) or for visualization.
+depth estimation on video frames. The depth maps can be used for visualization
+or as conditioning signals for other pipelines.
 
 Reference: https://github.com/DepthAnything/Video-Depth-Anything
 Paper: Video Depth Anything: Consistent Depth Estimation for Super-Long Videos (CVPR 2025)
@@ -46,7 +46,7 @@ class DepthAnythingPipeline(Pipeline):
         dtype: Data type for inference (default: torch.float16)
         input_size: Input size for the model (lower = faster)
         streaming: Use streaming mode for real-time processing
-        output_format: Output format ("grayscale", "rgb", or "vace")
+        output_format: Output format ("grayscale" or "rgb")
 
     Example:
         >>> pipeline = DepthAnythingPipeline(encoder="vitl", device="cuda")
@@ -66,7 +66,7 @@ class DepthAnythingPipeline(Pipeline):
         dtype: torch.dtype = torch.float16,
         input_size: int = 392,
         streaming: bool = True,
-        output_format: Literal["grayscale", "rgb", "vace"] = "grayscale",
+        output_format: Literal["grayscale", "rgb"] = "grayscale",
         **kwargs,  # Accept and ignore additional parameters like 'loras', 'config', etc.
     ):
         self.height = height
@@ -138,79 +138,57 @@ class DepthAnythingPipeline(Pipeline):
 
         self._ensure_model_loaded()
 
-        # Optimized path for VACE format: directly use process_video_for_vace
-        # This avoids redundant conversions and double inference
-        if self.output_format == "vace":
-            # Handle list input - convert to tensor [F, H, W, C]
-            if isinstance(input_frames, list):
-                # Stack frames directly without preprocess_chunk overhead
-                # Use torch.stack to create [F, H, W, C] from list of [H, W, C] frames
-                if len(input_frames) == 0:
-                    raise ValueError("Input frames list cannot be empty")
-                # Stack frames: [F, H, W, C] - torch.stack creates new dimension
-                frames = torch.stack(input_frames, dim=0)
-                # Extract dimensions from stacked frames
+        # Handle list input - convert to tensor [F, H, W, C]
+        frames = None
+        if isinstance(input_frames, list):
+            if len(input_frames) == 0:
+                raise ValueError("Input frames list cannot be empty")
+
+            # Check if frames are 3D [H, W, C] or 4D [T, H, W, C]
+            first_frame = input_frames[0]
+            if isinstance(first_frame, torch.Tensor):
+                first_frame = first_frame.to(device=self.device, dtype=self.dtype)
+            else:
+                first_frame = torch.from_numpy(first_frame).to(device=self.device, dtype=self.dtype)
+
+            if first_frame.dim() == 3:
+                # List of [H, W, C] frames - stack them directly
+                frames = torch.stack([f.to(device=self.device, dtype=self.dtype) if isinstance(f, torch.Tensor) else torch.from_numpy(f).to(device=self.device, dtype=self.dtype) for f in input_frames], dim=0)  # [F, H, W, C]
                 input_height, input_width = frames.shape[1], frames.shape[2]
-            elif input_frames.dim() == 5:
-                # [B, C, T, H, W] -> [T, H, W, C]
+            elif first_frame.dim() == 4:
+                # List of [T, H, W, C] frames - use preprocess_chunk
+                input_frames = preprocess_chunk(
+                    input_frames, self.device, self.dtype
+                )
+                # Continue to tensor handling below
+            else:
+                raise ValueError(f"Unexpected frame shape in list: {first_frame.shape}")
+
+        # Handle tensor input format - expect [B, C, T, H, W] or [T, H, W, C] or [T, C, H, W]
+        if frames is None:
+            if not isinstance(input_frames, torch.Tensor):
+                input_frames = torch.from_numpy(input_frames).to(device=self.device, dtype=self.dtype)
+            else:
+                input_frames = input_frames.to(device=self.device, dtype=self.dtype)
+
+            if input_frames.dim() == 5:
                 B, C, T, H, W = input_frames.shape
-                frames = input_frames[0].permute(1, 2, 3, 0)  # [T, H, W, C]
+                # Store original input dimensions to preserve them in output
                 input_height, input_width = H, W
+                # Rearrange to [T, H, W, C] for depth model
+                frames = input_frames[0].permute(1, 2, 3, 0)  # [T, H, W, C]
             elif input_frames.dim() == 4:
+                # Assume [T, C, H, W] or [T, H, W, C]
                 if input_frames.shape[1] == 3:
-                    # [T, C, H, W] -> [T, H, W, C]
                     T, C, H, W = input_frames.shape
-                    frames = input_frames.permute(0, 2, 3, 1)
                     input_height, input_width = H, W
+                    frames = input_frames.permute(0, 2, 3, 1)  # [T, H, W, C]
                 else:
-                    # Already [T, H, W, C]
                     T, H, W, C = input_frames.shape
-                    frames = input_frames
                     input_height, input_width = H, W
+                    frames = input_frames
             else:
                 raise ValueError(f"Unexpected input shape: {input_frames.shape}")
-
-            # Convert to [0, 255] range if needed
-            if frames.max() <= 1.0:
-                frames = frames * 255.0
-
-            # Directly use process_video_for_vace - this is the optimized path
-            depth_vace = self._model.process_video_for_vace(
-                frames, input_height, input_width
-            )  # Returns [1, 3, T, H, W] in [-1, 1]
-
-            # Convert to [T, H, W, C] in [0, 1] for consistency with other formats
-            output = depth_vace[0].permute(1, 2, 3, 0)  # [T, H, W, 3]
-            output = (output + 1.0) / 2.0  # [-1, 1] -> [0, 1]
-            return output
-
-        # Standard path for grayscale/rgb formats
-        # Convert list to tensor if needed - preserve original input dimensions
-        if isinstance(input_frames, list):
-            # Preprocess chunk WITHOUT resizing to preserve original input resolution
-            input_frames = preprocess_chunk(
-                input_frames, self.device, self.dtype
-            )
-
-        # Handle input format - expect [B, C, T, H, W]
-        if input_frames.dim() == 5:
-            B, C, T, H, W = input_frames.shape
-            # Store original input dimensions to preserve them in output
-            input_height, input_width = H, W
-            # Rearrange to [T, H, W, C] for depth model
-            frames = input_frames[0].permute(1, 2, 3, 0)  # [T, H, W, C]
-        elif input_frames.dim() == 4:
-            # Assume [T, C, H, W] or [T, H, W, C]
-            if input_frames.shape[1] == 3:
-                T, C, H, W = input_frames.shape
-                input_height, input_width = H, W
-                frames = input_frames.permute(0, 2, 3, 1)  # [T, H, W, C]
-            else:
-                T, H, W, C = input_frames.shape
-                input_height, input_width = H, W
-                frames = input_frames
-        else:
-            raise ValueError(f"Unexpected input shape: {input_frames.shape}")
 
         # Convert to [0, 255] range if needed
         if frames.max() <= 1.0:
