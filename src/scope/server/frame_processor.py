@@ -6,6 +6,7 @@ import time
 from collections import deque
 from typing import Any
 
+import numpy as np
 import torch
 from aiortc.mediastreams import VideoFrame
 
@@ -109,8 +110,8 @@ class FrameProcessor:
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
         # Async preprocessing state
-        self._preprocessor_type = None  # Current preprocessor type ("depthanything", "passthrough", etc.)
-        self._latest_preprocessor_result = None  # Cached preprocessor result for use in pipeline
+        self._preprocessor_types: list[str] = []  # Current preprocessor types (list)
+        self._latest_preprocessor_results: dict[str, Any] = {}  # Dict of preprocessor_type -> cached result
         self._preprocessor_submit_chunk_id = 0  # Counter for submitted chunks
         self._last_preprocessor_submit_time = 0.0
         self._preprocessor_result_lock = threading.Lock()
@@ -131,15 +132,25 @@ class FrameProcessor:
             spout_config = self.parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
 
-        # Load preprocessor from initial parameters if specified
-        if "preprocessor_type" in self.parameters:
+        # Load preprocessors from initial parameters if specified
+        if "preprocessor_types" in self.parameters:
+            preprocessor_types = self.parameters.get("preprocessor_types")
+            if preprocessor_types:
+                self.pipeline_manager._load_preprocessors(
+                    preprocessor_types,
+                    encoder="vits" if "depthanything" in preprocessor_types else None
+                )
+                self._preprocessor_types = preprocessor_types
+        elif "preprocessor_type" in self.parameters:
+            # Backward compatibility: handle single preprocessor_type
             preprocessor_type = self.parameters.get("preprocessor_type")
             if preprocessor_type is not None:
-                self.pipeline_manager._load_preprocessor(
-                    preprocessor_type,
+                preprocessor_types = [preprocessor_type]
+                self.pipeline_manager._load_preprocessors(
+                    preprocessor_types,
                     encoder="vits" if preprocessor_type == "depthanything" else None
                 )
-                self._preprocessor_type = preprocessor_type
+                self._preprocessor_types = preprocessor_types
 
         self.worker_thread = threading.Thread(target=self.worker_loop, daemon=True)
         self.worker_thread.start()
@@ -682,22 +693,29 @@ class FrameProcessor:
                     self._video_mode = new_parameters.get("input_mode") == "video"
 
                 # Handle preprocessor type changes
-                if "preprocessor_type" in new_parameters:
+                if "preprocessor_types" in new_parameters:
+                    new_preprocessor_types = new_parameters.get("preprocessor_types") or []
+                    if set(new_preprocessor_types) != set(self._preprocessor_types):
+                        # Update preprocessors
+                        self.pipeline_manager._load_preprocessors(
+                            new_preprocessor_types,
+                            encoder="vits" if "depthanything" in new_preprocessor_types else None
+                        )
+                        self._preprocessor_types = new_preprocessor_types
+                        with self._preprocessor_result_lock:
+                            self._latest_preprocessor_results.clear()
+                elif "preprocessor_type" in new_parameters:
+                    # Backward compatibility: handle single preprocessor_type
                     new_preprocessor_type = new_parameters.get("preprocessor_type")
-                    if new_preprocessor_type != self._preprocessor_type:
-                        # Unload old preprocessor
-                        if self._preprocessor_type is not None:
-                            if self.pipeline_manager.async_preprocessor is not None:
-                                self.pipeline_manager.async_preprocessor.stop()
-                                self.pipeline_manager._async_preprocessor = None
-                            self._preprocessor_type = None
-                            with self._preprocessor_result_lock:
-                                self._latest_preprocessor_result = None
-
-                        # Load new preprocessor if needed
-                        if new_preprocessor_type is not None:
-                            self.pipeline_manager._load_preprocessor(new_preprocessor_type, encoder="vits" if new_preprocessor_type == "depthanything" else None)
-                            self._preprocessor_type = new_preprocessor_type
+                    new_preprocessor_types = [new_preprocessor_type] if new_preprocessor_type else []
+                    if set(new_preprocessor_types) != set(self._preprocessor_types):
+                        self.pipeline_manager._load_preprocessors(
+                            new_preprocessor_types,
+                            encoder="vits" if new_preprocessor_type == "depthanything" else None
+                        )
+                        self._preprocessor_types = new_preprocessor_types
+                        with self._preprocessor_result_lock:
+                            self._latest_preprocessor_results.clear()
 
                 # Merge new parameters with existing ones to preserve any missing keys
                 self.parameters = {**self.parameters, **new_parameters}
@@ -771,78 +789,226 @@ class FrameProcessor:
             # Route video input based on VACE status and preprocessing
             if video_input is not None:
                 vace_enabled = getattr(pipeline, "vace_enabled", False)
-                preprocessor_type = self.parameters.get("preprocessor_type", None)
+                # Get preprocessor types (support both new list format and old single value)
+                preprocessor_types = self.parameters.get("preprocessor_types")
+                if preprocessor_types is None:
+                    # Backward compatibility: check for single preprocessor_type
+                    preprocessor_type = self.parameters.get("preprocessor_type")
+                    preprocessor_types = [preprocessor_type] if preprocessor_type else []
 
                 # Handle preprocessing (all preprocessors use the same async interface)
-                if preprocessor_type is not None:
-                    async_preprocessor_client = self.pipeline_manager.async_preprocessor
+                if preprocessor_types:
+                    async_preprocessors = self.pipeline_manager.async_preprocessors
 
-                    if async_preprocessor_client is None or not async_preprocessor_client.is_running():
-                        raise RuntimeError(
-                            f"Preprocessor {preprocessor_type} is enabled but async preprocessor is not available or not running"
-                        )
+                    # Verify all preprocessors are running
+                    for preprocessor_type in preprocessor_types:
+                        if preprocessor_type not in async_preprocessors:
+                            raise RuntimeError(
+                                f"Preprocessor {preprocessor_type} is enabled but not loaded"
+                            )
+                        client = async_preprocessors[preprocessor_type]
+                        if not client.is_running():
+                            raise RuntimeError(
+                                f"Preprocessor {preprocessor_type} is enabled but not running"
+                            )
 
                     # === ASYNC PREPROCESSING ===
-                    # Only submit new frames if we don't have a recent cached result
-                    # This reduces overhead (tensor→numpy conversion) and GPU contention
-                    # Since preprocessor runs faster than pipeline, we can skip some submissions
-                    should_submit = True
-                    with self._preprocessor_result_lock:
-                        if self._latest_preprocessor_result is not None:
-                            # Skip if we have a cached result and buffer has more results pending
-                            if async_preprocessor_client.get_buffer_size() > 0:
-                                should_submit = False
+                    width, height = self._get_pipeline_dimensions()
 
-                    if should_submit:
-                        # Submit current frames for processing (non-blocking)
-                        width, height = self._get_pipeline_dimensions()
-                        preprocessor_submit_time = time.time()
-                        async_preprocessor_client.submit_frames(
-                            video_input,
-                            target_height=height,
-                            target_width=width,
-                        )
-                        submit_overhead = time.time() - preprocessor_submit_time
-                        if submit_overhead > 0.05:
-                            logger.debug(f"[Overhead] Preprocessor submit: {submit_overhead*1000:.1f}ms")
+                    # Fast path for single preprocessor (optimized, matches old behavior)
+                    if len(preprocessor_types) == 1:
+                        preprocessor_type = preprocessor_types[0]
+                        async_preprocessor_client = async_preprocessors[preprocessor_type]
 
-                    # Get latest available (non-blocking)
-                    preprocessor_result = async_preprocessor_client.get_latest_result()
-                    if preprocessor_result is not None:
-                        # Cache the result for future use
+                        # === ASYNC PREPROCESSING ===
+                        # Only submit new frames if we don't have a recent cached result
+                        # This reduces overhead (tensor→numpy conversion) and GPU contention
+                        # Since preprocessor runs faster than pipeline, we can skip some submissions
+                        should_submit = True
                         with self._preprocessor_result_lock:
-                            self._latest_preprocessor_result = preprocessor_result.data
+                            if self._latest_preprocessor_results.get(preprocessor_type) is not None:
+                                # Skip if we have a cached result and buffer has more results pending
+                                if async_preprocessor_client.get_buffer_size() > 0:
+                                    should_submit = False
 
-                    # Use cached preprocessor result (may be from previous chunk)
-                    with self._preprocessor_result_lock:
-                        preprocessed_input = self._latest_preprocessor_result
+                        if should_submit:
+                            # Submit current frames for processing (non-blocking)
+                            preprocessor_submit_time = time.time()
+                            async_preprocessor_client.submit_frames(
+                                video_input,
+                                target_height=height,
+                                target_width=width,
+                            )
+                            submit_overhead = time.time() - preprocessor_submit_time
+                            if submit_overhead > 0.05:
+                                logger.debug(f"[Overhead] Preprocessor submit: {submit_overhead*1000:.1f}ms")
 
+                        # Get latest available (non-blocking)
+                        preprocessor_result = async_preprocessor_client.get_latest_result()
+                        if preprocessor_result is not None:
+                            # Cache the result for future use
+                            with self._preprocessor_result_lock:
+                                self._latest_preprocessor_results[preprocessor_type] = preprocessor_result.data
+
+                        # Use cached preprocessor result (may be from previous chunk)
+                        with self._preprocessor_result_lock:
+                            preprocessed_input = self._latest_preprocessor_results.get(preprocessor_type)
+
+                        if preprocessed_input is not None:
+                            # Move to correct device and dtype
+                            # non_blocking=True since memory is pinned in receiver thread
+                            gpu_start = time.time()
+                            preprocessed_input = preprocessed_input.to(
+                                device=torch.device("cuda"),
+                                dtype=torch.bfloat16,
+                                non_blocking=True,
+                            )
+                            gpu_time = time.time() - gpu_start
+                            if gpu_time > 0.01:
+                                logger.debug(f"[Overhead] Preprocessor GPU transfer: {gpu_time*1000:.1f}ms")
+
+                            logger.debug(
+                                f"Using async {preprocessor_type} preprocessor, shape: {preprocessed_input.shape}"
+                            )
+
+                            # Use preprocessed input
+                            if vace_enabled:
+                                call_params["vace_input_frames"] = preprocessed_input
+                            else:
+                                call_params["video"] = preprocessed_input
+                        else:
+                            # No preprocessor result available yet, fall back to video input
+                            logger.debug(
+                                "No async preprocessor result available yet, using video input"
+                            )
+                            if vace_enabled:
+                                call_params["vace_input_frames"] = video_input
+                            else:
+                                call_params["video"] = video_input
+
+                    else:
+                        # === SEQUENTIAL ASYNC PREPROCESSING (multiple preprocessors) ===
+                        # Preprocessors run sequentially: output of first becomes input to second, etc.
+                        # Start with original video input
+                        current_input = video_input
+                        preprocessed_input = None
+
+                        # Process each preprocessor in order
+                        for idx, preprocessor_type in enumerate(preprocessor_types):
+                            client = async_preprocessors[preprocessor_type]
+
+                            # Check if we have a cached result for this preprocessor
+                            cache_key = f"{preprocessor_type}_{idx}"
+                            with self._preprocessor_result_lock:
+                                cached_result = self._latest_preprocessor_results.get(cache_key)
+
+                            # Determine if we should submit
+                            should_submit = True
+                            if cached_result is not None:
+                                # Skip if buffer is full (preprocessor is ahead)
+                                if client.get_buffer_size() > client.result_buffer_size // 2:
+                                    should_submit = False
+
+                            if should_submit:
+                                # Convert current_input to numpy format for submission
+                                # current_input is list of tensors [(1, H, W, C), ...] or numpy array
+                                if isinstance(current_input, list):
+                                    # Convert list of tensors to numpy array [F, H, W, C]
+                                    stacked = torch.cat(current_input, dim=0)  # [F, H, W, C]
+                                    input_np = stacked.cpu().numpy()
+                                elif isinstance(current_input, torch.Tensor):
+                                    # Tensor might be [1, C, T, H, W] or [T, H, W, C]
+                                    if current_input.dim() == 5:
+                                        # [1, C, T, H, W] -> [T, H, W, C]
+                                        input_np = current_input.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()
+                                    else:
+                                        input_np = current_input.cpu().numpy()
+                                else:
+                                    input_np = current_input
+
+                                # Ensure uint8 format [F, H, W, C]
+                                if input_np.dtype != np.uint8:
+                                    if input_np.max() <= 1.0:
+                                        input_np = (input_np * 255).astype(np.uint8)
+                                    else:
+                                        input_np = input_np.astype(np.uint8)
+
+                                # Submit to preprocessor
+                                preprocessor_submit_time = time.time()
+                                client.submit_frames(
+                                    input_np,
+                                    target_height=height,
+                                    target_width=width,
+                                )
+                                submit_overhead = time.time() - preprocessor_submit_time
+                                if submit_overhead > 0.05:
+                                    logger.debug(f"[Overhead] Preprocessor {preprocessor_type} submit: {submit_overhead*1000:.1f}ms")
+
+                            # Get result (non-blocking, use cached if available)
+                            result = client.get_latest_result()
+                            if result is not None:
+                                # Cache the result
+                                with self._preprocessor_result_lock:
+                                    self._latest_preprocessor_results[cache_key] = result.data
+                                cached_result = result.data
+
+                            if cached_result is not None:
+                                # Move to GPU
+                                gpu_start = time.time()
+                                result_tensor = cached_result.to(
+                                    device=torch.device("cuda"),
+                                    dtype=torch.bfloat16,
+                                    non_blocking=True,
+                                )
+                                gpu_time = time.time() - gpu_start
+                                if gpu_time > 0.01:
+                                    logger.debug(f"[Overhead] Preprocessor {preprocessor_type} GPU transfer: {gpu_time*1000:.1f}ms")
+
+                                # Store final result for pipeline (keep tensor format)
+                                preprocessed_input = result_tensor
+
+                                # Only convert to numpy if there's a next preprocessor
+                                if idx < len(preprocessor_types) - 1:
+                                    # Convert result tensor [1, C, T, H, W] to numpy format for next preprocessor
+                                    # Extract frames: [1, C, T, H, W] -> [T, H, W, C] -> numpy [T, H, W, C]
+                                    T = result_tensor.shape[2]
+                                    result_tensor_permuted = result_tensor.squeeze(0).permute(1, 2, 3, 0)  # [T, H, W, C]
+
+                                    # Convert from [-1, 1] or [0, 1] range to [0, 255] uint8
+                                    # Preprocessor outputs are typically in [-1, 1] for depthanything or [0, 1] for passthrough
+                                    if result_tensor_permuted.min() < 0:
+                                        # [-1, 1] range -> [0, 1]
+                                        result_tensor_permuted = (result_tensor_permuted + 1.0) / 2.0
+                                    # [0, 1] -> [0, 255] uint8
+                                    result_tensor_permuted = (result_tensor_permuted * 255.0).clamp(0, 255).to(torch.uint8)
+
+                                    # Convert to numpy array [T, H, W, C] for next preprocessor
+                                    current_input = result_tensor_permuted.cpu().numpy()
+
+                                logger.debug(
+                                    f"Preprocessor {preprocessor_type} ({idx+1}/{len(preprocessor_types)}) output shape: {result_tensor.shape}"
+                                )
+                            else:
+                                # No result available yet, can't continue pipeline
+                                logger.debug(
+                                    f"No result available yet for preprocessor {preprocessor_type} ({idx+1}/{len(preprocessor_types)}), using video input"
+                                )
+                                preprocessed_input = None
+                                break
+
+                    # Use final preprocessed input if available
                     if preprocessed_input is not None:
-                        # Move to correct device and dtype
-                        # non_blocking=True since memory is pinned in receiver thread
-                        gpu_start = time.time()
-                        preprocessed_input = preprocessed_input.to(
-                            device=torch.device("cuda"),
-                            dtype=torch.bfloat16,
-                            non_blocking=True,
-                        )
-                        gpu_time = time.time() - gpu_start
-                        if gpu_time > 0.01:
-                            logger.debug(f"[Overhead] Preprocessor GPU transfer: {gpu_time*1000:.1f}ms")
-
                         logger.debug(
-                            f"Using async {preprocessor_type} preprocessor, shape: {preprocessed_input.shape}"
+                            f"Using sequential preprocessors {preprocessor_types}, final shape: {preprocessed_input.shape}"
                         )
-
-                        # Use preprocessed input
                         if vace_enabled:
                             call_params["vace_input_frames"] = preprocessed_input
                         else:
                             call_params["video"] = preprocessed_input
                     else:
-                        # No preprocessor result available yet, fall back to video input
+                        # Not all preprocessor results available yet, fall back to video input
                         logger.debug(
-                            "No async preprocessor result available yet, using video input"
+                            f"Preprocessor pipeline incomplete, using video input"
                         )
                         if vace_enabled:
                             call_params["vace_input_frames"] = video_input

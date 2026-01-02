@@ -19,6 +19,7 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
+import { OrderedMultiSelect } from "./ui/ordered-multi-select";
 import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
@@ -90,6 +91,8 @@ interface SettingsPanelProps {
   // Preprocessor settings
   preprocessorType?: string | null;
   onPreprocessorTypeChange?: (type: string | null) => void;
+  preprocessorTypes?: string[];
+  onPreprocessorTypesChange?: (types: string[]) => void;
   availablePreprocessors?: string[];
 }
 
@@ -132,6 +135,8 @@ export function SettingsPanel({
   onVaceContextScaleChange,
   preprocessorType = null,
   onPreprocessorTypeChange,
+  preprocessorTypes = [],
+  onPreprocessorTypesChange,
   availablePreprocessors = [],
 }: SettingsPanelProps) {
   // Local slider state management hooks
@@ -402,44 +407,63 @@ export function SettingsPanel({
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
                 label={PARAMETER_METADATA.preprocessorType.label}
-                tooltip={PARAMETER_METADATA.preprocessorType.tooltip}
+                tooltip={PARAMETER_METADATA.preprocessorType.tooltip + " You can select multiple preprocessors. Each runs in a separate process."}
                 className="text-xs text-muted-foreground w-32"
               />
-              <Select
-                value={preprocessorType || "none"}
-                onValueChange={value =>
-                  onPreprocessorTypeChange?.(
-                    value === "none" ? null : value
-                  )
-                }
-                disabled={isStreaming || isLoading}
-              >
-                <SelectTrigger className="flex-1 h-7">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {availablePreprocessors.map((id) => {
+              {onPreprocessorTypesChange ? (
+                <OrderedMultiSelect
+                  options={availablePreprocessors.map((id) => {
                     // Format preprocessor ID for display
-                    // Handle known preprocessors with special formatting
                     const displayNameMap: Record<string, string> = {
                       depthanything: "Depth Anything",
                       passthrough: "Passthrough",
                     };
-
-                    // Use mapped name if available, otherwise format generically
                     const displayName = displayNameMap[id] || id
                       .split("-")
                       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                       .join(" ");
-                    return (
-                      <SelectItem key={id} value={id}>
-                        {displayName}
-                      </SelectItem>
-                    );
+                    return { value: id, label: displayName };
                   })}
-                </SelectContent>
-              </Select>
+                  value={preprocessorTypes || []}
+                  onChange={onPreprocessorTypesChange}
+                  placeholder="Add preprocessor..."
+                  disabled={isStreaming || isLoading}
+                  className="flex-1"
+                />
+              ) : (
+                // Backward compatibility: single select
+                <Select
+                  value={preprocessorType || "none"}
+                  onValueChange={value =>
+                    onPreprocessorTypeChange?.(
+                      value === "none" ? null : value
+                    )
+                  }
+                  disabled={isStreaming || isLoading}
+                >
+                  <SelectTrigger className="flex-1 h-7">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {availablePreprocessors.map((id) => {
+                      const displayNameMap: Record<string, string> = {
+                        depthanything: "Depth Anything",
+                        passthrough: "Passthrough",
+                      };
+                      const displayName = displayNameMap[id] || id
+                        .split("-")
+                        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                        .join(" ");
+                      return (
+                        <SelectItem key={id} value={id}>
+                          {displayName}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           </div>
         )}

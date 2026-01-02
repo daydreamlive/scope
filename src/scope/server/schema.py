@@ -115,7 +115,11 @@ class Parameters(BaseModel):
     )
     preprocessor_type: str | None = Field(
         default=None,
-        description="Preprocessor type to use for video input. Options: 'depthanything' (extracts depth maps), 'passthrough' (passes through unchanged), None (no preprocessing).",
+        description="Preprocessor type to use for video input (deprecated, use preprocessor_types). Options: 'depthanything' (extracts depth maps), 'passthrough' (passes through unchanged), None (no preprocessing).",
+    )
+    preprocessor_types: list[str] | None = Field(
+        default=None,
+        description="List of preprocessor types to use for video input. Each preprocessor runs in a separate process. Results are concatenated along the channel dimension. Options: 'depthanything' (extracts depth maps), 'passthrough' (passes through unchanged).",
     )
 
 

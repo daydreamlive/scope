@@ -74,7 +74,8 @@ export interface SettingsState {
   refImages?: string[];
   vaceContextScale?: number;
   // Preprocessor settings
-  preprocessorType?: string | null;
+  preprocessorType?: string | null; // Deprecated, use preprocessorTypes
+  preprocessorTypes?: string[]; // List of preprocessor types
 }
 
 export interface PipelineInfo {

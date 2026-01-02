@@ -151,7 +151,8 @@ export function useStreamState() {
     inputMode: initialDefaults.inputMode,
     // VACE and Preprocessor defaults
     vaceEnabled: true,
-    preprocessorType: null, // No preprocessor by default
+    preprocessorType: null, // No preprocessor by default (deprecated)
+    preprocessorTypes: [], // List of preprocessor types
   });
 
   const [promptData, setPromptData] = useState<PromptData>({
