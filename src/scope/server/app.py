@@ -980,8 +980,17 @@ def plugins():
         click.echo(f"  • {plugin_name}")
 
 
-@main.command()
-def pipelines():
+@main.group(invoke_without_command=True)
+@click.pass_context
+def pipelines(ctx):
+    """Manage pipelines."""
+    # If no subcommand, list pipelines (backward compatibility)
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(pipelines_list)
+
+
+@pipelines.command("list")
+def pipelines_list():
     """List all available pipelines."""
 
     @suppress_init_output
@@ -1003,7 +1012,7 @@ def pipelines():
         click.echo(f"  • {pipeline_id}")
 
 
-@main.command(hidden=not _is_preview_enabled())
+@pipelines.command(hidden=not _is_preview_enabled())
 @click.argument("packages", nargs=-1, required=False)
 @click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
 @click.option(
@@ -1015,7 +1024,7 @@ def pipelines():
     "--pre", is_flag=True, help="Include pre-release and development versions"
 )
 def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
-    """Install a plugin."""
+    """Install a pipeline plugin."""
     args = ["uv", "pip", "install"]
     if upgrade:
         args.append("--upgrade")
@@ -1033,6 +1042,100 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
 
     if result.returncode != 0:
         sys.exit(result.returncode)
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def preprocessors(ctx):
+    """Manage preprocessors."""
+    # If no subcommand, list preprocessors
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(preprocessors_list)
+
+
+@preprocessors.command("list")
+def preprocessors_list():
+    """List all available preprocessors."""
+
+    @suppress_init_output
+    def _load_preprocessors():
+        from scope.core.preprocessors.registry import PreprocessorRegistry
+
+        return PreprocessorRegistry.list_preprocessors()
+
+    all_preprocessors = _load_preprocessors()
+
+    if not all_preprocessors:
+        click.echo("No preprocessors available.")
+        return
+
+    click.echo(f"{len(all_preprocessors)} preprocessor(s) available:\n")
+
+    # List all preprocessors
+    for preprocessor_id in all_preprocessors:
+        click.echo(f"  • {preprocessor_id}")
+
+
+@preprocessors.command(hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=False)
+@click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
+@click.option(
+    "-e", "--editable", help="Install a project in editable mode from this path"
+)
+@click.option("--force-reinstall", is_flag=True, help="Force reinstall packages")
+@click.option("--no-cache-dir", is_flag=True, help="Disable the cache")
+@click.option(
+    "--pre", is_flag=True, help="Include pre-release and development versions"
+)
+def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
+    """Install a preprocessor plugin."""
+    args = ["uv", "pip", "install"]
+    if upgrade:
+        args.append("--upgrade")
+    if editable:
+        args += ["--editable", editable]
+    if force_reinstall:
+        args.append("--force-reinstall")
+    if no_cache_dir:
+        args.append("--no-cache-dir")
+    if pre:
+        args.append("--pre")
+    args += list(packages)
+
+    result = subprocess.run(args, capture_output=False)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+# Backward compatibility: keep old commands working
+@main.command()
+def pipelines_legacy():
+    """List all available pipelines (legacy command, use 'pipelines list')."""
+    # Redirect to new command
+    from click import get_current_context
+    ctx = get_current_context()
+    ctx.invoke(pipelines.list)
+
+
+@main.command(hidden=not _is_preview_enabled())
+@click.argument("packages", nargs=-1, required=False)
+@click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
+@click.option(
+    "-e", "--editable", help="Install a project in editable mode from this path"
+)
+@click.option("--force-reinstall", is_flag=True, help="Force reinstall packages")
+@click.option("--no-cache-dir", is_flag=True, help="Disable the cache")
+@click.option(
+    "--pre", is_flag=True, help="Include pre-release and development versions"
+)
+def install_legacy(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
+    """Install a plugin (legacy command, use 'pipelines install' or 'preprocessors install')."""
+    # Redirect to pipelines install for backward compatibility
+    from click import get_current_context
+    ctx = get_current_context()
+    ctx.invoke(pipelines.install, packages=packages, upgrade=upgrade, editable=editable,
+                force_reinstall=force_reinstall, no_cache_dir=no_cache_dir, pre=pre)
 
 
 @main.command(hidden=not _is_preview_enabled())

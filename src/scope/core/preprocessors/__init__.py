@@ -5,6 +5,7 @@ video input before it enters the main diffusion pipeline.
 """
 
 from .async_preprocessor import AsyncPreprocessorClient, PreprocessorResult
+from .registry import PreprocessorRegistry
 
 # Backward compatibility aliases
 from .async_preprocessor import AsyncPreprocessorClient as DepthPreprocessorClient
@@ -14,4 +15,11 @@ from .async_preprocessor import PreprocessorResult as DepthResult
 # for backwards compatibility
 from scope.core.pipelines.depthanything import VideoDepthAnythingModel as VideoDepthAnything
 
-__all__ = ["VideoDepthAnything", "AsyncPreprocessorClient", "PreprocessorResult", "DepthPreprocessorClient", "DepthResult"]
+__all__ = [
+    "VideoDepthAnything",
+    "AsyncPreprocessorClient",
+    "PreprocessorResult",
+    "PreprocessorRegistry",
+    "DepthPreprocessorClient",
+    "DepthResult",
+]

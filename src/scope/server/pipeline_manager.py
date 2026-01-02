@@ -34,6 +34,13 @@ class PipelineStatus(Enum):
     ERROR = "error"
 
 
+# List of built-in preprocessors with custom initialization
+BUILTIN_PREPROCESSORS = {
+    "depthanything",
+    "passthrough",
+}
+
+
 class PipelineManager:
     """Manager for ML pipeline lifecycle."""
 
@@ -334,6 +341,26 @@ class PipelineManager:
             preprocessor_type: Type of preprocessor ("depthanything", "passthrough", etc.)
             encoder: For depthanything, encoder size ("vits", "vitb", or "vitl"). Defaults to "vits".
         """
+        from scope.core.preprocessors import PreprocessorRegistry
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        # Check if preprocessor is registered (built-in or plugin)
+        preprocessor_class = PreprocessorRegistry.get(preprocessor_type)
+
+        # If not found in PreprocessorRegistry, check PipelineRegistry (for plugin preprocessors)
+        if preprocessor_class is None:
+            preprocessor_class = PipelineRegistry.get(preprocessor_type)
+            if preprocessor_class is not None:
+                # Plugin preprocessor registered as pipeline
+                logger.info(f"Loading plugin preprocessor: {preprocessor_type}")
+
+        if preprocessor_class is None:
+            if preprocessor_type not in BUILTIN_PREPROCESSORS:
+                logger.error(f"Unknown preprocessor type: {preprocessor_type}")
+                self._async_preprocessor = None
+                return
+            # Built-in preprocessor not in registry yet, continue with async client loading
+
         # All preprocessors run in separate processes
         from scope.core.preprocessors import AsyncPreprocessorClient
 
