@@ -13,9 +13,6 @@ from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
-# Flag to enable async depth preprocessing (runs in separate process)
-ASYNC_DEPTH_PREPROCESSING = True
-
 # Flag to benchmark depth preprocessing only (skip main pipeline)
 # Set DEPTH_BENCHMARK_MODE=True environment variable to measure depth FPS without V2V processing
 DEPTH_BENCHMARK_MODE = os.environ.get("DEPTH_BENCHMARK_MODE", "").lower() in ("true", "1", "yes")
@@ -758,123 +755,101 @@ class FrameProcessor:
                     "depth_preprocessor_mode", "depth_only"
                 )
 
-                # Handle depth preprocessing
+                # Handle depth preprocessing (always async)
                 if depth_preprocessor_enabled:
-                    # Check for async depth preprocessor first
                     async_depth_client = self.pipeline_manager.async_depth_preprocessor
-                    use_async = (
-                        ASYNC_DEPTH_PREPROCESSING
-                        and async_depth_client is not None
-                        and async_depth_client.is_running()
-                    )
 
-                    if use_async:
-                        # === ASYNC DEPTH PREPROCESSING ===
-                        # Provide FPS feedback to throttle depth worker
-                        pipeline_fps = self.get_current_pipeline_fps()
-                        async_depth_client.set_target_fps(pipeline_fps)
-
-                        # Only submit new frames if we don't have a recent cached result
-                        # This reduces overhead (tensor→numpy conversion) and GPU contention
-                        # Since depth runs ~5x faster than pipeline, we can skip some submissions
-                        should_submit = True
-                        with self._depth_result_lock:
-                            if self._latest_depth_result is not None:
-                                # Skip if we have a cached result and buffer has more results pending
-                                if async_depth_client.get_buffer_size() > 0:
-                                    should_submit = False
-
-                        if should_submit:
-                            # Submit current frames for processing (non-blocking)
-                            width, height = self._get_pipeline_dimensions()
-                            depth_submit_time = time.time()
-                            async_depth_client.submit_frames(
-                                video_input,
-                                target_height=height,
-                                target_width=width,
-                            )
-                            submit_overhead = time.time() - depth_submit_time
-                            if submit_overhead > 0.05:
-                                logger.debug(f"[Overhead] Depth submit: {submit_overhead*1000:.1f}ms")
-
-                        # In benchmark mode, wait for actual result to measure true depth FPS
-                        if DEPTH_BENCHMARK_MODE:
-                            depth_result = async_depth_client.get_depth_result(
-                                wait=True, timeout=5.0
-                            )
-                            if depth_result is not None:
-                                depth_latency = time.time() - depth_submit_time
-                                num_frames = len(video_input)
-                                logger.info(
-                                    f"[DEPTH BENCHMARK] Depth round-trip: {num_frames} frames in "
-                                    f"{depth_latency:.3f}s ({num_frames / depth_latency:.1f} FPS)"
-                                )
-                                with self._depth_result_lock:
-                                    self._latest_depth_result = depth_result.depth
-                        else:
-                            # Normal mode: get latest available (non-blocking)
-                            depth_result = async_depth_client.get_latest_depth_result()
-                            if depth_result is not None:
-                                # Cache the result for future use
-                                with self._depth_result_lock:
-                                    self._latest_depth_result = depth_result.depth
-
-                        # Use cached depth result (may be from previous chunk)
-                        with self._depth_result_lock:
-                            depth_input = self._latest_depth_result
-
-                        if depth_input is not None:
-                            # Move to correct device and dtype
-                            # non_blocking=True since memory is pinned in receiver thread
-                            gpu_start = time.time()
-                            depth_input = depth_input.to(
-                                device=torch.device("cuda"),
-                                dtype=torch.bfloat16,
-                                non_blocking=True,
-                            )
-                            gpu_time = time.time() - gpu_start
-                            if gpu_time > 0.01:
-                                logger.debug(f"[Overhead] Depth GPU transfer: {gpu_time*1000:.1f}ms")
-
-                            logger.debug(
-                                f"Using async depth (mode={depth_mode}), "
-                                f"shape: {depth_input.shape}"
-                            )
-
-                            # Depth-only mode: generate from depth structure only
-                            if vace_enabled:
-                                call_params["vace_input_frames"] = depth_input
-                            else:
-                                call_params["video"] = depth_input
-                        else:
-                            # No depth result available yet, fall back to video input
-                            logger.debug(
-                                "No async depth result available yet, using video input"
-                            )
-                            if vace_enabled:
-                                call_params["vace_input_frames"] = video_input
-                            else:
-                                call_params["video"] = video_input
-                    else:
-                        # === SYNC DEPTH PREPROCESSING (fallback) ===
-                        # Use DepthAnythingPipeline for preprocessing (no longer using old preprocessor)
-                        # Apply depth preprocessing to video input
-                        depth_input = self._apply_depth_preprocessing(
-                            video_input, None  # depth_preprocessor parameter is unused
+                    if async_depth_client is None or not async_depth_client.is_running():
+                        raise RuntimeError(
+                            "Depth preprocessing is enabled but async depth preprocessor is not available or not running"
                         )
-                        logger.info(
-                            f"Applied depth preprocessing (mode={depth_mode}), "
-                            f"output shape: {depth_input.shape}"
+
+                    # === ASYNC DEPTH PREPROCESSING ===
+                    # Provide FPS feedback to throttle depth worker
+                    pipeline_fps = self.get_current_pipeline_fps()
+                    async_depth_client.set_target_fps(pipeline_fps)
+
+                    # Only submit new frames if we don't have a recent cached result
+                    # This reduces overhead (tensor→numpy conversion) and GPU contention
+                    # Since depth runs ~5x faster than pipeline, we can skip some submissions
+                    should_submit = True
+                    with self._depth_result_lock:
+                        if self._latest_depth_result is not None:
+                            # Skip if we have a cached result and buffer has more results pending
+                            if async_depth_client.get_buffer_size() > 0:
+                                should_submit = False
+
+                    if should_submit:
+                        # Submit current frames for processing (non-blocking)
+                        width, height = self._get_pipeline_dimensions()
+                        depth_submit_time = time.time()
+                        async_depth_client.submit_frames(
+                            video_input,
+                            target_height=height,
+                            target_width=width,
+                        )
+                        submit_overhead = time.time() - depth_submit_time
+                        if submit_overhead > 0.05:
+                            logger.debug(f"[Overhead] Depth submit: {submit_overhead*1000:.1f}ms")
+
+                    # In benchmark mode, wait for actual result to measure true depth FPS
+                    if DEPTH_BENCHMARK_MODE:
+                        depth_result = async_depth_client.get_depth_result(
+                            wait=True, timeout=5.0
+                        )
+                        if depth_result is not None:
+                            depth_latency = time.time() - depth_submit_time
+                            num_frames = len(video_input)
+                            logger.info(
+                                f"[DEPTH BENCHMARK] Depth round-trip: {num_frames} frames in "
+                                f"{depth_latency:.3f}s ({num_frames / depth_latency:.1f} FPS)"
+                            )
+                            with self._depth_result_lock:
+                                self._latest_depth_result = depth_result.depth
+                    else:
+                        # Normal mode: get latest available (non-blocking)
+                        depth_result = async_depth_client.get_latest_depth_result()
+                        if depth_result is not None:
+                            # Cache the result for future use
+                            with self._depth_result_lock:
+                                self._latest_depth_result = depth_result.depth
+
+                    # Use cached depth result (may be from previous chunk)
+                    with self._depth_result_lock:
+                        depth_input = self._latest_depth_result
+
+                    if depth_input is not None:
+                        # Move to correct device and dtype
+                        # non_blocking=True since memory is pinned in receiver thread
+                        gpu_start = time.time()
+                        depth_input = depth_input.to(
+                            device=torch.device("cuda"),
+                            dtype=torch.bfloat16,
+                            non_blocking=True,
+                        )
+                        gpu_time = time.time() - gpu_start
+                        if gpu_time > 0.01:
+                            logger.debug(f"[Overhead] Depth GPU transfer: {gpu_time*1000:.1f}ms")
+
+                        logger.debug(
+                            f"Using async depth (mode={depth_mode}), "
+                            f"shape: {depth_input.shape}"
                         )
 
                         # Depth-only mode: generate from depth structure only
                         if vace_enabled:
-                            # Use VACE conditioning with depth maps
                             call_params["vace_input_frames"] = depth_input
                         else:
-                            # No VACE: pass depth directly as video input
-                            # The depth map becomes the "video" to transform from
                             call_params["video"] = depth_input
+                    else:
+                        # No depth result available yet, fall back to video input
+                        logger.debug(
+                            "No async depth result available yet, using video input"
+                        )
+                        if vace_enabled:
+                            call_params["vace_input_frames"] = video_input
+                        else:
+                            call_params["video"] = video_input
                 elif vace_enabled:
                     # Regular VACE V2V editing mode: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
@@ -1077,107 +1052,3 @@ class FrameProcessor:
             return False
         # Add more non-recoverable error types here as needed
         return True
-
-    def _apply_depth_preprocessing(
-        self,
-        video_input: list[torch.Tensor],
-        depth_preprocessor,
-    ) -> torch.Tensor:
-        """Apply Video-Depth-Anything preprocessing to video frames.
-
-        Converts video frames to depth maps using DepthAnythingPipeline.
-
-        Args:
-            video_input: List of tensor frames, each (1, H, W, C) in [0, 255]
-            depth_preprocessor: Unused (kept for compatibility), pipeline is used instead
-
-        Returns:
-            Depth tensor [1, 3, F, H, W] in [-1, 1] range
-        """
-        from scope.core.pipelines.depthanything import DepthAnythingPipeline
-        import torch
-
-        # Get or create depth pipeline instance
-        # Check if current pipeline is already depthanything pipeline
-        try:
-            pipeline = self.pipeline_manager.get_pipeline()
-            if isinstance(pipeline, DepthAnythingPipeline):
-                depth_pipeline = pipeline
-            else:
-                # Check if we have a cached depth pipeline instance
-                if not hasattr(self, "_cached_depth_pipeline"):
-                    # Create a depth pipeline instance for preprocessing
-                    # Use the same device and settings as the main pipeline
-                    device = pipeline.device if hasattr(pipeline, "device") else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                    dtype = pipeline.dtype if hasattr(pipeline, "dtype") else torch.float16
-
-                    # Get encoder from parameters or use default
-                    encoder = self.parameters.get("depth_preprocessor_encoder", "vits")
-                    input_size = self.parameters.get("depth_input_size", 392)
-                    streaming = self.parameters.get("depth_streaming", True)
-
-                    depth_pipeline = DepthAnythingPipeline(
-                        encoder=encoder,
-                        device=device,
-                        dtype=dtype,
-                        input_size=input_size,
-                        streaming=streaming,
-                        output_format="rgb",
-                    )
-                    depth_pipeline.prepare()
-                    # Cache the pipeline instance for reuse
-                    self._cached_depth_pipeline = depth_pipeline
-                else:
-                    depth_pipeline = self._cached_depth_pipeline
-        except Exception:
-            # Fallback: create a new pipeline instance if we can't get the current one
-            if not hasattr(self, "_cached_depth_pipeline"):
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                encoder = self.parameters.get("depth_preprocessor_encoder", "vitl")
-                input_size = self.parameters.get("depth_input_size", 392)
-                streaming = self.parameters.get("depth_streaming", True)
-
-                depth_pipeline = DepthAnythingPipeline(
-                    encoder=encoder,
-                    device=device,
-                    dtype=torch.float16,
-                    input_size=input_size,
-                    streaming=streaming,
-                    output_format="rgb",
-                )
-                depth_pipeline.prepare()
-                self._cached_depth_pipeline = depth_pipeline
-            else:
-                depth_pipeline = self._cached_depth_pipeline
-
-        # Use the pipeline's __call__ method
-        depth_output = depth_pipeline(video=video_input)  # Returns [T, H, W, 3] in [0, 1]
-
-        # Convert pipeline output [T, H, W, 3] in [0, 1] to [1, 3, T, H, W] in [-1, 1]
-        T, H, W, C = depth_output.shape
-
-        # Get target dimensions from input frames
-        target_H, target_W = video_input[0].shape[1], video_input[0].shape[2]
-
-        # Resize to target dimensions if needed
-        if H != target_H or W != target_W:
-            depth_output = depth_output.permute(0, 3, 1, 2)  # [T, 3, H, W]
-            import torch.nn.functional as F
-            depth_output = F.interpolate(
-                depth_output,
-                size=(target_H, target_W),
-                mode="bilinear",
-                align_corners=False,
-            )
-            depth_output = depth_output.permute(0, 2, 3, 1)  # [T, H, W, 3]
-
-        # Convert [T, H, W, 3] -> [T, 3, H, W]
-        depth_tensor = depth_output.permute(0, 3, 1, 2)  # [T, 3, H, W]
-
-        # Convert from [0, 1] to [-1, 1]
-        depth_tensor = depth_tensor * 2.0 - 1.0
-
-        # Add batch dimension and rearrange to [1, 3, T, H, W]
-        depth_output = depth_tensor.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, 3, T, H, W]
-
-        return depth_output.to(dtype=torch.bfloat16)
