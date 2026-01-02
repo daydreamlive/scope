@@ -88,8 +88,9 @@ interface SettingsPanelProps {
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
   // Preprocessor settings
-  preprocessorType?: "depthanything" | "passthrough" | null;
-  onPreprocessorTypeChange?: (type: "depthanything" | "passthrough" | null) => void;
+  preprocessorType?: string | null;
+  onPreprocessorTypeChange?: (type: string | null) => void;
+  availablePreprocessors?: string[];
 }
 
 export function SettingsPanel({
@@ -131,6 +132,7 @@ export function SettingsPanel({
   onVaceContextScaleChange,
   preprocessorType = null,
   onPreprocessorTypeChange,
+  availablePreprocessors = [],
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -405,7 +407,7 @@ export function SettingsPanel({
                     value={preprocessorType || "none"}
                     onValueChange={value =>
                       onPreprocessorTypeChange?.(
-                        value === "none" ? null : (value as "depthanything" | "passthrough")
+                        value === "none" ? null : value
                       )
                     }
                     disabled={isStreaming || isLoading}
@@ -415,8 +417,25 @@ export function SettingsPanel({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="depthanything">Depth Anything</SelectItem>
-                      <SelectItem value="passthrough">Passthrough</SelectItem>
+                      {availablePreprocessors.map((id) => {
+                        // Format preprocessor ID for display
+                        // Handle known preprocessors with special formatting
+                        const displayNameMap: Record<string, string> = {
+                          depthanything: "Depth Anything",
+                          passthrough: "Passthrough",
+                        };
+
+                        // Use mapped name if available, otherwise format generically
+                        const displayName = displayNameMap[id] || id
+                          .split("-")
+                          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                          .join(" ");
+                        return (
+                          <SelectItem key={id} value={id}>
+                            {displayName}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>

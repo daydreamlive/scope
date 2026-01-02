@@ -25,7 +25,7 @@ export interface WebRTCOfferRequest {
     kv_cache_attention_bias?: number;
     vace_ref_images?: string[];
     vace_context_scale?: number;
-    preprocessor_type?: "depthanything" | "passthrough" | null;
+    preprocessor_type?: string | null;
   };
 }
 
@@ -408,6 +408,26 @@ export interface PipelineSchemaInfo {
 export interface PipelineSchemasResponse {
   pipelines: Record<string, PipelineSchemaInfo>;
 }
+
+export interface PreprocessorsResponse {
+  preprocessors: string[];
+}
+
+export const getPreprocessors = async (): Promise<PreprocessorsResponse> => {
+  const response = await fetch("/api/v1/preprocessors", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get preprocessors failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
 
 export const getPipelineSchemas =
   async (): Promise<PipelineSchemasResponse> => {

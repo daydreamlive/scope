@@ -51,9 +51,53 @@ class PreprocessorRegistry:
         """Get list of all registered preprocessor IDs.
 
         Returns:
-            List of preprocessor IDs (only explicitly registered preprocessors)
+            List of preprocessor IDs (built-in + plugin preprocessors from PipelineRegistry)
         """
-        return sorted(list(cls._preprocessors.keys()))
+        # Start with explicitly registered preprocessors
+        preprocessor_ids = set(cls._preprocessors.keys())
+
+        # Also check PipelineRegistry for plugin preprocessors
+        # (plugins might be loaded after PreprocessorRegistry initialization)
+        try:
+            from scope.core.pipelines.registry import PipelineRegistry
+
+            all_pipelines = PipelineRegistry.list_pipelines()
+
+            # Built-in preprocessor IDs
+            builtin_preprocessor_ids = {"depthanything", "passthrough"}
+
+            # Built-in pipeline IDs (that are NOT preprocessors)
+            builtin_pipeline_ids = {
+                "streamdiffusionv2",
+                "longlive",
+                "krea-realtime-video",
+                "reward-forcing",
+                "memflow",
+            }
+
+            # Add plugin pipelines as preprocessors
+            for pipeline_id in all_pipelines:
+                if pipeline_id in builtin_preprocessor_ids:
+                    # Already in our registry
+                    continue
+                if pipeline_id in builtin_pipeline_ids:
+                    # Built-in pipeline that's not a preprocessor, skip
+                    continue
+
+                # This is a plugin pipeline - add it as a preprocessor
+                preprocessor_ids.add(pipeline_id)
+
+                # Also register it in our registry if not already there
+                if pipeline_id not in cls._preprocessors:
+                    pipeline_class = PipelineRegistry.get(pipeline_id)
+                    if pipeline_class is not None:
+                        cls.register(pipeline_id, pipeline_class)
+                        logger.debug(f"Auto-registered plugin pipeline as preprocessor: {pipeline_id}")
+        except ImportError:
+            # PipelineRegistry might not be available in all contexts
+            pass
+
+        return sorted(list(preprocessor_ids))
 
 
 # Register all available preprocessors

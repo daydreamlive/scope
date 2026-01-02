@@ -60,6 +60,20 @@ def vace_encode_frames(
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
+
+        # Validate shapes before encoding
+        # VAE stream_encode processes frames in chunks of 4, so we need at least 4 frames
+        if inactive_stacked.shape[2] < 4:
+            raise ValueError(
+                f"inactive_stacked has {inactive_stacked.shape[2]} frames, but VAE stream_encode requires at least 4 frames. "
+                f"Shape: {inactive_stacked.shape}"
+            )
+        if reactive_stacked.shape[2] < 4:
+            raise ValueError(
+                f"reactive_stacked has {reactive_stacked.shape[2]} frames, but VAE stream_encode requires at least 4 frames. "
+                f"Shape: {reactive_stacked.shape}"
+            )
+
         # Use cache=True to ensure cache consistency for both inactive and reactive portions
         inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=True)
         reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=True)

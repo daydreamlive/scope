@@ -10,6 +10,7 @@ import type {
 import {
   getHardwareInfo,
   getPipelineSchemas,
+  getPreprocessors,
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
@@ -163,13 +164,17 @@ export function useStreamState() {
     null
   );
 
-  // Fetch pipeline schemas and hardware info on mount
+  // Store available preprocessors
+  const [availablePreprocessors, setAvailablePreprocessors] = useState<string[]>([]);
+
+  // Fetch pipeline schemas, hardware info, and preprocessors on mount
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const [schemasResult, hardwareResult] = await Promise.allSettled([
+        const [schemasResult, hardwareResult, preprocessorsResult] = await Promise.allSettled([
           getPipelineSchemas(),
           getHardwareInfo(),
+          getPreprocessors(),
         ]);
 
         if (schemasResult.status === "fulfilled") {
@@ -206,6 +211,15 @@ export function useStreamState() {
           console.error(
             "useStreamState: Failed to fetch hardware info:",
             hardwareResult.reason
+          );
+        }
+
+        if (preprocessorsResult.status === "fulfilled") {
+          setAvailablePreprocessors(preprocessorsResult.value.preprocessors);
+        } else {
+          console.error(
+            "useStreamState: Failed to fetch preprocessors:",
+            preprocessorsResult.reason
           );
         }
       } catch (error) {
@@ -293,5 +307,6 @@ export function useStreamState() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    availablePreprocessors,
   };
 }

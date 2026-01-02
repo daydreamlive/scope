@@ -78,6 +78,7 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    availablePreprocessors,
   } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
@@ -508,9 +509,7 @@ export function StreamPage() {
     }
   };
 
-  const handlePreprocessorTypeChange = (
-    type: "depthanything" | "passthrough" | null
-  ) => {
+  const handlePreprocessorTypeChange = (type: string | null) => {
     updateSettings({ preprocessorType: type });
     // Send preprocessor type update to backend if streaming
     if (isStreaming) {
@@ -811,7 +810,7 @@ export function StreamPage() {
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_context_scale?: number;
-        preprocessor_type?: "depthanything" | "passthrough" | null;
+        preprocessor_type?: string | null;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1145,6 +1144,7 @@ export function StreamPage() {
             onVaceContextScaleChange={handleVaceContextScaleChange}
             preprocessorType={settings.preprocessorType ?? null}
             onPreprocessorTypeChange={handlePreprocessorTypeChange}
+            availablePreprocessors={availablePreprocessors}
           />
         </div>
       </div>

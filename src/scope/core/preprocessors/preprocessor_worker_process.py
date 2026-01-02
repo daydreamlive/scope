@@ -36,6 +36,7 @@ def load_preprocessor_pipeline(preprocessor_type: str, encoder: str | None = Non
     """Load the appropriate preprocessor pipeline based on type."""
     import torch
 
+    # Built-in preprocessors with custom initialization
     if preprocessor_type == "depthanything":
         from scope.core.pipelines.depthanything import DepthAnythingPipeline
 
@@ -66,8 +67,45 @@ def load_preprocessor_pipeline(preprocessor_type: str, encoder: str | None = Non
         logger.info("PassthroughPipeline loaded successfully!")
         return pipeline
 
+    # Try to load from registry (for plugin preprocessors)
     else:
-        raise ValueError(f"Unknown preprocessor type: {preprocessor_type}")
+        try:
+            from scope.core.preprocessors.registry import PreprocessorRegistry
+            from scope.core.pipelines.registry import PipelineRegistry
+
+            # Check PreprocessorRegistry first
+            preprocessor_class = PreprocessorRegistry.get(preprocessor_type)
+
+            # If not found, check PipelineRegistry (plugin preprocessors are pipelines)
+            if preprocessor_class is None:
+                preprocessor_class = PipelineRegistry.get(preprocessor_type)
+
+            if preprocessor_class is None:
+                raise ValueError(f"Preprocessor {preprocessor_type} not found in registry")
+
+            logger.info(f"Loading plugin preprocessor: {preprocessor_type}")
+            # Plugin pipelines are instantiated with load_params (which may be empty)
+            # Try instantiating with no parameters first (plugin pipelines should handle defaults)
+            try:
+                pipeline = preprocessor_class()
+            except TypeError:
+                # If that fails, try with device and dtype (common pattern)
+                try:
+                    pipeline = preprocessor_class(
+                        device=torch.device("cuda"),
+                        dtype=torch.bfloat16,
+                    )
+                except TypeError:
+                    # If that also fails, try with just device
+                    pipeline = preprocessor_class(
+                        device=torch.device("cuda"),
+                    )
+
+            logger.info(f"Plugin preprocessor {preprocessor_type} loaded successfully!")
+            return pipeline
+        except Exception as e:
+            logger.error(f"Failed to load preprocessor {preprocessor_type} from registry: {e}")
+            raise ValueError(f"Unknown preprocessor type: {preprocessor_type}") from e
 
 
 def process_frames_depthanything(pipeline, frames, target_height, target_width):
@@ -137,8 +175,8 @@ def process_frames_passthrough(pipeline, frames, target_height, target_width):
             align_corners=False,
         )
 
-    # Convert from [0, 1] to [-1, 1]
-    output_tensor = output_tensor * 2.0 - 1.0
+    # Passthrough should keep values in [0, 1] range (not convert to [-1, 1])
+    # VACE expects conditioning inputs in [0, 1] range
 
     # Add batch dimension and rearrange to [1, C, T, H, W]
     # output_tensor is [T, C, H, W], need [1, C, T, H, W]
@@ -147,11 +185,145 @@ def process_frames_passthrough(pipeline, frames, target_height, target_width):
     return result.float().cpu()
 
 
+def process_frames_generic(pipeline, frames, target_height, target_width):
+    """Generic processing function for plugin preprocessors.
+
+    This function handles plugin pipelines that may have different interfaces.
+    It tries multiple calling conventions to accommodate different pipeline types.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    # Convert numpy to torch tensor
+    frames_tensor = torch.from_numpy(frames).float()  # [F, H, W, C]
+    num_frames = frames_tensor.shape[0]
+
+    # Try different calling conventions for plugin pipelines
+    output = None
+
+    # Try 1: List of frames with video= keyword (standard interface)
+    try:
+        frame_list = [frames_tensor[i].unsqueeze(0) for i in range(num_frames)]
+        output = pipeline(video=frame_list)
+    except (TypeError, AttributeError, KeyError):
+        # Try 2: List of frames as positional argument
+        try:
+            frame_list = [frames_tensor[i] for i in range(num_frames)]
+            output = pipeline(frame_list)
+        except (TypeError, AttributeError):
+            # Try 3: Tensor input [B, C, T, H, W] format
+            try:
+                # Convert [F, H, W, C] -> [1, C, F, H, W]
+                input_tensor = frames_tensor.permute(3, 0, 1, 2).unsqueeze(0)  # [1, C, F, H, W]
+                output = pipeline(input=input_tensor)
+            except (TypeError, AttributeError):
+                # Try 4: Direct tensor input
+                try:
+                    input_tensor = frames_tensor.permute(3, 0, 1, 2).unsqueeze(0)  # [1, C, F, H, W]
+                    output = pipeline(input_tensor)
+                except Exception as e:
+                    logger.error(f"Failed to call plugin pipeline with any known interface: {e}")
+                    raise ValueError(f"Plugin pipeline does not support any known calling convention") from e
+
+    if output is None:
+        raise ValueError("Plugin pipeline returned None")
+
+    # Log the raw output for debugging
+    logger.debug(f"Plugin pipeline raw output type: {type(output)}, shape: {output.shape if isinstance(output, torch.Tensor) else 'N/A'}")
+
+    # Normalize output to [T, H, W, C] format
+    if isinstance(output, torch.Tensor):
+        # Handle different output shapes
+        if output.dim() == 5:  # [B, C, T, H, W] or [B, T, C, H, W]
+            if output.shape[1] == 3 or output.shape[2] == 3:  # Channel dimension
+                # Assume [B, C, T, H, W] -> [T, H, W, C]
+                output = output.squeeze(0).permute(1, 2, 3, 0)  # [T, H, W, C]
+            else:
+                # Assume [B, T, C, H, W] -> [T, H, W, C]
+                output = output.squeeze(0).permute(0, 2, 3, 1)  # [T, H, W, C]
+        elif output.dim() == 4:  # [T, C, H, W] or [T, H, W, C]
+            if output.shape[1] == 3:  # [T, C, H, W]
+                output = output.permute(0, 2, 3, 1)  # [T, H, W, C]
+            # else already [T, H, W, C]
+        elif output.dim() == 3:  # [H, W, C] - single frame, repeat for all frames
+            output = output.unsqueeze(0).repeat(num_frames, 1, 1, 1)  # [T, H, W, C]
+        else:
+            raise ValueError(f"Unexpected output shape from plugin pipeline: {output.shape}")
+    else:
+        raise ValueError(f"Plugin pipeline returned non-tensor type: {type(output)}")
+
+    # Ensure output is in [0, 1] range (normalize if needed)
+    if output.max() > 1.0:
+        output = output / 255.0
+    elif output.min() < 0.0:
+        # If in [-1, 1] range, convert to [0, 1]
+        output = (output + 1.0) / 2.0
+
+    # Convert [T, H, W, C] -> [T, C, H, W]
+    output_tensor = output.permute(0, 3, 1, 2)  # [T, C, H, W]
+
+    # Resize to target dimensions if needed
+    if output_tensor.shape[2] != target_height or output_tensor.shape[3] != target_width:
+        output_tensor = F.interpolate(
+            output_tensor.unsqueeze(0),  # Add batch dim for interpolation
+            size=(target_height, target_width),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)  # Remove batch dim
+
+    # Validate output has frames
+    if output_tensor.shape[0] == 0:
+        raise ValueError(f"Plugin pipeline returned empty output (0 frames)")
+
+    # Ensure we have exactly 3 channels (RGB) for VACE compatibility
+    # VACE expects 3-channel RGB conditioning maps
+    if output_tensor.shape[1] == 1:
+        # Convert grayscale to RGB by repeating the channel
+        output_tensor = output_tensor.repeat(1, 3, 1, 1)
+    elif output_tensor.shape[1] != 3:
+        logger.warning(f"Plugin pipeline returned {output_tensor.shape[1]} channels, expected 1 or 3. Converting to 3 channels.")
+        # If more than 3 channels, take first 3; if less, pad with zeros
+        if output_tensor.shape[1] > 3:
+            output_tensor = output_tensor[:, :3, :, :]
+        else:
+            padding = torch.zeros(
+                (output_tensor.shape[0], 3 - output_tensor.shape[1], output_tensor.shape[2], output_tensor.shape[3]),
+                dtype=output_tensor.dtype,
+                device=output_tensor.device
+            )
+            output_tensor = torch.cat([output_tensor, padding], dim=1)
+
+    # Ensure we have at least 4 frames (VAE stream_encode requires chunks of 4)
+    # If we have fewer frames, pad by repeating the last frame
+    num_frames_output = output_tensor.shape[0]
+    if num_frames_output < 4:
+        logger.warning(
+            f"Plugin pipeline returned {num_frames_output} frames, but VAE requires at least 4. "
+            f"Padding by repeating the last frame."
+        )
+        last_frame = output_tensor[-1:].repeat(4 - num_frames_output, 1, 1, 1)
+        output_tensor = torch.cat([output_tensor, last_frame], dim=0)
+
+    # Add batch dimension and rearrange to [1, C, T, H, W]
+    # output_tensor is [T, C, H, W], need [1, C, T, H, W]
+    result = output_tensor.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, C, T, H, W]
+
+    # Final validation - ensure result has correct shape [1, C, T, H, W]
+    if result.shape[0] != 1 or result.shape[1] != 3 or result.shape[2] == 0:
+        raise ValueError(f"Plugin pipeline returned invalid output shape: {result.shape}, expected [1, 3, T, H, W]")
+
+    # Ensure we have at least 4 frames in the final result
+    if result.shape[2] < 4:
+        raise ValueError(f"Plugin pipeline returned {result.shape[2]} frames, but VAE requires at least 4 frames")
+
+    logger.debug(f"Plugin preprocessor output shape: {result.shape}")
+    return result.float().cpu()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Preprocessor worker process")
     parser.add_argument("--preprocessor-type", type=str, required=True,
-                       choices=["depthanything", "passthrough"],
-                       help="Type of preprocessor to use")
+                       help="Type of preprocessor to use (e.g., depthanything, passthrough, or plugin preprocessor ID)")
     parser.add_argument("--encoder", type=str, default="vits",
                        choices=["vits", "vitb", "vitl"],
                        help="Encoder size for depthanything (ignored for other types)")
@@ -227,13 +399,15 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
 
     # Select processing function based on preprocessor type
+    # Built-in preprocessors have specific processing functions
     if args.preprocessor_type == "depthanything":
         process_frames_fn = process_frames_depthanything
     elif args.preprocessor_type == "passthrough":
         process_frames_fn = process_frames_passthrough
     else:
-        logger.error(f"Unknown preprocessor type: {args.preprocessor_type}")
-        sys.exit(1)
+        # Plugin preprocessors use generic processing that handles different interfaces
+        logger.info(f"Using generic processing for plugin preprocessor: {args.preprocessor_type}")
+        process_frames_fn = process_frames_generic
 
     # Main processing loop
     logger.info("Starting main processing loop...")

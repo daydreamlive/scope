@@ -51,6 +51,7 @@ from .schema import (
     IceServersResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
+    PreprocessorsResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
@@ -385,6 +386,15 @@ async def get_pipeline_schemas():
             pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
+
+
+@app.get("/api/v1/preprocessors", response_model=PreprocessorsResponse)
+async def get_preprocessors():
+    """Get list of all available preprocessors."""
+    from scope.core.preprocessors.registry import PreprocessorRegistry
+
+    preprocessors = PreprocessorRegistry.list_preprocessors()
+    return PreprocessorsResponse(preprocessors=preprocessors)
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)

@@ -74,7 +74,7 @@ export interface SettingsState {
   refImages?: string[];
   vaceContextScale?: number;
   // Preprocessor settings
-  preprocessorType?: "depthanything" | "passthrough" | null;
+  preprocessorType?: string | null;
 }
 
 export interface PipelineInfo {

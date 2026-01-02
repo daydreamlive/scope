@@ -441,6 +441,12 @@ class PipelineSchemasResponse(BaseModel):
     pipelines: dict = Field(..., description="Pipeline schemas keyed by pipeline ID")
 
 
+class PreprocessorsResponse(BaseModel):
+    """Response containing list of available preprocessors."""
+
+    preprocessors: list[str] = Field(..., description="List of preprocessor IDs")
+
+
 class AssetFileInfo(BaseModel):
     """Metadata for an available asset file on disk."""
 
