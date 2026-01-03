@@ -73,6 +73,8 @@ export interface SettingsState {
   vaceEnabled?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
+  // RIFE-specific settings
+  rifeEnabled?: boolean;
 }
 
 export interface PipelineInfo {

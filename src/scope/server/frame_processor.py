@@ -9,6 +9,7 @@ import torch
 from aiortc.mediastreams import VideoFrame
 
 from .pipeline_manager import PipelineManager, PipelineNotAvailableException
+from .rife_interpolation import RIFEInterpolator
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +74,19 @@ class FrameProcessor:
         self.processing_time_per_frame = deque(
             maxlen=2
         )  # Keep last 2 processing_time/num_frames values for averaging
+        self.original_fps_data = deque(
+            maxlen=2
+        )  # Keep last 2 original frame generation FPS values
+        self.interpolated_fps_data = deque(
+            maxlen=2
+        )  # Keep last 2 interpolated FPS values
         self.last_fps_update = time.time()
         self.fps_update_interval = 0.5  # Update FPS every 0.5 seconds
         self.min_fps = MIN_FPS
         self.max_fps = MAX_FPS
         self.current_pipeline_fps = DEFAULT_FPS
+        self.current_original_fps = DEFAULT_FPS  # Original frame generation FPS
+        self.current_interpolated_fps = None  # After interpolation FPS (None when RIFE disabled)
         self.fps_lock = threading.Lock()  # Lock for thread-safe FPS updates
 
         # Input FPS tracking variables
@@ -107,6 +116,12 @@ class FrameProcessor:
         # Input mode is signaled by the frontend at stream start.
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
+
+        # RIFE interpolation
+        rife_enabled = (initial_parameters or {}).get("rife_enabled", True)
+        self.rife_interpolator = RIFEInterpolator(
+            enabled=rife_enabled, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
 
     def start(self):
         if self.running:
@@ -229,6 +244,16 @@ class FrameProcessor:
         with self.fps_lock:
             return self.current_pipeline_fps
 
+    def get_original_fps(self) -> float:
+        """Get the original frame generation FPS (before interpolation)"""
+        with self.fps_lock:
+            return self.current_original_fps
+
+    def get_interpolated_fps(self) -> float | None:
+        """Get the interpolated FPS (after RIFE interpolation), returns None if RIFE is disabled"""
+        with self.fps_lock:
+            return self.current_interpolated_fps
+
     def get_output_fps(self) -> float:
         """Get the output FPS that frames should be sent at.
 
@@ -238,6 +263,10 @@ class FrameProcessor:
         """
         input_fps = self._get_input_fps()
         pipeline_fps = self.get_current_pipeline_fps()
+
+        # RIFE interpolation doubles the frame count, so double the output rate
+        if self.rife_interpolator.enabled:
+            pipeline_fps = pipeline_fps * 2
 
         if input_fps is None:
             return pipeline_fps
@@ -325,6 +354,39 @@ class FrameProcessor:
                 with self.fps_lock:
                     self.current_pipeline_fps = estimated_fps
 
+                # Update original and interpolated FPS if we have data
+                if len(self.original_fps_data) >= 1:
+                    avg_original_fps = sum(self.original_fps_data) / len(self.original_fps_data)
+                    avg_original_fps = max(self.min_fps, min(self.max_fps, avg_original_fps))
+                    with self.fps_lock:
+                        self.current_original_fps = avg_original_fps
+
+                # Only calculate interpolated FPS if RIFE is enabled
+                if self.rife_interpolator.enabled and len(self.interpolated_fps_data) >= 1:
+                    avg_interpolated_fps = sum(self.interpolated_fps_data) / len(self.interpolated_fps_data)
+                    avg_interpolated_fps = max(self.min_fps, min(self.max_fps, avg_interpolated_fps))
+                    with self.fps_lock:
+                        self.current_interpolated_fps = avg_interpolated_fps
+                else:
+                    # If RIFE is disabled or no interpolated data, set to None (will not be sent to frontend)
+                    with self.fps_lock:
+                        self.current_interpolated_fps = None
+
+                # Send FPS update to frontend via notification callback
+                if self.notification_callback:
+                    with self.fps_lock:
+                        fps_data = {
+                            "type": "fps_update",
+                            "original_fps": self.current_original_fps,
+                        }
+                        # Only include interpolated_fps if RIFE is enabled and we have data
+                        if self.current_interpolated_fps is not None:
+                            fps_data["interpolated_fps"] = self.current_interpolated_fps
+                    try:
+                        self.notification_callback(fps_data)
+                    except Exception as e:
+                        logger.debug(f"Failed to send FPS update notification: {e}")
+
             self.last_fps_update = current_time
 
     def _get_pipeline_dimensions(self) -> tuple[int, int]:
@@ -350,6 +412,24 @@ class FrameProcessor:
         if "spout_receiver" in parameters:
             spout_config = parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
+
+        # Handle RIFE interpolation settings
+        if "rife_enabled" in parameters:
+            rife_enabled = parameters.pop("rife_enabled")
+            try:
+                self.rife_interpolator.set_enabled(rife_enabled)
+                logger.info(f"RIFE interpolation {'enabled' if rife_enabled else 'disabled'}")
+                # Clear interpolated FPS data when RIFE is disabled
+                if not rife_enabled:
+                    with self.fps_lock:
+                        self.interpolated_fps_data.clear()
+                        self.current_interpolated_fps = None
+            except Exception as e:
+                logger.error(f"Failed to {'enable' if rife_enabled else 'disable'} RIFE interpolation: {e}")
+                # If enabling fails, keep RIFE disabled
+                if rife_enabled:
+                    self.rife_interpolator.enabled = False
+                raise
 
         # Put new parameters in queue (replace any pending update)
         try:
@@ -749,10 +829,15 @@ class FrameProcessor:
                     self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
-            num_frames = output.shape[0]
+            original_num_frames = output.shape[0]
             logger.debug(
-                f"Processed pipeline in {processing_time:.4f}s, {num_frames} frames"
+                f"Processed pipeline in {processing_time:.4f}s, {original_num_frames} frames"
             )
+
+            # Calculate original frame generation FPS (before interpolation)
+            if processing_time > 0 and original_num_frames > 0:
+                original_fps = original_num_frames / processing_time
+                self.original_fps_data.append(original_fps)
 
             # Normalize to [0, 255] and convert to uint8
             output = (
@@ -763,6 +848,26 @@ class FrameProcessor:
                 .detach()
                 .cpu()
             )
+
+            # Apply RIFE interpolation if enabled
+            rife_interpolation_time = None
+            if self.rife_interpolator.enabled:
+                rife_start_time = time.time()
+                output = self.rife_interpolator.interpolate(output)
+                rife_interpolation_time = time.time() - rife_start_time
+                interpolated_num_frames = output.shape[0]
+                logger.debug(
+                    f"RIFE interpolation: {original_num_frames} frames -> {interpolated_num_frames} frames in {rife_interpolation_time:.4f}s"
+                )
+                num_frames = interpolated_num_frames
+
+                # Calculate interpolated FPS (total time including interpolation)
+                total_processing_time = processing_time + rife_interpolation_time
+                if total_processing_time > 0 and interpolated_num_frames > 0:
+                    interpolated_fps = interpolated_num_frames / total_processing_time
+                    self.interpolated_fps_data.append(interpolated_fps)
+            else:
+                num_frames = original_num_frames
 
             # Resize output queue to meet target max size
             target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
@@ -864,5 +969,12 @@ class FrameProcessor:
         """
         if isinstance(error, torch.cuda.OutOfMemoryError):
             return False
+
+        # RIFE-related errors are not recoverable - RIFE must be properly installed
+        if isinstance(error, RuntimeError):
+            error_msg = str(error)
+            if "RIFE" in error_msg and ("not available" in error_msg or "not found" in error_msg or "Failed to load" in error_msg):
+                return False
+
         # Add more non-recoverable error types here as needed
         return True

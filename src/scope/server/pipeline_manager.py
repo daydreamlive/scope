@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -233,11 +234,25 @@ class PipelineManager:
         Adds vace_path to config and optionally extracts VACE-specific parameters
         from load_params (ref_images, vace_context_scale).
 
+        If VACE model file doesn't exist, VACE will be automatically disabled
+        by setting vace_path to None.
+
         Args:
             config: Pipeline configuration dict to modify
             load_params: Optional load parameters containing VACE settings
         """
-        config["vace_path"] = self._get_vace_checkpoint_path()
+        vace_path = self._get_vace_checkpoint_path()
+
+        # Check if VACE model file exists
+        if not Path(vace_path).exists():
+            logger.warning(
+                f"VACE model file not found at {vace_path}. "
+                f"VACE will be disabled. To enable VACE, download the model first."
+            )
+            config["vace_path"] = None
+            return
+
+        config["vace_path"] = vace_path
         logger.debug(f"_configure_vace: Using VACE checkpoint at {config['vace_path']}")
 
         # Extract VACE-specific parameters from load_params if present

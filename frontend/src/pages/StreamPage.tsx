@@ -157,6 +157,8 @@ export function StreamPage() {
     stopStream,
     updateVideoTrack,
     sendParameterUpdate,
+    originalFPS,
+    interpolatedFPS,
   } = useWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
@@ -299,6 +301,8 @@ export function StreamPage() {
       inputMode: modeToUse,
       denoisingSteps: defaults.denoisingSteps,
       resolution,
+      // RIFE is enabled by default for all pipelines
+      rifeEnabled: settings.rifeEnabled ?? true,
       noiseScale: defaults.noiseScale,
       noiseController: defaults.noiseController,
       loras: [], // Clear LoRA controls when switching pipelines
@@ -485,6 +489,16 @@ export function StreamPage() {
   const handleVaceEnabledChange = (enabled: boolean) => {
     updateSettings({ vaceEnabled: enabled });
     // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
+  const handleRifeEnabledChange = (enabled: boolean) => {
+    updateSettings({ rifeEnabled: enabled });
+    // Send RIFE enabled update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        rife_enabled: enabled,
+      });
+    }
   };
 
   const handleRefImagesChange = (images: string[]) => {
@@ -749,6 +763,9 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...vaceParams };
         }
 
+        // Add RIFE parameter
+        loadParams.rife_enabled = settings.rifeEnabled ?? true;
+
         console.log(
           `Loading ${pipelineIdToUse} with resolution ${resolution.width}x${resolution.height}`,
           loadParams
@@ -791,6 +808,7 @@ export function StreamPage() {
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_context_scale?: number;
+        rife_enabled?: boolean;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -840,6 +858,9 @@ export function StreamPage() {
       if (settings.spoutReceiver?.enabled) {
         initialParameters.spout_receiver = settings.spoutReceiver;
       }
+
+      // RIFE interpolation
+      initialParameters.rife_enabled = settings.rifeEnabled ?? true;
 
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
@@ -1117,12 +1138,19 @@ export function StreamPage() {
             onVaceEnabledChange={handleVaceEnabledChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
+            rifeEnabled={settings.rifeEnabled ?? true}
+            onRifeEnabledChange={handleRifeEnabledChange}
           />
         </div>
       </div>
 
       {/* Status Bar */}
-      <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
+      <StatusBar
+        fps={webrtcStats.fps}
+        bitrate={webrtcStats.bitrate}
+        originalFPS={originalFPS}
+        interpolatedFPS={interpolatedFPS}
+      />
 
       {/* Download Dialog */}
       {pipelineNeedsModels && (

@@ -105,7 +105,11 @@ class NotificationSender:
                 def send_sync():
                     try:
                         self.data_channel.send(message_str)
-                        logger.info(f"Sent notification to frontend: {message}")
+                        # Use debug level for frequent updates like fps_update
+                        if message.get("type") == "fps_update":
+                            logger.debug(f"Sent notification to frontend: {message}")
+                        else:
+                            logger.info(f"Sent notification to frontend: {message}")
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
 

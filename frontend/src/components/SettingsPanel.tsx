@@ -87,6 +87,9 @@ interface SettingsPanelProps {
   onVaceEnabledChange?: (enabled: boolean) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
+  // RIFE settings
+  rifeEnabled?: boolean;
+  onRifeEnabledChange?: (enabled: boolean) => void;
 }
 
 export function SettingsPanel({
@@ -126,6 +129,8 @@ export function SettingsPanel({
   onVaceEnabledChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
+  rifeEnabled = true,
+  onRifeEnabledChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -388,6 +393,27 @@ export function SettingsPanel({
             )}
           </div>
         )}
+
+        {/* RIFE Toggle */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label="RIFE Interpolation"
+              tooltip="Enable RIFE (Real-Time Intermediate Flow Estimation) frame interpolation to double the frame rate of the output video. This increases smoothness but may add latency. Requires pipeline reload to take effect."
+              className="text-sm font-medium"
+            />
+            <Toggle
+              pressed={rifeEnabled}
+              onPressedChange={onRifeEnabledChange || (() => {})}
+              variant="outline"
+              size="sm"
+              className="h-7"
+              disabled={isStreaming || isLoading}
+            >
+              {rifeEnabled ? "ON" : "OFF"}
+            </Toggle>
+          </div>
+        </div>
 
         {currentPipeline?.supportsLoRA && (
           <div className="space-y-4">
