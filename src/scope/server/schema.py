@@ -108,6 +108,10 @@ class Parameters(BaseModel):
         default=None,
         description="List of reference image file paths for VACE conditioning. Images should be located in the assets directory (at the same level as the models directory).",
     )
+    vace_use_input_video: bool | None = Field(
+        default=None,
+        description="When enabled in V2V mode with VACE, uses the input video as VACE conditioning (vace_input_frames). When disabled, only reference images are used for conditioning, enabling R2V mode while in V2V mode.",
+    )
     vace_context_scale: float = Field(
         default=1.0,
         description="Scaling factor for VACE hint injection. Higher values make reference images more influential.",
