@@ -326,6 +326,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       spout_sender?: { enabled: boolean; name: string };
       spout_receiver?: { enabled: boolean; name: string };
       vace_ref_images?: string[];
+      vace_use_input_video?: boolean;
       vace_context_scale?: number;
     }) => {
       if (
