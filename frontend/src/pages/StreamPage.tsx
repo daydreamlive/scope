@@ -487,6 +487,16 @@ export function StreamPage() {
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
+  const handleVaceUseInputVideoChange = (enabled: boolean) => {
+    updateSettings({ vaceUseInputVideo: enabled });
+    // Send parameter update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        vace_use_input_video: enabled,
+      });
+    }
+  };
+
   const handleRefImagesChange = (images: string[]) => {
     updateSettings({ refImages: images });
   };
@@ -790,6 +800,7 @@ export function StreamPage() {
         spout_sender?: { enabled: boolean; name: string };
         spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
+        vace_use_input_video?: boolean;
         vace_context_scale?: number;
       } = {
         // Signal the intended input mode to the backend so it doesn't
@@ -825,6 +836,11 @@ export function StreamPage() {
       if ("vace_ref_images" in vaceParams) {
         initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         initialParameters.vace_context_scale = vaceParams.vace_context_scale;
+      }
+      // Add vace_use_input_video parameter
+      if (currentMode === "video") {
+        initialParameters.vace_use_input_video =
+          settings.vaceUseInputVideo ?? false;
       }
 
       // Video mode parameters - applies to all pipelines in video mode
@@ -1115,6 +1131,8 @@ export function StreamPage() {
                 settings.inputMode !== "video")
             }
             onVaceEnabledChange={handleVaceEnabledChange}
+            vaceUseInputVideo={settings.vaceUseInputVideo ?? false}
+            onVaceUseInputVideoChange={handleVaceUseInputVideoChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
           />

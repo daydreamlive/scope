@@ -71,6 +71,7 @@ export interface SettingsState {
   };
   // VACE-specific settings
   vaceEnabled?: boolean;
+  vaceUseInputVideo?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
 }

@@ -85,6 +85,8 @@ interface SettingsPanelProps {
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
+  vaceUseInputVideo?: boolean;
+  onVaceUseInputVideoChange?: (enabled: boolean) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
 }
@@ -124,6 +126,8 @@ export function SettingsPanel({
   spoutAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
+  vaceUseInputVideo = false,
+  onVaceUseInputVideoChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
 }: SettingsPanelProps) {
@@ -347,7 +351,7 @@ export function SettingsPanel({
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
                 label="VACE"
-                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding. Requires pipeline reload to take effect."
+                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, you can use reference images for R2V generation. A separate toggle controls whether input video in V2V mode is used as VACE conditioning. Requires pipeline reload to take effect."
                 className="text-sm font-medium"
               />
               <Toggle
@@ -363,7 +367,24 @@ export function SettingsPanel({
             </div>
 
             {vaceEnabled && (
-              <div className="rounded-lg border bg-card p-3">
+              <div className="rounded-lg border bg-card p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label="Use Input Video"
+                    tooltip="When enabled in V2V mode, the input video is used as VACE conditioning. When disabled, only reference images (R2V) are used for conditioning. This allows R2V mode with reference images while in V2V mode."
+                    className="text-xs text-muted-foreground"
+                  />
+                  <Toggle
+                    pressed={vaceUseInputVideo}
+                    onPressedChange={onVaceUseInputVideoChange || (() => {})}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    disabled={isStreaming || isLoading || inputMode !== "video"}
+                  >
+                    {vaceUseInputVideo ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
                 <div className="flex items-center gap-2">
                   <LabelWithTooltip
                     label="Scale:"

@@ -720,7 +720,11 @@ class FrameProcessor:
             # We do not support combining normal V2V (denoising from noisy video latents) and VACE V2V editing
             if video_input is not None:
                 vace_enabled = getattr(pipeline, "vace_enabled", False)
-                if vace_enabled:
+                vace_use_input_video = self.parameters.get(
+                    "vace_use_input_video", False
+                )
+
+                if vace_enabled and vace_use_input_video:
                     # VACE V2V editing mode: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
                 else:
