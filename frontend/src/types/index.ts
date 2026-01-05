@@ -4,6 +4,9 @@ export type PipelineId = string;
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";
 
+// VAE type for model selection (dynamic from backend registry)
+export type VaeType = string;
+
 // WebRTC ICE server configuration
 export interface IceServerConfig {
   urls: string | string[];
@@ -71,8 +74,11 @@ export interface SettingsState {
   };
   // VACE-specific settings
   vaceEnabled?: boolean;
+  vaceUseInputVideo?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
+  // VAE type selection
+  vaeType?: VaeType;
 }
 
 export interface PipelineInfo {
@@ -100,6 +106,8 @@ export interface PipelineInfo {
   supportsQuantization?: boolean;
   minDimension?: number;
   recommendedQuantizationVramThreshold?: number | null;
+  // Available VAE types from config schema enum (derived from vae_type field presence)
+  vaeTypes?: string[];
 }
 
 export interface DownloadProgress {

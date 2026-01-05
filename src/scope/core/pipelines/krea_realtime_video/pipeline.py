@@ -18,7 +18,7 @@ from ..process import postprocess_chunk
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
-from ..wan2_1.vae import WanVAEWrapper
+from ..wan2_1.vae import create_vae
 from .modular_blocks import KreaRealtimeVideoBlocks
 from .schema import KreaRealtimeVideoConfig
 
@@ -145,12 +145,16 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load vae
+        # Load VAE using create_vae factory (supports multiple VAE types)
+        vae_type = getattr(config, "vae_type", "wan")
         start = time.time()
-        vae = WanVAEWrapper(
-            model_name=base_model_name, model_dir=model_dir, vae_path=vae_path
+        vae = create_vae(
+            model_dir=model_dir,
+            model_name=base_model_name,
+            vae_type=vae_type,
+            vae_path=vae_path,
         )
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
+        print(f"Loaded VAE (type={vae_type}) in {time.time() - start:.3f}s")
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
 

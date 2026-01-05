@@ -1,14 +1,22 @@
-"""Unified Wan VAE wrapper with streaming and batch encoding/decoding."""
+"""Unified Wan VAE wrapper with streaming and batch encoding/decoding.
+
+This module provides a unified VAE wrapper that supports both the full WanVAE
+and the 75% pruned LightVAE through a single interface with a `use_lightvae` parameter.
+"""
 
 import os
 
 import torch
 
 from .constants import WAN_VAE_LATENT_MEAN, WAN_VAE_LATENT_STD
-from .modules.vae import _video_vae
+from .modules.vae import _video_vae, count_conv3d
 
-# Default filename for standard Wan2.1 VAE checkpoint
+# Default filenames for VAE checkpoints
 DEFAULT_VAE_FILENAME = "Wan2.1_VAE.pth"
+LIGHTVAE_FILENAME = "lightvaew2_1.pth"
+
+# LightVAE pruning rate (75% of channels pruned)
+LIGHTVAE_PRUNING_RATE = 0.75
 
 
 class WanVAEWrapper(torch.nn.Module):
@@ -16,6 +24,15 @@ class WanVAEWrapper(torch.nn.Module):
 
     This VAE supports both streaming (cached) and batch encoding/decoding modes.
     Normalization is always applied during encoding for consistent latent distributions.
+
+    The wrapper can instantiate either the full WanVAE or the 75% pruned LightVAE
+    through the `use_lightvae` parameter.
+
+    Args:
+        model_dir: Base directory containing model files
+        model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
+        vae_path: Explicit path to VAE checkpoint (overrides model_dir/model_name)
+        use_lightvae: If True, use 75% pruned LightVAE (faster, lower quality)
     """
 
     def __init__(
@@ -23,12 +40,17 @@ class WanVAEWrapper(torch.nn.Module):
         model_dir: str = "wan_models",
         model_name: str = "Wan2.1-T2V-1.3B",
         vae_path: str | None = None,
+        use_lightvae: bool = False,
     ):
         super().__init__()
 
+        # Determine pruning rate based on VAE type
+        pruning_rate = LIGHTVAE_PRUNING_RATE if use_lightvae else 0.0
+
         # Determine paths with priority: explicit vae_path > model_dir/model_name default
         if vae_path is None:
-            vae_path = os.path.join(model_dir, model_name, DEFAULT_VAE_FILENAME)
+            filename = LIGHTVAE_FILENAME if use_lightvae else DEFAULT_VAE_FILENAME
+            vae_path = os.path.join(model_dir, model_name, filename)
 
         self.register_buffer(
             "mean", torch.tensor(WAN_VAE_LATENT_MEAN, dtype=torch.float32)
@@ -42,10 +64,14 @@ class WanVAEWrapper(torch.nn.Module):
             _video_vae(
                 pretrained_path=vae_path,
                 z_dim=self.z_dim,
+                pruning_rate=pruning_rate,
             )
             .eval()
             .requires_grad_(False)
         )
+
+        # Cache encoder conv count for dynamic cache sizing
+        self._encoder_conv_count = count_conv3d(self.model.encoder)
 
     def _get_scale(self, device: torch.device, dtype: torch.dtype) -> list:
         """Get normalization scale parameters on the correct device/dtype."""
@@ -65,8 +91,8 @@ class WanVAEWrapper(torch.nn.Module):
         return (latent - scale[0]) * scale[1]
 
     def _create_encoder_cache(self) -> list:
-        """Create a fresh encoder feature cache."""
-        return [None] * 55
+        """Create a fresh encoder feature cache with dynamic sizing."""
+        return [None] * self._encoder_conv_count
 
     def encode_to_latent(
         self,

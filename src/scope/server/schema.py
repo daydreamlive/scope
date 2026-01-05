@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 from scope.core.pipelines.krea_realtime_video.schema import KreaRealtimeVideoConfig
 from scope.core.pipelines.longlive.schema import LongLiveConfig
 from scope.core.pipelines.streamdiffusionv2.schema import StreamDiffusionV2Config
-from scope.core.pipelines.utils import Quantization
+from scope.core.pipelines.utils import Quantization, VaeType
+from scope.core.pipelines.wan2_1.vae import DEFAULT_VAE_TYPE
 
 
 class HealthResponse(BaseModel):
@@ -106,6 +107,10 @@ class Parameters(BaseModel):
     vace_ref_images: list[str] | None = Field(
         default=None,
         description="List of reference image file paths for VACE conditioning. Images should be located in the assets directory (at the same level as the models directory).",
+    )
+    vace_use_input_video: bool | None = Field(
+        default=None,
+        description="When enabled in Video input mode, the input video is used for VACE conditioning. When disabled, the input video is used for latent initialization instead, allowing reference images to be used while in Video input mode.",
     )
     vace_context_scale: float = Field(
         default=1.0,
@@ -304,7 +309,11 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
     )
     vace_enabled: bool = Field(
         default=True,
-        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
+    )
+    vae_type: VaeType = Field(
+        default=DEFAULT_VAE_TYPE,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
 
@@ -343,7 +352,11 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     )
     vace_enabled: bool = Field(
         default=True,
-        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
+    )
+    vae_type: VaeType = Field(
+        default=DEFAULT_VAE_TYPE,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
 
@@ -373,6 +386,10 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    vae_type: VaeType = Field(
+        default=DEFAULT_VAE_TYPE,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
 

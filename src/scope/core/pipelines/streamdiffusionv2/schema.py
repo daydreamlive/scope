@@ -1,4 +1,7 @@
+from pydantic import Field
+
 from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..utils import VaeType
 
 
 class StreamDiffusionV2Config(BasePipelineConfig):
@@ -24,6 +27,10 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     noise_scale: float = 0.7
     noise_controller: bool = True
     input_size: int = 4
+    vae_type: VaeType = Field(
+        default=VaeType.WAN,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+    )
 
     modes = {
         "text": ModeDefaults(

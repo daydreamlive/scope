@@ -356,6 +356,8 @@ export interface PipelineSchemaProperty {
   maximum?: number;
   items?: unknown;
   anyOf?: unknown[];
+  enum?: unknown[];
+  $ref?: string;
 }
 
 export interface PipelineConfigSchema {
@@ -363,6 +365,7 @@ export interface PipelineConfigSchema {
   properties: Record<string, PipelineSchemaProperty>;
   required?: string[];
   title?: string;
+  $defs?: Record<string, { enum?: unknown[] }>;
 }
 
 // Mode-specific default overrides

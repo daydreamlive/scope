@@ -26,12 +26,31 @@ VACE_14B_ARTIFACT = HuggingfaceRepoArtifact(
     files=["Wan2_1-VACE_module_14B_bf16.safetensors"],
 )
 
+# Extra VAE artifacts (lightweight/alternative encoders)
+LIGHTVAE_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="lightx2v/Autoencoders",
+    files=["lightvaew2_1.pth"],
+)
+
+TAE_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="lightx2v/Autoencoders",
+    files=["taew2_1.pth"],
+)
+
+LIGHTTAE_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="lightx2v/Autoencoders",
+    files=["lighttaew2_1.pth"],
+)
+
 # Pipeline-specific artifacts
 PIPELINE_ARTIFACTS = {
     "streamdiffusionv2": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
         VACE_ARTIFACT,
+        LIGHTVAE_ARTIFACT,
+        TAE_ARTIFACT,
+        LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="jerryfeng/StreamDiffusionV2",
             files=["wan_causal_dmd_v2v/model.pt"],
@@ -41,6 +60,9 @@ PIPELINE_ARTIFACTS = {
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
         VACE_ARTIFACT,
+        LIGHTVAE_ARTIFACT,
+        TAE_ARTIFACT,
+        LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="Efficient-Large-Model/LongLive-1.3B",
             files=["models/longlive_base.pt", "models/lora.pt"],
@@ -50,6 +72,9 @@ PIPELINE_ARTIFACTS = {
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
         VACE_14B_ARTIFACT,
+        LIGHTVAE_ARTIFACT,
+        TAE_ARTIFACT,
+        LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="Wan-AI/Wan2.1-T2V-14B",
             files=["config.json"],
@@ -63,6 +88,9 @@ PIPELINE_ARTIFACTS = {
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
         VACE_ARTIFACT,
+        LIGHTVAE_ARTIFACT,
+        TAE_ARTIFACT,
+        LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="JaydenLu666/Reward-Forcing-T2V-1.3B",
             files=["rewardforcing.pt"],
@@ -72,6 +100,9 @@ PIPELINE_ARTIFACTS = {
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
         VACE_ARTIFACT,
+        LIGHTVAE_ARTIFACT,
+        TAE_ARTIFACT,
+        LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="KlingTeam/MemFlow",
             files=["base.pt", "lora.pt"],

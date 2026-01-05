@@ -717,7 +717,7 @@ class FrameProcessor:
                 call_params["lora_scales"] = lora_scales
 
             # Route video input based on VACE status
-            # We do not support combining normal V2V (denoising from noisy video latents) and VACE V2V editing
+            # We do not support combining latent initialization and VACE conditioning
             if video_input is not None:
                 # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
                 # This fixes the chicken-and-egg problem where VACE isn't enabled until vace_input_frames arrives
@@ -731,11 +731,14 @@ class FrameProcessor:
                 ):
                     vace_enabled = True
 
-                if vace_enabled:
-                    # VACE V2V editing mode: route to vace_input_frames
+                # Check if input video should be used for VACE conditioning
+                vace_use_input_video = self.parameters.get("vace_use_input_video", True)
+
+                if vace_enabled and vace_use_input_video:
+                    # VACE conditioning: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
                 else:
-                    # Normal V2V mode: route to video
+                    # Latent initialization: route to video
                     call_params["video"] = video_input
 
             output = pipeline(**call_params)
@@ -847,15 +850,14 @@ class FrameProcessor:
         for _ in range(last_idx + 1):
             self.frame_buffer.popleft()
 
-        # Convert VideoFrames to tensors
+        # Convert VideoFrames to tensors (keep as uint8, GPU will handle dtype conversion)
         tensor_frames = []
         for video_frame in video_frames:
-            # Convert VideoFrame into (1, H, W, C) tensor on cpu
+            # Convert VideoFrame into (1, H, W, C) uint8 tensor on cpu
             # The T=1 dimension is expected by preprocess_chunk which rearranges T H W C -> T C H W
-            tensor = (
-                torch.from_numpy(video_frame.to_ndarray(format="rgb24"))
-                .float()
-                .unsqueeze(0)
+            # Note: We keep uint8 here and let pipeline preprocess chunk to target dtype on GPU
+            tensor = torch.from_numpy(video_frame.to_ndarray(format="rgb24")).unsqueeze(
+                0
             )
             tensor_frames.append(tensor)
 

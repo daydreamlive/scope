@@ -34,6 +34,7 @@ import type {
   SettingsState,
   InputMode,
   PipelineInfo,
+  VaeType,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
 
@@ -85,8 +86,15 @@ interface SettingsPanelProps {
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
+  vaceUseInputVideo?: boolean;
+  onVaceUseInputVideoChange?: (enabled: boolean) => void;
   vaceContextScale?: number;
   onVaceContextScaleChange?: (scale: number) => void;
+  // VAE type selection
+  vaeType?: VaeType;
+  onVaeTypeChange?: (vaeType: VaeType) => void;
+  // Available VAE types from backend registry
+  vaeTypes?: string[];
 }
 
 export function SettingsPanel({
@@ -124,8 +132,13 @@ export function SettingsPanel({
   spoutAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
+  vaceUseInputVideo = true,
+  onVaceUseInputVideoChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
+  vaeType = "wan",
+  onVaeTypeChange,
+  vaeTypes = ["wan"],
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -347,7 +360,7 @@ export function SettingsPanel({
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
                 label="VACE"
-                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding. Requires pipeline reload to take effect."
+                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, you can use reference images for R2V generation. In Video input mode, a separate toggle controls whether the input video is used for VACE conditioning or for latent initialization. Requires pipeline reload to take effect."
                 className="text-sm font-medium"
               />
               <Toggle
@@ -363,7 +376,24 @@ export function SettingsPanel({
             </div>
 
             {vaceEnabled && (
-              <div className="rounded-lg border bg-card p-3">
+              <div className="rounded-lg border bg-card p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label="Use Input Video"
+                    tooltip="When enabled in Video input mode, the input video is used for VACE conditioning. When disabled, the input video is used for latent initialization instead, allowing you to use reference images while in Video input mode."
+                    className="text-xs text-muted-foreground"
+                  />
+                  <Toggle
+                    pressed={vaceUseInputVideo}
+                    onPressedChange={onVaceUseInputVideoChange || (() => {})}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    disabled={isStreaming || isLoading || inputMode !== "video"}
+                  >
+                    {vaceUseInputVideo ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
                 <div className="flex items-center gap-2">
                   <LabelWithTooltip
                     label="Scale:"
@@ -398,6 +428,37 @@ export function SettingsPanel({
               isStreaming={isStreaming}
               loraMergeStrategy={loraMergeStrategy}
             />
+          </div>
+        )}
+
+        {/* VAE Type Selection */}
+        {vaeTypes && vaeTypes.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.vaeType.label}
+                tooltip={PARAMETER_METADATA.vaeType.tooltip}
+                className="text-sm text-foreground"
+              />
+              <Select
+                value={vaeType}
+                onValueChange={value => {
+                  onVaeTypeChange?.(value as VaeType);
+                }}
+                disabled={isStreaming}
+              >
+                <SelectTrigger className="w-[140px] h-7">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {vaeTypes.map(type => (
+                    <SelectItem key={type} value={type}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
 
