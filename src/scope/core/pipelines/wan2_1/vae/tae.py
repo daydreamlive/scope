@@ -632,9 +632,6 @@ class TAEWrapper(nn.Module):
             self.std.to(device=device, dtype=dtype),
         ]
 
-        # Return in [batch, frames, channels, h, w] format
-        return latent
-
     def decode_to_pixel(
         self, latent: torch.Tensor, use_cache: bool = True
     ) -> torch.Tensor:
