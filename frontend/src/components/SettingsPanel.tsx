@@ -419,6 +419,18 @@ export function SettingsPanel({
           </div>
         )}
 
+        {currentPipeline?.supportsLoRA && (
+          <div className="space-y-4">
+            <LoRAManager
+              loras={loras}
+              onLorasChange={onLorasChange}
+              disabled={isLoading}
+              isStreaming={isStreaming}
+              loraMergeStrategy={loraMergeStrategy}
+            />
+          </div>
+        )}
+
         {/* VAE Type Selection */}
         {vaeTypes && vaeTypes.length > 0 && (
           <div className="space-y-2">
@@ -447,18 +459,6 @@ export function SettingsPanel({
                 </SelectContent>
               </Select>
             </div>
-          </div>
-        )}
-
-        {currentPipeline?.supportsLoRA && (
-          <div className="space-y-4">
-            <LoRAManager
-              loras={loras}
-              onLorasChange={onLorasChange}
-              disabled={isLoading}
-              isStreaming={isStreaming}
-              loraMergeStrategy={loraMergeStrategy}
-            />
           </div>
         )}
 
