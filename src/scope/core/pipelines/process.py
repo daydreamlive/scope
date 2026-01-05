@@ -16,8 +16,8 @@ def preprocess_chunk(
     frames = []
 
     for frame in chunk:
-        # Move to pipeline device
-        frame = frame.to(device=device, dtype=dtype)
+        # Move to pipeline device first (likely as uint8), then convert dtype on device
+        frame = frame.to(device=device).to(dtype=dtype)
         frame = rearrange(frame, "T H W C -> T C H W")
 
         _, _, H, W = frame.shape
