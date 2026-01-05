@@ -1,4 +1,7 @@
+from pydantic import Field
+
 from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..utils import VaeType
 
 
 class KreaRealtimeVideoConfig(BasePipelineConfig):
@@ -16,7 +19,6 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     supports_cache_management = True
     supports_kv_cache_bias = True
     supports_quantization = True
-    supports_vae_type = True
     min_dimension = 16
     modified = True
     recommended_quantization_vram_threshold = 40.0
@@ -27,6 +29,10 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     height: int = 320
     width: int = 576
     denoising_steps: list[int] = [1000, 750, 500, 250]
+    vae_type: VaeType = Field(
+        default=VaeType.WAN,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+    )
 
     modes = {
         "text": ModeDefaults(default=True),

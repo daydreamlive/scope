@@ -23,6 +23,19 @@ export function usePipelines() {
         // Transform to camelCase for TypeScript conventions
         const transformed: Record<string, PipelineInfo> = {};
         for (const [id, schema] of Object.entries(schemas.pipelines)) {
+          // Extract VAE types from JSON schema if vae_type field exists
+          // Pydantic v2 represents enum fields using $ref to definitions
+          let vaeTypes: string[] | undefined = undefined;
+          const vaeTypeProperty = schema.config_schema?.properties?.vae_type;
+          if (vaeTypeProperty?.$ref && schema.config_schema?.$defs) {
+            const refPath = vaeTypeProperty.$ref;
+            const defName = refPath.split("/").pop();
+            const definition = schema.config_schema.$defs[defName || ""];
+            if (definition && Array.isArray(definition.enum)) {
+              vaeTypes = definition.enum as string[];
+            }
+          }
+
           transformed[id] = {
             name: schema.name,
             about: schema.description,
@@ -41,12 +54,11 @@ export function usePipelines() {
             supportsCacheManagement: schema.supports_cache_management,
             supportsKvCacheBias: schema.supports_kv_cache_bias,
             supportsQuantization: schema.supports_quantization,
-            supportsVaeType: schema.supports_vae_type,
             minDimension: schema.min_dimension,
             recommendedQuantizationVramThreshold:
               schema.recommended_quantization_vram_threshold ?? undefined,
             modified: schema.modified,
-            vaeTypes: schema.vae_types ?? undefined,
+            vaeTypes,
           };
         }
 

@@ -356,6 +356,8 @@ export interface PipelineSchemaProperty {
   maximum?: number;
   items?: unknown;
   anyOf?: unknown[];
+  enum?: unknown[];
+  $ref?: string;
 }
 
 export interface PipelineConfigSchema {
@@ -363,6 +365,7 @@ export interface PipelineConfigSchema {
   properties: Record<string, PipelineSchemaProperty>;
   required?: string[];
   title?: string;
+  $defs?: Record<string, { enum?: unknown[] }>;
 }
 
 // Mode-specific default overrides
@@ -399,12 +402,9 @@ export interface PipelineSchemaInfo {
   supports_cache_management: boolean;
   supports_kv_cache_bias: boolean;
   supports_quantization: boolean;
-  supports_vae_type: boolean;
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
-  // Available VAE types from config schema enum
-  vae_types?: string[];
 }
 
 export interface PipelineSchemasResponse {
