@@ -126,7 +126,7 @@ export function SettingsPanel({
   spoutAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
-  vaceUseInputVideo = false,
+  vaceUseInputVideo = true,
   onVaceUseInputVideoChange,
   vaceContextScale = 1.0,
   onVaceContextScaleChange,
@@ -351,7 +351,7 @@ export function SettingsPanel({
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
                 label="VACE"
-                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, you can use reference images for R2V generation. A separate toggle controls whether input video in V2V mode is used as VACE conditioning. Requires pipeline reload to take effect."
+                tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, you can use reference images for R2V generation. In Video input mode, a separate toggle controls whether the input video is used for VACE conditioning or for latent initialization. Requires pipeline reload to take effect."
                 className="text-sm font-medium"
               />
               <Toggle
@@ -371,7 +371,7 @@ export function SettingsPanel({
                 <div className="flex items-center justify-between gap-2">
                   <LabelWithTooltip
                     label="Use Input Video"
-                    tooltip="When enabled in V2V mode, the input video is used as VACE conditioning. When disabled, only reference images (R2V) are used for conditioning. This allows R2V mode with reference images while in V2V mode."
+                    tooltip="When enabled in Video input mode, the input video is used for VACE conditioning. When disabled, the input video is used for latent initialization instead, allowing you to use reference images while in Video input mode."
                     className="text-xs text-muted-foreground"
                   />
                   <Toggle
