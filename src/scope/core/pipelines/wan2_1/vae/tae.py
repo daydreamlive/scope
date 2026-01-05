@@ -504,7 +504,7 @@ class TAEWrapper(nn.Module):
 
     Args:
         model_dir: Base directory containing model files
-        model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
+        model_name: Model subdirectory name (defaults to "Autoencoders")
         vae_path: Explicit path to TAE checkpoint (overrides model_dir/model_name)
         use_lighttae: If True, use LightTAE with WanVAE normalization (faster, lower quality)
     """
@@ -512,7 +512,7 @@ class TAEWrapper(nn.Module):
     def __init__(
         self,
         model_dir: str = "wan_models",
-        model_name: str = "Wan2.1-T2V-1.3B",
+        model_name: str = "Autoencoders",
         vae_path: str | None = None,
         use_lighttae: bool = False,
     ):
@@ -524,7 +524,7 @@ class TAEWrapper(nn.Module):
             default_filename = (
                 LIGHTTAE_FILENAME if use_lighttae else DEFAULT_TAE_FILENAME
             )
-            vae_path = os.path.join(model_dir, "Autoencoders", default_filename)
+            vae_path = os.path.join(model_dir, model_name, default_filename)
 
         self.z_dim = 16
         self.use_lighttae = use_lighttae
