@@ -892,39 +892,27 @@ class FrameProcessor:
                         # Track preprocessor latency
                         preprocessor_start_time = time.time()
 
-                        # Only submit new frames if we don't have a recent cached result
-                        # This reduces overhead (tensor→numpy conversion) and GPU contention
-                        # Since preprocessor runs faster than pipeline, we can skip some submissions
-                        should_submit = True
-                        with self._preprocessor_result_lock:
-                            if self._latest_preprocessor_results.get(preprocessor_type) is not None:
-                                # Skip if we have a cached result and buffer has more results pending
-                                if async_preprocessor_client.get_buffer_size() > 0:
-                                    should_submit = False
+                        # Always submit current frames to ensure we process the most recent input
+                        # This guarantees the pipeline always gets the latest frame, minimizing latency
+                        preprocessor_submit_time = time.time()
+                        async_preprocessor_client.submit_frames(
+                            video_input,
+                            target_height=height,
+                            target_width=width,
+                        )
+                        submit_time = time.time() - preprocessor_submit_time
+                        if submit_time > 0.05:
+                            logger.debug(f"[Latency] Preprocessor {preprocessor_type} submit: {submit_time*1000:.1f}ms")
 
-                        submit_time = 0.0
-                        if should_submit:
-                            # Submit current frames for processing (non-blocking)
-                            preprocessor_submit_time = time.time()
-                            async_preprocessor_client.submit_frames(
-                                video_input,
-                                target_height=height,
-                                target_width=width,
-                            )
-                            submit_time = time.time() - preprocessor_submit_time
-                            if submit_time > 0.05:
-                                logger.debug(f"[Latency] Preprocessor {preprocessor_type} submit: {submit_time*1000:.1f}ms")
-
-                        # Get latest available (non-blocking)
+                        # Get latest available result (non-blocking, discards older results)
+                        # This ensures we always use the most recent preprocessed frame
                         get_result_start = time.time()
                         preprocessor_result = async_preprocessor_client.get_latest_result()
                         get_result_time = time.time() - get_result_start
 
+                        # Use the fresh result directly (not cached) to ensure minimum latency
+                        preprocessed_input = None
                         if preprocessor_result is not None:
-                            # Cache the result for future use
-                            with self._preprocessor_result_lock:
-                                self._latest_preprocessor_results[preprocessor_type] = preprocessor_result.data
-
                             # Track processing latency from result metadata if available
                             if hasattr(preprocessor_result, 'processing_time'):
                                 processing_time = preprocessor_result.processing_time
@@ -935,9 +923,8 @@ class FrameProcessor:
                                     f"get_result={get_result_time*1000:.1f}ms"
                                 )
 
-                        # Use cached preprocessor result (may be from previous chunk)
-                        with self._preprocessor_result_lock:
-                            preprocessed_input = self._latest_preprocessor_results.get(preprocessor_type)
+                            # Use the fresh result directly (not cached) for minimum latency
+                            preprocessed_input = preprocessor_result.data
 
                         gpu_transfer_time = 0.0
                         if preprocessed_input is not None:
@@ -992,65 +979,51 @@ class FrameProcessor:
                             client = async_preprocessors[preprocessor_type]
                             preprocessor_iter_start = time.time()
 
-                            # Check if we have a cached result for this preprocessor
-                            cache_key = f"{preprocessor_type}_{idx}"
-                            with self._preprocessor_result_lock:
-                                cached_result = self._latest_preprocessor_results.get(cache_key)
-
-                            # Determine if we should submit
-                            should_submit = True
-                            if cached_result is not None:
-                                # Skip if buffer is full (preprocessor is ahead)
-                                if client.get_buffer_size() > client.result_buffer_size // 2:
-                                    should_submit = False
-
-                            submit_time = 0.0
-                            if should_submit:
-                                # Convert current_input to numpy format for submission
-                                # current_input is list of tensors [(1, H, W, C), ...] or numpy array
-                                if isinstance(current_input, list):
-                                    # Convert list of tensors to numpy array [F, H, W, C]
-                                    stacked = torch.cat(current_input, dim=0)  # [F, H, W, C]
-                                    input_np = stacked.cpu().numpy()
-                                elif isinstance(current_input, torch.Tensor):
-                                    # Tensor might be [1, C, T, H, W] or [T, H, W, C]
-                                    if current_input.dim() == 5:
-                                        # [1, C, T, H, W] -> [T, H, W, C]
-                                        input_np = current_input.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()
-                                    else:
-                                        input_np = current_input.cpu().numpy()
+                            # Always submit current frames to ensure we process the most recent input
+                            # This guarantees the pipeline always gets the latest frame, minimizing latency
+                            # Convert current_input to numpy format for submission
+                            # current_input is list of tensors [(1, H, W, C), ...] or numpy array
+                            if isinstance(current_input, list):
+                                # Convert list of tensors to numpy array [F, H, W, C]
+                                stacked = torch.cat(current_input, dim=0)  # [F, H, W, C]
+                                input_np = stacked.cpu().numpy()
+                            elif isinstance(current_input, torch.Tensor):
+                                # Tensor might be [1, C, T, H, W] or [T, H, W, C]
+                                if current_input.dim() == 5:
+                                    # [1, C, T, H, W] -> [T, H, W, C]
+                                    input_np = current_input.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()
                                 else:
-                                    input_np = current_input
+                                    input_np = current_input.cpu().numpy()
+                            else:
+                                input_np = current_input
 
-                                # Ensure uint8 format [F, H, W, C]
-                                if input_np.dtype != np.uint8:
-                                    if input_np.max() <= 1.0:
-                                        input_np = (input_np * 255).astype(np.uint8)
-                                    else:
-                                        input_np = input_np.astype(np.uint8)
+                            # Ensure uint8 format [F, H, W, C]
+                            if input_np.dtype != np.uint8:
+                                if input_np.max() <= 1.0:
+                                    input_np = (input_np * 255).astype(np.uint8)
+                                else:
+                                    input_np = input_np.astype(np.uint8)
 
-                                # Submit to preprocessor
-                                preprocessor_submit_time = time.time()
-                                client.submit_frames(
-                                    input_np,
-                                    target_height=height,
-                                    target_width=width,
-                                )
-                                submit_time = time.time() - preprocessor_submit_time
-                                if submit_time > 0.05:
-                                    logger.debug(f"[Latency] Preprocessor {preprocessor_type} submit: {submit_time*1000:.1f}ms")
+                            # Submit to preprocessor (always submit for minimum latency)
+                            preprocessor_submit_time = time.time()
+                            client.submit_frames(
+                                input_np,
+                                target_height=height,
+                                target_width=width,
+                            )
+                            submit_time = time.time() - preprocessor_submit_time
+                            if submit_time > 0.05:
+                                logger.debug(f"[Latency] Preprocessor {preprocessor_type} submit: {submit_time*1000:.1f}ms")
 
-                            # Get result (non-blocking, use cached if available)
+                            # Get latest result (non-blocking, discards older results)
+                            # This ensures we always use the most recent preprocessed frame
                             get_result_start = time.time()
                             result = client.get_latest_result()
                             get_result_time = time.time() - get_result_start
 
+                            # Use the fresh result directly (not cached) to ensure minimum latency
+                            gpu_transfer_time = 0.0
                             if result is not None:
-                                # Cache the result
-                                with self._preprocessor_result_lock:
-                                    self._latest_preprocessor_results[cache_key] = result.data
-                                cached_result = result.data
-
                                 # Track processing latency from result metadata if available
                                 if hasattr(result, 'processing_time'):
                                     processing_time = result.processing_time
@@ -1061,11 +1034,11 @@ class FrameProcessor:
                                         f"get_result={get_result_time*1000:.1f}ms"
                                     )
 
-                            gpu_transfer_time = 0.0
-                            if cached_result is not None:
+                                # Use the fresh result directly (not cached) for minimum latency
+                                result_data = result.data
                                 # Move to GPU
                                 gpu_start = time.time()
-                                result_tensor = cached_result.to(
+                                result_tensor = result_data.to(
                                     device=torch.device("cuda"),
                                     dtype=torch.bfloat16,
                                     non_blocking=True,
@@ -1250,12 +1223,10 @@ class FrameProcessor:
 
     def prepare_chunk(self, chunk_size: int) -> tuple[list[torch.Tensor], float]:
         """
-        Sample frames uniformly from the buffer, convert them to tensors, and remove processed frames.
+        Take the most recent frames from the buffer, convert them to tensors, and remove processed frames.
 
-        This function implements uniform sampling across the entire buffer to ensure
-        temporal coverage of input frames. It samples frames at evenly distributed
-        indices and removes all frames up to the last sampled frame to prevent
-        buffer buildup.
+        This function always takes the most recent frames to minimize latency. It takes the last
+        chunk_size frames from the buffer to ensure the pipeline always processes the freshest input.
 
         Note:
             This function must be called with self.frame_buffer_lock held to ensure
@@ -1263,22 +1234,20 @@ class FrameProcessor:
 
         Example:
             With buffer_len=8 and chunk_size=4:
-            - step = 8/4 = 2.0
-            - indices = [0, 2, 4, 6] (uniformly distributed)
-            - Returns frames at positions 0, 2, 4, 6
-            - Removes frames 0-6 from buffer (7 frames total)
+            - Takes frames at positions 4, 5, 6, 7 (most recent)
+            - Removes all frames 0-7 from buffer (all processed)
 
         Returns:
             Tuple of (list of tensor frames, earliest input timestamp)
             - List of tensor frames, each (1, H, W, C) for downstream preprocess_chunk
             - Earliest input timestamp for latency tracking
         """
-        # Calculate uniform sampling step
-        step = len(self.frame_buffer) / chunk_size
-        # Generate indices for uniform sampling
-        indices = [round(i * step) for i in range(chunk_size)]
-        # Extract VideoFrames at sampled indices
-        video_frames = [self.frame_buffer[i] for i in indices]
+        buffer_len = len(self.frame_buffer)
+        # Always take the most recent frames for minimum latency
+        # If buffer has fewer frames than chunk_size, take all available
+        start_idx = max(0, buffer_len - chunk_size)
+        # Extract VideoFrames from the most recent positions
+        video_frames = [self.frame_buffer[i] for i in range(start_idx, buffer_len)]
 
         # Extract earliest input timestamp for latency tracking
         # This timestamp represents when the frame arrived from the camera (via put()),
@@ -1288,9 +1257,8 @@ class FrameProcessor:
             for frame in video_frames
         )
 
-        # Drop all frames up to and including the last sampled frame
-        last_idx = indices[-1]
-        for _ in range(last_idx + 1):
+        # Drop all processed frames from buffer (all frames up to the last one we're using)
+        for _ in range(buffer_len):
             self.frame_buffer.popleft()
 
         # Convert VideoFrames to tensors
