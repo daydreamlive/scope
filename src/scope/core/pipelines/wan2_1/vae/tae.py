@@ -519,11 +519,12 @@ class TAEWrapper(nn.Module):
         super().__init__()
 
         # Determine checkpoint path with priority: explicit vae_path > model_dir/model_name default
+        # Both TAE and LightTAE downloaded from lightx2v/Autoencoders
         if vae_path is None:
             default_filename = (
                 LIGHTTAE_FILENAME if use_lighttae else DEFAULT_TAE_FILENAME
             )
-            vae_path = os.path.join(model_dir, model_name, default_filename)
+            vae_path = os.path.join(model_dir, "Autoencoders", default_filename)
 
         self.z_dim = 16
         self.use_lighttae = use_lighttae
