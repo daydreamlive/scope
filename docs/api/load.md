@@ -52,6 +52,7 @@ await loadPipeline("longlive", {
     "seed": 42,
     "quantization": null,
     "vace_enabled": false,
+    "vae_type": "wan",
     "loras": [
       {
         "path": "/path/to/lora.safetensors",
@@ -71,6 +72,7 @@ await loadPipeline("longlive", {
 | `width`           | int    | 576                 | Output width (16-2048)                  |
 | `seed`            | int    | 42                  | Random seed for generation              |
 | `vace_enabled`    | bool   | true                | Enable VACE                             |
+| `vae_type`        | string | `"wan"`             | VAE type (see [VAE Types](#vae-types))  |
 | `loras`           | array  | null                | LoRA adapters to load                   |
 | `lora_merge_mode` | string | `"permanent_merge"` | `"permanent_merge"` or `"runtime_peft"` |
 
@@ -199,6 +201,36 @@ await loadPipeline("longlive", {
 ```
 
 With `runtime_peft` mode, you can update LoRA scales during streaming via the data channel. See [Send Parameters](parameters.md) for details.
+
+## VAE Types
+
+The `vae_type` parameter controls which VAE (Variational Autoencoder) is used for encoding pixels to latents and decoding latents to pixels. Different VAE types offer tradeoffs between quality, speed, and memory usage.
+
+| Type       | Quality | Speed  |
+| ---------- | ------- | ------ |
+| `wan`      | Best    | Slow   |
+| `lightvae` | High    | Medium |
+| `tae`      | Average | Fast   |
+| `lighttae` | High    | Fast   |
+
+The lightx2v [docs](https://huggingface.co/lightx2v/Autoencoders) contain more details.
+
+```javascript
+// Load with LightVAE
+await loadPipeline("longlive", {
+  vae_type: "lightvae"
+});
+
+// Load with LightTAE
+await loadPipeline("longlive", {
+  vae_type: "lighttae"
+});
+
+// Load with TAE
+await loadPipeline("longlive", {
+  vae_type: "tae"
+});
+```
 
 ## Error Handling
 
