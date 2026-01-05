@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, prepare-commit-msg]
+
 repos:
   # General hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -37,3 +39,9 @@ repos:
         language: system
         files: ^frontend/.*\.(ts|tsx|js|jsx)$
         pass_filenames: false
+
+      - id: signoff
+        name: Add Signed-off-by
+        entry: "bash -c 'git interpret-trailers --if-exists doNothing --trailer \"Signed-off-by: $(git config user.name) <$(git config user.email)>\" --in-place \"$1\"' --"
+        language: system
+        stages: [prepare-commit-msg]
