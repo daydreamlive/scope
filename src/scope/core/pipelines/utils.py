@@ -20,6 +20,7 @@ class VaeType(str, Enum):
     WAN = "wan"
     LIGHTVAE = "lightvae"
     TAE = "tae"
+    LIGHTTAE = "lighttae"
 
 
 def load_state_dict(weights_path: str) -> dict:

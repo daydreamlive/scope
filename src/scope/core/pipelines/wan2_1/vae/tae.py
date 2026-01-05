@@ -25,10 +25,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from safetensors.torch import load_file
 
-# Note: TAE does NOT use WAN_VAE_LATENT_MEAN/STD - it has its own latent space
+from .constants import WAN_VAE_LATENT_MEAN, WAN_VAE_LATENT_STD
 
-# Default checkpoint filename for Wan 2.1 TAE
+# Default checkpoint filenames for Wan 2.1 TAE
 DEFAULT_TAE_FILENAME = "taew2_1.pth"
+LIGHTTAE_FILENAME = "lighttaew2_1.pth"
 
 
 def _conv(n_in: int, n_out: int, **kwargs) -> nn.Conv2d:
@@ -488,9 +489,9 @@ class TAEWrapper(nn.Module):
     This provides a consistent interface for the Tiny AutoEncoder that matches
     the WanVAEWrapper's encode_to_latent/decode_to_pixel/clear_cache API.
 
-    Note: TAE is a lightweight preview encoder with its own latent space. It does
-    NOT use WanVAE's normalization constants - TAE produces approximately Gaussian
-    latents directly. Quality may be lower than WanVAE but encoding/decoding is faster.
+    The wrapper can instantiate either the full TAE or LightTAE through the
+    `use_lighttae` parameter. LightTAE uses WanVAE normalization constants for
+    consistent latent space with WanVAE, while regular TAE has its own latent space.
 
     Streaming mode (use_cache=True):
         TAE maintains persistent MemBlock memory for smooth frame-by-frame streaming.
@@ -503,23 +504,39 @@ class TAEWrapper(nn.Module):
 
     Args:
         model_dir: Base directory containing model files
-        model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
+        model_name: Model subdirectory name (defaults to "Autoencoders")
         vae_path: Explicit path to TAE checkpoint (overrides model_dir/model_name)
+        use_lighttae: If True, use LightTAE with WanVAE normalization (faster, lower quality)
     """
 
     def __init__(
         self,
         model_dir: str = "wan_models",
-        model_name: str = "Wan2.1-T2V-1.3B",
+        model_name: str = "Autoencoders",
         vae_path: str | None = None,
+        use_lighttae: bool = False,
     ):
         super().__init__()
 
-        # Determine checkpoint path
+        # Determine checkpoint path with priority: explicit vae_path > model_dir/model_name default
+        # Both TAE and LightTAE downloaded from lightx2v/Autoencoders
         if vae_path is None:
-            vae_path = os.path.join(model_dir, model_name, DEFAULT_TAE_FILENAME)
+            default_filename = (
+                LIGHTTAE_FILENAME if use_lighttae else DEFAULT_TAE_FILENAME
+            )
+            vae_path = os.path.join(model_dir, model_name, default_filename)
 
         self.z_dim = 16
+        self.use_lighttae = use_lighttae
+
+        # Register normalization buffers for LightTAE (same as WanVAEWrapper)
+        if use_lighttae:
+            self.register_buffer(
+                "mean", torch.tensor(WAN_VAE_LATENT_MEAN, dtype=torch.float32)
+            )
+            self.register_buffer(
+                "std", torch.tensor(WAN_VAE_LATENT_STD, dtype=torch.float32)
+            )
 
         # Create TAE model
         self.model = (
@@ -556,6 +573,10 @@ class TAEWrapper(nn.Module):
             TAE produces approximately Gaussian latents directly without additional
             normalization. The latent space is similar to but not identical to WanVAE.
 
+            For LightTAE, normalization is applied to match WanVAE's latent space
+            distribution, following LightX2V's approach. This ensures compatibility
+            with the diffusion model trained on WanVAE latents.
+
             In streaming mode (use_cache=True), TAE maintains MemBlock state across
             calls for smooth temporal continuity at chunk boundaries.
         """
@@ -577,8 +598,39 @@ class TAEWrapper(nn.Module):
                 pixel_ntchw, parallel=True, show_progress_bar=False
             )
 
+        # Apply normalization for LightTAE to match WanVAE latent space
+        # This follows LightX2V's approach: normalized = (latent - mean) / std
+        if self.use_lighttae:
+            # Convert to [batch, channels, frames, h, w] format for normalization
+            latent = latent.permute(0, 2, 1, 3, 4)
+
+            device, dtype = latent.device, latent.dtype
+            mean = self.mean.to(device=device, dtype=dtype)
+            std = self.std.to(device=device, dtype=dtype)
+
+            # Normalize: (latent - mean) / std
+            # Latent is [batch, channels, frames, h, w], so view as (1, z_dim, 1, 1, 1)
+            latent = (latent - mean.view(1, self.z_dim, 1, 1, 1)) / std.view(
+                1, self.z_dim, 1, 1, 1
+            )
+
+            # Convert back to [batch, frames, channels, h, w] format for return
+            latent = latent.permute(0, 2, 1, 3, 4)
+
         # Return in [batch, frames, channels, h, w] format
         return latent
+
+    def _get_scale(self, device: torch.device, dtype: torch.dtype) -> list:
+        """Get normalization scale parameters on the correct device/dtype.
+
+        Returns [mean, std] for denormalization: latent * std + mean
+        Note: This differs from WanVAEWrapper which returns [mean, 1/std] for its
+        internal decode method. LightTAE denormalization matches LightX2V's formula.
+        """
+        return [
+            self.mean.to(device=device, dtype=dtype),
+            self.std.to(device=device, dtype=dtype),
+        ]
 
     def decode_to_pixel(
         self, latent: torch.Tensor, use_cache: bool = True
@@ -598,7 +650,30 @@ class TAEWrapper(nn.Module):
             calls for smooth temporal continuity. Uses parallel processing within
             each batch for speed. The first call may have fewer output frames due
             to TGrow temporal expansion and frame trimming.
+
+            For LightTAE (use_lighttae=True), denormalization is applied during decode
+            to convert from the normalized latent space back to WanVAE's latent space
+            distribution, following LightX2V's formula: latent * std + mean
         """
+        # Apply denormalization for LightTAE (reverse of encoding normalization)
+        if self.use_lighttae:
+            # [batch, frames, channels, h, w] -> [batch, channels, frames, h, w] (match LightX2V format)
+            latent = latent.permute(0, 2, 1, 3, 4)
+
+            device, dtype = latent.device, latent.dtype
+            mean = self.mean.to(device=device, dtype=dtype)
+            std = self.std.to(device=device, dtype=dtype)
+
+            # Denormalize: latent * std + mean (inverse of encoding normalization)
+            # This matches LightX2V's formula: latents / (1/std) + mean = latents * std + mean
+            # Latent is [batch, channels, frames, h, w], so view as (1, z_dim, 1, 1, 1)
+            latent = latent * std.view(1, self.z_dim, 1, 1, 1) + mean.view(
+                1, self.z_dim, 1, 1, 1
+            )
+
+            # Convert back to [batch, frames, channels, h, w] for TAE decode
+            latent = latent.permute(0, 2, 1, 3, 4)
+
         if use_cache:
             # Streaming mode - use parallel processing with persistent memory
             if self._first_batch:

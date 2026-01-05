@@ -1,7 +1,9 @@
 """Wan2.1 VAE implementations.
 
-This module provides a unified VAE interface through WanVAEWrapper, which supports
-both the full WanVAE and the 75% pruned LightVAE via the `use_lightvae` parameter.
+This module provides a unified VAE interface through WanVAEWrapper and TAEWrapper.
+WanVAEWrapper supports both the full WanVAE and the 75% pruned LightVAE via the
+`use_lightvae` parameter. TAEWrapper supports both TAE and LightTAE via the
+`use_lighttae` parameter.
 
 Usage:
     from scope.core.pipelines.wan2_1.vae import create_vae
@@ -14,6 +16,12 @@ Usage:
 
     # LightVAE (75% pruned, faster but lower quality)
     vae = create_vae(model_dir="wan_models", vae_type="lightvae")
+
+    # TAE (lightweight preview encoder)
+    vae = create_vae(model_dir="wan_models", vae_type="tae")
+
+    # LightTAE (with WanVAE normalization)
+    vae = create_vae(model_dir="wan_models", vae_type="lighttae")
 
     # With explicit path override
     vae = create_vae(model_dir="wan_models", vae_path="/path/to/custom_vae.pth")
@@ -30,6 +38,7 @@ VAE_REGISTRY: dict[str, type] = {
     "wan": WanVAEWrapper,
     "lightvae": partial(WanVAEWrapper, use_lightvae=True),
     "tae": TAEWrapper,
+    "lighttae": partial(TAEWrapper, use_lighttae=True),
 }
 
 DEFAULT_VAE_TYPE = "wan"
@@ -46,13 +55,14 @@ def create_vae(
     Args:
         model_dir: Base model directory
         model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
-        vae_type: VAE type ("wan" for full VAE, "lightvae" for 75% pruned).
+        vae_type: VAE type ("wan" for full VAE, "lightvae" for 75% pruned,
+                  "tae" for TAE, "lighttae" for LightTAE).
                   Defaults to "wan". This is selectable via UI dropdown.
         vae_path: Optional explicit path override. If provided, takes
                   precedence over model_dir/model_name path construction.
 
     Returns:
-        Initialized WanVAEWrapper instance
+        Initialized WanVAEWrapper or TAEWrapper instance
 
     Raises:
         ValueError: If vae_type is not recognized
