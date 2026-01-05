@@ -110,7 +110,7 @@ class Parameters(BaseModel):
     )
     vace_use_input_video: bool | None = Field(
         default=None,
-        description="When enabled in V2V mode with VACE, uses the input video as VACE conditioning (vace_input_frames). When disabled, only reference images are used for conditioning, enabling R2V mode while in V2V mode.",
+        description="When enabled in Video input mode, the input video is used for VACE conditioning. When disabled, the input video is used for latent initialization instead, allowing reference images to be used while in Video input mode.",
     )
     vace_context_scale: float = Field(
         default=1.0,
@@ -309,7 +309,7 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
     )
     vace_enabled: bool = Field(
         default=True,
-        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
     )
     vae_type: VaeType = Field(
         default=DEFAULT_VAE_TYPE,
@@ -352,7 +352,7 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
     )
     vace_enabled: bool = Field(
         default=True,
-        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, incoming video in V2V mode is routed to VACE for conditioning. When disabled, V2V uses faster regular encoding.",
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
     )
     vae_type: VaeType = Field(
         default=DEFAULT_VAE_TYPE,
