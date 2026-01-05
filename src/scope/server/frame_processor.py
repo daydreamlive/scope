@@ -836,15 +836,14 @@ class FrameProcessor:
         for _ in range(last_idx + 1):
             self.frame_buffer.popleft()
 
-        # Convert VideoFrames to tensors
+        # Convert VideoFrames to tensors (keep as uint8, GPU will handle dtype conversion)
         tensor_frames = []
         for video_frame in video_frames:
-            # Convert VideoFrame into (1, H, W, C) tensor on cpu
+            # Convert VideoFrame into (1, H, W, C) uint8 tensor on cpu
             # The T=1 dimension is expected by preprocess_chunk which rearranges T H W C -> T C H W
-            tensor = (
-                torch.from_numpy(video_frame.to_ndarray(format="rgb24"))
-                .float()
-                .unsqueeze(0)
+            # Note: We keep uint8 here and let pipeline preprocess chunk to target dtype on GPU
+            tensor = torch.from_numpy(video_frame.to_ndarray(format="rgb24")).unsqueeze(
+                0
             )
             tensor_frames.append(tensor)
 
