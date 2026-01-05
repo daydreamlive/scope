@@ -10,6 +10,7 @@ import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
+import { useStreamLatency } from "../hooks/useStreamLatency";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
@@ -167,6 +168,12 @@ export function StreamPage() {
   const webrtcStats = useWebRTCStats({
     peerConnectionRef,
     isStreaming,
+  });
+
+  // Get stream latency (only for V2V mode)
+  const latency = useStreamLatency({
+    isStreaming,
+    inputMode: settings.inputMode ?? "text",
   });
 
   // Video source for preview (camera or video)
@@ -1166,7 +1173,12 @@ export function StreamPage() {
       </div>
 
       {/* Status Bar */}
-      <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
+      <StatusBar
+        fps={webrtcStats.fps}
+        bitrate={webrtcStats.bitrate}
+        latency={latency}
+        showLatency={settings.inputMode === "video"}
+      />
 
       {/* Download Dialog */}
       {pipelineNeedsModels && (

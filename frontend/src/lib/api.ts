@@ -161,6 +161,28 @@ export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
   return result;
 };
 
+export interface StreamStatsResponse {
+  latency?: number | null;
+}
+
+export const getStreamStats = async (): Promise<StreamStatsResponse> => {
+  const response = await fetch("/api/v1/stream/stats", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(5000), // 5 second timeout
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Stream stats failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
 export const checkModelStatus = async (
   pipelineId: string
 ): Promise<ModelStatusResponse> => {

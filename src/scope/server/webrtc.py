@@ -294,6 +294,24 @@ class WebRTCManager:
             ]
         )
 
+    def get_latency(self) -> float | None:
+        """Get latency from the first active session's frame processor.
+
+        Returns:
+            Average latency in milliseconds, or None if no active session or latency unavailable.
+        """
+        for session in self.sessions.values():
+            if (
+                session.pc.connectionState not in ["closed", "failed"]
+                and session.video_track
+                and hasattr(session.video_track, "frame_processor")
+                and session.video_track.frame_processor is not None
+            ):
+                latency = session.video_track.frame_processor.get_average_latency()
+                if latency > 0:
+                    return latency
+        return None
+
     async def add_ice_candidate(
         self,
         session_id: str,

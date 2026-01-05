@@ -40,6 +40,20 @@ class _SpoutFrame:
         return self._data
 
 
+class _FrameWithTimestamp:
+    """Wrapper for frames with input timestamp for latency tracking."""
+
+    __slots__ = ["frame", "input_timestamp"]
+
+    def __init__(self, frame, input_timestamp: float):
+        self.frame = frame
+        self.input_timestamp = input_timestamp
+
+    def to_ndarray(self, format="rgb24"):
+        """Delegate to underlying frame's to_ndarray method."""
+        return self.frame.to_ndarray(format=format)
+
+
 class FrameProcessor:
     def __init__(
         self,
@@ -115,6 +129,11 @@ class FrameProcessor:
         self._preprocessor_submit_chunk_id = 0  # Counter for submitted chunks
         self._last_preprocessor_submit_time = 0.0
         self._preprocessor_result_lock = threading.Lock()
+
+        # End-to-end latency tracking
+        self._latency_samples = deque(maxlen=30)  # Keep last 30 latency measurements
+        self._latency_lock = threading.Lock()
+        self._current_average_latency = 0.0  # Current average latency in ms
 
     def start(self):
         if self.running:
@@ -226,8 +245,12 @@ class FrameProcessor:
         # Track input frame timestamp for FPS measurement
         self.track_input_frame()
 
+        # Wrap frame with timestamp for end-to-end latency tracking
+        input_timestamp = time.time()
+        frame_with_timestamp = _FrameWithTimestamp(frame, input_timestamp)
+
         with self.frame_buffer_lock:
-            self.frame_buffer.append(frame)
+            self.frame_buffer.append(frame_with_timestamp)
             return True
 
     def get(self) -> torch.Tensor | None:
@@ -235,7 +258,39 @@ class FrameProcessor:
             return None
 
         try:
-            frame = self.output_queue.get_nowait()
+            queue_item = self.output_queue.get_nowait()
+
+            # Unwrap frame and timestamp if wrapped for latency tracking
+            if isinstance(queue_item, tuple) and len(queue_item) == 2:
+                frame, input_timestamp = queue_item
+                # Calculate end-to-end latency from camera input to playback output
+                # This includes: buffer wait + preprocessing + pipeline processing + queue wait
+                output_timestamp = time.time()
+                latency_ms = (output_timestamp - input_timestamp) * 1000.0
+
+                # Track latency samples
+                with self._latency_lock:
+                    self._latency_samples.append(latency_ms)
+                    if len(self._latency_samples) >= 10:
+                        # Log average latency every 10 frames
+                        avg_latency = sum(self._latency_samples) / len(self._latency_samples)
+                        min_latency = min(self._latency_samples)
+                        max_latency = max(self._latency_samples)
+                        logger.info(
+                            f"[Latency] End-to-end: avg={avg_latency:.1f}ms, "
+                            f"min={min_latency:.1f}ms, max={max_latency:.1f}ms "
+                            f"(sample_size={len(self._latency_samples)})"
+                        )
+                        # Update current average latency for API access
+                        self._current_average_latency = avg_latency
+                        self._latency_samples.clear()
+                    elif len(self._latency_samples) > 0:
+                        # Update average even if we don't have 10 samples yet
+                        self._current_average_latency = sum(self._latency_samples) / len(self._latency_samples)
+            else:
+                # Backward compatibility: handle old format without timestamps
+                frame = queue_item
+
             # Enqueue frame for async Spout sending (non-blocking)
             if self.spout_sender_enabled and self.spout_sender is not None:
                 try:
@@ -256,6 +311,14 @@ class FrameProcessor:
         """Get the current dynamically calculated pipeline FPS"""
         with self.fps_lock:
             return self.current_pipeline_fps
+
+    def get_average_latency(self) -> float:
+        """Get the current average end-to-end latency in milliseconds.
+
+        Returns 0.0 if no latency measurements are available yet.
+        """
+        with self._latency_lock:
+            return self._current_average_latency
 
     def get_output_fps(self) -> float:
         """Get the output FPS that frames should be sent at.
@@ -630,8 +693,12 @@ class FrameProcessor:
                     last_frame_time = time.time()
                     spout_frame = _SpoutFrame(rgb_frame)
 
+                    # Wrap with timestamp for latency tracking
+                    input_timestamp = time.time()
+                    frame_with_timestamp = _FrameWithTimestamp(spout_frame, input_timestamp)
+
                     with self.frame_buffer_lock:
-                        self.frame_buffer.append(spout_frame)
+                        self.frame_buffer.append(frame_with_timestamp)
 
                     frame_count += 1
                     if frame_count % 100 == 0:
@@ -761,6 +828,7 @@ class FrameProcessor:
             )
 
         video_input = None
+        chunk_input_timestamp = None
         if requirements is not None:
             current_chunk_size = requirements.input_size
             with self.frame_buffer_lock:
@@ -769,7 +837,7 @@ class FrameProcessor:
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
                 prepare_start = time.time()
-                video_input = self.prepare_chunk(current_chunk_size)
+                video_input, chunk_input_timestamp = self.prepare_chunk(current_chunk_size)
                 prepare_time = time.time() - prepare_start
                 if prepare_time > 0.01:
                     logger.debug(f"[Overhead] prepare_chunk: {prepare_time*1000:.1f}ms")
@@ -821,6 +889,9 @@ class FrameProcessor:
                         async_preprocessor_client = async_preprocessors[preprocessor_type]
 
                         # === ASYNC PREPROCESSING ===
+                        # Track preprocessor latency
+                        preprocessor_start_time = time.time()
+
                         # Only submit new frames if we don't have a recent cached result
                         # This reduces overhead (tensor→numpy conversion) and GPU contention
                         # Since preprocessor runs faster than pipeline, we can skip some submissions
@@ -831,6 +902,7 @@ class FrameProcessor:
                                 if async_preprocessor_client.get_buffer_size() > 0:
                                     should_submit = False
 
+                        submit_time = 0.0
                         if should_submit:
                             # Submit current frames for processing (non-blocking)
                             preprocessor_submit_time = time.time()
@@ -839,21 +911,35 @@ class FrameProcessor:
                                 target_height=height,
                                 target_width=width,
                             )
-                            submit_overhead = time.time() - preprocessor_submit_time
-                            if submit_overhead > 0.05:
-                                logger.debug(f"[Overhead] Preprocessor submit: {submit_overhead*1000:.1f}ms")
+                            submit_time = time.time() - preprocessor_submit_time
+                            if submit_time > 0.05:
+                                logger.debug(f"[Latency] Preprocessor {preprocessor_type} submit: {submit_time*1000:.1f}ms")
 
                         # Get latest available (non-blocking)
+                        get_result_start = time.time()
                         preprocessor_result = async_preprocessor_client.get_latest_result()
+                        get_result_time = time.time() - get_result_start
+
                         if preprocessor_result is not None:
                             # Cache the result for future use
                             with self._preprocessor_result_lock:
                                 self._latest_preprocessor_results[preprocessor_type] = preprocessor_result.data
 
+                            # Track processing latency from result metadata if available
+                            if hasattr(preprocessor_result, 'processing_time'):
+                                processing_time = preprocessor_result.processing_time
+                                logger.info(
+                                    f"[Latency] Preprocessor {preprocessor_type}: "
+                                    f"submit={submit_time*1000:.1f}ms, "
+                                    f"process={processing_time*1000:.1f}ms, "
+                                    f"get_result={get_result_time*1000:.1f}ms"
+                                )
+
                         # Use cached preprocessor result (may be from previous chunk)
                         with self._preprocessor_result_lock:
                             preprocessed_input = self._latest_preprocessor_results.get(preprocessor_type)
 
+                        gpu_transfer_time = 0.0
                         if preprocessed_input is not None:
                             # Move to correct device and dtype
                             # non_blocking=True since memory is pinned in receiver thread
@@ -863,9 +949,14 @@ class FrameProcessor:
                                 dtype=torch.bfloat16,
                                 non_blocking=True,
                             )
-                            gpu_time = time.time() - gpu_start
-                            if gpu_time > 0.01:
-                                logger.debug(f"[Overhead] Preprocessor GPU transfer: {gpu_time*1000:.1f}ms")
+                            gpu_transfer_time = time.time() - gpu_start
+
+                            # Log total preprocessor latency
+                            total_preprocessor_time = time.time() - preprocessor_start_time
+                            logger.info(
+                                f"[Latency] Preprocessor {preprocessor_type} total: {total_preprocessor_time*1000:.1f}ms "
+                                f"(submit={submit_time*1000:.1f}ms, gpu_transfer={gpu_transfer_time*1000:.1f}ms)"
+                            )
 
                             logger.debug(
                                 f"Using async {preprocessor_type} preprocessor, shape: {preprocessed_input.shape}"
@@ -893,9 +984,13 @@ class FrameProcessor:
                         current_input = video_input
                         preprocessed_input = None
 
+                        # Track total preprocessing time for sequential preprocessors
+                        sequential_preprocessor_start = time.time()
+
                         # Process each preprocessor in order
                         for idx, preprocessor_type in enumerate(preprocessor_types):
                             client = async_preprocessors[preprocessor_type]
+                            preprocessor_iter_start = time.time()
 
                             # Check if we have a cached result for this preprocessor
                             cache_key = f"{preprocessor_type}_{idx}"
@@ -909,6 +1004,7 @@ class FrameProcessor:
                                 if client.get_buffer_size() > client.result_buffer_size // 2:
                                     should_submit = False
 
+                            submit_time = 0.0
                             if should_submit:
                                 # Convert current_input to numpy format for submission
                                 # current_input is list of tensors [(1, H, W, C), ...] or numpy array
@@ -940,18 +1036,32 @@ class FrameProcessor:
                                     target_height=height,
                                     target_width=width,
                                 )
-                                submit_overhead = time.time() - preprocessor_submit_time
-                                if submit_overhead > 0.05:
-                                    logger.debug(f"[Overhead] Preprocessor {preprocessor_type} submit: {submit_overhead*1000:.1f}ms")
+                                submit_time = time.time() - preprocessor_submit_time
+                                if submit_time > 0.05:
+                                    logger.debug(f"[Latency] Preprocessor {preprocessor_type} submit: {submit_time*1000:.1f}ms")
 
                             # Get result (non-blocking, use cached if available)
+                            get_result_start = time.time()
                             result = client.get_latest_result()
+                            get_result_time = time.time() - get_result_start
+
                             if result is not None:
                                 # Cache the result
                                 with self._preprocessor_result_lock:
                                     self._latest_preprocessor_results[cache_key] = result.data
                                 cached_result = result.data
 
+                                # Track processing latency from result metadata if available
+                                if hasattr(result, 'processing_time'):
+                                    processing_time = result.processing_time
+                                    logger.info(
+                                        f"[Latency] Preprocessor {preprocessor_type} ({idx+1}/{len(preprocessor_types)}): "
+                                        f"submit={submit_time*1000:.1f}ms, "
+                                        f"process={processing_time*1000:.1f}ms, "
+                                        f"get_result={get_result_time*1000:.1f}ms"
+                                    )
+
+                            gpu_transfer_time = 0.0
                             if cached_result is not None:
                                 # Move to GPU
                                 gpu_start = time.time()
@@ -960,9 +1070,15 @@ class FrameProcessor:
                                     dtype=torch.bfloat16,
                                     non_blocking=True,
                                 )
-                                gpu_time = time.time() - gpu_start
-                                if gpu_time > 0.01:
-                                    logger.debug(f"[Overhead] Preprocessor {preprocessor_type} GPU transfer: {gpu_time*1000:.1f}ms")
+                                gpu_transfer_time = time.time() - gpu_start
+
+                                # Log per-preprocessor latency
+                                preprocessor_iter_time = time.time() - preprocessor_iter_start
+                                logger.info(
+                                    f"[Latency] Preprocessor {preprocessor_type} ({idx+1}/{len(preprocessor_types)}) "
+                                    f"total: {preprocessor_iter_time*1000:.1f}ms "
+                                    f"(submit={submit_time*1000:.1f}ms, gpu_transfer={gpu_transfer_time*1000:.1f}ms)"
+                                )
 
                                 # Store final result for pipeline (keep tensor format)
                                 preprocessed_input = result_tensor
@@ -996,24 +1112,29 @@ class FrameProcessor:
                                 preprocessed_input = None
                                 break
 
-                    # Use final preprocessed input if available
-                    if preprocessed_input is not None:
-                        logger.debug(
-                            f"Using sequential preprocessors {preprocessor_types}, final shape: {preprocessed_input.shape}"
-                        )
-                        if vace_enabled:
-                            call_params["vace_input_frames"] = preprocessed_input
+                        # Use final preprocessed input if available (inside sequential preprocessor block)
+                        if preprocessed_input is not None:
+                            # Log total sequential preprocessing time
+                            total_sequential_time = time.time() - sequential_preprocessor_start
+                            logger.info(
+                                f"[Latency] Sequential preprocessors {preprocessor_types} total: {total_sequential_time*1000:.1f}ms"
+                            )
+                            logger.debug(
+                                f"Using sequential preprocessors {preprocessor_types}, final shape: {preprocessed_input.shape}"
+                            )
+                            if vace_enabled:
+                                call_params["vace_input_frames"] = preprocessed_input
+                            else:
+                                call_params["video"] = preprocessed_input
                         else:
-                            call_params["video"] = preprocessed_input
-                    else:
-                        # Not all preprocessor results available yet, fall back to video input
-                        logger.debug(
-                            f"Preprocessor pipeline incomplete, using video input"
-                        )
-                        if vace_enabled:
-                            call_params["vace_input_frames"] = video_input
-                        else:
-                            call_params["video"] = video_input
+                            # Not all preprocessor results available yet, fall back to video input
+                            logger.debug(
+                                f"Preprocessor pipeline incomplete, using video input"
+                            )
+                            if vace_enabled:
+                                call_params["vace_input_frames"] = video_input
+                            else:
+                                call_params["video"] = video_input
                 elif vace_enabled:
                     # Regular VACE V2V editing mode: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
@@ -1021,7 +1142,10 @@ class FrameProcessor:
                     # Normal V2V mode: route to video
                     call_params["video"] = video_input
 
+            # Measure pipeline execution latency
+            pipeline_start_time = time.time()
             output = pipeline(**call_params)
+            pipeline_latency = time.time() - pipeline_start_time
 
             # Clear vace_ref_images from parameters after use to prevent sending them on subsequent chunks
             # vace_ref_images should only be sent when explicitly provided in parameter updates
@@ -1049,9 +1173,16 @@ class FrameProcessor:
             # Calculate overhead (time before pipeline call)
             # start_time is set at beginning of process_chunk
             # pipeline call happens after parameter handling, prepare, and depth processing
+            overhead_time = processing_time - pipeline_latency
+
             logger.info(
-                f"[Pipeline] Chunk: {num_frames} frames in {processing_time:.3f}s "
-                f"({num_frames / processing_time:.1f} FPS)"
+                f"[Latency] Pipeline: {pipeline_latency*1000:.1f}ms for {num_frames} frames "
+                f"({num_frames / pipeline_latency:.1f} FPS)"
+            )
+            logger.info(
+                f"[Latency] Total chunk: {processing_time*1000:.1f}ms "
+                f"(pipeline={pipeline_latency*1000:.1f}ms, overhead={overhead_time*1000:.1f}ms, "
+                f"total_fps={num_frames / processing_time:.1f})"
             )
 
             # Normalize to [0, 255] and convert to uint8
@@ -1081,9 +1212,25 @@ class FrameProcessor:
                     except queue.Empty:
                         break
 
+            # Wrap output frames with input timestamp for end-to-end latency tracking
+            # This timestamp represents when the input frame arrived from the camera,
+            # and will be used to calculate total latency including:
+            # - Buffer wait time
+            # - Preprocessing time (DepthAnything, etc.) - included because preprocessing
+            #   happens between prepare_chunk() and pipeline execution
+            # - Pipeline processing time
+            # - Output queue wait time
+            # Use current time if no input timestamp (text-to-video mode)
+            if chunk_input_timestamp is None:
+                chunk_input_timestamp = start_time  # Use chunk start time as fallback
+
             for frame in output:
                 try:
-                    self.output_queue.put_nowait(frame)
+                    # Store frame with input timestamp for latency calculation
+                    # This preserves the original camera input timestamp through the entire
+                    # processing pipeline (preprocessing + pipeline) for accurate E2E measurement
+                    frame_with_latency = (frame, chunk_input_timestamp)
+                    self.output_queue.put_nowait(frame_with_latency)
                 except queue.Full:
                     logger.warning("Output queue full, dropping processed frame")
                     # Update FPS calculation based on processing time and frame count
@@ -1101,7 +1248,7 @@ class FrameProcessor:
 
         self.is_prepared = True
 
-    def prepare_chunk(self, chunk_size: int) -> list[torch.Tensor]:
+    def prepare_chunk(self, chunk_size: int) -> tuple[list[torch.Tensor], float]:
         """
         Sample frames uniformly from the buffer, convert them to tensors, and remove processed frames.
 
@@ -1122,7 +1269,9 @@ class FrameProcessor:
             - Removes frames 0-6 from buffer (7 frames total)
 
         Returns:
-            List of tensor frames, each (1, H, W, C) for downstream preprocess_chunk
+            Tuple of (list of tensor frames, earliest input timestamp)
+            - List of tensor frames, each (1, H, W, C) for downstream preprocess_chunk
+            - Earliest input timestamp for latency tracking
         """
         # Calculate uniform sampling step
         step = len(self.frame_buffer) / chunk_size
@@ -1130,6 +1279,14 @@ class FrameProcessor:
         indices = [round(i * step) for i in range(chunk_size)]
         # Extract VideoFrames at sampled indices
         video_frames = [self.frame_buffer[i] for i in indices]
+
+        # Extract earliest input timestamp for latency tracking
+        # This timestamp represents when the frame arrived from the camera (via put()),
+        # and will be preserved through preprocessing and pipeline processing for E2E latency measurement
+        earliest_timestamp = min(
+            frame.input_timestamp if isinstance(frame, _FrameWithTimestamp) else time.time()
+            for frame in video_frames
+        )
 
         # Drop all frames up to and including the last sampled frame
         last_idx = indices[-1]
@@ -1139,16 +1296,19 @@ class FrameProcessor:
         # Convert VideoFrames to tensors
         tensor_frames = []
         for video_frame in video_frames:
+            # Unwrap if it's a _FrameWithTimestamp
+            actual_frame = video_frame.frame if isinstance(video_frame, _FrameWithTimestamp) else video_frame
+
             # Convert VideoFrame into (1, H, W, C) tensor on cpu
             # The T=1 dimension is expected by preprocess_chunk which rearranges T H W C -> T C H W
             tensor = (
-                torch.from_numpy(video_frame.to_ndarray(format="rgb24"))
+                torch.from_numpy(actual_frame.to_ndarray(format="rgb24"))
                 .float()
                 .unsqueeze(0)
             )
             tensor_frames.append(tensor)
 
-        return tensor_frames
+        return tensor_frames, earliest_timestamp
 
     def __enter__(self):
         self.start()

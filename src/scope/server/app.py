@@ -53,6 +53,7 @@ from .schema import (
     PipelineSchemasResponse,
     PreprocessorsResponse,
     PipelineStatusResponse,
+    StreamStatsResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
@@ -356,6 +357,19 @@ async def get_pipeline_status(
         return PipelineStatusResponse(**status_info)
     except Exception as e:
         logger.error(f"Error getting pipeline status: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/stream/stats", response_model=StreamStatsResponse)
+async def get_stream_stats(
+    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+):
+    """Get stream statistics (latency, etc.) from active WebRTC session."""
+    try:
+        latency = webrtc_manager.get_latency()
+        return StreamStatsResponse(latency=latency)
+    except Exception as e:
+        logger.error(f"Error getting stream stats: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

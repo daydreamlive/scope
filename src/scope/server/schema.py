@@ -435,6 +435,14 @@ class PipelineStatusResponse(BaseModel):
     )
 
 
+class StreamStatsResponse(BaseModel):
+    """Stream statistics response schema."""
+
+    latency: float | None = Field(
+        default=None, description="Average end-to-end latency in milliseconds (V2V only)"
+    )
+
+
 class PipelineSchemasResponse(BaseModel):
     """Response containing schemas for all available pipelines.
 

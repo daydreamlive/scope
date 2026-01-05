@@ -2,9 +2,17 @@ interface StatusBarProps {
   className?: string;
   fps?: number;
   bitrate?: number;
+  latency?: number | null;
+  showLatency?: boolean; // Only show latency for V2V mode
 }
 
-export function StatusBar({ className = "", fps, bitrate }: StatusBarProps) {
+export function StatusBar({
+  className = "",
+  fps,
+  bitrate,
+  latency,
+  showLatency = false,
+}: StatusBarProps) {
   const MetricItem = ({
     label,
     value,
@@ -35,6 +43,11 @@ export function StatusBar({ className = "", fps, bitrate }: StatusBarProps) {
 
   const fpsValue = fps !== undefined && fps > 0 ? fps.toFixed(1) : "N/A";
   const bitrateValue = formatBitrate(bitrate);
+  const latencyValue =
+    latency !== undefined && latency !== null && latency > 0
+      ? latency.toFixed(1)
+      : "N/A";
+  const latencyUnit = latencyValue === "N/A" ? "" : "ms";
 
   return (
     <div
@@ -43,6 +56,9 @@ export function StatusBar({ className = "", fps, bitrate }: StatusBarProps) {
       <div className="flex items-center gap-6">
         <MetricItem label="FPS" value={fpsValue} />
         <MetricItem label="Bitrate" value={bitrateValue} />
+        {showLatency && (
+          <MetricItem label="Latency" value={latencyValue} unit={latencyUnit} />
+        )}
       </div>
     </div>
   );
