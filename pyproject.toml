@@ -111,7 +111,6 @@ dev = [
 benchmark = [
     "psutil>=6.1.0",
     "nvidia-ml-py>=12.560.30",
-    "py-cpuinfo>=9.0.0",
 ]
 
 [tool.ruff]
