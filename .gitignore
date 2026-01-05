@@ -20,3 +20,5 @@ notes/
 .cursorrules
 .cursorignore
 .cursorindexingignore
+
+*.local*
