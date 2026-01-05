@@ -55,22 +55,26 @@ class HardwareInfo:
             if isinstance(driver, bytes):
                 driver = driver.decode("utf-8")
 
-            gpu_info["devices"].append({
-                "index": i,
-                "name": name,
-                "memory_total_gb": mem.total / (1024**3),
-                "driver_version": driver,
-            })
+            gpu_info["devices"].append(
+                {
+                    "index": i,
+                    "name": name,
+                    "memory_total_gb": mem.total / (1024**3),
+                    "driver_version": driver,
+                }
+            )
         pynvml.nvmlShutdown()
 
         if not gpu_info["devices"]:
             for i in range(gpu_info["count"]):
                 props = torch.cuda.get_device_properties(i)
-                gpu_info["devices"].append({
-                    "index": i,
-                    "name": props.name,
-                    "memory_total_gb": props.total_memory / (1024**3),
-                })
+                gpu_info["devices"].append(
+                    {
+                        "index": i,
+                        "name": props.name,
+                        "memory_total_gb": props.total_memory / (1024**3),
+                    }
+                )
 
         return gpu_info
 
@@ -83,7 +87,10 @@ class HardwareInfo:
 
     def _get_memory_info(self) -> dict[str, Any]:
         mem = psutil.virtual_memory()
-        return {"total_gb": mem.total / (1024**3), "available_gb": mem.available / (1024**3)}
+        return {
+            "total_gb": mem.total / (1024**3),
+            "available_gb": mem.available / (1024**3),
+        }
 
     def _get_platform_info(self) -> dict[str, Any]:
         return {
@@ -100,6 +107,7 @@ class HardwareInfo:
         if not self._info["gpu"]["available"] or not self._info["gpu"]["devices"]:
             return 0.0
         return self._info["gpu"]["devices"][0]["memory_total_gb"]
+
 
 class ResourceMonitor:
     def __init__(self, interval_ms: int = 100, device_index: int = 0):
@@ -143,7 +151,9 @@ class ResourceMonitor:
     def _collect_sample(self) -> dict[str, Any]:
         sample = {}
         if torch.cuda.is_available():
-            sample["gpu_memory_allocated_gb"] = torch.cuda.memory_allocated(self.device_index) / (1024**3)
+            sample["gpu_memory_allocated_gb"] = torch.cuda.memory_allocated(
+                self.device_index
+            ) / (1024**3)
             if self._pynvml_initialized and self._gpu_handle:
                 util = pynvml.nvmlDeviceGetUtilizationRates(self._gpu_handle)
                 sample["gpu_utilization_percent"] = util.gpu
@@ -158,7 +168,11 @@ class ResourceMonitor:
             return {}
 
         stats = {}
-        keys = ["gpu_memory_allocated_gb", "gpu_utilization_percent", "system_cpu_percent"]
+        keys = [
+            "gpu_memory_allocated_gb",
+            "gpu_utilization_percent",
+            "system_cpu_percent",
+        ]
         for key in keys:
             values = [s[key] for s in samples if key in s]
             if values:
@@ -238,7 +252,9 @@ class BenchmarkRunner:
 
     def run_config(self, config: dict) -> dict:
         pipeline_id = config["pipeline_id"]
-        print(f"\n--- Benchmarking {pipeline_id} [{config['height']}x{config['width']}] ---")
+        print(
+            f"\n--- Benchmarking {pipeline_id} [{config['height']}x{config['width']}] ---"
+        )
 
         if not models_are_downloaded(pipeline_id):
             print(f"Downloading models for {pipeline_id}...")
@@ -256,9 +272,14 @@ class BenchmarkRunner:
 
             if pipeline_id == "streamdiffusionv2":
                 inputs["video"] = torch.randn(
-                        1, 3, 4, config["height"], config["width"],
-                        device=self.device, dtype=torch.bfloat16
-                    )
+                    1,
+                    3,
+                    4,
+                    config["height"],
+                    config["width"],
+                    device=self.device,
+                    dtype=torch.bfloat16,
+                )
 
             print(f"Warmup ({self.warmup_iterations} iterations)...")
             try:
@@ -315,10 +336,12 @@ class BenchmarkRunner:
                 "latency_min_sec": round(min_latency, 4),
                 "latency_max_sec": round(max_latency, 4),
                 "jitter_sec": round(jitter, 6),
-                **resource_stats
+                **resource_stats,
             }
 
-            print(f"-> FPS: {results['fps_avg']} | Latency: {results['latency_avg_sec']}s | Jitter: {results['jitter_sec']}s")
+            print(
+                f"-> FPS: {results['fps_avg']} | Latency: {results['latency_avg_sec']}s | Jitter: {results['jitter_sec']}s"
+            )
             return results
 
         except Exception as e:
@@ -333,7 +356,12 @@ class BenchmarkRunner:
         pid = config["pipeline_id"]
         pipeline_class = PipelineRegistry.get(pid)
 
-        model_config = OmegaConf.load(Path(__file__).parent / "src/scope/core/pipelines" / pid.replace("-", "_") / "model.yaml")
+        model_config = OmegaConf.load(
+            Path(__file__).parent
+            / "src/scope/core/pipelines"
+            / pid.replace("-", "_")
+            / "model.yaml"
+        )
         pipeline_config = {
             "model_dir": str(get_models_dir()),
             "model_config": model_config,
@@ -341,25 +369,35 @@ class BenchmarkRunner:
             "width": config["width"],
         }
 
-        def model_path(p): return str(get_model_file_path(p))
+        def model_path(p):
+            return str(get_model_file_path(p))
+
         wan_enc = model_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors")
         wan_tok = model_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
 
         paths = {}
         if pid == "streamdiffusionv2":
-            paths = {"generator_path": model_path("StreamDiffusionV2/wan_causal_dmd_v2v/model.pt")}
+            paths = {
+                "generator_path": model_path(
+                    "StreamDiffusionV2/wan_causal_dmd_v2v/model.pt"
+                )
+            }
         elif pid == "longlive":
             paths = {
                 "generator_path": model_path("LongLive-1.3B/models/longlive_base.pt"),
-                "lora_path": model_path("LongLive-1.3B/models/lora.pt")
+                "lora_path": model_path("LongLive-1.3B/models/lora.pt"),
             }
         elif pid == "krea-realtime-video":
             paths = {
-                "generator_path": model_path("krea-realtime-video/krea-realtime-video-14b.safetensors"),
-                "vae_path": model_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
+                "generator_path": model_path(
+                    "krea-realtime-video/krea-realtime-video-14b.safetensors"
+                ),
+                "vae_path": model_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth"),
             }
         elif pid == "reward-forcing":
-            paths = {"generator_path": model_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")}
+            paths = {
+                "generator_path": model_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")
+            }
 
         pipeline_config.update(paths)
         if "text_encoder_path" not in pipeline_config:
@@ -371,7 +409,7 @@ class BenchmarkRunner:
         args = {
             "config": OmegaConf.create(pipeline_config),
             "device": self.device,
-            "dtype": torch.bfloat16
+            "dtype": torch.bfloat16,
         }
         if quantization:
             args.update({"quantization": quantization})
@@ -387,14 +425,23 @@ class BenchmarkRunner:
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
+
 def main():
     parser = argparse.ArgumentParser(description="Scope Benchmark")
     parser.add_argument("--pipelines", nargs="+", help="Specific pipelines to test")
     parser.add_argument("--resolutions", nargs="+", help="Resolutions (e.g. 512x512)")
-    parser.add_argument("--iterations", type=int, default=30, help="Measurement iterations per config")
-    parser.add_argument("--warmup", type=int, default=5, help="Warmup iterations per config")
-    parser.add_argument("--output", default=f"benchmark_{datetime.now().strftime('%Y%m%d_%H%M')}.json")
-    parser.add_argument("--no-tf32", action="store_true", help="Disable TF32 (enabled by default)")
+    parser.add_argument(
+        "--iterations", type=int, default=30, help="Measurement iterations per config"
+    )
+    parser.add_argument(
+        "--warmup", type=int, default=5, help="Warmup iterations per config"
+    )
+    parser.add_argument(
+        "--output", default=f"benchmark_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+    )
+    parser.add_argument(
+        "--no-tf32", action="store_true", help="Disable TF32 (enabled by default)"
+    )
     parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
     args = parser.parse_args()
 
@@ -433,22 +480,25 @@ def main():
         for i, config in enumerate(matrix, 1):
             print(f"\n[{i}/{len(matrix)}]", end=" ")
             metrics = runner.run_config(config)
-            results.append({
-                "pipeline": config["pipeline_id"],
-                "resolution": f"{config['height']}x{config['width']}",
-                "metrics": metrics
-            })
+            results.append(
+                {
+                    "pipeline": config["pipeline_id"],
+                    "resolution": f"{config['height']}x{config['width']}",
+                    "metrics": metrics,
+                }
+            )
     except KeyboardInterrupt:
         print("\nStopped.")
 
     data = {
         "metadata": {"timestamp": datetime.now().isoformat(), "args": vars(args)},
         "hardware": hw.to_dict(),
-        "results": results
+        "results": results,
     }
     with open(args.output, "w") as f:
         json.dump(data, f, indent=2)
     print(f"\nSaved to {args.output}")
+
 
 if __name__ == "__main__":
     main()
