@@ -399,7 +399,7 @@ export function SettingsPanel({
         )}
 
         {/* VAE Type Selection */}
-        {pipelines?.[pipelineId]?.supportsVaeType && (
+        {vaeTypes && vaeTypes.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip

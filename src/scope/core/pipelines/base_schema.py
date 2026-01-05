@@ -160,7 +160,6 @@ class BasePipelineConfig(BaseModel):
     supports_cache_management: ClassVar[bool] = False
     supports_kv_cache_bias: ClassVar[bool] = False
     supports_quantization: ClassVar[bool] = False
-    supports_vae_type: ClassVar[bool] = False
     min_dimension: ClassVar[int] = 1
     # Whether this pipeline contains modifications based on the original project
     modified: ClassVar[bool] = False
@@ -289,19 +288,12 @@ class BasePipelineConfig(BaseModel):
         metadata["supports_cache_management"] = cls.supports_cache_management
         metadata["supports_kv_cache_bias"] = cls.supports_kv_cache_bias
         metadata["supports_quantization"] = cls.supports_quantization
-        metadata["supports_vae_type"] = cls.supports_vae_type
         metadata["min_dimension"] = cls.min_dimension
         metadata["recommended_quantization_vram_threshold"] = (
             cls.recommended_quantization_vram_threshold
         )
         metadata["modified"] = cls.modified
         metadata["config_schema"] = cls.model_json_schema()
-
-        # Extract VAE types from schema if pipeline supports it
-        if cls.supports_vae_type:
-            from .utils import VaeType
-
-            metadata["vae_types"] = [vae_type.value for vae_type in VaeType]
 
         # Include mode-specific defaults (excluding None values and the "default" flag)
         mode_defaults = {}
