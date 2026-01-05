@@ -71,12 +71,13 @@ def create_vae(
     """
     vae_type = vae_type or DEFAULT_VAE_TYPE
 
-    # Determine default model_name based on vae_type if not explicitly provided
-    if model_name is None:
-        if vae_type in ("tae", "lighttae", "lightvae"):
-            model_name = "Autoencoders"
-        else:
-            model_name = "Wan2.1-T2V-1.3B"
+    # Determine model_name based on vae_type
+    # Non-"wan" VAE types are ALWAYS from Autoencoders repo, ignore passed model_name
+    if vae_type in ("tae", "lighttae", "lightvae"):
+        model_name = "Autoencoders"
+    elif model_name is None:
+        # Default for "wan" VAE type only
+        model_name = "Wan2.1-T2V-1.3B"
 
     vae_factory = VAE_REGISTRY.get(vae_type)
     if vae_factory is None:
