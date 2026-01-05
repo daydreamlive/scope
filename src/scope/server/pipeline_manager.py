@@ -334,6 +334,7 @@ class PipelineManager:
             "krea-realtime-video",
             "reward-forcing",
             "memflow",
+            "depth-anything",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -648,6 +649,41 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("MemFlow pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "depth-anything":
+            from scope.core.pipelines import DepthAnythingPipeline
+
+            # Create config from load_params
+            config = OmegaConf.create({})
+
+            # Apply load parameters (resolution) to config
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
+            # Add depth-anything-specific parameters
+            if load_params:
+                config.metric = load_params.get("metric", False)
+                config.input_size = load_params.get(
+                    "input_size", 518
+                )  # Default 518 (optimal for model)
+                config.fp32 = load_params.get("fp32", False)
+            else:
+                config.metric = False
+                config.input_size = 518
+                config.fp32 = False
+
+            pipeline = DepthAnythingPipeline(
+                config,
+                device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+                dtype=torch.float16,
+            )
+            logger.info("DepthAnything pipeline initialized")
             return pipeline
 
         else:
