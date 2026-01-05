@@ -503,9 +503,8 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    "vae_path": str(
-                        get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
-                    ),
+                    # Note: vae_path is intentionally omitted to allow create_vae()
+                    # to construct the correct path based on vae_type
                 }
             )
 
