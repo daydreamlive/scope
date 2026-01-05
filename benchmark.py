@@ -2,24 +2,24 @@ import argparse
 import gc
 import json
 import platform
+import statistics
 import threading
 import time
-import statistics
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import torch
-import pynvml
 import psutil
-import statistics
+import pynvml
+import torch
 from omegaconf import OmegaConf
 
-from scope.core.pipelines.utils import Quantization
+from scope.core.config import get_model_file_path, get_models_dir
 from scope.core.pipelines.registry import PipelineRegistry
+from scope.core.pipelines.utils import Quantization
 from scope.server.download_models import download_models
 from scope.server.models_config import models_are_downloaded
-from scope.core.config import get_model_file_path, get_models_dir
+
 
 class HardwareInfo:
     """Collects and stores hardware information."""
@@ -47,11 +47,13 @@ class HardwareInfo:
         for i in range(gpu_info["count"]):
             handle = pynvml.nvmlDeviceGetHandleByIndex(i)
             name = pynvml.nvmlDeviceGetName(handle)
-            if isinstance(name, bytes): name = name.decode("utf-8")
+            if isinstance(name, bytes):
+                name = name.decode("utf-8")
 
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
             driver = pynvml.nvmlSystemGetDriverVersion()
-            if isinstance(driver, bytes): driver = driver.decode("utf-8")
+            if isinstance(driver, bytes):
+                driver = driver.decode("utf-8")
 
             gpu_info["devices"].append({
                 "index": i,
@@ -116,14 +118,16 @@ class ResourceMonitor:
         self._pynvml_initialized = True
 
     def start(self):
-        if self._monitoring: return
+        if self._monitoring:
+            return
         self._monitoring = True
         self._samples = []
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
 
     def stop(self):
-        if not self._monitoring: return
+        if not self._monitoring:
+            return
         self._monitoring = False
         if self._thread:
             self._thread.join(timeout=2.0)
@@ -148,8 +152,10 @@ class ResourceMonitor:
         return sample
 
     def get_statistics(self) -> dict[str, float]:
-        with self._lock: samples = self._samples.copy()
-        if not samples: return {}
+        with self._lock:
+            samples = self._samples.copy()
+        if not samples:
+            return {}
 
         stats = {}
         keys = ["gpu_memory_allocated_gb", "gpu_utilization_percent", "system_cpu_percent"]
@@ -211,7 +217,8 @@ class ConfigurationMatrix:
             return self.custom_resolutions
 
         pipeline_class = PipelineRegistry.get(pid)
-        if not pipeline_class: return []
+        if not pipeline_class:
+            return []
         default_cfg = pipeline_class.get_config_class()()
 
         res_set = {(default_cfg.height, default_cfg.width)}
@@ -219,7 +226,7 @@ class ConfigurationMatrix:
         for h, w in self.STANDARD_RESOLUTIONS:
             res_set.add((h, w))
 
-        return sorted(list(res_set))
+        return sorted(res_set)
 
 
 class BenchmarkRunner:
@@ -258,7 +265,7 @@ class BenchmarkRunner:
                 for _ in range(self.warmup_iterations):
                     pipeline(**inputs)
             except Exception as e:
-                raise Exception(f"Warmup failed: {e}")
+                raise Exception(f"Warmup failed: {e}") from e
 
             print(f"Measuring ({self.iterations} iterations)...")
             monitor = ResourceMonitor()
@@ -355,8 +362,10 @@ class BenchmarkRunner:
             paths = {"generator_path": model_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")}
 
         pipeline_config.update(paths)
-        if "text_encoder_path" not in pipeline_config: pipeline_config["text_encoder_path"] = wan_enc
-        if "tokenizer_path" not in pipeline_config: pipeline_config["tokenizer_path"] = wan_tok
+        if "text_encoder_path" not in pipeline_config:
+            pipeline_config["text_encoder_path"] = wan_enc
+        if "tokenizer_path" not in pipeline_config:
+            pipeline_config["tokenizer_path"] = wan_tok
 
         quantization = Quantization.FP8_E4M3FN if pid == "krea-realtime-video" else None
         args = {
@@ -400,7 +409,8 @@ def main():
             try:
                 h, w = map(int, r.split("x"))
                 custom_res.append((h, w))
-            except ValueError: pass
+            except ValueError:
+                pass
 
     hw = HardwareInfo()
     print("\n=== Hardware ===")
@@ -413,7 +423,8 @@ def main():
     ).build()
 
     print(f"\nPlanned Configurations: {len(matrix)}")
-    if not matrix: return
+    if not matrix:
+        return
 
     runner = BenchmarkRunner(args.warmup, args.iterations, compile_model=args.compile)
     results = []
@@ -435,7 +446,8 @@ def main():
         "hardware": hw.to_dict(),
         "results": results
     }
-    with open(args.output, "w") as f: json.dump(data, f, indent=2)
+    with open(args.output, "w") as f:
+        json.dump(data, f, indent=2)
     print(f"\nSaved to {args.output}")
 
 if __name__ == "__main__":
