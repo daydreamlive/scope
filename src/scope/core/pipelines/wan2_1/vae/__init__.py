@@ -46,7 +46,7 @@ DEFAULT_VAE_TYPE = "wan"
 
 def create_vae(
     model_dir: str = "wan_models",
-    model_name: str = "Wan2.1-T2V-1.3B",
+    model_name: str | None = None,
     vae_type: str | None = None,
     vae_path: str | None = None,
 ) -> WanVAEWrapper | TAEWrapper:
@@ -54,7 +54,9 @@ def create_vae(
 
     Args:
         model_dir: Base model directory
-        model_name: Model subdirectory name (e.g., "Wan2.1-T2V-1.3B")
+        model_name: Model subdirectory name. If not provided, defaults based on
+                    vae_type: "Autoencoders" for tae/lighttae/lightvae,
+                    "Wan2.1-T2V-1.3B" for wan.
         vae_type: VAE type ("wan" for full VAE, "lightvae" for 75% pruned,
                   "tae" for TAE, "lighttae" for LightTAE).
                   Defaults to "wan". This is selectable via UI dropdown.
@@ -68,6 +70,13 @@ def create_vae(
         ValueError: If vae_type is not recognized
     """
     vae_type = vae_type or DEFAULT_VAE_TYPE
+
+    # Determine default model_name based on vae_type if not explicitly provided
+    if model_name is None:
+        if vae_type in ("tae", "lighttae", "lightvae"):
+            model_name = "Autoencoders"
+        else:
+            model_name = "Wan2.1-T2V-1.3B"
 
     vae_factory = VAE_REGISTRY.get(vae_type)
     if vae_factory is None:

@@ -49,12 +49,8 @@ class WanVAEWrapper(torch.nn.Module):
 
         # Determine paths with priority: explicit vae_path > model_dir/model_name default
         if vae_path is None:
-            if use_lightvae:
-                # LightVAE downloaded from lightx2v/Autoencoders
-                vae_path = os.path.join(model_dir, "Autoencoders", LIGHTVAE_FILENAME)
-            else:
-                # Default VAE bundled with main model
-                vae_path = os.path.join(model_dir, model_name, DEFAULT_VAE_FILENAME)
+            filename = LIGHTVAE_FILENAME if use_lightvae else DEFAULT_VAE_FILENAME
+            vae_path = os.path.join(model_dir, model_name, filename)
 
         self.register_buffer(
             "mean", torch.tensor(WAN_VAE_LATENT_MEAN, dtype=torch.float32)
