@@ -19,7 +19,7 @@ from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.vace.mixin import VACEEnabledPipeline
-from ..wan2_1.vae import WanVAEWrapper
+from ..wan2_1.vae import create_vae
 from .modular_blocks import RewardForcingBlocks
 from .schema import RewardForcingConfig
 
@@ -119,10 +119,13 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         # Move text encoder to target device but use dtype of weights
         text_encoder = text_encoder.to(device=device)
 
-        # Load VAE using unified WanVAEWrapper
+        # Load VAE using create_vae factory (supports multiple VAE types)
+        vae_type = getattr(config, "vae_type", "wan")
         start = time.time()
-        vae = WanVAEWrapper(model_dir=model_dir, model_name=base_model_name)
-        print(f"Loaded VAE in {time.time() - start:.3f}s")
+        vae = create_vae(
+            model_dir=model_dir, model_name=base_model_name, vae_type=vae_type
+        )
+        print(f"Loaded VAE (type={vae_type}) in {time.time() - start:.3f}s")
         # Move VAE to target device and use target dtype
         vae = vae.to(device=device, dtype=dtype)
 
