@@ -104,12 +104,6 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 default=None,
                 description="Input frames for VACE conditioning (if present, indicates video input is enabled)",
             ),
-            InputParam(
-                "soft_transition_active",
-                type_hint=bool,
-                default=False,
-                description="Whether a soft transition (KV bias lowering) is active - prevents cache reset on prompt change",
-            ),
         ]
 
     @property
@@ -139,7 +133,6 @@ class SetupCachesBlock(ModularPipelineBlocks):
         init_cache = block_state.init_cache
         is_transitioning = state.get("_transition_active", False)
         was_transitioning = state.get("_transition_active_prev", False)
-        soft_transitioning = block_state.soft_transition_active
 
         if init_cache:
             logger.info(
@@ -155,9 +148,7 @@ class SetupCachesBlock(ModularPipelineBlocks):
 
         # Clear KV cache when conditioning changes outside of a transition if manage_cache is enabled and video input is present.
         # Transitions include: embedding blending (_transition_active) and soft transitions (KV bias lowering).
-        transitioning_context = (
-            is_transitioning or was_transitioning or soft_transitioning
-        )
+        transitioning_context = is_transitioning or was_transitioning
         if (
             block_state.conditioning_embeds_updated
             and not transitioning_context

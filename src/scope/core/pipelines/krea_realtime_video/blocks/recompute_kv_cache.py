@@ -13,29 +13,6 @@ from einops import rearrange
 from scope.core.pipelines.wan2_1.utils import initialize_kv_cache
 
 
-def _get_block_mask_model(model: torch.nn.Module) -> torch.nn.Module:
-    """Return the underlying model object that owns `block_mask`.
-
-    When VACE is enabled, `components.generator.model` is wrapped by `CausalVaceWanModel`,
-    but the actual `block_mask` lives on the wrapped base model (`causal_wan_model`).
-    """
-    causal_wan_model = getattr(model, "causal_wan_model", None)
-    if causal_wan_model is not None:
-        return causal_wan_model
-
-    # PEFT models (runtime_peft) expose the wrapped module at base_model.model.
-    base_model = getattr(model, "base_model", None)
-    if base_model is not None:
-        inner = getattr(base_model, "model", None)
-        if inner is not None:
-            causal_wan_model = getattr(inner, "causal_wan_model", None)
-            if causal_wan_model is not None:
-                return causal_wan_model
-            return inner
-
-    return model
-
-
 class RecomputeKVCacheBlock(ModularPipelineBlocks):
     @property
     def expected_components(self) -> list[ComponentSpec]:
@@ -57,6 +34,29 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
     @property
     def description(self) -> str:
         return "Recompute KV Cache block that recomputes KV cache using context frames"
+
+    @staticmethod
+    def _get_block_mask_model(model: torch.nn.Module) -> torch.nn.Module:
+        """Return the underlying model object that owns `block_mask`.
+
+        When VACE is enabled, `components.generator.model` is wrapped by `CausalVaceWanModel`,
+        but the actual `block_mask` lives on the wrapped base model (`causal_wan_model`).
+        """
+        causal_wan_model = getattr(model, "causal_wan_model", None)
+        if causal_wan_model is not None:
+            return causal_wan_model
+
+        # PEFT models (runtime_peft) expose the wrapped module at base_model.model.
+        base_model = getattr(model, "base_model", None)
+        if base_model is not None:
+            inner = getattr(base_model, "model", None)
+            if inner is not None:
+                causal_wan_model = getattr(inner, "causal_wan_model", None)
+                if causal_wan_model is not None:
+                    return causal_wan_model
+                return inner
+
+        return model
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -253,7 +253,7 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
         )
 
         # Prepare blockwise causal mask
-        block_mask_model = _get_block_mask_model(components.generator.model)
+        block_mask_model = self._get_block_mask_model(components.generator.model)
         block_mask_model.block_mask = (
             block_mask_model._prepare_blockwise_causal_attn_mask(
                 device=context_frames.device,
