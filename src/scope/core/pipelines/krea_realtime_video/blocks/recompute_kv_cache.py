@@ -163,27 +163,6 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
 
         block_state.start_frame = start_frame
 
-        # Optional perf knob: recompute KV cache less frequently in steady-state.
-        #
-        # This is an algorithmic trade-off: skipping recompute may increase drift / error
-        # accumulation, but can save ~10–15% of pipeline time on B300 (cu130).
-        #
-        # Semantics:
-        # - Always run recompute for the first block (current_start_frame == 0).
-        # - Only start skipping once the cache is in steady-state:
-        #     current_start_frame >= kv_cache_num_frames
-        # - Recompute every N "blocks" (a block produces num_frame_per_block frames).
-        every_n = int(os.getenv("SCOPE_KV_CACHE_RECOMPUTE_EVERY", "1") or "1")
-        if every_n > 1 and block_state.current_start_frame > 0:
-            if block_state.current_start_frame >= components.config.kv_cache_num_frames:
-                num_frame_per_block = int(components.config.num_frame_per_block)
-                block_idx = int(block_state.current_start_frame) // max(
-                    1, num_frame_per_block
-                )
-                if (block_idx % every_n) != 0:
-                    self.set_block_state(state, block_state)
-                    return components, state
-
         if block_state.current_start_frame == 0:
             context_frame_buffer_max_size = components.config.kv_cache_num_frames - 1
             decoded_frame_buffer_max_size = (
