@@ -217,9 +217,10 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         """Check if VACE is needed based on the provided kwargs."""
         if self._vace_path is None:
             return False
-        # Check for VACE-specific inputs
+        # Check for VACE-specific inputs or explicit vace_enabled parameter
         return (
-            kwargs.get("vace_ref_images") is not None
+            kwargs.get("vace_enabled") is True
+            or kwargs.get("vace_ref_images") is not None
             or kwargs.get("vace_input_frames") is not None
         )
 

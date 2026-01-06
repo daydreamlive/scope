@@ -506,6 +506,24 @@ class PipelineManager:
                 }
             )
 
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                # Use 14B VACE checkpoint for Krea (not the default 1.3B from _configure_vace)
+                config["vace_path"] = str(
+                    get_model_file_path(
+                        "WanVideo_comfy/Wan2_1-VACE_module_14B_bf16.safetensors"
+                    )
+                )
+                logger.debug(
+                    f"Krea: Using 14B VACE checkpoint at {config['vace_path']}"
+                )
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
+
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
