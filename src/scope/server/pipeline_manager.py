@@ -503,9 +503,6 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    "vae_path": str(
-                        get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
-                    ),
                     "vace_path": str(
                         get_model_file_path(
                             "WanVideo_comfy/Wan2_1-VACE_module_14B_bf16.safetensors"
