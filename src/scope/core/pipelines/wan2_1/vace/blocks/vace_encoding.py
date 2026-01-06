@@ -57,6 +57,22 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     VACE has one operation with multiple potential triggers, better handled internally.
     """
 
+    def __init__(self):
+        super().__init__()
+        # Explicit encoder caches for TAE VACE dual-encode (inactive + reactive)
+        # These persist across chunks to maintain temporal continuity within each stream
+        # while preventing MemBlock memory pollution between streams.
+        # Lazily initialized on first use since we need the VAE to create caches.
+        self._inactive_cache = None
+        self._reactive_cache = None
+        self._caches_initialized = False
+
+    def clear_encoder_caches(self):
+        """Clear encoder caches for a new video sequence."""
+        self._inactive_cache = None
+        self._reactive_cache = None
+        self._caches_initialized = False
+
     @property
     def expected_components(self) -> list[ComponentSpec]:
         return [
@@ -359,15 +375,27 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             # Wrap in list for batch dimension
             ref_images = [prepared_refs]
 
+        # Lazily initialize encoder caches on first use (need VAE to create them)
+        # These caches persist across chunks for temporal continuity
+        # WanVAE.create_encoder_cache() returns None (no MemBlock issue)
+        # TAEWrapper.create_encoder_cache() returns TAEEncoderCache
+        if not self._caches_initialized:
+            self._inactive_cache = vae.create_encoder_cache()
+            self._reactive_cache = vae.create_encoder_cache()
+            self._caches_initialized = True
+
         # Standard VACE encoding path (matching wan_vace.py lines 339-341)
         # z0 = vace_encode_frames(vace_input_frames, vace_ref_images, masks=vace_input_masks)
         # When masks are provided, set pad_to_96=False because mask encoding (64 channels) will be added later
+        # Pass explicit caches to prevent TAE MemBlock memory pollution between inactive/reactive streams
         z0 = vace_encode_frames(
             vae,
             input_frames_list,
             ref_images,
             masks=input_masks_list,
             pad_to_96=False,
+            inactive_cache=self._inactive_cache,
+            reactive_cache=self._reactive_cache,
         )
 
         # m0 = vace_encode_masks(input_masks, ref_images)
