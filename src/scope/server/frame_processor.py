@@ -723,14 +723,6 @@ class FrameProcessor:
                 # This fixes the chicken-and-egg problem where VACE isn't enabled until vace_input_frames arrives
                 vace_enabled = self.parameters.get("vace_enabled", False)
 
-                # Robustness fallback: If vace_enabled is missing (e.g. old frontend build),
-                # infer intent from VACE-specific parameters that are only sent when VACE is desired.
-                if not vace_enabled and (
-                    self.parameters.get("vace_context_scale") is not None
-                    or self.parameters.get("vace_ref_images") is not None
-                ):
-                    vace_enabled = True
-
                 # Check if input video should be used for VACE conditioning
                 vace_use_input_video = self.parameters.get("vace_use_input_video", True)
 
