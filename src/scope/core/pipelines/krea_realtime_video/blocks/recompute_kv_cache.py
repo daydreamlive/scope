@@ -1,5 +1,3 @@
-import os
-
 import torch
 from diffusers.modular_pipelines import BlockState, ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import (

@@ -502,7 +502,7 @@ class PipelineManager:
                     ),
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
-                    )
+                    ),
                 }
             )
 
