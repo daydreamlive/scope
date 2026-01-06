@@ -1,4 +1,7 @@
+from pydantic import Field
+
 from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..utils import VaeType
 
 
 class RewardForcingConfig(BasePipelineConfig):
@@ -22,6 +25,10 @@ class RewardForcingConfig(BasePipelineConfig):
     height: int = 320
     width: int = 576
     denoising_steps: list[int] = [1000, 750, 500, 250]
+    vae_type: VaeType = Field(
+        default=VaeType.WAN,
+        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+    )
 
     modes = {
         "text": ModeDefaults(default=True),
