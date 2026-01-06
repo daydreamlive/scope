@@ -77,7 +77,7 @@ PIPELINE_ARTIFACTS = {
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="Wan-AI/Wan2.1-T2V-14B",
-            files=["config.json"],
+            files=["config.json", "Wan2.1_VAE.pth"],
         ),
         HuggingfaceRepoArtifact(
             repo_id="krea/krea-realtime-video",
