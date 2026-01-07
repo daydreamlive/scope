@@ -679,10 +679,10 @@ class PipelineManager:
 
             # Add LTX2-specific parameters
             if load_params:
-                config["num_frames"] = load_params.get("num_frames", 33)
+                config["num_frames"] = load_params.get("num_frames", 151)
                 config["frame_rate"] = load_params.get("frame_rate", 24.0)
             else:
-                config["num_frames"] = 33
+                config["num_frames"] = 151
                 config["frame_rate"] = 24.0
 
             pipeline = LTX2Pipeline(
