@@ -132,6 +132,7 @@ def _register_pipelines():
         ),
         ("memflow", ".memflow.pipeline", "MemFlowPipeline"),
         ("passthrough", ".passthrough.pipeline", "PassthroughPipeline"),
+        ("ltx2", ".ltx2.pipeline", "LTX2Pipeline"),
     ]
 
     # Try to import and register each pipeline
