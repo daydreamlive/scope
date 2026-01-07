@@ -1,6 +1,7 @@
+import { getDaydreamAPIKey } from "./auth";
+
 const DAYDREAM_API_BASE =
   (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.live";
-const DAYDREAM_API_KEY = (import.meta as any).env?.VITE_DAYDREAM_API_KEY;
 
 /**
  * Prompt can be a single string or weighted list of (prompt, weight) tuples
@@ -199,15 +200,16 @@ export interface DaydreamWebRTCOfferRequest {
 }
 
 export async function createCloudStream(req: CreateStreamRequest) {
-  if (!DAYDREAM_API_KEY) {
-    throw new Error("VITE_DAYDREAM_API_KEY is not set");
+  const apiKey = getDaydreamAPIKey();
+  if (!apiKey) {
+    throw new Error("Not authenticated. Please sign in to use Daydream API.");
   }
 
   const response = await fetch(`${DAYDREAM_API_BASE}/v1/streams`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${DAYDREAM_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(req),
   });
@@ -235,8 +237,9 @@ export async function updateCloudStream(
   streamId: string,
   req: UpdateStreamRequest
 ): Promise<UpdateStreamResponse> {
-  if (!DAYDREAM_API_KEY) {
-    throw new Error("VITE_DAYDREAM_API_KEY is not set");
+  const apiKey = getDaydreamAPIKey();
+  if (!apiKey) {
+    throw new Error("Not authenticated. Please sign in to use Daydream API.");
   }
 
   const response = await fetch(
@@ -245,7 +248,7 @@ export async function updateCloudStream(
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${DAYDREAM_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(req),
     }
@@ -266,8 +269,9 @@ export async function sendDaydreamWebRTCOffer(
   streamId: string,
   data: DaydreamWebRTCOfferRequest
 ): Promise<RTCSessionDescriptionInit> {
-  if (!DAYDREAM_API_KEY) {
-    throw new Error("VITE_DAYDREAM_API_KEY is not set");
+  const apiKey = getDaydreamAPIKey();
+  if (!apiKey) {
+    throw new Error("Not authenticated. Please sign in to use Daydream API.");
   }
 
   const response = await fetch(
@@ -276,7 +280,7 @@ export async function sendDaydreamWebRTCOffer(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${DAYDREAM_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(data),
     }
