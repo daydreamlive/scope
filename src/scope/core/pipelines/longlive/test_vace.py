@@ -35,9 +35,9 @@ from .pipeline import LongLivePipeline
 
 CONFIG = {
     # ===== MODE SELECTION =====
-    "use_r2v": True,  # Reference-to-Video: condition on reference images
+    "use_r2v": False,  # Reference-to-Video: condition on reference images
     "use_depth": False,  # Depth guidance: structural control via depth maps
-    "use_inpainting": False,  # Inpainting: masked video-to-video generation
+    "use_inpainting": True,  # Inpainting: masked video-to-video generation
     # ===== INPUT PATHS =====
     # R2V: List of reference image paths
     "ref_images": [
@@ -63,6 +63,7 @@ CONFIG = {
     "mask_value": 127,  # Gray value for masked regions (0-255)
     # ===== OUTPUT =====
     "output_dir": "vace_tests/unified",  # path/to/output_dir
+    "vae_type": "tae",
 }
 
 # ========================= END CONFIGURATION =========================
@@ -487,6 +488,7 @@ def main():
             "model_config": OmegaConf.load(script_dir / "model.yaml"),
             "height": config["height"],
             "width": config["width"],
+            "vae_type": config["vae_type"],
         }
     )
 

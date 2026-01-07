@@ -19,6 +19,7 @@ Streaming mode:
 """
 
 import os
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
@@ -26,6 +27,25 @@ import torch.nn.functional as F
 from safetensors.torch import load_file
 
 from .constants import WAN_VAE_LATENT_MEAN, WAN_VAE_LATENT_STD
+
+
+@dataclass
+class TAEEncoderCache:
+    """Explicit encoder cache for TAE streaming.
+
+    This cache holds the MemBlock memory state for streaming encoding.
+    Create separate cache instances for independent encoding streams
+    (e.g., VACE inactive vs reactive) to prevent memory pollution.
+
+    Usage:
+        cache = vae.create_encoder_cache()
+        latent = vae.encode_to_latent(pixels, encoder_cache=cache)
+        # Cache is updated in-place, reuse for next chunk in same stream
+    """
+
+    memory: list[torch.Tensor | None] | None = field(default=None)
+    initialized: bool = field(default=False)
+
 
 # Default checkpoint filenames for Wan 2.1 TAE
 DEFAULT_TAE_FILENAME = "taew2_1.pth"
@@ -549,36 +569,56 @@ class TAEWrapper(nn.Module):
             .requires_grad_(False)
         )
 
-        # Track state for streaming
-        self._first_batch = True
+        # Default encoder cache for backwards compatibility (when no explicit cache passed)
+        self._default_encoder_cache = TAEEncoderCache()
+        self._first_decode = True
+
+    def create_encoder_cache(self) -> TAEEncoderCache:
+        """Create a fresh encoder cache for streaming.
+
+        Use separate caches for independent encoding streams to prevent
+        TAE's MemBlock memory pollution. This is essential for VACE which
+        encodes inactive and reactive portions separately.
+
+        Returns:
+            A new TAEEncoderCache instance for use with encode_to_latent()
+
+        Example:
+            # For VACE dual-encode
+            inactive_cache = vae.create_encoder_cache()
+            reactive_cache = vae.create_encoder_cache()
+            inactive_latent = vae.encode_to_latent(inactive, encoder_cache=inactive_cache)
+            reactive_latent = vae.encode_to_latent(reactive, encoder_cache=reactive_cache)
+        """
+        return TAEEncoderCache()
 
     def encode_to_latent(
         self,
         pixel: torch.Tensor,
         use_cache: bool = True,
-        feat_cache: list | None = None,
+        encoder_cache: TAEEncoderCache | None = None,
     ) -> torch.Tensor:
         """Encode video pixels to latents.
 
         Args:
             pixel: Input video tensor [batch, channels, frames, height, width]
             use_cache: If True, use streaming encode with persistent memory.
-                      If False, use batch encode (clears state).
-            feat_cache: Unused (kept for interface compatibility with WanVAEWrapper)
+                      If False, use batch encode (no persistent state).
+            encoder_cache: Explicit cache for streaming mode. If None, uses internal
+                          default cache. Pass separate cache instances for independent
+                          encoding streams (e.g., VACE inactive vs reactive) to prevent
+                          TAE's MemBlock memory pollution.
 
         Returns:
             Latent tensor [batch, frames, channels, height, width]
 
         Note:
-            TAE produces approximately Gaussian latents directly without additional
-            normalization. The latent space is similar to but not identical to WanVAE.
+            TAE's MemBlock architecture mixes processed memory state with input via
+            channel concatenation. When encoding multiple interleaved streams (like
+            VACE's inactive + reactive), each stream needs its own cache to maintain
+            temporal continuity without cross-contamination.
 
-            For LightTAE, normalization is applied to match WanVAE's latent space
-            distribution, following LightX2V's approach. This ensures compatibility
-            with the diffusion model trained on WanVAE latents.
-
-            In streaming mode (use_cache=True), TAE maintains MemBlock state across
-            calls for smooth temporal continuity at chunk boundaries.
+            For LightTAE, normalization is applied to match WanVAE's latent space.
         """
         # [batch, channels, frames, h, w] -> [batch, frames, channels, h, w] for TAE
         pixel_ntchw = pixel.permute(0, 2, 1, 3, 4)
@@ -587,11 +627,25 @@ class TAEWrapper(nn.Module):
         pixel_ntchw = (pixel_ntchw + 1) / 2
 
         if use_cache:
-            # Streaming mode - use parallel processing with persistent memory
-            if self._first_batch:
-                self.model.clear_encode_state()
+            # Use provided cache or fall back to default
+            cache = (
+                encoder_cache
+                if encoder_cache is not None
+                else self._default_encoder_cache
+            )
+
+            # Initialize cache on first use
+            if not cache.initialized:
+                cache.memory = None
+                cache.initialized = True
+
+            # Restore cache memory to model
+            self.model._encoder_mem = cache.memory
 
             latent = self.model.stream_encode(pixel_ntchw)
+
+            # Save updated memory back to cache
+            cache.memory = self.model._encoder_mem
         else:
             # Batch mode - no persistent state
             latent = self.model.encode_video(
@@ -676,9 +730,9 @@ class TAEWrapper(nn.Module):
 
         if use_cache:
             # Streaming mode - use parallel processing with persistent memory
-            if self._first_batch:
+            if self._first_decode:
                 self.model.clear_decode_state()
-                self._first_batch = False
+                self._first_decode = False
 
             output = self.model.stream_decode(latent)
         else:
@@ -696,6 +750,8 @@ class TAEWrapper(nn.Module):
 
     def clear_cache(self):
         """Clear state for next sequence."""
-        self._first_batch = True
+        # Reset default encoder cache
+        self._default_encoder_cache = TAEEncoderCache()
+        self._first_decode = True
         self.model.clear_encode_state()
         self.model.clear_decode_state()
