@@ -46,11 +46,17 @@ LTX2_ARTIFACT = HuggingfaceRepoArtifact(
 )
 
 GEMMA_TEXT_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
-    repo_id="google/gemma-2-2b-it",
+    repo_id="google/gemma-3-12b-it",
     files=[
         "config.json",
         "generation_config.json",
-        "model.safetensors",
+        "model-00001-of-00005.safetensors",
+        "model-00002-of-00005.safetensors",
+        "model-00003-of-00005.safetensors",
+        "model-00004-of-00005.safetensors",
+        "model-00005-of-00005.safetensors",
+        "model.safetensors.index.json",
+        "special_tokens_map.json",
         "tokenizer.json",
         "tokenizer.model",
         "tokenizer_config.json",

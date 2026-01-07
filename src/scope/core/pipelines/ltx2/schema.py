@@ -7,7 +7,7 @@ from ..base_schema import BasePipelineConfig, ModeDefaults, height_field, width_
 
 class LTX2Config(BasePipelineConfig):
     """Configuration for LTX2 text-to-video pipeline.
-    
+
     LTX2 is a high-quality video generation model that generates videos from text prompts.
     This is a non-autoregressive model that generates complete videos in one shot.
     """
@@ -43,9 +43,14 @@ class LTX2Config(BasePipelineConfig):
     # Default to 1024x768 for 2-stage pipeline
     height: int = height_field(default=1024)
     width: int = width_field(default=1536)
-    
+
     # Number of frames to generate
     num_frames: int = 121  # Default to 121 frames (~5 seconds at 24fps)
-    
+
     # Frame rate for video generation
     frame_rate: float = 24.0
+
+    # Memory optimization: Use FP8 quantization for transformer
+    # According to official LTX-2 docs, this significantly reduces VRAM usage
+    # Requires PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    use_fp8: bool = True
