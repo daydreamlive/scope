@@ -22,8 +22,6 @@ import logging
 import time
 from typing import Any
 
-import torch
-
 logger = logging.getLogger(__name__)
 
 
