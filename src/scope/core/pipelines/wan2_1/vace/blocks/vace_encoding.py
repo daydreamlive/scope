@@ -302,16 +302,14 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         first_frame_image = block_state.first_frame_image
         last_frame_image = block_state.last_frame_image
 
-        images_to_load = []
+        # Load reference images based on mode
         if extension_mode == "firstframe":
             images_to_load = [first_frame_image]
         elif extension_mode == "lastframe":
             images_to_load = [last_frame_image]
         elif extension_mode == "firstlastframe":
-            if current_start == 0:
-                images_to_load = [first_frame_image]
-            else:
-                images_to_load = [last_frame_image]
+            # Load BOTH images for firstlastframe mode
+            images_to_load = [first_frame_image, last_frame_image]
 
         prepared_refs = load_and_prepare_reference_images(
             images_to_load,
@@ -320,27 +318,24 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             components.config.device,
         )
 
-        if hasattr(components, "vace_vae") and components.vace_vae is not None:
-            vace_vae = components.vace_vae
-        else:
-            vace_vae = components.vae
-
-        vae_dtype = next(vace_vae.parameters()).dtype
+        vae = components.vae
+        vae_dtype = next(vae.parameters()).dtype
 
         num_frames = (
             components.config.num_frame_per_block
             * components.config.vae_temporal_downsample_factor
         )
 
-        ref_at_start = extension_mode == "firstframe" or (
-            extension_mode == "firstlastframe" and current_start == 0
-        )
+        # Determine ref placement
+        ref_at_start = extension_mode in ("firstframe", "firstlastframe")
+        ref_at_end = extension_mode in ("lastframe", "firstlastframe")
 
         frames, masks = self._build_extension_frames_and_masks(
             prepared_refs=prepared_refs,
             num_frames=num_frames,
             temporal_group_size=components.config.vae_temporal_downsample_factor,
             ref_at_start=ref_at_start,
+            ref_at_end=ref_at_end,
             device=components.config.device,
             dtype=vae_dtype,
             height=block_state.height,
@@ -351,7 +346,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         masks_to_encode = [masks]
 
         z0 = vace_encode_frames(
-            vae=vace_vae,
+            vae=vae,
             frames=frames_to_encode,
             ref_images=[None],
             masks=masks_to_encode,
@@ -385,6 +380,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         num_frames: int,
         temporal_group_size: int,
         ref_at_start: bool,
+        ref_at_end: bool,
         device: torch.device,
         dtype: torch.dtype,
         height: int,
@@ -394,10 +390,13 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         Build frames and masks for extension mode with reference frame replication.
 
         Args:
-            prepared_refs: List of prepared reference images [C, 1, H, W]
+            prepared_refs: List of prepared reference images [C, 1, H, W].
+                For firstframe/lastframe: single image.
+                For firstlastframe: [first_image, last_image].
             num_frames: Total number of frames to generate
             temporal_group_size: Number of frames in a temporal VAE group
-            ref_at_start: True for firstframe mode, False for lastframe mode
+            ref_at_start: True to place reference at start (firstframe, firstlastframe)
+            ref_at_end: True to place reference at end (lastframe, firstlastframe)
             device: Target device
             dtype: Target dtype for frames
             height: Frame height
@@ -408,37 +407,80 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             - frames: [C, F, H, W] tensor with reference frames and dummy frames
             - masks: [1, F, H, W] tensor with 0s for reference frames, 1s for dummy frames
         """
-        num_ref_frames = temporal_group_size
-        num_dummy_frames = num_frames - num_ref_frames
 
-        # Replicate reference across temporal group to prevent dilution during VAE encoding
-        ref_replicated = prepared_refs[0].repeat(1, num_ref_frames, 1, 1)
+        # Helper to create ref and mask tensors
+        def make_ref_block(
+            ref_tensor: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Replicate ref across temporal group, return (frames, masks)."""
+            ref_replicated = ref_tensor.repeat(1, temporal_group_size, 1, 1)
+            ref_mask = torch.zeros(
+                (1, temporal_group_size, height, width),
+                device=device,
+                dtype=torch.float32,
+            )
+            return ref_replicated, ref_mask
 
-        # Create dummy frames (zeros = gray in normalized space)
-        dummy_frames = torch.zeros(
-            (3, num_dummy_frames, height, width), device=device, dtype=dtype
-        )
+        if ref_at_start and ref_at_end:
+            # firstlastframe: [ref_first, ref_first, ..., dummy, dummy, ..., ref_last, ref_last, ...]
+            # Two temporal groups for refs, rest for dummy
+            num_dummy_frames = num_frames - 2 * temporal_group_size
+            if num_dummy_frames < 0:
+                raise ValueError(
+                    f"Not enough frames for firstlastframe mode: need at least {2 * temporal_group_size} frames, got {num_frames}"
+                )
 
-        # Create masks: 0 for reference frames (keep), 1 for dummy frames (inpaint)
-        ref_masks = torch.zeros(
-            (1, num_ref_frames, height, width),
-            device=device,
-            dtype=torch.float32,
-        )
-        dummy_masks = torch.ones(
-            (1, num_dummy_frames, height, width),
-            device=device,
-            dtype=torch.float32,
-        )
+            first_ref_frames, first_ref_mask = make_ref_block(prepared_refs[0])
+            last_ref_frames, last_ref_mask = make_ref_block(prepared_refs[1])
 
-        if ref_at_start:
+            dummy_frames = torch.zeros(
+                (3, num_dummy_frames, height, width), device=device, dtype=dtype
+            )
+            dummy_mask = torch.ones(
+                (1, num_dummy_frames, height, width),
+                device=device,
+                dtype=torch.float32,
+            )
+
+            frames = torch.cat([first_ref_frames, dummy_frames, last_ref_frames], dim=1)
+            masks = torch.cat([first_ref_mask, dummy_mask, last_ref_mask], dim=1)
+
+        elif ref_at_start:
             # firstframe: [ref, ref, ref, zeros, zeros, ...]
-            frames = torch.cat([ref_replicated, dummy_frames], dim=1)
-            masks = torch.cat([ref_masks, dummy_masks], dim=1)
-        else:
+            num_dummy_frames = num_frames - temporal_group_size
+            ref_frames, ref_mask = make_ref_block(prepared_refs[0])
+
+            dummy_frames = torch.zeros(
+                (3, num_dummy_frames, height, width), device=device, dtype=dtype
+            )
+            dummy_mask = torch.ones(
+                (1, num_dummy_frames, height, width),
+                device=device,
+                dtype=torch.float32,
+            )
+
+            frames = torch.cat([ref_frames, dummy_frames], dim=1)
+            masks = torch.cat([ref_mask, dummy_mask], dim=1)
+
+        elif ref_at_end:
             # lastframe: [zeros, zeros, ..., ref, ref, ref]
-            frames = torch.cat([dummy_frames, ref_replicated], dim=1)
-            masks = torch.cat([dummy_masks, ref_masks], dim=1)
+            num_dummy_frames = num_frames - temporal_group_size
+            ref_frames, ref_mask = make_ref_block(prepared_refs[0])
+
+            dummy_frames = torch.zeros(
+                (3, num_dummy_frames, height, width), device=device, dtype=dtype
+            )
+            dummy_mask = torch.ones(
+                (1, num_dummy_frames, height, width),
+                device=device,
+                dtype=torch.float32,
+            )
+
+            frames = torch.cat([dummy_frames, ref_frames], dim=1)
+            masks = torch.cat([dummy_mask, ref_mask], dim=1)
+
+        else:
+            raise ValueError("At least one of ref_at_start or ref_at_end must be True")
 
         return frames, masks
 
