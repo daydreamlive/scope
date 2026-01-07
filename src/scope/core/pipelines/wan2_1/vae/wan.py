@@ -94,10 +94,23 @@ class WanVAEWrapper(torch.nn.Module):
         """Create a fresh encoder feature cache with dynamic sizing."""
         return [None] * self._encoder_conv_count
 
+    def create_encoder_cache(self):
+        """Create encoder cache (TAE compatibility).
+
+        WanVAE's CausalConv3d uses raw frame prepending for temporal context,
+        so it doesn't have TAE's MemBlock memory pollution issue. This method
+        exists for interface compatibility with TAEWrapper.
+
+        Returns:
+            None (WanVAE doesn't need explicit caches)
+        """
+        return None
+
     def encode_to_latent(
         self,
         pixel: torch.Tensor,
         use_cache: bool = True,
+        encoder_cache=None,
     ) -> torch.Tensor:
         """Encode video pixels to latents.
 
@@ -105,6 +118,9 @@ class WanVAEWrapper(torch.nn.Module):
             pixel: Input video tensor [batch, channels, frames, height, width]
             use_cache: If True, use streaming encode (maintains cache state).
                       If False, use batch encode with a temporary cache.
+            encoder_cache: Ignored (TAE compatibility). WanVAE's CausalConv3d
+                          prepends raw frames as context, avoiding the MemBlock
+                          memory pollution issue that requires separate caches.
 
         Returns:
             Latent tensor [batch, frames, channels, height, width]

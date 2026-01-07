@@ -18,13 +18,20 @@ from PIL import Image
 
 
 def vace_encode_frames(
-    vae, frames, ref_images, masks=None, pad_to_96=True, use_cache=True
+    vae,
+    frames,
+    ref_images,
+    masks=None,
+    pad_to_96=True,
+    use_cache=True,
+    inactive_cache=None,
+    reactive_cache=None,
 ):
     """
     Encode frames and reference images via VAE for VACE conditioning.
 
     Args:
-        vae: VAE model wrapper
+        vae: VAE model wrapper (TAEWrapper or WanVAEWrapper)
         frames: List of video frames [B, C, F, H, W] or single frame [C, F, H, W]
         ref_images: List of reference images, one list per batch element
                    Each element is a list of reference images [C, 1, H, W]
@@ -32,9 +39,19 @@ def vace_encode_frames(
         pad_to_96: Whether to pad to 96 channels (default True). Set False when masks will be added later.
         use_cache: Whether to use streaming encode cache for frames (default True).
                    Set False for one-off encoding (e.g., reference images only mode).
+        inactive_cache: Explicit encoder cache for inactive stream (TAE only).
+                       Create via vae.create_encoder_cache(). Reuse across chunks
+                       for temporal continuity. If None, uses VAE's default cache.
+        reactive_cache: Explicit encoder cache for reactive stream (TAE only).
+                       Must be separate from inactive_cache to prevent memory pollution.
 
     Returns:
         List of concatenated latents [ref_latents + frame_latents]
+
+    Note:
+        For TAE with masked encoding (depth/flow/pose/inpainting), you MUST provide
+        separate inactive_cache and reactive_cache to prevent MemBlock memory pollution.
+        WanVAE ignores these caches as its CausalConv3d doesn't have this issue.
     """
     if ref_images is None:
         ref_images = [None] * len(frames)
@@ -47,6 +64,7 @@ def vace_encode_frames(
     # Encode frames (with optional masking)
     # Note: WanVAEWrapper expects [B, C, F, H, W] and returns [B, F, C, H, W]
     if masks is None:
+        # Single encode path - no masks, just encode frames directly
         # Stack list of [C, F, H, W] -> [B, C, F, H, W]
         frames_stacked = torch.stack(frames, dim=0)
         frames_stacked = frames_stacked.to(dtype=vae_dtype)
@@ -55,14 +73,22 @@ def vace_encode_frames(
         # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
         latents = [lat.permute(1, 0, 2, 3) for lat in latents_out]
     else:
+        # Dual encode path for masked video generation
+        # Each stream needs its own cache to prevent TAE's MemBlock memory pollution
         masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
         inactive = [i * (1 - m) + 0 * m for i, m in zip(frames, masks, strict=False)]
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
-        # Use cache=True to ensure cache consistency for both inactive and reactive portions
-        inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=True)
-        reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=True)
+
+        # Encode with separate caches for temporal continuity without cross-contamination
+        inactive_out = vae.encode_to_latent(
+            inactive_stacked, use_cache=True, encoder_cache=inactive_cache
+        )
+        reactive_out = vae.encode_to_latent(
+            reactive_stacked, use_cache=True, encoder_cache=reactive_cache
+        )
+
         # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
         inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
         reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
