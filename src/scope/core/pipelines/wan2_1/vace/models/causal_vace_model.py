@@ -255,13 +255,13 @@ class CausalVaceWanModel(nn.Module):
             new_block.load_state_dict(new_state, strict=False, assign=True)
             new_block.block_id = saved_block_id
 
-            # Move new block to target device/dtype
+            # Move original block to CPU first to free GPU memory immediately
+            # This is safe because we've already copied the weights to CPU
+            orig_block.to("cpu")
+
+            # Now move new block to target device/dtype (reusing freed GPU memory)
             new_block = new_block.to(device=orig_device, dtype=orig_dtype)
             new_block.eval()
-
-            # Clear the original block's parameters to free GPU memory immediately
-            # This is safe because we've already copied the weights
-            orig_block.to("cpu")
 
             new_blocks.append(new_block)
 
