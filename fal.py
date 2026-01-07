@@ -2,7 +2,7 @@ import fal
 from fal.container import ContainerImage
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:main@sha256:69eb6cbf81b3899283486459c01a756844c99f4f5e42a724649dee6ec7b535ef"
+DOCKER_IMAGE = "daydreamlive/scope:038798f"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -18,7 +18,7 @@ class ScopeBenchmark(fal.App, keep_alive=300):
     image = custom_image
 
     # GPU configuration
-    machine_type = "GPU"  # Will use GPU, fal will assign appropriate type
+    machine_type = "GPU-H100"  # Will use GPU, fal will assign appropriate type
 
     # Additional requirements needed for the setup code
     requirements = [
@@ -33,14 +33,32 @@ class ScopeBenchmark(fal.App, keep_alive=300):
         """
         import requests
         import logging
+        import sys
+        import subprocess
+        import os
+        import time
+        import threading
 
         logger = logging.getLogger(__name__)
 
         try:
-            import sys
-                # The container has uv and the project installed
             subprocess.run(
-                ["uv", "run", "benchmark.py", "blah"],
+                ["uv", "sync", "--group", "benchmark"],
+                cwd="/app",
+                check=True,
+            )
+
+            # Build command with arguments from request
+            cmd = ["uv", "run", "benchmark.py"]
+
+            # Extract args from request_data
+            if "args" in request_data:
+                cmd.extend(request_data["args"])
+
+            logger.info(f"Running command: {' '.join(cmd)}")
+
+            subprocess.run(
+                cmd,
                 cwd="/app",
                 check=True,
             )
