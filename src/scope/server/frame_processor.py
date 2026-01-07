@@ -79,6 +79,7 @@ class FrameProcessor:
         self.max_fps = MAX_FPS
         self.current_pipeline_fps = DEFAULT_FPS
         self.fps_lock = threading.Lock()  # Lock for thread-safe FPS updates
+        self._fixed_pipeline_fps: float | None = None
 
         # Input FPS tracking variables
         self.input_frame_times = deque(maxlen=INPUT_FPS_SAMPLE_SIZE)
@@ -295,6 +296,10 @@ class FrameProcessor:
 
     def _calculate_pipeline_fps(self, start_time: float, num_frames: int):
         """Calculate FPS based on processing time and number of frames created"""
+        if self._fixed_pipeline_fps is not None:
+            with self.fps_lock:
+                self.current_pipeline_fps = self._fixed_pipeline_fps
+            return
         processing_time = time.time() - start_time
         if processing_time <= 0 or num_frames <= 0:
             return
@@ -765,6 +770,17 @@ class FrameProcessor:
                 .detach()
                 .cpu()
             )
+
+            # Honor requested frame rate (for non-autoregressive pipelines)
+            frame_rate = call_params.get("frame_rate")
+            if frame_rate is None and hasattr(pipeline, "config"):
+                frame_rate = getattr(pipeline.config, "frame_rate", None)
+            if frame_rate:
+                self._fixed_pipeline_fps = float(frame_rate)
+                with self.fps_lock:
+                    self.current_pipeline_fps = self._fixed_pipeline_fps
+            else:
+                self._fixed_pipeline_fps = None
 
             # Resize output queue to meet target max size
             target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR

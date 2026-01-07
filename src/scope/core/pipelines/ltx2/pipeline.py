@@ -25,14 +25,17 @@ class LTX2Pipeline(Pipeline):
 
     Memory Optimization:
     --------------------
-    This implementation follows the official LTX-2 memory optimization guidelines:
+    This implementation is optimized for maximum inference speed by keeping all models
+    in VRAM:
 
     1. **FP8 Quantization for Weights Only**: Enabled by default (use_fp8=True) to
        reduce transformer weights from ~45GB to ~25GB. However, **activations during
        inference remain in BF16** and are the main memory bottleneck.
 
-    2. **Aggressive Model Cleanup**: Models are loaded on-demand and immediately freed
-       after use, with explicit garbage collection.
+    2. **All Models Cached in VRAM**: Text encoder (~20GB), transformer (~25GB), and
+       video decoder (~3GB) are loaded once during initialization and kept in VRAM.
+       This eliminates all model loading overhead between generations, providing
+       maximum inference speed at the cost of higher baseline VRAM usage.
 
     3. **PYTORCH_CUDA_ALLOC_CONF**: Set to "expandable_segments:True" in app.py to
        prevent memory fragmentation with FP8 quantization.
@@ -53,15 +56,16 @@ class LTX2Pipeline(Pipeline):
 
     Memory Breakdown (96GB GPU):
     ----------------------------
-    - Transformer weights (FP8): ~25GB
-    - Text encoder (temp): ~20GB (freed before generation)
-    - Decoder (temp): ~3GB (freed after decoding)
+    - Text encoder (cached): ~20GB
+    - Transformer weights FP8 (cached): ~25GB
+    - Video decoder (cached): ~3GB
     - **Activations during denoising**:
-      * 33 frames @ 512x768: ~50GB ✅ Fits
-      * 61 frames @ 768x1024: ~90GB ❌ OOM
-      * 121 frames @ 1024x1536: ~150GB ❌ OOM
+      * 33 frames @ 512x768: ~50GB ✅ Fits (total ~98GB)
+      * 61 frames @ 768x1024: ~90GB ❌ OOM (total ~138GB)
+      * 121 frames @ 1024x1536: ~150GB ❌ OOM (total ~198GB)
 
-    Peak VRAM = Model (25GB) + Activations (resolution × frames dependent)
+    Baseline VRAM = Text Encoder (20GB) + Transformer (25GB) + Decoder (3GB) = 48GB
+    Peak VRAM = Baseline (48GB) + Activations (resolution × frames dependent)
 
     For higher quality, you need:
     - A GPU with 141GB+ VRAM (H100)
@@ -161,6 +165,17 @@ class LTX2Pipeline(Pipeline):
         # Set up tiling config for VAE decoding
         self.tiling_config = TilingConfig.default()
 
+        # Cache all models in VRAM for maximum performance
+        # This uses more VRAM (~48GB total) but eliminates all reload overhead
+        logger.info("Loading and caching models in VRAM...")
+        logger.info("  - Loading text encoder (~20GB)...")
+        self._cached_text_encoder = self.model_ledger.text_encoder()
+        logger.info("  - Loading transformer (~25GB)...")
+        self._cached_transformer = self.model_ledger.transformer()
+        logger.info("  - Loading video decoder (~3GB)...")
+        self._cached_video_decoder = self.model_ledger.video_decoder()
+        logger.info("All models cached successfully in VRAM")
+
         logger.info(f"LTX2 models loaded in {time.time() - start:.2f}s")
         logger.info(f"FP8 quantization: {'enabled' if fp8_enabled else 'disabled'}")
         if fp8_enabled:
@@ -226,26 +241,13 @@ class LTX2Pipeline(Pipeline):
         noiser = GaussianNoiser(generator=generator)
         stepper = EulerDiffusionStep()
 
-        # Encode text prompt
+        # Encode text prompt using cached text encoder
         logger.info(f"Encoding prompt: {prompt_text}")
-        text_encoder = self.model_ledger.text_encoder()
-        context_p = encode_text(text_encoder, prompts=[prompt_text])[0]
+        context_p = encode_text(self._cached_text_encoder, prompts=[prompt_text])[0]
         video_context, audio_context = context_p
 
-        # CRITICAL: Aggressively free text encoder memory
-        # The Gemma text encoder is HUGE (~20GB for 5 shards) and must be freed immediately
-        del text_encoder
-        torch.cuda.synchronize()
-        cleanup_memory()
-        logger.info("Text encoder freed from VRAM")
-
-        # Load transformer for generation
-        # NOTE: We do NOT load video_encoder here because it's only needed for i2v conditioning
-        # Loading it wastes ~8GB of VRAM unnecessarily
-        transformer = self.model_ledger.transformer()
+        # Use cached transformer for generation
         sigmas = torch.Tensor(DISTILLED_SIGMA_VALUES).to(self.device)
-
-        logger.info(f"Loaded transformer for generation")
 
         # Define denoising loop
         def denoising_loop(sigmas, video_state, audio_state, stepper):
@@ -257,7 +259,7 @@ class LTX2Pipeline(Pipeline):
                 denoise_fn=simple_denoising_func(
                     video_context=video_context,
                     audio_context=audio_context,
-                    transformer=transformer,
+                    transformer=self._cached_transformer,
                 ),
             )
 
@@ -287,30 +289,15 @@ class LTX2Pipeline(Pipeline):
             device=self.device,
         )
 
-        # CRITICAL: Clean up transformer immediately after generation
-        # According to official docs, this is essential for memory management
-        del transformer
-        torch.cuda.synchronize()
-        cleanup_memory()
-        logger.info("Transformer freed from VRAM")
-
-        # Decode video from latents
+        # Decode video from latents using cached decoder
         logger.info("Decoding video from latents")
-        video_decoder = self.model_ledger.video_decoder()
 
         # Use tiling for VAE decoding to reduce memory usage
-        # According to official docs, tiling is essential for memory efficiency
         decoded_video = vae_decode_video(
             video_state.latent,
-            video_decoder,
+            self._cached_video_decoder,
             self.tiling_config
         )
-
-        # CRITICAL: Clean up decoder immediately after use
-        del video_decoder
-        torch.cuda.synchronize()
-        cleanup_memory()
-        logger.info("Video decoder freed from VRAM")
 
         # Convert decoded video iterator to tensor and postprocess
         # LTX2 vae_decode_video returns an iterator of frame chunks

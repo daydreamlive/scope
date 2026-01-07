@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from scope.core.pipelines.krea_realtime_video.schema import KreaRealtimeVideoConfig
 from scope.core.pipelines.longlive.schema import LongLiveConfig
+from scope.core.pipelines.ltx2.schema import LTX2Config
 from scope.core.pipelines.streamdiffusionv2.schema import StreamDiffusionV2Config
 from scope.core.pipelines.utils import Quantization, VaeType
 from scope.core.pipelines.wan2_1.vae import DEFAULT_VAE_TYPE
@@ -393,6 +394,39 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
+class LTX2LoadParams(PipelineLoadParams):
+    """Load parameters for LTX2 pipeline."""
+
+    height: int = Field(
+        default=LTX2Config.model_fields["height"].default,
+        description="Target video height",
+        ge=64,
+        le=1536,
+    )
+    width: int = Field(
+        default=LTX2Config.model_fields["width"].default,
+        description="Target video width",
+        ge=64,
+        le=2048,
+    )
+    num_frames: int = Field(
+        default=LTX2Config.model_fields["num_frames"].default,
+        description="Number of frames to generate per clip",
+        ge=1,
+        le=512,
+    )
+    frame_rate: float = Field(
+        default=LTX2Config.model_fields["frame_rate"].default,
+        description="Output frame rate (FPS)",
+        gt=0.0,
+    )
+    seed: int = Field(
+        default=LTX2Config.model_fields["base_seed"].default,
+        description="Random seed for generation",
+        ge=0,
+    )
+
+
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
@@ -404,6 +438,7 @@ class PipelineLoadRequest(BaseModel):
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
+        | LTX2LoadParams
         | None
     ) = Field(default=None, description="Pipeline-specific load parameters")
 
