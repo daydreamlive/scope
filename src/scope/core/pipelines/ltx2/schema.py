@@ -20,7 +20,7 @@ class LTX2Config(BasePipelineConfig):
     )
     pipeline_version: ClassVar[str] = "0.1.0"
     docs_url: ClassVar[str | None] = "https://github.com/Lightricks/LTX-2"
-    estimated_vram_gb: ClassVar[float | None] = 24.0
+    estimated_vram_gb: ClassVar[float | None] = 32.0
     requires_models: ClassVar[bool] = True
     supports_lora: ClassVar[bool] = False
     supports_vace: ClassVar[bool] = False
@@ -40,12 +40,16 @@ class LTX2Config(BasePipelineConfig):
     supports_prompts: ClassVar[bool] = True
 
     # Resolution settings (LTX2 works best at these resolutions)
-    # Default to 1024x768 for 2-stage pipeline
-    height: int = height_field(default=1024)
-    width: int = width_field(default=1536)
+    # CRITICAL: Set to minimal values to fit in 96GB VRAM
+    # Activations during denoising are NOT quantized and scale with resolution×frames
+    # Even with FP8 weights, activations use 70+ GB at high settings
+    height: int = height_field(default=512)
+    width: int = width_field(default=768)
 
     # Number of frames to generate
-    num_frames: int = 121  # Default to 121 frames (~5 seconds at 24fps)
+    # Reduced to 33 frames (~1.3 seconds) to fit in 96GB VRAM
+    # Memory formula: ~1.5GB per frame at 512x768 resolution
+    num_frames: int = 33
 
     # Frame rate for video generation
     frame_rate: float = 24.0

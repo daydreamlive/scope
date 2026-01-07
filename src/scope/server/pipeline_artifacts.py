@@ -41,7 +41,7 @@ LTX2_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="Lightricks/LTX-2",
     files=[
         "ltx-2-19b-distilled.safetensors",
-        "ltx-2-spatial-upsampler-x2-1.0.safetensors",
+        "ltx-2-spatial-upscaler-x2-1.0.safetensors",
     ],
 )
 
@@ -56,6 +56,8 @@ GEMMA_TEXT_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
         "model-00004-of-00005.safetensors",
         "model-00005-of-00005.safetensors",
         "model.safetensors.index.json",
+        "processor_config.json",
+        "preprocessor_config.json",
         "special_tokens_map.json",
         "tokenizer.json",
         "tokenizer.model",

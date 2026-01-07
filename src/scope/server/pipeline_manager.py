@@ -667,21 +667,22 @@ class PipelineManager:
             )
 
             # Apply load parameters (resolution, num_frames, frame_rate, seed)
-            # LTX2 defaults: 1024x1536, 121 frames, 24fps
+            # LTX2 defaults: 512x768, 33 frames, 24fps (reduced to fit in 96GB VRAM)
+            # Activations during denoising are NOT quantized and are the main memory bottleneck
             self._apply_load_params(
                 config,
                 load_params,
-                default_height=1024,
-                default_width=1536,
+                default_height=512,
+                default_width=768,
                 default_seed=42,
             )
 
             # Add LTX2-specific parameters
             if load_params:
-                config["num_frames"] = load_params.get("num_frames", 121)
+                config["num_frames"] = load_params.get("num_frames", 33)
                 config["frame_rate"] = load_params.get("frame_rate", 24.0)
             else:
-                config["num_frames"] = 121
+                config["num_frames"] = 33
                 config["frame_rate"] = 24.0
 
             pipeline = LTX2Pipeline(

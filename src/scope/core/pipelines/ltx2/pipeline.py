@@ -27,11 +27,12 @@ class LTX2Pipeline(Pipeline):
     --------------------
     This implementation follows the official LTX-2 memory optimization guidelines:
 
-    1. **FP8 Quantization**: Enabled by default (use_fp8=True) to reduce VRAM usage
-       from ~45GB to ~25GB for the transformer model.
+    1. **FP8 Quantization for Weights Only**: Enabled by default (use_fp8=True) to
+       reduce transformer weights from ~45GB to ~25GB. However, **activations during
+       inference remain in BF16** and are the main memory bottleneck.
 
     2. **Aggressive Model Cleanup**: Models are loaded on-demand and immediately freed
-       after use. The ModelLedger does NOT cache models - each call creates a new instance.
+       after use, with explicit garbage collection.
 
     3. **PYTORCH_CUDA_ALLOC_CONF**: Set to "expandable_segments:True" in app.py to
        prevent memory fragmentation with FP8 quantization.
@@ -39,13 +40,33 @@ class LTX2Pipeline(Pipeline):
     4. **VAE Tiling**: Uses TilingConfig for decoder to reduce peak memory during
        video decoding.
 
-    Memory Flow:
-    ------------
-    1. Text Encoder (~5GB) → Encode → FREE immediately
-    2. Video Encoder + Transformer (~25GB with FP8) → Denoise → FREE immediately
-    3. Video Decoder (~3GB) → Decode → FREE immediately
+    5. **No Unnecessary Models**: Video encoder is only loaded for i2v conditioning.
 
-    Total Peak VRAM: ~30GB (vs 92GB without optimizations)
+    6. **Minimal Defaults**: 33 frames at 512x768 to fit in 96GB VRAM.
+       **Activations are the bottleneck**: ~1.5GB per frame at 512x768.
+
+    CRITICAL LIMITATION:
+    --------------------
+    Unlike other pipelines that use torchao FP8 quantization for both weights AND
+    activations, LTX2's custom FP8 only quantizes weights. This means the transformer's
+    intermediate activations during denoising consume 60-80GB at higher resolutions.
+
+    Memory Breakdown (96GB GPU):
+    ----------------------------
+    - Transformer weights (FP8): ~25GB
+    - Text encoder (temp): ~20GB (freed before generation)
+    - Decoder (temp): ~3GB (freed after decoding)
+    - **Activations during denoising**:
+      * 33 frames @ 512x768: ~50GB ✅ Fits
+      * 61 frames @ 768x1024: ~90GB ❌ OOM
+      * 121 frames @ 1024x1536: ~150GB ❌ OOM
+
+    Peak VRAM = Model (25GB) + Activations (resolution × frames dependent)
+
+    For higher quality, you need:
+    - A GPU with 141GB+ VRAM (H100)
+    - OR the two-stage pipeline (low-res generation + upsampling)
+    - OR generate shorter/lower-res videos
 
     Reference:
     ----------
@@ -123,6 +144,7 @@ class LTX2Pipeline(Pipeline):
                 gemma_root_path=gemma_root,
                 spatial_upsampler_path=None,  # We'll add upsampler support later
                 loras=[],
+                # Use default DummyRegistry - don't cache state dicts in RAM
                 fp8transformer=fp8_enabled,  # FP8 significantly reduces VRAM usage
             )
         except Exception as e:
@@ -141,18 +163,19 @@ class LTX2Pipeline(Pipeline):
 
         logger.info(f"LTX2 models loaded in {time.time() - start:.2f}s")
         logger.info(f"FP8 quantization: {'enabled' if fp8_enabled else 'disabled'}")
+        if fp8_enabled:
+            logger.warning(
+                "FP8 quantization only reduces weight size (~25GB). "
+                "Activations during inference are still in BF16 and are the main memory bottleneck. "
+                f"At {self.config.height}x{self.config.width} with {self.config.num_frames} frames, "
+                "expect ~50-60GB for activations during denoising."
+            )
 
         # NOTE: This is currently a single-stage pipeline implementation.
         # For even lower VRAM usage, consider implementing a two-stage pipeline:
         # - Stage 1: Generate at lower resolution (512x768) with CFG guidance
         # - Stage 2: Upsample to full resolution (1024x1536) with distilled LoRA
         # See: https://github.com/Lightricks/LTX-2/blob/main/packages/ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages.py
-
-        # Cache for model state
-        self.text_encoder = None
-        self.video_encoder = None
-        self.transformer = None
-        self.video_decoder = None
 
     def __call__(self, **kwargs) -> torch.Tensor:
         """Generate video from text prompt.
@@ -169,6 +192,7 @@ class LTX2Pipeline(Pipeline):
         """
         return self._generate(**kwargs)
 
+    @torch.inference_mode()
     def _generate(self, **kwargs) -> torch.Tensor:
         """Internal generation method."""
         from ltx_core.components.diffusion_steps import EulerDiffusionStep
@@ -209,18 +233,19 @@ class LTX2Pipeline(Pipeline):
         video_context, audio_context = context_p
 
         # CRITICAL: Aggressively free text encoder memory
-        # The Gemma text encoder is HUGE (~5GB) and must be freed immediately
-        torch.cuda.synchronize()
+        # The Gemma text encoder is HUGE (~20GB for 5 shards) and must be freed immediately
         del text_encoder
+        torch.cuda.synchronize()
         cleanup_memory()
         logger.info("Text encoder freed from VRAM")
 
-        # Load models for generation
-        video_encoder = self.model_ledger.video_encoder()
+        # Load transformer for generation
+        # NOTE: We do NOT load video_encoder here because it's only needed for i2v conditioning
+        # Loading it wastes ~8GB of VRAM unnecessarily
         transformer = self.model_ledger.transformer()
         sigmas = torch.Tensor(DISTILLED_SIGMA_VALUES).to(self.device)
 
-        logger.info(f"Loaded transformer and video encoder for generation")
+        logger.info(f"Loaded transformer for generation")
 
         # Define denoising loop
         def denoising_loop(sigmas, video_state, audio_state, stepper):
@@ -262,13 +287,12 @@ class LTX2Pipeline(Pipeline):
             device=self.device,
         )
 
-        # CRITICAL: Clean up transformer and encoder immediately after generation
+        # CRITICAL: Clean up transformer immediately after generation
         # According to official docs, this is essential for memory management
-        torch.cuda.synchronize()
         del transformer
-        del video_encoder
+        torch.cuda.synchronize()
         cleanup_memory()
-        logger.info("Transformer and encoder freed from VRAM")
+        logger.info("Transformer freed from VRAM")
 
         # Decode video from latents
         logger.info("Decoding video from latents")
@@ -283,8 +307,8 @@ class LTX2Pipeline(Pipeline):
         )
 
         # CRITICAL: Clean up decoder immediately after use
-        torch.cuda.synchronize()
         del video_decoder
+        torch.cuda.synchronize()
         cleanup_memory()
         logger.info("Video decoder freed from VRAM")
 
@@ -292,17 +316,12 @@ class LTX2Pipeline(Pipeline):
         # LTX2 vae_decode_video returns an iterator of frame chunks
         video_frames = []
         for chunk in decoded_video:
-            video_frames.append(chunk)
+            video_frames.append(chunk.to(torch.float32))
 
-        # Concatenate all chunks along time dimension
-        video_tensor = torch.cat(video_frames, dim=1)  # [B, T, C, H, W]
+        # Concatenate all chunks along time dimension -> [T, H, W, C]
+        video_tensor = torch.cat(video_frames, dim=0)
 
-        # Convert from BTCHW to THWC format and normalize to [0, 1]
-        video_tensor = video_tensor.squeeze(0)  # Remove batch dim: [T, C, H, W]
-        video_tensor = video_tensor.permute(0, 2, 3, 1)  # [T, H, W, C]
-
-        # LTX2 VAE outputs in range [-1, 1], convert to [0, 1]
-        video_tensor = (video_tensor + 1.0) / 2.0
-        video_tensor = torch.clamp(video_tensor, 0.0, 1.0)
+        # Normalize from [0, 255] uint8 to [0, 1] float
+        video_tensor = torch.clamp(video_tensor / 255.0, 0.0, 1.0)
 
         return video_tensor
