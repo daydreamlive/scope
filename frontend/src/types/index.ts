@@ -79,6 +79,8 @@ export interface SettingsState {
   vaceContextScale?: number;
   // VAE type selection
   vaeType?: VaeType;
+  // Preprocessors
+  preprocessorIds?: string[];
 }
 
 export interface PipelineInfo {
@@ -95,6 +97,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
   supportsVACE?: boolean;
+  usage?: string[];
 
   // Multi-mode support
   supportedModes: InputMode[];

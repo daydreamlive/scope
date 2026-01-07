@@ -9,12 +9,13 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Progress } from "./ui/progress";
-import type { PipelineId, DownloadProgress, PipelineInfo } from "../types";
+import type { DownloadProgress, PipelineInfo } from "../types";
 
 interface DownloadDialogProps {
   open: boolean;
   pipelines: Record<string, PipelineInfo> | null;
-  pipelineId: PipelineId;
+  pipelineIds: string[];
+  currentDownloadPipeline: string | null;
   onClose: () => void;
   onDownload: () => void;
   isDownloading?: boolean;
@@ -24,14 +25,25 @@ interface DownloadDialogProps {
 export function DownloadDialog({
   open,
   pipelines,
-  pipelineId,
+  pipelineIds,
+  currentDownloadPipeline,
   onClose,
   onDownload,
   isDownloading = false,
   progress = null,
 }: DownloadDialogProps) {
-  const pipelineInfo = pipelines?.[pipelineId];
-  if (!pipelineInfo) return null;
+  if (pipelineIds.length === 0) return null;
+
+  // Calculate total estimated VRAM for all pipelines
+  const totalVram = pipelineIds.reduce((sum, id) => {
+    const info = pipelines?.[id];
+    return sum + (info?.estimatedVram ?? 0);
+  }, 0);
+
+  // Get current pipeline info if downloading
+  const currentPipelineInfo = currentDownloadPipeline
+    ? (pipelines?.[currentDownloadPipeline] ?? null)
+    : null;
 
   return (
     <Dialog
@@ -45,17 +57,50 @@ export function DownloadDialog({
           </DialogTitle>
           <DialogDescription className="mt-3">
             {isDownloading
-              ? "Please wait while models are downloaded."
-              : "This pipeline requires models to be downloaded."}
+              ? currentDownloadPipeline
+                ? `Downloading models for ${currentPipelineInfo?.name || currentDownloadPipeline}...`
+                : "Please wait while models are downloaded."
+              : "The following pipeline(s) require models to be downloaded:"}
           </DialogDescription>
         </DialogHeader>
 
-        {!isDownloading && pipelineInfo.estimatedVram && (
+        {/* List of missing pipelines/preprocessors */}
+        {!isDownloading && (
+          <div className="space-y-2 mb-3">
+            {pipelineIds.map(id => {
+              const info = pipelines?.[id];
+              const isPreprocessor =
+                info?.usage?.includes("preprocessor") ?? false;
+              return (
+                <div
+                  key={id}
+                  className="flex items-center justify-between rounded border bg-background p-2 text-sm"
+                >
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {info?.name || id}
+                      {isPreprocessor && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          (Preprocessor)
+                        </span>
+                      )}
+                    </div>
+                    {info?.estimatedVram && (
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Estimated VRAM: {info.estimatedVram} GB
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!isDownloading && totalVram > 0 && (
           <p className="text-sm text-muted-foreground mb-3">
-            <span className="font-semibold">
-              Estimated GPU VRAM Requirement:
-            </span>{" "}
-            {pipelineInfo.estimatedVram} GB
+            <span className="font-semibold">Total Estimated GPU VRAM:</span>{" "}
+            {totalVram} GB
           </p>
         )}
 
@@ -84,11 +129,19 @@ export function DownloadDialog({
           </div>
         )}
 
+        {/* Show remaining pipelines count if downloading */}
+        {isDownloading && currentDownloadPipeline && pipelineIds.length > 1 && (
+          <p className="text-sm text-muted-foreground">
+            {pipelineIds.length - 1} more pipeline(s) will be downloaded after
+            this one.
+          </p>
+        )}
+
         <DialogFooter>
           {!isDownloading && (
             <Button onClick={onDownload} className="gap-2">
               <Download className="h-4 w-4" />
-              Download
+              Download All
             </Button>
           )}
         </DialogFooter>

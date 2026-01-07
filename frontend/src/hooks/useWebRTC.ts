@@ -19,6 +19,7 @@ interface InitialParameters {
   kv_cache_attention_bias?: number;
   vace_ref_images?: string[];
   vace_context_scale?: number;
+  pipeline_ids?: string[];
 }
 
 interface UseWebRTCOptions {

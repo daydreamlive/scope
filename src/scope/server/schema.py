@@ -122,6 +122,10 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    pipeline_ids: list[str] | None = Field(
+        default=None,
+        description="List of pipeline IDs to execute in a chain. If not provided, uses the currently loaded pipeline.",
+    )
 
 
 class SpoutConfig(BaseModel):
@@ -404,16 +408,17 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
 class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
-    pipeline_id: str = Field(
-        default="streamdiffusionv2", description="ID of pipeline to load"
-    )
+    pipeline_ids: list[str] = Field(..., description="List of pipeline IDs to load")
     load_params: (
         StreamDiffusionV2LoadParams
         | PassthroughLoadParams
         | LongLiveLoadParams
         | KreaRealtimeVideoLoadParams
         | None
-    ) = Field(default=None, description="Pipeline-specific load parameters")
+    ) = Field(
+        default=None,
+        description="Pipeline-specific load parameters (applies to all pipelines)",
+    )
 
 
 class PipelineStatusResponse(BaseModel):

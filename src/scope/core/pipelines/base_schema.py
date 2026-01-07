@@ -174,6 +174,10 @@ class BasePipelineConfig(BaseModel):
     # quantization=null is recommended, otherwise fp8_e4m3fn is recommended.
     # None means no specific recommendation (pipeline doesn't benefit from quantization).
     recommended_quantization_vram_threshold: ClassVar[float | None] = None
+    # Usage types: list of usage strings indicating how this pipeline can be used.
+    # Default is ["pipeline"] meaning it can be used as a main pipeline.
+    # Can also include "preprocessor" to allow use as a preprocessor.
+    usage: ClassVar[list[str]] = ["pipeline"]
 
     # Mode configuration - keys are mode names, values are ModeDefaults with field overrides
     # Use default=True to mark the default mode. Only include fields that differ from base.
@@ -301,6 +305,7 @@ class BasePipelineConfig(BaseModel):
             cls.recommended_quantization_vram_threshold
         )
         metadata["modified"] = cls.modified
+        metadata["usage"] = cls.usage
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults (excluding None values and the "default" flag)
