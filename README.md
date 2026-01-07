@@ -162,8 +162,8 @@ uv run benchmark.py --pipelines streamdiffusionv2 longlive
 # Custom resolutions
 uv run benchmark.py --resolutions 480x832 768x1344
 
-# Custom iterations (defaults: warmup=10, iterations=100)
-uv run benchmark.py --warmup 5 --iterations 50
+# Custom iterations
+uv run benchmark.py --warmup 10 --iterations 50
 
 # Save results to specific file
 uv run benchmark.py --output h100_results.json
