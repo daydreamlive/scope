@@ -43,6 +43,8 @@ RUN uv sync --frozen
 COPY frontend/ ./frontend/
 RUN cd frontend && npm install && npm run build
 
+COPY benchmark.py /app/benchmark.py
+
 # Copy project files
 COPY src/ /app/src/
 
