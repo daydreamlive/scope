@@ -51,7 +51,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.version }}"
-            TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
+            TAGS="daydreamlive/scope:${{ github.event.inputs.version }}"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             # Extract version from tag (e.g., v0.1.0 -> 0.1.0)
             VERSION_TAG="${{ github.ref_name }}"
