@@ -20,6 +20,7 @@ from .base_schema import BasePipelineConfig, InputMode, ModeDefaults
 # This provides backwards compatibility for existing imports from this module
 from .krea_realtime_video.schema import KreaRealtimeVideoConfig
 from .longlive.schema import LongLiveConfig
+from .ltx2.schema import LTX2Config
 from .memflow.schema import MemFlowConfig
 from .passthrough.schema import PassthroughConfig
 from .reward_forcing.schema import RewardForcingConfig
@@ -32,6 +33,7 @@ PIPELINE_CONFIGS: dict[str, type[BasePipelineConfig]] = {
     "krea-realtime-video": KreaRealtimeVideoConfig,
     "reward-forcing": RewardForcingConfig,
     "passthrough": PassthroughConfig,
+    "ltx2": LTX2Config,
 }
 
 
@@ -59,6 +61,7 @@ __all__ = [
     "RewardForcingConfig",
     "MemFlowConfig",
     "PassthroughConfig",
+    "LTX2Config",
     # Registry
     "PIPELINE_CONFIGS",
     "get_config_class",

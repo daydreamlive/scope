@@ -36,6 +36,27 @@ LIGHTTAE_ARTIFACT = HuggingfaceRepoArtifact(
     files=["lighttaew2_1.pth"],
 )
 
+# LTX2 artifacts
+LTX2_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="Lightricks/LTX-2",
+    files=[
+        "ltx-2-19b-distilled.safetensors",
+        "ltx-2-spatial-upsampler-x2-1.0.safetensors",
+    ],
+)
+
+GEMMA_TEXT_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="google/gemma-2-2b-it",
+    files=[
+        "config.json",
+        "generation_config.json",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer.model",
+        "tokenizer_config.json",
+    ],
+)
+
 # Pipeline-specific artifacts
 PIPELINE_ARTIFACTS = {
     "streamdiffusionv2": [
@@ -100,5 +121,9 @@ PIPELINE_ARTIFACTS = {
             repo_id="KlingTeam/MemFlow",
             files=["base.pt", "lora.pt"],
         ),
+    ],
+    "ltx2": [
+        LTX2_ARTIFACT,
+        GEMMA_TEXT_ENCODER_ARTIFACT,
     ],
 }
