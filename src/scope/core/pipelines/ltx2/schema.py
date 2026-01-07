@@ -54,6 +54,9 @@ class LTX2Config(BasePipelineConfig):
     # Frame rate for video generation
     frame_rate: float = 24.0
 
+    # Random seed for generation
+    base_seed: int = 42
+
     # Memory optimization: Use FP8 quantization for transformer
     # According to official LTX-2 docs, this significantly reduces VRAM usage
     # Requires PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

@@ -174,6 +174,10 @@ class LTX2Pipeline(Pipeline):
         self._cached_transformer = self.model_ledger.transformer()
         logger.info("  - Loading video decoder (~3GB)...")
         self._cached_video_decoder = self.model_ledger.video_decoder()
+        logger.info("  - Loading audio decoder (~1GB)...")
+        self._cached_audio_decoder = self.model_ledger.audio_decoder()
+        logger.info("  - Loading vocoder for audio generation...")
+        self._cached_vocoder = self.model_ledger.vocoder()
         logger.info("All models cached successfully in VRAM")
 
         logger.info(f"LTX2 models loaded in {time.time() - start:.2f}s")
@@ -185,6 +189,10 @@ class LTX2Pipeline(Pipeline):
                 f"At {self.config.height}x{self.config.width} with {self.config.num_frames} frames, "
                 "expect ~50-60GB for activations during denoising."
             )
+
+        # Store audio for external access
+        self.audio_samples = None  # Will be populated after generation
+        self.audio_sample_rate = None  # Will be set after generation
 
         # NOTE: This is currently a single-stage pipeline implementation.
         # For even lower VRAM usage, consider implementing a two-stage pipeline:
@@ -212,10 +220,12 @@ class LTX2Pipeline(Pipeline):
         """Internal generation method."""
         from ltx_core.components.diffusion_steps import EulerDiffusionStep
         from ltx_core.components.noisers import GaussianNoiser
+        from ltx_core.model.audio_vae import decode_audio as vae_decode_audio
         from ltx_core.model.video_vae import decode_video as vae_decode_video
         from ltx_core.text_encoders.gemma import encode_text
         from ltx_core.types import VideoPixelShape
         from ltx_pipelines.utils.constants import (
+            AUDIO_SAMPLE_RATE,
             DISTILLED_SIGMA_VALUES,
         )
         from ltx_pipelines.utils.helpers import (
@@ -227,7 +237,7 @@ class LTX2Pipeline(Pipeline):
 
         # Extract parameters
         prompts = kwargs.get("prompts", [{"text": "a beautiful sunset", "weight": 1.0}])
-        seed = kwargs.get("seed", kwargs.get("base_seed", 42))
+        seed = kwargs.get("seed", kwargs.get("base_seed", self.config.base_seed))
         num_frames = kwargs.get("num_frames", self.config.num_frames)
         frame_rate = kwargs.get("frame_rate", self.config.frame_rate)
         height = kwargs.get("height", self.config.height)
@@ -310,5 +320,22 @@ class LTX2Pipeline(Pipeline):
 
         # Normalize from [0, 255] uint8 to [0, 1] float
         video_tensor = torch.clamp(video_tensor / 255.0, 0.0, 1.0)
+
+        # Decode audio from latents using cached decoder and vocoder
+        logger.info("Decoding audio from latents")
+        decoded_audio_mel = vae_decode_audio(
+            audio_state.latent,
+            self._cached_audio_decoder,
+        )
+
+        # Convert mel spectrogram to audio samples using vocoder
+        # decoded_audio_mel shape: [batch, mel_bins, time]
+        audio_samples = self._cached_vocoder(decoded_audio_mel)
+
+        # Store audio for external access (convert to CPU numpy for easier handling)
+        # audio_samples shape: [batch, channels, samples]
+        self.audio_samples = audio_samples.squeeze(0).cpu()  # Remove batch dimension
+        self.audio_sample_rate = AUDIO_SAMPLE_RATE
+        logger.info(f"Audio decoded: {self.audio_samples.shape} at {self.audio_sample_rate}Hz")
 
         return video_tensor

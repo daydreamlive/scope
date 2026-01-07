@@ -19,7 +19,7 @@ from aiortc.sdp import candidate_from_sdp
 from .credentials import get_turn_credentials
 from .pipeline_manager import PipelineManager
 from .schema import WebRTCOfferRequest
-from .tracks import VideoProcessingTrack
+from .tracks import AudioProcessingTrack, VideoProcessingTrack
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +45,13 @@ class Session:
         self,
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
+        audio_track: MediaStreamTrack | None = None,
         data_channel: RTCDataChannel | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
+        self.audio_track = audio_track
         self.data_channel = data_channel
 
     async def close(self):
@@ -58,6 +60,10 @@ class Session:
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
                 await self.video_track.stop()
+
+            # Stop audio track
+            if self.audio_track is not None:
+                await self.audio_track.stop()
 
             if self.pc.connectionState not in ["closed", "failed"]:
                 await self.pc.close()
@@ -175,7 +181,12 @@ class WebRTCManager:
             session.video_track = video_track
             pc.addTrack(video_track)
 
-            logger.info(f"Created new session: {session}")
+            # Create audio track for LTX2 pipeline audio support
+            audio_track = AudioProcessingTrack(pipeline_manager)
+            session.audio_track = audio_track
+            pc.addTrack(audio_track)
+
+            logger.info(f"Created new session with video and audio: {session}")
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
