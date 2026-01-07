@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/a78ec9c5-83aa-4f0d-826e-f32f6fd10366
 
 ## Resolution
 
-The generation will be faster for smaller resolutions resulting in smoother video. Scope currently will use the input video's resolution as the output resolution. The visual quality will be better at 480x832 which is the resolution that the model was trained on, but you may need a more powerful GPU in order to achieve a higher FPS.
+The generation will be faster for smaller resolutions resulting in smoother video. Scope currently will use the input video's resolution as the output resolution. The visual quality will be better at 832x480 which is the resolution that the model was trained on, but you may need a more powerful GPU in order to achieve a higher FPS.
 
 ## Seed
 
