@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import cpuinfo
 import psutil
 import pynvml
 import torch
@@ -79,17 +80,95 @@ class HardwareInfo:
         return gpu_info
 
     def _get_cpu_info(self) -> dict[str, Any]:
-        return {
+        """Get comprehensive CPU information using py-cpuinfo"""
+        cpu_data = cpuinfo.get_cpu_info()
+        flags = cpu_data.get("flags", [])
+
+        cpu_info = {
+            "model": cpu_data.get("brand_raw", platform.processor() or "Unknown"),
+            "architecture": cpu_data.get("arch", platform.machine()),
             "physical_cores": psutil.cpu_count(logical=False),
             "logical_cores": psutil.cpu_count(logical=True),
-            "model": platform.processor(),
         }
+
+        # SIMD extensions (relevant for ML performance)
+        simd_flags = {
+            "avx": "AVX", "avx2": "AVX2", "avx512f": "AVX512F",
+            "avx512_bf16": "AVX512_BF16", "fma": "FMA", "fma3": "FMA", "neon": "NEON"
+        }
+        simd = [name for flag, name in simd_flags.items() if flag in flags]
+        if simd:
+            cpu_info["simd_support"] = list(dict.fromkeys(simd))  # dedupe
+
+        # Cache info
+        cache_keys = [
+            ("l1_data_cache_size", "L1d"), ("l1_instruction_cache_size", "L1i"),
+            ("l2_cache_size", "L2"), ("l3_cache_size", "L3")
+        ]
+        cache = {name: self._fmt_bytes(cpu_data[key])
+                 for key, name in cache_keys if cpu_data.get(key)}
+        if cache:
+            cpu_info["cache"] = cache
+
+        cpu_quota = self._read_cgroup("cpu.max", "cpu/cpu.cfs_quota_us")
+        if cpu_quota:
+            cpu_info["container_cpu_limit"] = cpu_quota
+
+        return cpu_info
+
+    def _fmt_bytes(self, size: int) -> str:
+        """Format bytes in human-readable format"""
+        for unit, threshold in [("GiB", 1024**3), ("MiB", 1024**2), ("KiB", 1024)]:
+            if size >= threshold:
+                return f"{size / threshold:.0f} {unit}"
+        return f"{size} B"
+
+    def _read_cgroup(self, v2_path: str, v1_path: str) -> float | None:
+        """Read cgroup value (tries v2 then v1)"""
+        try:
+            with open(f"/sys/fs/cgroup/{v2_path}", "r") as f:
+                val = f.read().strip()
+                if val not in ("max", "unlimited"):
+                    if "cpu" in v2_path:
+                        quota, period = val.split()
+                        return float(quota) / float(period)
+                    return int(val)
+        except (FileNotFoundError, ValueError):
+            pass
+
+        try:
+            with open(f"/sys/fs/cgroup/{v1_path}", "r") as f:
+                val = int(f.read().strip())
+                if "cpu" in v1_path and val > 0:
+                    with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us", "r") as pf:
+                        return val / int(pf.read().strip())
+                if "memory" in v1_path and val < 1024**4:
+                    return val
+        except (FileNotFoundError, ValueError):
+            pass
+
+        return None
 
     def _get_memory_info(self) -> dict[str, Any]:
         mem = psutil.virtual_memory()
+        host_total = mem.total / (1024**3)
+        host_avail = mem.available / (1024**3)
+
+        container_limit = self._read_cgroup("memory.max", "memory/memory.limit_in_bytes")
+
+        if container_limit:
+            container_gb = container_limit / (1024**3)
+            return {
+                "total_gb": container_gb,
+                "available_gb": min(host_avail, container_gb),
+                "host_total_gb": host_total,
+                "is_containerized": True,
+            }
+
         return {
-            "total_gb": mem.total / (1024**3),
-            "available_gb": mem.available / (1024**3),
+            "total_gb": host_total,
+            "available_gb": host_avail,
+            "is_containerized": False,
         }
 
     def _get_platform_info(self) -> dict[str, Any]:
@@ -460,8 +539,24 @@ def main():
                 pass
 
     hw = HardwareInfo()
+    hw_dict = hw.to_dict()
+    cpu, mem, gpu = hw_dict['cpu'], hw_dict['memory'], hw_dict['gpu']
+
     print("\n=== Hardware ===")
-    print(f"GPU: {hw._get_gpu_info().get('devices', [{}])[0].get('name', 'None')}")
+    print(f"CPU: {cpu['model']} ({cpu.get('architecture', 'Unknown')})")
+    print(f"Cores: {cpu['physical_cores']}P/{cpu['logical_cores']}L" +
+          (f" | Container limit: {cpu['container_cpu_limit']:.1f}" if 'container_cpu_limit' in cpu else ""))
+    if 'simd_support' in cpu:
+        print(f"SIMD: {', '.join(cpu['simd_support'])}")
+    if 'cache' in cpu:
+        print(f"Cache: {', '.join(f'{k}={v}' for k, v in cpu['cache'].items())}")
+
+    ram_str = f"{mem['total_gb']:.1f} GB"
+    if mem.get('is_containerized'):
+        ram_str += f" (host: {mem['host_total_gb']:.1f} GB)"
+    print(f"RAM: {ram_str}")
+
+    print(f"GPU: {gpu.get('devices', [{}])[0].get('name', 'None')}")
     print(f"VRAM: {hw.get_primary_gpu_vram_gb():.1f} GB")
 
     matrix = ConfigurationMatrix(
