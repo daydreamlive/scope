@@ -11,11 +11,9 @@ When LoRA is present, VACE must be applied in the correct order to avoid model d
 
 This ensures LoRA is the outermost wrapper, which is critical for maintaining generation quality.
 
-Memory Optimization Strategy:
-For memory-constrained setups (e.g., 32GB VRAM), the mixin supports text encoder CPU offloading.
-When enabled, the text encoder (~6.4GB in FP8) is moved to CPU before VACE loading, freeing
-VRAM for VACE components while maintaining functionality (embeddings are computed on CPU and
-moved to GPU).
+Memory Requirements:
+VACE with the Mixin approach requires ~48GB VRAM minimum. The text encoder (~6.4GB in FP8)
+remains on GPU for optimal prompt encoding performance.
 """
 
 from __future__ import annotations
@@ -48,7 +46,6 @@ class VACEEnabledPipeline:
     - Loading VACE-specific weights from checkpoint
     - Moving VACE components to the correct device/dtype
     - Optional FP8 quantization of VACE components
-    - Optional text encoder CPU offloading for memory-constrained setups
     - PEFT compatibility (VACE must be loaded before LoRA for correct ordering)
 
     The mixin keeps track of:
@@ -128,19 +125,6 @@ class VACEEnabledPipeline:
             f"_init_vace: Loading VACE support upfront "
             f"(vace_in_dim={vace_in_dim}, vace_layers={vace_layers})"
         )
-
-        # Offload text encoder to CPU to free VRAM for VACE (if provided)
-        # The text encoder (~6.4 GB FP8) is only used occasionally for prompt encoding
-        # and can run on CPU while outputting embeddings to GPU
-        if text_encoder is not None:
-            logger.info("_init_vace: Offloading text encoder to CPU to free VRAM...")
-            text_encoder.output_device = device  # Keep outputs on GPU
-            # Cast to bfloat16 before moving to CPU (FP8 is GPU-only)
-            text_encoder.to(dtype=torch.bfloat16, device="cpu")
-            torch.cuda.empty_cache()
-            logger.info(
-                "_init_vace: Text encoder offloaded to CPU (as bf16), CUDA cache cleared"
-            )
 
         # Wrap model with VACE
         start = time.time()

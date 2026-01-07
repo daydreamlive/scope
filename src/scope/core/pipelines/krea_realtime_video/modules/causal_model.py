@@ -381,15 +381,6 @@ class CausalWanSelfAttention(nn.Module):
                 roped_query = rope_apply(q, grid_sizes, freqs).type_as(v)
                 roped_key = rope_apply(k, grid_sizes, freqs).type_as(v)
 
-                # Only update kv_cache if it exists (VACE forward passes kv_cache=None)
-                if kv_cache is not None:
-                    local_end_index = roped_key.shape[1]
-                    kv_cache["k"][:, :local_end_index] = roped_key
-                    kv_cache["v"][:, :local_end_index] = v
-
-                    kv_cache["global_end_index"] = local_end_index
-                    kv_cache["local_end_index"] = local_end_index
-
                 padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
                 padded_roped_query = torch.cat(
                     [

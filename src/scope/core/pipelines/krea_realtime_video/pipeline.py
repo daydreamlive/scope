@@ -84,7 +84,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
 
-        # Load text encoder before VACE initialization (may be offloaded to CPU)
+        # Load text encoder before VACE initialization
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
             model_name=base_model_name,
