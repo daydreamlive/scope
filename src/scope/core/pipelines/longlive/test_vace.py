@@ -192,7 +192,7 @@ def load_video_frames(
 
     num_frames = frames_array.shape[0]
     print(
-        f"load_video_frames: Loaded {num_frames} frames at {target_height}x{target_width}"
+        f"load_video_frames: Loaded {num_frames} frames at {target_width}x{target_height}"
     )
     return frames_array
 
@@ -445,7 +445,7 @@ def main():
     print(f"  Inpainting: {use_inpainting}")
     print(f"  Prompt: '{prompt}'")
     print(f"  Chunks: {config['num_chunks']} x {config['frames_per_chunk']} frames")
-    print(f"  Resolution: {config['height']}x{config['width']}")
+    print(f"  Resolution: {config['width']}x{config['height']}")
     print(f"  VACE Scale: {config['vace_context_scale']}")
 
     # Setup paths

@@ -255,7 +255,7 @@ Options:
 
 ### Available Pipelines
 
-| Pipeline ID           | Default Resolution (HxW) |
+| Pipeline ID           | Default Resolution (WxH) |
 | --------------------- | ------------------------ |
 | `longlive`            | 576x320                  |
 | `streamdiffusionv2`   | 512x512                  |

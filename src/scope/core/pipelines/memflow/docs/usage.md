@@ -21,7 +21,7 @@ https://github.com/user-attachments/assets/cfdcd83d-593e-443c-b37c-134e1cd041ae
 
 ## Resolution
 
-The generation will be faster for smaller resolutions resulting in smoother video. The visual quality will be better at 480x832 which is the resolution that the model was trained on, but you may need a more powerful GPU in order to achieve a higher FPS.
+The generation will be faster for smaller resolutions resulting in smoother video. The visual quality will be better at 832x480 which is the resolution that the model was trained on, but you may need a more powerful GPU in order to achieve a higher FPS.
 
 ## Seed
 

@@ -290,8 +290,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         # Validate resolution
         if height != block_state.height or width != block_state.width:
             raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: Input resolution {height}x{width} "
-                f"does not match target resolution {block_state.height}x{block_state.width}"
+                f"VaceEncodingBlock._encode_with_conditioning: Input resolution {width}x{height} "
+                f"does not match target resolution {block_state.width}x{block_state.height}"
             )
 
         # Check if we have reference images too (for combined guidance)
