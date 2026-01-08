@@ -1059,7 +1059,7 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre, for
             sys.exit(1)
 
     # Proceed with actual install
-    args = ["uv", "pip", "install"]
+    args = ["uv", "pip", "install", "--torch-backend", "cu128"]
     if upgrade:
         args.append("--upgrade")
     if editable:

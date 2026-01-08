@@ -67,6 +67,8 @@ class DependencyValidator:
                     "compile",
                     str(pyproject_path),
                     plugin_requirements,
+                    "--torch-backend",
+                    "cu128",
                     "--quiet",
                 ],
                 capture_output=True,
