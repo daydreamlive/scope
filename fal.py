@@ -42,6 +42,9 @@ class ScopeBenchmark(fal.App, keep_alive=300):
         logger = logging.getLogger(__name__)
 
         try:
+            output_dir = "/data/benchmark_results"
+            os.makedirs(output_dir, exist_ok=True)
+
             subprocess.run(
                 ["uv", "sync", "--group", "benchmark"],
                 cwd="/app",
@@ -54,6 +57,11 @@ class ScopeBenchmark(fal.App, keep_alive=300):
             # Extract args from request_data
             if "args" in request_data:
                 cmd.extend(request_data["args"])
+
+            if "--output" not in cmd:
+                timestamp = time.strftime("%Y%m%d_%H%M")
+                output_path = f"{output_dir}/benchmark_{timestamp}.json"
+                cmd.extend(["--output", output_path])
 
             logger.info(f"Running command: {' '.join(cmd)}")
 
