@@ -1035,8 +1035,30 @@ def pipelines():
 @click.option(
     "--pre", is_flag=True, help="Include pre-release and development versions"
 )
-def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre):
+@click.option("--force", is_flag=True, help="Skip dependency validation")
+def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre, force):
     """Install a plugin."""
+    from ..core.plugins.dependency_validator import DependencyValidator
+
+    # Build list of packages to validate
+    packages_to_validate = list(packages) if packages else []
+    if editable:
+        packages_to_validate.append(editable)
+
+    # Validate before installing (unless --force)
+    if packages_to_validate and not force:
+        validator = DependencyValidator()
+        result = validator.validate_install(packages_to_validate)
+
+        if not result.is_valid:
+            click.echo("Dependency conflict detected!\n", err=True)
+            click.echo(result.error_message, err=True)
+            click.echo(
+                "\nUse --force to install anyway (may break environment)", err=True
+            )
+            sys.exit(1)
+
+    # Proceed with actual install
     args = ["uv", "pip", "install"]
     if upgrade:
         args.append("--upgrade")
