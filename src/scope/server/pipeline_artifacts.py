@@ -1,10 +1,14 @@
 """
 Defines which artifacts each pipeline requires.
+
+This module maintains the legacy PIPELINE_ARTIFACTS dict for backwards compatibility.
+New pipelines (especially plugins) should declare artifacts via the `artifacts` ClassVar
+on their config class instead.
 """
 
 from .artifacts import HuggingfaceRepoArtifact
 
-# Common artifacts shared across pipelines
+# Common artifacts shared across built-in pipelines
 WAN_1_3B_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="Wan-AI/Wan2.1-T2V-1.3B",
     files=["config.json", "Wan2.1_VAE.pth", "google"],
