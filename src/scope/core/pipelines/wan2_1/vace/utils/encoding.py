@@ -215,7 +215,7 @@ def vace_latent(z, m):
 
 def load_and_prepare_reference_images(
     ref_image_paths, target_height, target_width, device
-):
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     """
     Load and prepare reference images for VACE conditioning.
 
@@ -226,9 +226,14 @@ def load_and_prepare_reference_images(
         device: Target device
 
     Returns:
-        List of prepared reference image tensors [C, 1, H, W]
+        Tuple of (prepared_images, spatial_masks) where:
+        - prepared_images: List of image tensors [C, 1, H, W] normalized to [-1, 1]
+        - spatial_masks: List of mask tensors [1, 1, H, W] indicating padding regions
+          (0=image region to preserve, 1=padding region to generate). All-zeros when
+          no padding was needed.
     """
     prepared_refs = []
+    spatial_masks = []
 
     for ref_path in ref_image_paths:
         # Load image
@@ -270,9 +275,26 @@ def load_and_prepare_reference_images(
                 resized_image
             )
             ref_img = white_canvas
+
+            # Create spatial mask: 0=image region, 1=padding region
+            spatial_mask = torch.ones(
+                (1, 1, target_height, target_width),
+                device=device,
+                dtype=torch.float32,
+            )
+            spatial_mask[:, :, top : top + new_height, left : left + new_width] = 0.0
+            spatial_masks.append(spatial_mask)
         else:
             ref_img = ref_img.to(device)
 
+            # No padding needed, so mask is all zeros (all image, no padding)
+            spatial_mask = torch.zeros(
+                (1, 1, target_height, target_width),
+                device=device,
+                dtype=torch.float32,
+            )
+            spatial_masks.append(spatial_mask)
+
         prepared_refs.append(ref_img)
 
-    return prepared_refs
+    return prepared_refs, spatial_masks
