@@ -16,6 +16,8 @@ src/scope/core/pipelines/**/*.mp4
 
 notes/
 
+benchmark_*.json
+
 # Cursor IDE files
 .cursorrules
 .cursorignore
