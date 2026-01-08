@@ -286,7 +286,8 @@ class BasePipelineConfig(BaseModel):
         )
         metadata["docs_url"] = cls.docs_url
         metadata["estimated_vram_gb"] = cls.estimated_vram_gb
-        metadata["requires_models"] = cls.requires_models
+        # Infer requires_models from artifacts if not explicitly set
+        metadata["requires_models"] = cls.requires_models or bool(cls.artifacts)
         metadata["supports_lora"] = cls.supports_lora
         metadata["supports_vace"] = cls.supports_vace
         metadata["supports_cache_management"] = cls.supports_cache_management
