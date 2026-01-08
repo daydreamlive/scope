@@ -116,8 +116,16 @@ class HardwareInfo:
 
         return cpu_info
 
-    def _fmt_bytes(self, size: int) -> str:
+    def _fmt_bytes(self, size: int | str) -> str:
         """Format bytes in human-readable format"""
+        if isinstance(size, str):
+            if any(unit in size for unit in ["KiB", "MiB", "GiB", "KB", "MB", "GB"]):
+                return size
+            try:
+                size = int(size)
+            except ValueError:
+                return size
+
         for unit, threshold in [("GiB", 1024**3), ("MiB", 1024**2), ("KiB", 1024)]:
             if size >= threshold:
                 return f"{size / threshold:.0f} {unit}"
