@@ -89,6 +89,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         return [
             ConfigSpec("num_frame_per_block", 3),
             ConfigSpec("vae_temporal_downsample_factor", 4),
+            ConfigSpec("vae_spatial_downsample_factor", 8),  # Used by vae_stride tuple
             ConfigSpec("device", torch.device("cuda")),
         ]
 
@@ -236,8 +237,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             )
             return None, None
 
-        # Load and prepare reference images
-        prepared_refs = load_and_prepare_reference_images(
+        # Load and prepare reference images (spatial masks unused in R2V mode)
+        prepared_refs, _ = load_and_prepare_reference_images(
             ref_image_paths,
             block_state.height,
             block_state.width,
@@ -296,6 +297,11 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         replicates it across a temporal group, fills remaining frames with zeros (dummy frames),
         and encodes with masks indicating which frames to inpaint (1=dummy, 0=reference).
 
+        Spatial masking: Auto-generates spatial mask based on padding detection
+        (0=image region, 1=padding region). This allows the first/last frame influence
+        to be regional rather than full-frame, letting the model freely generate in
+        padded areas while preserving the reference image's influence in its actual region.
+
         Args:
             extension_mode: Inferred mode ('firstframe', 'lastframe', or 'firstlastframe')
         """
@@ -311,7 +317,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             # Load BOTH images for firstlastframe mode
             images_to_load = [first_frame_image, last_frame_image]
 
-        prepared_refs = load_and_prepare_reference_images(
+        # Load and crop-to-fill reference images (spatial masks always zeros with crop strategy)
+        prepared_refs, spatial_masks = load_and_prepare_reference_images(
             images_to_load,
             block_state.height,
             block_state.width,
@@ -340,6 +347,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             dtype=vae_dtype,
             height=block_state.height,
             width=block_state.width,
+            spatial_masks=spatial_masks,
         )
 
         frames_to_encode = [frames]
@@ -367,9 +375,12 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         vace_context = vace_latent(z0, m0)
 
+        # Log spatial mask status
+        has_padding = any((mask > 0).any() for mask in spatial_masks)
         logger.info(
             f"_encode_extension_mode: mode={extension_mode}, current_start={current_start}, "
-            f"num_frames={num_frames}, vace_context_shape={vace_context[0].shape}"
+            f"num_frames={num_frames}, vace_context_shape={vace_context[0].shape}, "
+            f"spatial_masking={'active (padding detected)' if has_padding else 'inactive (no padding)'}"
         )
 
         return vace_context, prepared_refs
@@ -385,6 +396,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         dtype: torch.dtype,
         height: int,
         width: int,
+        spatial_masks: list[torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Build frames and masks for extension mode with reference frame replication.
@@ -401,25 +413,46 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             dtype: Target dtype for frames
             height: Frame height
             width: Frame width
+            spatial_masks: Optional list of spatial masks [1, 1, H, W] where 0=image region,
+                1=padding region. When provided, reference frame masks use these spatial masks
+                instead of all-zeros, allowing the model to freely generate in padding regions
+                while preserving the reference image's influence in its actual region.
 
         Returns:
             Tuple of (frames, masks) where:
             - frames: [C, F, H, W] tensor with reference frames and dummy frames
-            - masks: [1, F, H, W] tensor with 0s for reference frames, 1s for dummy frames
+            - masks: [1, F, H, W] tensor with spatial masks for reference frames (0=preserve,
+                     1=generate in padding), 1s for dummy frames (fully generate)
         """
 
         # Helper to create ref and mask tensors
         def make_ref_block(
             ref_tensor: torch.Tensor,
+            spatial_mask: torch.Tensor | None = None,
         ) -> tuple[torch.Tensor, torch.Tensor]:
             """Replicate ref across temporal group, return (frames, masks)."""
             ref_replicated = ref_tensor.repeat(1, temporal_group_size, 1, 1)
-            ref_mask = torch.zeros(
-                (1, temporal_group_size, height, width),
-                device=device,
-                dtype=torch.float32,
-            )
+
+            if spatial_mask is not None:
+                # Use spatial mask: 0=preserve image region, 1=generate in padding
+                # Replicate [1, 1, H, W] -> [1, temporal_group_size, H, W]
+                ref_mask = spatial_mask.repeat(1, temporal_group_size, 1, 1)
+            else:
+                # No spatial mask: all zeros (preserve entire reference frame)
+                ref_mask = torch.zeros(
+                    (1, temporal_group_size, height, width),
+                    device=device,
+                    dtype=torch.float32,
+                )
             return ref_replicated, ref_mask
+
+        # Get spatial masks if provided
+        first_spatial_mask = spatial_masks[0] if spatial_masks else None
+        last_spatial_mask = (
+            spatial_masks[1]
+            if spatial_masks and len(spatial_masks) > 1
+            else first_spatial_mask
+        )
 
         if ref_at_start and ref_at_end:
             # firstlastframe: [ref_first, ref_first, ..., dummy, dummy, ..., ref_last, ref_last, ...]
@@ -430,8 +463,12 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                     f"Not enough frames for firstlastframe mode: need at least {2 * temporal_group_size} frames, got {num_frames}"
                 )
 
-            first_ref_frames, first_ref_mask = make_ref_block(prepared_refs[0])
-            last_ref_frames, last_ref_mask = make_ref_block(prepared_refs[1])
+            first_ref_frames, first_ref_mask = make_ref_block(
+                prepared_refs[0], first_spatial_mask
+            )
+            last_ref_frames, last_ref_mask = make_ref_block(
+                prepared_refs[1], last_spatial_mask
+            )
 
             dummy_frames = torch.zeros(
                 (3, num_dummy_frames, height, width), device=device, dtype=dtype
@@ -448,7 +485,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         elif ref_at_start:
             # firstframe: [ref, ref, ref, zeros, zeros, ...]
             num_dummy_frames = num_frames - temporal_group_size
-            ref_frames, ref_mask = make_ref_block(prepared_refs[0])
+            ref_frames, ref_mask = make_ref_block(prepared_refs[0], first_spatial_mask)
 
             dummy_frames = torch.zeros(
                 (3, num_dummy_frames, height, width), device=device, dtype=dtype
@@ -465,7 +502,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         elif ref_at_end:
             # lastframe: [zeros, zeros, ..., ref, ref, ref]
             num_dummy_frames = num_frames - temporal_group_size
-            ref_frames, ref_mask = make_ref_block(prepared_refs[0])
+            ref_frames, ref_mask = make_ref_block(prepared_refs[0], first_spatial_mask)
 
             dummy_frames = torch.zeros(
                 (3, num_dummy_frames, height, width), device=device, dtype=dtype
@@ -597,7 +634,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         if has_ref_images:
             from ..utils.encoding import load_and_prepare_reference_images
 
-            prepared_refs = load_and_prepare_reference_images(
+            # Spatial masks unused in conditioning mode (masks come from vace_input_masks)
+            prepared_refs, _ = load_and_prepare_reference_images(
                 ref_image_paths,
                 block_state.height,
                 block_state.width,

@@ -215,9 +215,13 @@ def vace_latent(z, m):
 
 def load_and_prepare_reference_images(
     ref_image_paths, target_height, target_width, device
-):
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     """
     Load and prepare reference images for VACE conditioning.
+
+    Uses crop-to-fill strategy: scales image to cover target dimensions, then
+    center-crops to exact size. This avoids padding artifacts at the cost of
+    losing a small amount of edge content when aspect ratios differ.
 
     Args:
         ref_image_paths: List of paths to reference images
@@ -226,9 +230,14 @@ def load_and_prepare_reference_images(
         device: Target device
 
     Returns:
-        List of prepared reference image tensors [C, 1, H, W]
+        Tuple of (prepared_images, spatial_masks) where:
+        - prepared_images: List of image tensors [C, 1, H, W] normalized to [-1, 1]
+        - spatial_masks: List of mask tensors [1, 1, H, W] indicating padding regions
+          (0=image region to preserve, 1=padding region to generate). Always all-zeros
+          with crop-to-fill since entire frame is image content.
     """
     prepared_refs = []
+    spatial_masks = []
 
     for ref_path in ref_image_paths:
         # Load image
@@ -241,17 +250,12 @@ def load_and_prepare_reference_images(
         if ref_img.shape[-2:] != (target_height, target_width):
             ref_height, ref_width = ref_img.shape[-2:]
 
-            # Create white canvas
-            white_canvas = torch.ones(
-                (3, 1, target_height, target_width), device=device
-            )
-
-            # Calculate scale to fit
-            scale = min(target_height / ref_height, target_width / ref_width)
+            # Scale to fill (crop-to-fit) - use max to ensure image covers target
+            scale = max(target_height / ref_height, target_width / ref_width)
             new_height = int(ref_height * scale)
             new_width = int(ref_width * scale)
 
-            # Resize
+            # Resize to cover target dimensions
             resized_image = (
                 F.interpolate(
                     ref_img.squeeze(1).unsqueeze(0),
@@ -263,16 +267,31 @@ def load_and_prepare_reference_images(
                 .unsqueeze(1)
             )
 
-            # Center on canvas
-            top = (target_height - new_height) // 2
-            left = (target_width - new_width) // 2
-            white_canvas[:, :, top : top + new_height, left : left + new_width] = (
-                resized_image
+            # Center-crop to target size
+            top = (new_height - target_height) // 2
+            left = (new_width - target_width) // 2
+            ref_img = resized_image[
+                :, :, top : top + target_height, left : left + target_width
+            ].to(device)
+
+            # No padding, so spatial mask is all zeros (entire frame is image)
+            spatial_mask = torch.zeros(
+                (1, 1, target_height, target_width),
+                device=device,
+                dtype=torch.float32,
             )
-            ref_img = white_canvas
+            spatial_masks.append(spatial_mask)
         else:
             ref_img = ref_img.to(device)
 
+            # No padding needed, so mask is all zeros (all image, no padding)
+            spatial_mask = torch.zeros(
+                (1, 1, target_height, target_width),
+                device=device,
+                dtype=torch.float32,
+            )
+            spatial_masks.append(spatial_mask)
+
         prepared_refs.append(ref_img)
 
-    return prepared_refs
+    return prepared_refs, spatial_masks
