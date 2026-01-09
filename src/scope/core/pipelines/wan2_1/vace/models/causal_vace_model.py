@@ -117,12 +117,6 @@ class CausalVaceWanModel(nn.Module):
         # This allows the VACE model to work with any CausalWanModel implementation
         self._block_forward_params = self._get_block_forward_params()
 
-        # VACE context token cache - prevents numerical drift at chunk boundaries
-        # by ensuring vace_patch_embedding is computed once per chunk, not per denoise step.
-        # Cache key is based on vace_context tensor data pointers and seq_len.
-        self._cached_vace_context_key: tuple | None = None
-        self._cached_vace_context_tokens: torch.Tensor | None = None
-
     def _get_block_init_kwargs(self):
         """Get initialization kwargs for creating new blocks.
 
@@ -313,63 +307,6 @@ class CausalVaceWanModel(nn.Module):
 
         self.vace_blocks = vace_blocks
 
-    def clear_vace_cache(self):
-        """Clear the VACE context token cache.
-
-        Call this when starting a new video sequence or when vace_context changes.
-        The cache is also automatically invalidated when vace_context tensors change.
-        """
-        self._cached_vace_context_key = None
-        self._cached_vace_context_tokens = None
-
-    def _get_cached_vace_context_tokens(self, vace_context, seq_len):
-        """Get VACE context tokens, using cache if available.
-
-        This method caches the output of vace_patch_embedding to prevent numerical
-        drift at chunk boundaries. Conv3d operations can produce slightly different
-        outputs even with identical inputs due to floating point accumulation patterns.
-        By caching, we ensure the VACE context tokens are computed once per chunk
-        (when vace_context changes) rather than once per denoise step.
-
-        Args:
-            vace_context: List of VACE context tensors
-            seq_len: Sequence length for padding
-
-        Returns:
-            Padded and concatenated VACE context tokens tensor
-        """
-        # Build cache key from tensor data pointers and seq_len
-        # Using data_ptr() ensures we detect when the underlying tensor data changes
-        key = (seq_len, tuple(u.data_ptr() for u in vace_context))
-
-        if (
-            key == self._cached_vace_context_key
-            and self._cached_vace_context_tokens is not None
-        ):
-            # Cache hit - return cached tokens
-            return self._cached_vace_context_tokens
-
-        # Cache miss - compute tokens and cache them
-        # Embed VACE context through patch embedding (Conv3d)
-        c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
-        c = [u.flatten(2).transpose(1, 2) for u in c]
-
-        # Pad to seq_len
-        c = torch.cat(
-            [
-                torch.cat(
-                    [u, u.new_zeros(1, max(0, seq_len - u.size(1)), u.size(2))], dim=1
-                )
-                for u in c
-            ]
-        )
-
-        # Store in cache
-        self._cached_vace_context_key = key
-        self._cached_vace_context_tokens = c
-
-        return c
-
     def forward_vace(
         self,
         x,
@@ -384,15 +321,20 @@ class CausalVaceWanModel(nn.Module):
         block_mask,
         crossattn_cache,
     ):
-        """Process VACE context to generate hints.
+        """Process VACE context to generate hints."""
+        # Embed VACE context through patch embedding (Conv3d)
+        c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
+        c = [u.flatten(2).transpose(1, 2) for u in c]
 
-        Uses cached VACE context tokens to prevent numerical drift at chunk boundaries.
-        The vace_patch_embedding (Conv3d) output is cached and reused across denoise steps
-        within the same chunk, ensuring consistent hints throughout the denoising process.
-        """
-        # Get cached VACE context tokens (embedding + padding)
-        # This prevents Conv3d numerical variance from causing drift across denoise steps
-        c = self._get_cached_vace_context_tokens(vace_context, seq_len)
+        # Pad to seq_len
+        c = torch.cat(
+            [
+                torch.cat(
+                    [u, u.new_zeros(1, max(0, seq_len - u.size(1)), u.size(2))], dim=1
+                )
+                for u in c
+            ]
+        )
 
         # Process through VACE blocks
         for _block_idx, block in enumerate(self.vace_blocks):
