@@ -17,6 +17,7 @@ import { usePipelines } from "../hooks/usePipelines";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
+  ExtensionMode,
   InputMode,
   PipelineId,
   LoRAConfig,
@@ -605,6 +606,57 @@ export function StreamPage() {
     }
   };
 
+  // Derive the appropriate extension mode based on which frame images are set
+  const deriveExtensionMode = (
+    first: string | undefined,
+    last: string | undefined
+  ): ExtensionMode | undefined => {
+    if (first && last) return "firstlastframe";
+    if (first) return "firstframe";
+    if (last) return "lastframe";
+    return undefined;
+  };
+
+  const handleFirstFrameImageChange = (imagePath: string | undefined) => {
+    updateSettings({
+      firstFrameImage: imagePath,
+      extensionMode: deriveExtensionMode(imagePath, settings.lastFrameImage),
+    });
+  };
+
+  const handleLastFrameImageChange = (imagePath: string | undefined) => {
+    updateSettings({
+      lastFrameImage: imagePath,
+      extensionMode: deriveExtensionMode(settings.firstFrameImage, imagePath),
+    });
+  };
+
+  const handleExtensionModeChange = (mode: ExtensionMode) => {
+    updateSettings({ extensionMode: mode });
+  };
+
+  const handleSendExtensionFrames = () => {
+    const mode = settings.extensionMode || "firstframe";
+    const params: Record<string, string> = {};
+
+    if (mode === "firstframe" && settings.firstFrameImage) {
+      params.first_frame_image = settings.firstFrameImage;
+    } else if (mode === "lastframe" && settings.lastFrameImage) {
+      params.last_frame_image = settings.lastFrameImage;
+    } else if (mode === "firstlastframe") {
+      if (settings.firstFrameImage) {
+        params.first_frame_image = settings.firstFrameImage;
+      }
+      if (settings.lastFrameImage) {
+        params.last_frame_image = settings.lastFrameImage;
+      }
+    }
+
+    if (Object.keys(params).length > 0) {
+      sendParameterUpdate(params);
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -919,6 +971,8 @@ export function StreamPage() {
         vace_context_scale?: number;
         vace_enabled?: boolean;
         pipeline_ids?: string[];
+        first_frame_image?: string;
+        last_frame_image?: string;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -966,6 +1020,14 @@ export function StreamPage() {
       // Explicitly pass vace_enabled state
       if (currentPipeline?.supportsVACE) {
         initialParameters.vace_enabled = vaceEnabled;
+      }
+
+      // Add FFLF (first-frame-last-frame) parameters if set
+      if (settings.firstFrameImage) {
+        initialParameters.first_frame_image = settings.firstFrameImage;
+      }
+      if (settings.lastFrameImage) {
+        initialParameters.last_frame_image = settings.lastFrameImage;
       }
 
       // Video mode parameters - applies to all pipelines in video mode
@@ -1061,6 +1123,13 @@ export function StreamPage() {
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
             supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
+            firstFrameImage={settings.firstFrameImage}
+            onFirstFrameImageChange={handleFirstFrameImageChange}
+            lastFrameImage={settings.lastFrameImage}
+            onLastFrameImageChange={handleLastFrameImageChange}
+            extensionMode={settings.extensionMode || "firstframe"}
+            onExtensionModeChange={handleExtensionModeChange}
+            onSendExtensionFrames={handleSendExtensionFrames}
           />
         </div>
 

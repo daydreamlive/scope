@@ -7,6 +7,9 @@ export type InputMode = "text" | "video";
 // VAE type for model selection (dynamic from backend registry)
 export type VaeType = string;
 
+// Extension mode for FFLF (First-Frame-Last-Frame) feature
+export type ExtensionMode = "firstframe" | "lastframe" | "firstlastframe";
+
 // WebRTC ICE server configuration
 export interface IceServerConfig {
   urls: string | string[];
@@ -77,6 +80,10 @@ export interface SettingsState {
   vaceUseInputVideo?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
+  // FFLF (First-Frame-Last-Frame) extension mode
+  firstFrameImage?: string;
+  lastFrameImage?: string;
+  extensionMode?: ExtensionMode;
   // VAE type selection
   vaeType?: VaeType;
   // Preprocessors
