@@ -79,11 +79,14 @@ class VACEEnabledPipeline:
 
         vace_path = _get_config_value(config, "vace_path")
         vace_in_dim = _get_config_value(config, "vace_in_dim", 96)
+        vace_layers = _get_config_value(config, "vace_layers", None)
 
         # Get vace_in_dim from base_model_kwargs if present
         base_model_kwargs = _get_config_value(config, "base_model_kwargs")
         if base_model_kwargs and "vace_in_dim" in base_model_kwargs:
             vace_in_dim = base_model_kwargs["vace_in_dim"]
+        if base_model_kwargs and "vace_layers" in base_model_kwargs:
+            vace_layers = base_model_kwargs["vace_layers"]
 
         self.vace_path = vace_path
         self.vace_in_dim = vace_in_dim
@@ -99,7 +102,9 @@ class VACEEnabledPipeline:
 
         # Wrap model with VACE
         start = time.time()
-        vace_wrapped_model = CausalVaceWanModel(model, vace_in_dim=vace_in_dim)
+        vace_wrapped_model = CausalVaceWanModel(
+            model, vace_in_dim=vace_in_dim, vace_layers=vace_layers
+        )
         logger.info(
             f"_init_vace: Wrapped model with VACE in {time.time() - start:.3f}s"
         )

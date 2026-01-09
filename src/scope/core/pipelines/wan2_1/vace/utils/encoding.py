@@ -11,10 +11,43 @@ For conditioning modes (following original VACE architecture):
 - Standard path: vace_encode_frames -> vace_encode_masks -> vace_latent
 """
 
+import os
+
 import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from PIL import Image
+
+
+_ZERO_INACTIVE_LATENT_CACHE: dict[tuple, torch.Tensor] = {}
+_FULL_MASK_ENCODED_MASK_CACHE: dict[tuple, torch.Tensor] = {}
+
+
+def _get_zero_inactive_latent(
+    vae,
+    *,
+    channels: int,
+    frames: int,
+    height: int,
+    width: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    key = (id(vae), channels, frames, height, width, str(device), str(dtype))
+    cached = _ZERO_INACTIVE_LATENT_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    zeros_pixel = torch.zeros(
+        (1, channels, frames, height, width),
+        device=device,
+        dtype=dtype,
+    )
+    zeros_latent_out = vae.encode_to_latent(zeros_pixel, use_cache=False)
+    zeros_latent = zeros_latent_out[0].permute(1, 0, 2, 3).contiguous()
+
+    _ZERO_INACTIVE_LATENT_CACHE[key] = zeros_latent
+    return zeros_latent
 
 
 def vace_encode_frames(
@@ -24,14 +57,14 @@ def vace_encode_frames(
     masks=None,
     pad_to_96=True,
     use_cache=True,
-    inactive_cache=None,
-    reactive_cache=None,
+    *,
+    full_mask: bool = False,
 ):
     """
     Encode frames and reference images via VAE for VACE conditioning.
 
     Args:
-        vae: VAE model wrapper (TAEWrapper or WanVAEWrapper)
+        vae: VAE model wrapper
         frames: List of video frames [B, C, F, H, W] or single frame [C, F, H, W]
         ref_images: List of reference images, one list per batch element
                    Each element is a list of reference images [C, 1, H, W]
@@ -39,28 +72,26 @@ def vace_encode_frames(
         pad_to_96: Whether to pad to 96 channels (default True). Set False when masks will be added later.
         use_cache: Whether to use streaming encode cache for frames (default True).
                    Set False for one-off encoding (e.g., reference images only mode).
-                   When masks are provided, caching is handled automatically based on
-                   mask content: conditioning mode (all-1s masks) uses cache for both
-                   streams, while extension/inpainting mode (mixed masks) skips cache
-                   for reactive to weaken temporal blending.
-        inactive_cache: Explicit encoder cache for inactive stream (TAE only).
-                       Create via vae.create_encoder_cache(). Reuse across chunks
-                       for temporal continuity. If None, uses VAE's default cache.
-        reactive_cache: Explicit encoder cache for reactive stream (TAE only).
-                       Must be separate from inactive_cache to prevent memory pollution.
+        full_mask: If True, masks represent an all-ones full-frame mask (white=generate).
+                   Enables optional fastpaths for VACE when `SCOPE_VACE_FULL_MASK_FASTPATH=1`.
 
     Returns:
         List of concatenated latents [ref_latents + frame_latents]
-
-    Note:
-        For TAE with masked encoding (depth/flow/pose/inpainting), you MUST provide
-        separate inactive_cache and reactive_cache to prevent MemBlock memory pollution.
-        WanVAE ignores these caches as its CausalConv3d doesn't have this issue.
     """
-    if ref_images is None:
-        ref_images = [None] * len(frames)
+    use_full_mask_fastpath = full_mask and os.getenv("SCOPE_VACE_FULL_MASK_FASTPATH", "0") == "1"
+    uses_mask_path = masks is not None or use_full_mask_fastpath
+
+    frames_stacked: torch.Tensor | None = None
+    if isinstance(frames, torch.Tensor):
+        frames_stacked = frames
+        batch_size = int(frames_stacked.shape[0])
     else:
-        assert len(frames) == len(ref_images)
+        batch_size = len(frames)
+
+    if ref_images is None:
+        ref_images = [None] * batch_size
+    else:
+        assert batch_size == len(ref_images)
 
     # Get VAE dtype for consistent encoding
     vae_dtype = next(vae.parameters()).dtype
@@ -68,47 +99,78 @@ def vace_encode_frames(
     # Encode frames (with optional masking)
     # Note: WanVAEWrapper expects [B, C, F, H, W] and returns [B, F, C, H, W]
     if masks is None:
-        # Single encode path - no masks, just encode frames directly
-        # Stack list of [C, F, H, W] -> [B, C, F, H, W]
-        frames_stacked = torch.stack(frames, dim=0)
-        frames_stacked = frames_stacked.to(dtype=vae_dtype)
-        # Use provided cache setting (use_cache=False for reference-only mode with dummy frames)
-        latents_out = vae.encode_to_latent(frames_stacked, use_cache=use_cache)
-        # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
-        latents = [lat.permute(1, 0, 2, 3) for lat in latents_out]
+        if use_full_mask_fastpath:
+            # Full-mask (all ones) means the inactive branch is identically the encoding of
+            # all-zero pixels. Avoid materializing full-resolution masks and avoid re-encoding
+            # the inactive branch every chunk.
+            if frames_stacked is None:
+                frames_stacked = torch.stack(frames, dim=0)
+            frames_stacked = frames_stacked.to(dtype=vae_dtype)
+
+            reactive_out = vae.encode_to_latent(frames_stacked, use_cache=use_cache)
+            reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
+
+            zero_latent = _get_zero_inactive_latent(
+                vae,
+                channels=frames_stacked.shape[1],
+                frames=frames_stacked.shape[2],
+                height=frames_stacked.shape[3],
+                width=frames_stacked.shape[4],
+                device=frames_stacked.device,
+                dtype=vae_dtype,
+            )
+            latents = [torch.cat((zero_latent, c), dim=0) for c in reactive_transposed]
+        else:
+            # Stack list of [C, F, H, W] -> [B, C, F, H, W]
+            if frames_stacked is None:
+                frames_stacked = torch.stack(frames, dim=0)
+            frames_stacked = frames_stacked.to(dtype=vae_dtype)
+            # Use provided cache setting (use_cache=False for reference-only mode with dummy frames)
+            latents_out = vae.encode_to_latent(frames_stacked, use_cache=use_cache)
+            # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
+            latents = [lat.permute(1, 0, 2, 3) for lat in latents_out]
     else:
-        # Dual encode path for masked video generation
-        # Each stream needs its own cache to prevent TAE's MemBlock memory pollution
-        masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
-        inactive = [i * (1 - m) + 0 * m for i, m in zip(frames, masks, strict=False)]
-        reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
+        if use_full_mask_fastpath:
+            # For the common "mask omitted" case we currently default to an all-ones
+            # mask, which makes the inactive branch identically zero. We can avoid
+            # re-encoding that inactive branch every chunk by caching a single
+            # zero-latent (per shape/device/dtype) and only encoding the reactive
+            # (full) frames.
+            if frames_stacked is None:
+                frames_stacked = torch.stack(frames, dim=0)
+            frames_stacked = frames_stacked.to(dtype=vae_dtype)
+            reactive_out = vae.encode_to_latent(frames_stacked, use_cache=use_cache)
+            reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
 
-        inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
-        reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
-
-        # Auto-detect mode based on mask content and handle caching appropriately:
-        # - Conditioning mode (mask all 1s): inactive=zeros, reactive=content → both use cache
-        # - Extension/inpainting mode (mixed mask): reactive skips cache to weaken temporal blending
-        is_conditioning_mode = all((m > 0.5).all() for m in masks)
-
-        # Encode with separate caches for temporal continuity without cross-contamination
-        inactive_out = vae.encode_to_latent(
-            inactive_stacked, use_cache=True, encoder_cache=inactive_cache
-        )
-        reactive_out = vae.encode_to_latent(
-            reactive_stacked,
-            use_cache=is_conditioning_mode,
-            encoder_cache=reactive_cache,
-        )
-
-        # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
-        inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
-        reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
-
-        latents = [
-            torch.cat((u, c), dim=0)
-            for u, c in zip(inactive_transposed, reactive_transposed, strict=False)
-        ]
+            zero_latent = _get_zero_inactive_latent(
+                vae,
+                channels=frames_stacked.shape[1],
+                frames=frames_stacked.shape[2],
+                height=frames_stacked.shape[3],
+                width=frames_stacked.shape[4],
+                device=frames_stacked.device,
+                dtype=vae_dtype,
+            )
+            latents = [torch.cat((zero_latent, c), dim=0) for c in reactive_transposed]
+        else:
+            masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
+            inactive = [
+                i * (1 - m) + 0 * m for i, m in zip(frames, masks, strict=False)
+            ]
+            reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
+            inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
+            reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
+            # Default to cache=True for streaming consistency, but allow stateless
+            # encoding (use_cache=False) for hybrid modes that also encode `video`.
+            inactive_out = vae.encode_to_latent(inactive_stacked, use_cache=use_cache)
+            reactive_out = vae.encode_to_latent(reactive_stacked, use_cache=use_cache)
+            # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
+            inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
+            reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
+            latents = [
+                torch.cat((u, c), dim=0)
+                for u, c in zip(inactive_transposed, reactive_transposed, strict=False)
+            ]
 
     # Concatenate reference images if provided
     cat_latents = []
@@ -124,7 +186,7 @@ def vace_encode_frames(
             # Get first batch element and transpose: [num_refs, C, H, W] -> [C, num_refs, H, W]
             ref_latent_batch = ref_latent_out[0].permute(1, 0, 2, 3)
 
-            if masks is not None:
+            if uses_mask_path:
                 # Pad reference latents with zeros for mask channel
                 zeros = torch.zeros_like(ref_latent_batch)
                 ref_latent_batch = torch.cat((ref_latent_batch, zeros), dim=0)
@@ -152,7 +214,64 @@ def vace_encode_frames(
     return cat_latents
 
 
-def vace_encode_masks(masks, ref_images=None, vae_stride=(4, 8, 8)):
+def _get_full_mask_encoded_mask(
+    *,
+    num_frames: int,
+    height: int,
+    width: int,
+    ref_length: int,
+    device: torch.device,
+    dtype: torch.dtype,
+    vae_stride: tuple[int, int, int],
+) -> torch.Tensor:
+    key = (
+        num_frames,
+        height,
+        width,
+        ref_length,
+        str(device),
+        str(dtype),
+        tuple(int(v) for v in vae_stride),
+    )
+    cached = _FULL_MASK_ENCODED_MASK_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    new_depth = int((num_frames + (vae_stride[0] - 1)) // vae_stride[0])
+    latent_height = 2 * (int(height) // (vae_stride[1] * 2))
+    latent_width = 2 * (int(width) // (vae_stride[2] * 2))
+    mask_channels = int(vae_stride[1]) * int(vae_stride[2])
+
+    base = torch.ones(
+        (mask_channels, new_depth, latent_height, latent_width),
+        device=device,
+        dtype=dtype,
+    )
+    if ref_length > 0:
+        pad = torch.zeros(
+            (mask_channels, int(ref_length), latent_height, latent_width),
+            device=device,
+            dtype=dtype,
+        )
+        base = torch.cat((pad, base), dim=1)
+
+    _FULL_MASK_ENCODED_MASK_CACHE[key] = base
+    return base
+
+
+def vace_encode_masks(
+    masks,
+    ref_images=None,
+    vae_stride=(4, 8, 8),
+    *,
+    full_mask: bool = False,
+    batch_size: int | None = None,
+    num_frames: int | None = None,
+    height: int | None = None,
+    width: int | None = None,
+    device: torch.device | None = None,
+    dtype: torch.dtype | None = None,
+):
     """
     Encode masks for VACE context at VAE latent resolution.
 
@@ -164,6 +283,64 @@ def vace_encode_masks(masks, ref_images=None, vae_stride=(4, 8, 8)):
     Returns:
         List of encoded masks at latent resolution
     """
+    use_full_mask_fastpath = full_mask and os.getenv("SCOPE_VACE_FULL_MASK_FASTPATH", "0") == "1"
+
+    if use_full_mask_fastpath:
+        inferred_batch = batch_size
+        if inferred_batch is None:
+            if masks is not None:
+                inferred_batch = len(masks)
+            elif ref_images is not None:
+                inferred_batch = len(ref_images)
+        if inferred_batch is None:
+            raise ValueError(
+                "vace_encode_masks: batch_size is required when masks=None and ref_images=None"
+            )
+
+        inferred_num_frames = num_frames
+        inferred_height = height
+        inferred_width = width
+        inferred_device = device
+        inferred_dtype = dtype
+        if masks is not None:
+            sample = masks[0]
+            if isinstance(sample, torch.Tensor) and sample.ndim == 4:
+                _, inferred_num_frames, inferred_height, inferred_width = sample.shape
+                inferred_device = sample.device
+                inferred_dtype = sample.dtype
+
+        if (
+            inferred_num_frames is None
+            or inferred_height is None
+            or inferred_width is None
+            or inferred_device is None
+            or inferred_dtype is None
+        ):
+            raise ValueError(
+                "vace_encode_masks: num_frames/height/width/device/dtype are required for full_mask fastpath"
+            )
+
+        if ref_images is None:
+            ref_images = [None] * int(inferred_batch)
+        else:
+            assert int(inferred_batch) == len(ref_images)
+
+        result_masks = []
+        for refs in ref_images:
+            ref_len = len(refs) if refs is not None else 0
+            result_masks.append(
+                _get_full_mask_encoded_mask(
+                    num_frames=int(inferred_num_frames),
+                    height=int(inferred_height),
+                    width=int(inferred_width),
+                    ref_length=int(ref_len),
+                    device=inferred_device,
+                    dtype=inferred_dtype,
+                    vae_stride=tuple(int(v) for v in vae_stride),
+                )
+            )
+        return result_masks
+
     if ref_images is None:
         ref_images = [None] * len(masks)
     else:

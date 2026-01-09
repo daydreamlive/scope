@@ -8,6 +8,14 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 
 🚧 This project is currently in **beta**. 🚧
 
+## Hackathon Snapshot (`competition-vace`)
+
+This fork/branch is a **hackathon submission snapshot** of additional work on top of Scope, optimized for readability and review.
+
+- Start here: [HACKATHON-REFERENCE.md](./HACKATHON-REFERENCE.md)
+- High-level performance notes (no code): [PERF-NOTES.md](./PERF-NOTES.md)
+- Note: this branch is not guaranteed to be runnable as-is.
+
 ## Table of Contents
 
 - [Table of Contents](#table-of-contents)
