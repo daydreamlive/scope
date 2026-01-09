@@ -12,6 +12,7 @@ This is a **high-level summary** of performance work done while building a realt
 
 ### 1) Backend Selection + Visibility
 
+- Integrated a fused attention backend (e.g., FlashAttention 4) where available, with safe fallbacks.
 - Built lightweight reporting so it’s obvious which attention/compile backend handled a call, and when fallbacks occur.
 - Added “tell me what happened” hooks to catch silent degradations (unexpected graph breaks, backend switching, cache resets).
 
@@ -34,4 +35,3 @@ This is a **high-level summary** of performance work done while building a realt
 
 - Benchmarked with consistent resolution/settings and avoided GPU contention during measurements.
 - Logged enough metadata to reproduce regressions (settings, steps, cache mode, backend mode).
-
