@@ -89,6 +89,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         return [
             ConfigSpec("num_frame_per_block", 3),
             ConfigSpec("vae_temporal_downsample_factor", 4),
+            ConfigSpec("vae_spatial_downsample_factor", 8),  # Used by vae_stride tuple
             ConfigSpec("device", torch.device("cuda")),
         ]
 
@@ -316,7 +317,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             # Load BOTH images for firstlastframe mode
             images_to_load = [first_frame_image, last_frame_image]
 
-        # Load images with spatial mask detection for auto-masking of padding regions
+        # Load and crop-to-fill reference images (spatial masks always zeros with crop strategy)
         prepared_refs, spatial_masks = load_and_prepare_reference_images(
             images_to_load,
             block_state.height,
