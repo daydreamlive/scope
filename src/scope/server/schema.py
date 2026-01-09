@@ -118,6 +118,14 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    first_frame_image: str | None = Field(
+        default=None,
+        description="Path to first frame reference image for extension mode. When provided alone, enables 'firstframe' mode (reference at start, generate continuation). When provided with last_frame_image, enables 'firstlastframe' mode (references at both ends). Images should be located in the assets directory.",
+    )
+    last_frame_image: str | None = Field(
+        default=None,
+        description="Path to last frame reference image for extension mode. When provided alone, enables 'lastframe' mode (generate lead-up, reference at end). When provided with first_frame_image, enables 'firstlastframe' mode (references at both ends). Images should be located in the assets directory.",
+    )
 
 
 class SpoutConfig(BaseModel):

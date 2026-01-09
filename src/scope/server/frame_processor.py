@@ -731,13 +731,16 @@ class FrameProcessor:
 
             output = pipeline(**call_params)
 
-            # Clear vace_ref_images from parameters after use to prevent sending them on subsequent chunks
-            # vace_ref_images should only be sent when explicitly provided in parameter updates
-            if (
-                "vace_ref_images" in call_params
-                and "vace_ref_images" in self.parameters
-            ):
-                self.parameters.pop("vace_ref_images", None)
+            # Clear one-shot parameters after use to prevent sending them on subsequent chunks
+            # These parameters should only be sent when explicitly provided in parameter updates
+            one_shot_params = [
+                "vace_ref_images",
+                "first_frame_image",
+                "last_frame_image",
+            ]
+            for param in one_shot_params:
+                if param in call_params and param in self.parameters:
+                    self.parameters.pop(param, None)
 
             # Clear transition when complete (blocks signal completion via _transition_active)
             # Contract: Modular pipelines manage prompts internally; frame_processor manages lifecycle
