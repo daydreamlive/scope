@@ -1,7 +1,7 @@
 from ..base_schema import BasePipelineConfig, ModeDefaults
 
 
-class DepthAnythingConfig(BasePipelineConfig):
+class VideoDepthAnythingConfig(BasePipelineConfig):
     """Configuration for Video Depth Anything pipeline.
 
     This pipeline performs consistent depth estimation for videos using the
@@ -9,7 +9,7 @@ class DepthAnythingConfig(BasePipelineConfig):
     depth maps for video sequences.
     """
 
-    pipeline_id = "depth-anything"
+    pipeline_id = "video-depth-anything"
     pipeline_name = "Video Depth Anything"
     pipeline_description = (
         "Video depth estimation pipeline providing temporally consistent depth maps "

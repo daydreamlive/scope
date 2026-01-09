@@ -14,7 +14,7 @@ import torch
 from scope.core.config import get_model_file_path
 
 from ..interface import Pipeline, Requirements
-from .schema import DepthAnythingConfig
+from .schema import VideoDepthAnythingConfig
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 MODEL_CONFIG = {"encoder": "vits", "features": 64, "out_channels": [48, 96, 192, 384]}
 
 
-class DepthAnythingPipeline(Pipeline):
+class VideoDepthAnythingPipeline(Pipeline):
     """Video depth estimation pipeline."""
 
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
-        return DepthAnythingConfig
+        return VideoDepthAnythingConfig
 
     def __init__(
         self,
@@ -89,7 +89,9 @@ class DepthAnythingPipeline(Pipeline):
         """
         video = kwargs.get("video")
         if video is None:
-            raise ValueError("Input video cannot be None for DepthAnythingPipeline")
+            raise ValueError(
+                "Input video cannot be None for VideoDepthAnythingPipeline"
+            )
 
         # Convert input to numpy uint8 array
         # Frames from frame_processor are always (1, H, W, C), so we squeeze the T dimension

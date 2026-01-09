@@ -101,7 +101,7 @@ PIPELINE_ARTIFACTS = {
             files=["base.pt", "lora.pt"],
         ),
     ],
-    "depth-anything": [
+    "video-depth-anything": [
         HuggingfaceRepoArtifact(
             repo_id="depth-anything/Video-Depth-Anything-Small",
             files=["video_depth_anything_vits.pth"],
