@@ -241,6 +241,13 @@ export function StreamPage() {
     // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
     setPromptItems([{ text: getDefaultPromptForMode(newMode), weight: 100 }]);
 
+    // Update temporal interpolation steps to mode-specific default
+    const pipeline = pipelines?.[settings.pipelineId];
+    const pipelineDefaultSteps = pipeline?.defaultTemporalInterpolationSteps ?? 4;
+    setTransitionSteps(
+      modeDefaults.defaultTemporalInterpolationSteps ?? pipelineDefaultSteps
+    );
+
     // Handle video source based on mode
     if (newMode === "video") {
       // Trigger video source reinitialization
@@ -637,7 +644,12 @@ export function StreamPage() {
     if (pipeline) {
       const defaultMethod =
         pipeline.defaultTemporalInterpolationMethod || "slerp";
-      const defaultSteps = pipeline.defaultTemporalInterpolationSteps ?? 4;
+      const pipelineDefaultSteps =
+        pipeline.defaultTemporalInterpolationSteps ?? 4;
+      // Get mode-specific default if available
+      const modeDefaults = getDefaults(settings.pipelineId, settings.inputMode);
+      const defaultSteps =
+        modeDefaults.defaultTemporalInterpolationSteps ?? pipelineDefaultSteps;
 
       setTemporalInterpolationMethod(defaultMethod);
       setTransitionSteps(defaultSteps);
@@ -647,7 +659,7 @@ export function StreamPage() {
         setPromptItems([{ text: "", weight: 1.0 }]);
       }
     }
-  }, [settings.pipelineId, pipelines]);
+  }, [settings.pipelineId, pipelines, settings.inputMode, getDefaults]);
 
   const handlePlayPauseToggle = () => {
     const newPausedState = !settings.paused;

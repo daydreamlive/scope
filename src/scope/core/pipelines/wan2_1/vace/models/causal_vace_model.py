@@ -322,7 +322,7 @@ class CausalVaceWanModel(nn.Module):
         crossattn_cache,
     ):
         """Process VACE context to generate hints."""
-        # Embed VACE context
+        # Embed VACE context through patch embedding (Conv3d)
         c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
         c = [u.flatten(2).transpose(1, 2) for u in c]
 
