@@ -43,5 +43,6 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
             noise_scale=0.7,
             noise_controller=True,
             denoising_steps=[1000, 750],
+            default_temporal_interpolation_steps=0,
         ),
     }

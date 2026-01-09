@@ -122,6 +122,9 @@ class ModeDefaults(BaseModel):
     noise_controller: bool | None = None
     input_size: int | None = None
 
+    # Temporal interpolation
+    default_temporal_interpolation_steps: int | None = None
+
 
 class BasePipelineConfig(BaseModel):
     """Base configuration for all pipelines.
