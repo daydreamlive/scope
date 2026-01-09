@@ -28,6 +28,10 @@ def __getattr__(name):
         from .memflow.pipeline import MemFlowPipeline
 
         return MemFlowPipeline
+    elif name == "VideoDepthAnythingPipeline":
+        from .video_depth_anything.pipeline import VideoDepthAnythingPipeline
+
+        return VideoDepthAnythingPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -57,6 +61,10 @@ def __getattr__(name):
         from .memflow.schema import MemFlowConfig
 
         return MemFlowConfig
+    elif name == "VideoDepthAnythingConfig":
+        from .video_depth_anything.schema import VideoDepthAnythingConfig
+
+        return VideoDepthAnythingConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -68,6 +76,7 @@ __all__ = [
     "StreamDiffusionV2Pipeline",
     "PassthroughPipeline",
     "MemFlowPipeline",
+    "VideoDepthAnythingPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
@@ -76,4 +85,5 @@ __all__ = [
     "PassthroughConfig",
     "RewardForcingConfig",
     "MemFlowConfig",
+    "VideoDepthAnythingConfig",
 ]
