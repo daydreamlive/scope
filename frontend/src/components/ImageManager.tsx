@@ -8,32 +8,53 @@ interface ImageManagerProps {
   images: string[];
   onImagesChange: (images: string[]) => void;
   disabled?: boolean;
+  /** Maximum number of images allowed. When set to 1, replaces instead of adding. */
+  maxImages?: number;
+  /** Label for the component */
+  label?: string;
+  /** Tooltip for the label */
+  tooltip?: string;
+  /** Hide the label */
+  hideLabel?: boolean;
 }
 
 export function ImageManager({
   images,
   onImagesChange,
   disabled,
+  maxImages,
+  label = "Reference Images",
+  tooltip = "Select reference images for VACE conditioning. Images will guide the video generation style and content.",
+  hideLabel = false,
 }: ImageManagerProps) {
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
 
   const handleAddImage = (imagePath: string) => {
-    onImagesChange([...images, imagePath]);
+    if (maxImages === 1) {
+      // Single image mode - replace
+      onImagesChange([imagePath]);
+    } else {
+      onImagesChange([...images, imagePath]);
+    }
   };
 
   const handleRemoveImage = (index: number) => {
     onImagesChange(images.filter((_, i) => i !== index));
   };
 
+  const canAddMore = maxImages === undefined || images.length < maxImages;
+
   return (
     <div>
-      <LabelWithTooltip
-        label="Reference Images"
-        tooltip="Select reference images for VACE conditioning. Images will guide the video generation style and content."
-        className="text-sm font-medium mb-2 block"
-      />
+      {!hideLabel && (
+        <LabelWithTooltip
+          label={label}
+          tooltip={tooltip}
+          className="text-sm font-medium mb-2 block"
+        />
+      )}
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className={maxImages === 1 ? "grid grid-cols-1" : "grid grid-cols-2 gap-2"}>
         {images.length === 0 && (
           <button
             onClick={() => setIsMediaPickerOpen(true)}
@@ -52,7 +73,7 @@ export function ImageManager({
           >
             <img
               src={getAssetUrl(imagePath)}
-              alt={`Reference ${index + 1}`}
+              alt={`${label} ${index + 1}`}
               className="w-full h-full object-cover"
             />
             <button
@@ -65,6 +86,18 @@ export function ImageManager({
             </button>
           </div>
         ))}
+
+        {/* Show add button if we have images but can add more (multi-image mode) */}
+        {images.length > 0 && canAddMore && maxImages !== 1 && (
+          <button
+            onClick={() => setIsMediaPickerOpen(true)}
+            disabled={disabled}
+            className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center hover:bg-accent hover:border-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Plus className="h-6 w-6 mb-1 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Add Image</span>
+          </button>
+        )}
       </div>
 
       <MediaPicker
