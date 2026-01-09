@@ -20,5 +20,6 @@ class VideoDepthAnythingConfig(BasePipelineConfig):
     requires_models = True
     supports_prompts = False
     modified = True
+    usage = ["preprocessor"]
 
     modes = {"video": ModeDefaults(default=True)}

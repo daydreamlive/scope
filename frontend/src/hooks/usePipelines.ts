@@ -51,6 +51,7 @@ export function usePipelines() {
             requiresModels: schema.requires_models,
             supportsLoRA: schema.supports_lora,
             supportsVACE: schema.supports_vace,
+            usage: schema.usage,
             supportsCacheManagement: schema.supports_cache_management,
             supportsKvCacheBias: schema.supports_kv_cache_bias,
             supportsQuantization: schema.supports_quantization,

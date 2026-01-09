@@ -138,11 +138,16 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   // Load pipeline
   const triggerLoad = useCallback(
     async (
-      pipelineId?: string,
+      pipelineIds?: string[],
       loadParams?: PipelineLoadParams
     ): Promise<boolean> => {
       if (isLoading) {
         console.log("Pipeline already loading");
+        return false;
+      }
+
+      if (!pipelineIds || pipelineIds.length === 0) {
+        console.error("No pipeline IDs provided");
         return false;
       }
 
@@ -153,7 +158,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
         // Start the load request
         await loadPipeline({
-          pipeline_id: pipelineId,
+          pipeline_ids: pipelineIds,
           load_params: loadParams,
         });
 
@@ -246,11 +251,11 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   // Load pipeline with proper state management
   const loadPipelineAsync = useCallback(
     async (
-      pipelineId?: string,
+      pipelineIds?: string[],
       loadParams?: PipelineLoadParams
     ): Promise<boolean> => {
       // Always trigger load - let the backend decide if reload is needed
-      return await triggerLoad(pipelineId, loadParams);
+      return await triggerLoad(pipelineIds, loadParams);
     },
     [triggerLoad]
   );
