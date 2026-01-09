@@ -2,7 +2,7 @@ import fal
 from fal.container import ContainerImage
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:038798f"
+DOCKER_IMAGE = "daydreamlive/scope:1495918"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
