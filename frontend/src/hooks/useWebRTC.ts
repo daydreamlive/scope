@@ -21,6 +21,8 @@ interface InitialParameters {
   vace_context_scale?: number;
   pipeline_ids?: string[];
   images?: string[];
+  first_frame_image?: string;
+  last_frame_image?: string;
 }
 
 interface UseWebRTCOptions {
@@ -332,6 +334,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       vace_context_scale?: number;
       ctrl_input?: { button: string[]; mouse: [number, number] };
       images?: string[];
+      first_frame_image?: string;
+      last_frame_image?: string;
     }) => {
       if (
         dataChannelRef.current &&
