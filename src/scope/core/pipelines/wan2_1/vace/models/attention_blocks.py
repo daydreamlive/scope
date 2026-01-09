@@ -21,12 +21,17 @@ def create_vace_attention_block_class(base_attention_block_class):
         A VaceWanAttentionBlock class that inherits from the given base
     """
 
+    base_module = getattr(base_attention_block_class, "__module__", "")
+    needs_scratch_kv_cache = "krea_realtime_video" in base_module
+
     class VaceWanAttentionBlock(base_attention_block_class):
         """VACE attention block with zero-initialized projection layers for hint injection."""
 
         def __init__(self, *args, block_id=0, **kwargs):
             super().__init__(*args, **kwargs)
             self.block_id = block_id
+            self._vace_kv_cache = None
+            self._vace_kv_cache_key = None
 
             # Initialize projection layers for hint accumulation
             # Duck typing: assume self.dim exists from base class
@@ -38,6 +43,50 @@ def create_vace_attention_block_class(base_attention_block_class):
             self.after_proj = nn.Linear(self.dim, self.dim)
             nn.init.zeros_(self.after_proj.weight)
             nn.init.zeros_(self.after_proj.bias)
+
+        def _get_or_create_vace_kv_cache(self, x: torch.Tensor) -> dict:
+            """Return a scratch KV cache for running the block with kv_cache enabled.
+
+            Krea's self-attn implementation expects kv_cache to be present even in
+            non-streaming contexts. VACE blocks use kv_cache only as a scratch buffer.
+            """
+            if not hasattr(self, "self_attn"):
+                raise RuntimeError(
+                    "VaceWanAttentionBlock: expected base block to define `self_attn`"
+                )
+
+            batch = int(x.shape[0])
+            seq_len = int(x.shape[1])
+            num_heads = int(getattr(self.self_attn, "num_heads", getattr(self, "num_heads")))
+            head_dim = int(getattr(self.self_attn, "head_dim", self.dim // num_heads))
+
+            key = (batch, seq_len, num_heads, head_dim, str(x.dtype), str(x.device))
+            if self._vace_kv_cache is None or self._vace_kv_cache_key != key:
+                self._vace_kv_cache_key = key
+                self._vace_kv_cache = {
+                    "k": torch.empty(
+                        (batch, seq_len, num_heads, head_dim),
+                        dtype=x.dtype,
+                        device=x.device,
+                    ).contiguous(),
+                    "v": torch.empty(
+                        (batch, seq_len, num_heads, head_dim),
+                        dtype=x.dtype,
+                        device=x.device,
+                    ).contiguous(),
+                    # Indices are used in Python control flow / slicing; keep them on CPU.
+                    "global_end_index": torch.tensor([0], dtype=torch.long),
+                    "local_end_index": torch.tensor([0], dtype=torch.long),
+                }
+            else:
+                for name in ("global_end_index", "local_end_index"):
+                    t = self._vace_kv_cache.get(name)
+                    if isinstance(t, torch.Tensor):
+                        t.fill_(0)
+                    else:
+                        self._vace_kv_cache[name] = torch.tensor([0], dtype=torch.long)
+
+            return self._vace_kv_cache
 
         def forward_vace(
             self,
@@ -78,7 +127,18 @@ def create_vace_attention_block_class(base_attention_block_class):
                 c = all_c.pop(-1)
 
             # Run standard transformer block on current context
-            # VACE blocks don't use caching since they process reference images once
+            # Most Wan2.1 attention blocks can run without kv_cache for VACE hint generation.
+            # Some attention block implementations expect kv_cache to be present, so we provide
+            # a scratch kv_cache to keep the forward path intact.
+            kv_cache = self._get_or_create_vace_kv_cache(c) if needs_scratch_kv_cache else None
+            forward_kwargs = {
+                "kv_cache": kv_cache,
+                "crossattn_cache": None,
+                "current_start": 0,
+            }
+            # kv_cache_attention_bias is Krea-specific, don't pass to other pipelines
+            if needs_scratch_kv_cache:
+                forward_kwargs["kv_cache_attention_bias"] = 1.0
             c = super().forward(
                 c,
                 e,
@@ -88,9 +148,7 @@ def create_vace_attention_block_class(base_attention_block_class):
                 context,
                 context_lens,
                 block_mask,
-                kv_cache=None,
-                crossattn_cache=None,
-                current_start=0,
+                **forward_kwargs,
             )
 
             # Handle case where block returns tuple (shouldn't happen with kv_cache=None)

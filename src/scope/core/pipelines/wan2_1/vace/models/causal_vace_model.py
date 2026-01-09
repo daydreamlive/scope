@@ -1,7 +1,6 @@
 # Modified from https://github.com/ali-vilab/VACE/blob/48eb44f1c4be87cc65a98bff985a26976841e9f3/vace/models/wan/modules/model.py
 # Adapted for causal/autoregressive generation with factory pattern
 # Pipeline-agnostic using duck typing - works with any CausalWanModel
-import inspect
 import math
 
 import torch
@@ -87,6 +86,14 @@ class CausalVaceWanModel(nn.Module):
 
         # Get the original block class BEFORE replacing blocks
         self._original_block_class = type(causal_wan_model.blocks[0])
+        import inspect
+
+        block_forward_params = inspect.signature(self._original_block_class.forward).parameters
+        self._block_forward_accepts_cache_start = "cache_start" in block_forward_params
+        self._block_forward_accepts_current_end = "current_end" in block_forward_params
+        self._block_forward_accepts_kv_cache_attention_bias = (
+            "kv_cache_attention_bias" in block_forward_params
+        )
 
         # Create factory-generated classes for this pipeline's block type
         self._BaseWanAttentionBlock = create_base_attention_block_class(
@@ -109,10 +116,46 @@ class CausalVaceWanModel(nn.Module):
             kernel_size=self.patch_size,
             stride=self.patch_size,
         )
+        # Cache: VACE patch-embedded context is constant across denoise steps within a chunk.
+        # Cache the patch embedding + flatten/pad work to avoid re-running it per timestep.
+        self._cached_vace_context_key: tuple | None = None
+        self._cached_vace_context_tokens: torch.Tensor | None = None
 
-        # Cache block forward signature for dynamic parameter filtering
-        # This allows the VACE model to work with any CausalWanModel implementation
-        self._block_forward_params = self._get_block_forward_params()
+    def _prepare_vace_context_tokens(
+        self, vace_context: list[torch.Tensor], seq_len: int
+    ) -> torch.Tensor:
+        # Embed VACE context
+        c = [self._vace_patch_embed(u) for u in vace_context]
+        c = [u.flatten(2).transpose(1, 2) for u in c]
+
+        # Pad to seq_len
+        c = torch.cat(
+            [
+                torch.cat(
+                    [u, u.new_zeros(1, max(0, seq_len - u.size(1)), u.size(2))], dim=1
+                )
+                for u in c
+            ]
+        )
+        return c
+
+    def _get_cached_vace_context_tokens(
+        self, vace_context: list[torch.Tensor], seq_len: int
+    ) -> torch.Tensor:
+        # Invalidate when the backing tensors change or the patch-embedding weights change.
+        bias = self.vace_patch_embedding.bias
+        key = (
+            int(seq_len),
+            int(getattr(self.vace_patch_embedding.weight, "_version", 0)),
+            int(getattr(bias, "_version", 0)) if bias is not None else None,
+            tuple(id(u) for u in vace_context),
+        )
+        if key == self._cached_vace_context_key and self._cached_vace_context_tokens is not None:
+            return self._cached_vace_context_tokens
+        c = self._prepare_vace_context_tokens(vace_context, seq_len)
+        self._cached_vace_context_key = key
+        self._cached_vace_context_tokens = c
+        return c
 
     def _get_block_init_kwargs(self):
         """Get initialization kwargs for creating new blocks.
@@ -135,6 +178,8 @@ class CausalVaceWanModel(nn.Module):
         }
 
         # Add pipeline-specific kwargs based on what the original block class expects
+        import inspect
+
         sig = inspect.signature(self._original_block_class.__init__)
         params = sig.parameters
 
@@ -147,71 +192,15 @@ class CausalVaceWanModel(nn.Module):
 
         return kwargs
 
-    def _get_block_forward_params(self):
-        """Get the set of parameter names accepted by the block's forward method.
-
-        Inspects the original block class's forward signature to determine which
-        parameters should be passed through to blocks. This allows the VACE model
-        to work with any CausalWanModel implementation without hardcoding parameter names.
-
-        Returns:
-            set: Parameter names accepted by block.forward(), or None if the block
-                 accepts **kwargs (VAR_KEYWORD) and can handle any parameters.
-        """
-        sig = inspect.signature(self._original_block_class.forward)
-
-        # If block accepts **kwargs, return None to indicate all params are accepted
-        has_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
-        if has_var_keyword:
-            return None
-
-        return set(sig.parameters.keys())
-
-    def _filter_block_kwargs(self, block_kwargs, block_index):
-        """Filter and prepare kwargs for a specific block.
-
-        Handles two types of parameters:
-        1. Per-block indexed: Lists with length matching num_blocks (e.g., kv_bank)
-           These get indexed with block_index.
-        2. Shared: Scalar/other values passed to all blocks as-is
-
-        Only includes parameters that the block's forward method accepts.
-
-        Args:
-            block_kwargs: Dict of additional kwargs from _forward_inference
-            block_index: Index of the current block
-
-        Returns:
-            Dict of kwargs filtered and prepared for this specific block
-        """
-        if not block_kwargs:
-            return {}
-
-        filtered = {}
-        for key, value in block_kwargs.items():
-            # Skip if block doesn't accept this parameter
-            if (
-                self._block_forward_params is not None
-                and key not in self._block_forward_params
-            ):
-                continue
-
-            # Check if this is a per-block indexed parameter (list matching block count)
-            if isinstance(value, list | tuple) and len(value) == self.num_layers:
-                filtered[key] = value[block_index]
-            else:
-                filtered[key] = value
-
-        return filtered
-
     def _replace_blocks_with_hint_injection_support(self):
         """Replace blocks with BaseWanAttentionBlock to support hint injection.
 
         Creates new block instances of the factory-generated class and copies
         weights from the original blocks. Uses proper inheritance (not composition),
         so state_dict paths are preserved.
+
+        Memory-optimized: replaces blocks one at a time to avoid doubling memory
+        usage when wrapping large models (e.g. 14B).
         """
         original_blocks = self.causal_wan_model.blocks
 
@@ -222,34 +211,45 @@ class CausalVaceWanModel(nn.Module):
         # Get initialization kwargs
         block_kwargs = self._get_block_init_kwargs()
 
-        # Create new blocks with hint injection support
+        # Replace blocks one-at-a-time to minimize peak memory usage.
         new_blocks = nn.ModuleList()
         for i in range(self.num_layers):
             block_id = self.vace_layers_mapping[i] if i in self.vace_layers else None
-            new_block = self._BaseWanAttentionBlock(
-                **block_kwargs,
-                block_id=block_id,
-            )
-            new_blocks.append(new_block)
+            orig_block = original_blocks[i]
 
-        # Set to eval mode and move to correct device/dtype
-        new_blocks.eval()
-        new_blocks.to(device=orig_device, dtype=orig_dtype)
+            with torch.device("cpu"):
+                new_block = self._BaseWanAttentionBlock(
+                    **block_kwargs,
+                    block_id=block_id,
+                )
 
-        # Copy weights from original blocks
-        for _i, (orig_block, new_block) in enumerate(
-            zip(original_blocks, new_blocks, strict=False)
-        ):
             orig_state = orig_block.state_dict()
             new_state = new_block.state_dict()
             saved_block_id = new_block.block_id
 
             for key in orig_state.keys():
                 if key in new_state:
-                    new_state[key] = orig_state[key].clone()
+                    new_state[key] = orig_state[key].detach().to("cpu")
 
             new_block.load_state_dict(new_state, strict=False, assign=True)
             new_block.block_id = saved_block_id
+
+            # Drop the original block reference early so its parameters can be freed.
+            # This avoids a full-model 2x peak during wrapping.
+            original_blocks[i] = nn.Identity()
+            del orig_block
+            del orig_state
+            del new_state
+
+            new_block = new_block.to(device=orig_device, dtype=orig_dtype)
+            new_block.eval()
+            new_blocks.append(new_block)
+
+            if torch.cuda.is_available() and i % 10 == 0:
+                torch.cuda.empty_cache()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Replace blocks in wrapped model
         self.causal_wan_model.blocks = new_blocks
@@ -258,25 +258,28 @@ class CausalVaceWanModel(nn.Module):
         self.blocks = new_blocks
 
     def _create_vace_blocks(self):
-        """Create VACE blocks for parallel processing of reference images."""
-        # Get device and dtype from existing blocks
+        """Create VACE blocks for parallel processing of reference images.
+
+        Create on CPU by default; the owning pipeline can move these to the
+        target (device, dtype) before loading VACE weights.
+        """
+        # Get dtype from existing blocks
         orig_dtype = next(self.blocks[0].parameters()).dtype
-        orig_device = next(self.blocks[0].parameters()).device
 
         # Get initialization kwargs
         block_kwargs = self._get_block_init_kwargs()
 
-        # Create VACE blocks
+        # Create VACE blocks on CPU to minimize peak memory usage during init.
         vace_blocks = nn.ModuleList()
-        for block_id in range(len(self.vace_layers)):
-            vace_block = self._VaceWanAttentionBlock(
-                **block_kwargs,
-                block_id=block_id,
-            )
-            vace_blocks.append(vace_block)
+        with torch.device("cpu"):
+            for block_id in range(len(self.vace_layers)):
+                vace_block = self._VaceWanAttentionBlock(
+                    **block_kwargs,
+                    block_id=block_id,
+                )
+                vace_blocks.append(vace_block)
 
-        # Move to correct device/dtype
-        vace_blocks.to(device=orig_device, dtype=orig_dtype)
+        vace_blocks.to(dtype=orig_dtype)
 
         self.vace_blocks = vace_blocks
 
@@ -295,25 +298,7 @@ class CausalVaceWanModel(nn.Module):
         crossattn_cache,
     ):
         """Process VACE context to generate hints."""
-        # Get target dtype from vace_patch_embedding parameters
-        target_dtype = next(self.vace_patch_embedding.parameters()).dtype
-
-        # Convert all VACE context to model dtype first
-        vace_context_converted = [u.to(dtype=target_dtype) for u in vace_context]
-
-        # Embed VACE context
-        c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context_converted]
-        c = [u.flatten(2).transpose(1, 2) for u in c]
-
-        # Pad to seq_len
-        c = torch.cat(
-            [
-                torch.cat(
-                    [u, u.new_zeros(1, max(0, seq_len - u.size(1)), u.size(2))], dim=1
-                )
-                for u in c
-            ]
-        )
+        c = self._get_cached_vace_context_tokens(vace_context, seq_len)
 
         # Process through VACE blocks
         for _block_idx, block in enumerate(self.vace_blocks):
@@ -334,6 +319,49 @@ class CausalVaceWanModel(nn.Module):
         hints = torch.unbind(c)[:-1]
         return hints
 
+    def _patch_embed(self, u: torch.Tensor) -> torch.Tensor:
+        """Patch-embed a single latent sample, preferring pipeline fastpaths.
+
+        Some pipelines (e.g. krea_realtime_video) provide a Conv3d(t=1) → Conv2d
+        fastpath to avoid slow Conv3d implementations on some backends. When present, prefer it.
+        """
+        patch_embed = getattr(self.causal_wan_model, "_patch_embed", None)
+        if callable(patch_embed):
+            return patch_embed(u)
+        return self.causal_wan_model.patch_embedding(u.unsqueeze(0))
+
+    def _vace_patch_embed(self, u: torch.Tensor) -> torch.Tensor:
+        """Patch-embed a single VACE context sample.
+
+        VACE uses a Conv3d patch embedding with the same (t,h,w) patch size as the
+        base model. When t==1, apply an equivalent Conv2d per frame to avoid slow
+        Conv3d paths on some backends.
+        """
+        u = u.unsqueeze(0)  # [1, C, F, H, W]
+        try:
+            t_patch, h_patch, w_patch = self.patch_size
+        except Exception:
+            return self.vace_patch_embedding(u)
+
+        if int(t_patch) != 1:
+            return self.vace_patch_embedding(u)
+
+        b, c, f, h, w = u.shape
+        u2 = u.permute(0, 2, 1, 3, 4).reshape(b * f, c, h, w)  # [B*F, C, H, W]
+
+        out2 = torch.nn.functional.conv2d(
+            u2,
+            self.vace_patch_embedding.weight.squeeze(2),
+            bias=self.vace_patch_embedding.bias,
+            stride=(int(h_patch), int(w_patch)),
+            padding=0,
+        )
+
+        out = out2.reshape(b, f, out2.shape[1], out2.shape[2], out2.shape[3]).permute(
+            0, 2, 1, 3, 4
+        )
+        return out
+
     def _forward_inference(
         self,
         x,
@@ -347,6 +375,9 @@ class CausalVaceWanModel(nn.Module):
         kv_cache=None,
         crossattn_cache=None,
         current_start=0,
+        current_end=0,
+        cache_start=0,
+        kv_cache_attention_bias=1.0,
         **block_kwargs,
     ):
         """Forward pass with optional VACE conditioning."""
@@ -361,7 +392,7 @@ class CausalVaceWanModel(nn.Module):
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y, strict=False)]
 
         # Embeddings
-        x = [self.causal_wan_model.patch_embedding(u.unsqueeze(0)) for u in x]
+        x = [self._patch_embed(u) for u in x]
         grid_sizes = torch.stack(
             [torch.tensor(u.shape[2:], dtype=torch.long) for u in x]
         )
@@ -421,8 +452,8 @@ class CausalVaceWanModel(nn.Module):
                 crossattn_cache,
             )
 
-        # Base arguments for transformer blocks (shared across all blocks)
-        base_kwargs = {
+        # Arguments for transformer blocks
+        kwargs = {
             "e": e0,
             "seq_lens": seq_lens,
             "grid_sizes": grid_sizes,
@@ -443,23 +474,24 @@ class CausalVaceWanModel(nn.Module):
         # Process through blocks
         cache_update_infos = []
         for block_index, block in enumerate(self.blocks):
-            # Build per-block kwargs:
-            # - kv_cache/crossattn_cache are always per-block indexed
-            # - Additional block_kwargs are dynamically filtered based on block's signature
-            #   and automatically indexed if they're per-block lists
-            filtered_block_kwargs = self._filter_block_kwargs(block_kwargs, block_index)
-            per_block_kwargs = {
+            block_call_kwargs = {
                 "kv_cache": kv_cache[block_index],
                 "current_start": current_start,
-                **filtered_block_kwargs,
+                **block_kwargs,
             }
+            if self._block_forward_accepts_current_end:
+                block_call_kwargs["current_end"] = current_end
+            if self._block_forward_accepts_cache_start:
+                block_call_kwargs["cache_start"] = cache_start
+            if self._block_forward_accepts_kv_cache_attention_bias:
+                block_call_kwargs["kv_cache_attention_bias"] = kv_cache_attention_bias
 
             if torch.is_grad_enabled() and self.causal_wan_model.gradient_checkpointing:
-                kwargs = {**base_kwargs, **per_block_kwargs}
                 result = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x,
                     **kwargs,
+                    **block_call_kwargs,
                     use_reentrant=False,
                 )
                 if kv_cache is not None and isinstance(result, tuple):
@@ -468,9 +500,8 @@ class CausalVaceWanModel(nn.Module):
                 else:
                     x = result
             else:
-                per_block_kwargs["crossattn_cache"] = crossattn_cache[block_index]
-                kwargs = {**base_kwargs, **per_block_kwargs}
-                result = block(x, **kwargs)
+                block_call_kwargs["crossattn_cache"] = crossattn_cache[block_index]
+                result = block(x, **kwargs, **block_call_kwargs)
                 if kv_cache is not None and isinstance(result, tuple):
                     x, block_cache_update_info = result
                     cache_update_infos.append((block_index, block_cache_update_info))
@@ -478,9 +509,7 @@ class CausalVaceWanModel(nn.Module):
                     x = result
 
         if kv_cache is not None and cache_update_infos:
-            self.causal_wan_model._apply_cache_updates(
-                kv_cache, cache_update_infos, **block_kwargs
-            )
+            self.causal_wan_model._apply_cache_updates(kv_cache, cache_update_infos)
 
         x = self.causal_wan_model.head(
             x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2)
