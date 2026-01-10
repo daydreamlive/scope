@@ -12,10 +12,13 @@ Child classes can override field defaults with type-annotated assignments:
     denoising_steps: list[int] = [1000, 750, 500, 250]
 """
 
-from typing import Annotated, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
+
+if TYPE_CHECKING:
+    from .artifacts import Artifact
 
 
 # Field templates - use these to override defaults while keeping constraints/descriptions
@@ -156,6 +159,7 @@ class BasePipelineConfig(BaseModel):
     docs_url: ClassVar[str | None] = None
     estimated_vram_gb: ClassVar[float | None] = None
     requires_models: ClassVar[bool] = False
+    artifacts: ClassVar[list["Artifact"]] = []
     supports_lora: ClassVar[bool] = False
     supports_vace: ClassVar[bool] = False
 
@@ -285,7 +289,8 @@ class BasePipelineConfig(BaseModel):
         )
         metadata["docs_url"] = cls.docs_url
         metadata["estimated_vram_gb"] = cls.estimated_vram_gb
-        metadata["requires_models"] = cls.requires_models
+        # Infer requires_models from artifacts if not explicitly set
+        metadata["requires_models"] = cls.requires_models or bool(cls.artifacts)
         metadata["supports_lora"] = cls.supports_lora
         metadata["supports_vace"] = cls.supports_vace
         metadata["supports_cache_management"] = cls.supports_cache_management

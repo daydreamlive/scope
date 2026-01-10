@@ -132,6 +132,11 @@ def _register_pipelines():
         ),
         ("memflow", ".memflow.pipeline", "MemFlowPipeline"),
         ("passthrough", ".passthrough.pipeline", "PassthroughPipeline"),
+        (
+            "video_depth_anything",
+            ".video_depth_anything.pipeline",
+            "VideoDepthAnythingPipeline",
+        ),
     ]
 
     # Try to import and register each pipeline

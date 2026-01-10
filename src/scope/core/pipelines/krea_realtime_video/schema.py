@@ -1,6 +1,14 @@
 from pydantic import Field
 
+from ..artifacts import HuggingfaceRepoArtifact
 from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..common_artifacts import (
+    LIGHTTAE_ARTIFACT,
+    LIGHTVAE_ARTIFACT,
+    TAE_ARTIFACT,
+    UMT5_ENCODER_ARTIFACT,
+    WAN_1_3B_ARTIFACT,
+)
 from ..utils import VaeType
 
 
@@ -13,9 +21,23 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     )
     docs_url = "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/krea_realtime_video/docs/usage.md"
     estimated_vram_gb = 32.0
-    requires_models = True
     supports_lora = True
     supports_vace = True
+    artifacts = [
+        WAN_1_3B_ARTIFACT,
+        UMT5_ENCODER_ARTIFACT,
+        LIGHTVAE_ARTIFACT,
+        TAE_ARTIFACT,
+        LIGHTTAE_ARTIFACT,
+        HuggingfaceRepoArtifact(
+            repo_id="Wan-AI/Wan2.1-T2V-14B",
+            files=["config.json"],
+        ),
+        HuggingfaceRepoArtifact(
+            repo_id="krea/krea-realtime-video",
+            files=["krea-realtime-video-14b.safetensors"],
+        ),
+    ]
 
     supports_cache_management = True
     supports_kv_cache_bias = True

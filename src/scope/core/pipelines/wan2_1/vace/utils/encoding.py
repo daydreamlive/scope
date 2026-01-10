@@ -39,6 +39,10 @@ def vace_encode_frames(
         pad_to_96: Whether to pad to 96 channels (default True). Set False when masks will be added later.
         use_cache: Whether to use streaming encode cache for frames (default True).
                    Set False for one-off encoding (e.g., reference images only mode).
+                   When masks are provided, caching is handled automatically based on
+                   mask content: conditioning mode (all-1s masks) uses cache for both
+                   streams, while extension/inpainting mode (mixed masks) skips cache
+                   for reactive to weaken temporal blending.
         inactive_cache: Explicit encoder cache for inactive stream (TAE only).
                        Create via vae.create_encoder_cache(). Reuse across chunks
                        for temporal continuity. If None, uses VAE's default cache.
@@ -78,20 +82,29 @@ def vace_encode_frames(
         masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
         inactive = [i * (1 - m) + 0 * m for i, m in zip(frames, masks, strict=False)]
         reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks, strict=False)]
+
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
+
+        # Auto-detect mode based on mask content and handle caching appropriately:
+        # - Conditioning mode (mask all 1s): inactive=zeros, reactive=content → both use cache
+        # - Extension/inpainting mode (mixed mask): reactive skips cache to weaken temporal blending
+        is_conditioning_mode = all((m > 0.5).all() for m in masks)
 
         # Encode with separate caches for temporal continuity without cross-contamination
         inactive_out = vae.encode_to_latent(
             inactive_stacked, use_cache=True, encoder_cache=inactive_cache
         )
         reactive_out = vae.encode_to_latent(
-            reactive_stacked, use_cache=True, encoder_cache=reactive_cache
+            reactive_stacked,
+            use_cache=is_conditioning_mode,
+            encoder_cache=reactive_cache,
         )
 
         # Transpose [B, F, C, H, W] -> [B, C, F, H, W] and concatenate along channel dim
         inactive_transposed = [lat.permute(1, 0, 2, 3) for lat in inactive_out]
         reactive_transposed = [lat.permute(1, 0, 2, 3) for lat in reactive_out]
+
         latents = [
             torch.cat((u, c), dim=0)
             for u, c in zip(inactive_transposed, reactive_transposed, strict=False)
@@ -202,9 +215,13 @@ def vace_latent(z, m):
 
 def load_and_prepare_reference_images(
     ref_image_paths, target_height, target_width, device
-):
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     """
     Load and prepare reference images for VACE conditioning.
+
+    Uses crop-to-fill strategy: scales image to cover target dimensions, then
+    center-crops to exact size. This avoids padding artifacts at the cost of
+    losing a small amount of edge content when aspect ratios differ.
 
     Args:
         ref_image_paths: List of paths to reference images
@@ -213,9 +230,14 @@ def load_and_prepare_reference_images(
         device: Target device
 
     Returns:
-        List of prepared reference image tensors [C, 1, H, W]
+        Tuple of (prepared_images, spatial_masks) where:
+        - prepared_images: List of image tensors [C, 1, H, W] normalized to [-1, 1]
+        - spatial_masks: List of mask tensors [1, 1, H, W] indicating padding regions
+          (0=image region to preserve, 1=padding region to generate). Always all-zeros
+          with crop-to-fill since entire frame is image content.
     """
     prepared_refs = []
+    spatial_masks = []
 
     for ref_path in ref_image_paths:
         # Load image
@@ -228,17 +250,12 @@ def load_and_prepare_reference_images(
         if ref_img.shape[-2:] != (target_height, target_width):
             ref_height, ref_width = ref_img.shape[-2:]
 
-            # Create white canvas
-            white_canvas = torch.ones(
-                (3, 1, target_height, target_width), device=device
-            )
-
-            # Calculate scale to fit
-            scale = min(target_height / ref_height, target_width / ref_width)
+            # Scale to fill (crop-to-fit) - use max to ensure image covers target
+            scale = max(target_height / ref_height, target_width / ref_width)
             new_height = int(ref_height * scale)
             new_width = int(ref_width * scale)
 
-            # Resize
+            # Resize to cover target dimensions
             resized_image = (
                 F.interpolate(
                     ref_img.squeeze(1).unsqueeze(0),
@@ -250,16 +267,31 @@ def load_and_prepare_reference_images(
                 .unsqueeze(1)
             )
 
-            # Center on canvas
-            top = (target_height - new_height) // 2
-            left = (target_width - new_width) // 2
-            white_canvas[:, :, top : top + new_height, left : left + new_width] = (
-                resized_image
+            # Center-crop to target size
+            top = (new_height - target_height) // 2
+            left = (new_width - target_width) // 2
+            ref_img = resized_image[
+                :, :, top : top + target_height, left : left + target_width
+            ].to(device)
+
+            # No padding, so spatial mask is all zeros (entire frame is image)
+            spatial_mask = torch.zeros(
+                (1, 1, target_height, target_width),
+                device=device,
+                dtype=torch.float32,
             )
-            ref_img = white_canvas
+            spatial_masks.append(spatial_mask)
         else:
             ref_img = ref_img.to(device)
 
+            # No padding needed, so mask is all zeros (all image, no padding)
+            spatial_mask = torch.zeros(
+                (1, 1, target_height, target_width),
+                device=device,
+                dtype=torch.float32,
+            )
+            spatial_masks.append(spatial_mask)
+
         prepared_refs.append(ref_img)
 
-    return prepared_refs
+    return prepared_refs, spatial_masks

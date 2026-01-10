@@ -13,7 +13,8 @@ from pathlib import Path
 
 import httpx
 
-from .artifacts import Artifact, HuggingfaceRepoArtifact
+from scope.core.pipelines.artifacts import Artifact, HuggingfaceRepoArtifact
+
 from .download_progress_manager import download_progress_manager
 from .models_config import ensure_models_dir
 
@@ -368,12 +369,16 @@ def download_models(pipeline_id: str) -> None:
     Args:
         pipeline_id: Pipeline ID to download models for.
     """
-    from .pipeline_artifacts import PIPELINE_ARTIFACTS
+    from .artifact_registry import get_artifacts_for_pipeline
 
     models_root = ensure_models_dir()
 
     logger.info(f"Downloading models for pipeline: {pipeline_id}")
-    artifacts = PIPELINE_ARTIFACTS[pipeline_id]
+    artifacts = get_artifacts_for_pipeline(pipeline_id)
+
+    if not artifacts:
+        logger.warning(f"No artifacts defined for pipeline: {pipeline_id}")
+        return
 
     # Download each artifact (progress tracking starts in set_download_context)
     for artifact in artifacts:

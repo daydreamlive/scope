@@ -1166,7 +1166,7 @@ export function StreamPage() {
             onVaceContextScaleChange={handleVaceContextScaleChange}
             vaeType={settings.vaeType ?? "wan"}
             onVaeTypeChange={handleVaeTypeChange}
-            vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes ?? ["wan"]}
+            vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
           />
         </div>
       </div>
