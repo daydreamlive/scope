@@ -101,12 +101,14 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     """
     models_dir = get_models_dir()
 
-    from .pipeline_artifacts import PIPELINE_ARTIFACTS
+    from .artifact_registry import get_artifacts_for_pipeline
 
-    if pipeline_id == "passthrough" or pipeline_id not in PIPELINE_ARTIFACTS:
+    if pipeline_id == "passthrough" or pipeline_id is None:
         return []
 
-    artifacts = PIPELINE_ARTIFACTS[pipeline_id]
+    artifacts = get_artifacts_for_pipeline(pipeline_id)
+    if not artifacts:
+        return []
 
     required_files = []
     for artifact in artifacts:

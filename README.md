@@ -57,8 +57,8 @@ The following models currently have more restrictive requirements:
 **Krea Realtime Video**
 
 - Requires a Nvidia GPU with >= 32 GB VRAM and we recommend > 40GB VRAM GPU in order to get better results
-- At the default resolution of 320x576, a 32 GB VRAM GPU (eg RTX 5090) can run the model with fp8 quantization
-- If you want to use a higher resolution like 480x832, we suggest using a > 40GB VRAM GPU (eg H100, RTX 6000 Pro)
+- At the default resolution of 576x320, a 32 GB VRAM GPU (eg RTX 5090) can run the model with fp8 quantization
+- If you want to use a higher resolution like 832x480, we suggest using a > 40GB VRAM GPU (eg H100, RTX 6000 Pro)
 
 If you do not have access to a GPU with these specs then we recommend installing on [Runpod](#runpod).
 

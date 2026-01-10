@@ -30,7 +30,12 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ..utils.encoding import load_and_prepare_reference_images
+from ..utils.encoding import (
+    load_and_prepare_reference_images,
+    vace_encode_frames,
+    vace_encode_masks,
+    vace_latent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +89,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         return [
             ConfigSpec("num_frame_per_block", 3),
             ConfigSpec("vae_temporal_downsample_factor", 4),
+            ConfigSpec("vae_spatial_downsample_factor", 8),  # Used by vae_stride tuple
             ConfigSpec("device", torch.device("cuda")),
         ]
 
@@ -111,6 +117,16 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 default=None,
                 type_hint=torch.Tensor | None,
                 description="Spatial control masks [B, 1, F, H, W]: defines WHERE to apply conditioning (white=generate, black=preserve). Defaults to ones (all white) when None. Works with any vace_input_frames type.",
+            ),
+            InputParam(
+                "first_frame_image",
+                default=None,
+                description="Path to first frame reference image for extension mode. When provided alone, enables 'firstframe' mode (ref at start, generate after). When provided with last_frame_image, enables 'firstlastframe' mode (refs at both ends).",
+            ),
+            InputParam(
+                "last_frame_image",
+                default=None,
+                description="Path to last frame reference image for extension mode. When provided alone, enables 'lastframe' mode (generate before, ref at end). When provided with first_frame_image, enables 'firstlastframe' mode (refs at both ends).",
             ),
             InputParam(
                 "height",
@@ -151,22 +167,40 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         vace_ref_images = block_state.vace_ref_images
         vace_input_frames = block_state.vace_input_frames
+        first_frame_image: str | None = block_state.first_frame_image
+        last_frame_image: str | None = block_state.last_frame_image
         current_start = block_state.current_start_frame
 
-        # If neither input is provided, skip VACE conditioning
-        if (
-            vace_ref_images is None or len(vace_ref_images) == 0
-        ) and vace_input_frames is None:
+        # If no inputs provided, skip VACE conditioning
+        has_ref_images = vace_ref_images is not None and len(vace_ref_images) > 0
+        has_input_frames = vace_input_frames is not None
+        has_first_frame = first_frame_image is not None
+        has_last_frame = last_frame_image is not None
+        has_extension = has_first_frame or has_last_frame
+
+        if not has_ref_images and not has_input_frames and not has_extension:
             block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
             return components, state
 
         # Determine encoding path based on what's provided (implicit mode detection)
-        has_ref_images = vace_ref_images is not None and len(vace_ref_images) > 0
-        has_input_frames = vace_input_frames is not None
+        if has_extension:
+            # Extension mode: Generate frames before/after reference frame(s)
+            # Mode is inferred from which frame images are provided
+            if has_first_frame and has_last_frame:
+                extension_mode = "firstlastframe"
+            elif has_first_frame:
+                extension_mode = "firstframe"
+            else:
+                extension_mode = "lastframe"
 
-        if has_input_frames:
+            block_state.vace_context, block_state.vace_ref_images = (
+                self._encode_extension_mode(
+                    components, block_state, current_start, extension_mode
+                )
+            )
+        elif has_input_frames:
             # Standard VACE path: conditioning input (depth, flow, pose, etc.)
             # with optional reference images
             block_state.vace_context, block_state.vace_ref_images = (
@@ -203,8 +237,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             )
             return None, None
 
-        # Load and prepare reference images
-        prepared_refs = load_and_prepare_reference_images(
+        # Load and prepare reference images (spatial masks unused in R2V mode)
+        prepared_refs, _ = load_and_prepare_reference_images(
             ref_image_paths,
             block_state.height,
             block_state.width,
@@ -253,6 +287,240 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         # Return original paths, not tensors, so they can be reused in subsequent chunks
         return vace_context, ref_image_paths
 
+    def _encode_extension_mode(
+        self, components, block_state, current_start, extension_mode: str
+    ):
+        """
+        Encode VACE context with reference frames and dummy frames for temporal extension.
+
+        Loads reference image based on extension_mode (inferred from provided images),
+        replicates it across a temporal group, fills remaining frames with zeros (dummy frames),
+        and encodes with masks indicating which frames to inpaint (1=dummy, 0=reference).
+
+        Spatial masking: Auto-generates spatial mask based on padding detection
+        (0=image region, 1=padding region). This allows the first/last frame influence
+        to be regional rather than full-frame, letting the model freely generate in
+        padded areas while preserving the reference image's influence in its actual region.
+
+        Args:
+            extension_mode: Inferred mode ('firstframe', 'lastframe', or 'firstlastframe')
+        """
+        first_frame_image = block_state.first_frame_image
+        last_frame_image = block_state.last_frame_image
+
+        # Load reference images based on mode
+        if extension_mode == "firstframe":
+            images_to_load = [first_frame_image]
+        elif extension_mode == "lastframe":
+            images_to_load = [last_frame_image]
+        elif extension_mode == "firstlastframe":
+            # Load BOTH images for firstlastframe mode
+            images_to_load = [first_frame_image, last_frame_image]
+
+        # Load and crop-to-fill reference images (spatial masks always zeros with crop strategy)
+        prepared_refs, spatial_masks = load_and_prepare_reference_images(
+            images_to_load,
+            block_state.height,
+            block_state.width,
+            components.config.device,
+        )
+
+        vae = components.vae
+        vae_dtype = next(vae.parameters()).dtype
+
+        num_frames = (
+            components.config.num_frame_per_block
+            * components.config.vae_temporal_downsample_factor
+        )
+
+        # Determine ref placement
+        ref_at_start = extension_mode in ("firstframe", "firstlastframe")
+        ref_at_end = extension_mode in ("lastframe", "firstlastframe")
+
+        frames, masks = self._build_extension_frames_and_masks(
+            prepared_refs=prepared_refs,
+            num_frames=num_frames,
+            temporal_group_size=components.config.vae_temporal_downsample_factor,
+            ref_at_start=ref_at_start,
+            ref_at_end=ref_at_end,
+            device=components.config.device,
+            dtype=vae_dtype,
+            height=block_state.height,
+            width=block_state.width,
+            spatial_masks=spatial_masks,
+        )
+
+        frames_to_encode = [frames]
+        masks_to_encode = [masks]
+
+        z0 = vace_encode_frames(
+            vae=vae,
+            frames=frames_to_encode,
+            ref_images=[None],
+            masks=masks_to_encode,
+            pad_to_96=False,
+            use_cache=False,
+        )
+
+        vae_stride = (
+            components.config.vae_temporal_downsample_factor,
+            components.config.vae_spatial_downsample_factor,
+            components.config.vae_spatial_downsample_factor,
+        )
+        m0 = vace_encode_masks(
+            masks=masks_to_encode,
+            ref_images=[None],
+            vae_stride=vae_stride,
+        )
+
+        vace_context = vace_latent(z0, m0)
+
+        # Log spatial mask status
+        has_padding = any((mask > 0).any() for mask in spatial_masks)
+        logger.info(
+            f"_encode_extension_mode: mode={extension_mode}, current_start={current_start}, "
+            f"num_frames={num_frames}, vace_context_shape={vace_context[0].shape}, "
+            f"spatial_masking={'active (padding detected)' if has_padding else 'inactive (no padding)'}"
+        )
+
+        return vace_context, prepared_refs
+
+    def _build_extension_frames_and_masks(
+        self,
+        prepared_refs: list[torch.Tensor],
+        num_frames: int,
+        temporal_group_size: int,
+        ref_at_start: bool,
+        ref_at_end: bool,
+        device: torch.device,
+        dtype: torch.dtype,
+        height: int,
+        width: int,
+        spatial_masks: list[torch.Tensor] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Build frames and masks for extension mode with reference frame replication.
+
+        Args:
+            prepared_refs: List of prepared reference images [C, 1, H, W].
+                For firstframe/lastframe: single image.
+                For firstlastframe: [first_image, last_image].
+            num_frames: Total number of frames to generate
+            temporal_group_size: Number of frames in a temporal VAE group
+            ref_at_start: True to place reference at start (firstframe, firstlastframe)
+            ref_at_end: True to place reference at end (lastframe, firstlastframe)
+            device: Target device
+            dtype: Target dtype for frames
+            height: Frame height
+            width: Frame width
+            spatial_masks: Optional list of spatial masks [1, 1, H, W] where 0=image region,
+                1=padding region. When provided, reference frame masks use these spatial masks
+                instead of all-zeros, allowing the model to freely generate in padding regions
+                while preserving the reference image's influence in its actual region.
+
+        Returns:
+            Tuple of (frames, masks) where:
+            - frames: [C, F, H, W] tensor with reference frames and dummy frames
+            - masks: [1, F, H, W] tensor with spatial masks for reference frames (0=preserve,
+                     1=generate in padding), 1s for dummy frames (fully generate)
+        """
+
+        # Helper to create ref and mask tensors
+        def make_ref_block(
+            ref_tensor: torch.Tensor,
+            spatial_mask: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Replicate ref across temporal group, return (frames, masks)."""
+            ref_replicated = ref_tensor.repeat(1, temporal_group_size, 1, 1)
+
+            if spatial_mask is not None:
+                # Use spatial mask: 0=preserve image region, 1=generate in padding
+                # Replicate [1, 1, H, W] -> [1, temporal_group_size, H, W]
+                ref_mask = spatial_mask.repeat(1, temporal_group_size, 1, 1)
+            else:
+                # No spatial mask: all zeros (preserve entire reference frame)
+                ref_mask = torch.zeros(
+                    (1, temporal_group_size, height, width),
+                    device=device,
+                    dtype=torch.float32,
+                )
+            return ref_replicated, ref_mask
+
+        # Get spatial masks if provided
+        first_spatial_mask = spatial_masks[0] if spatial_masks else None
+        last_spatial_mask = (
+            spatial_masks[1]
+            if spatial_masks and len(spatial_masks) > 1
+            else first_spatial_mask
+        )
+
+        if ref_at_start and ref_at_end:
+            # firstlastframe: [ref_first, ref_first, ..., dummy, dummy, ..., ref_last, ref_last, ...]
+            # Two temporal groups for refs, rest for dummy
+            num_dummy_frames = num_frames - 2 * temporal_group_size
+            if num_dummy_frames < 0:
+                raise ValueError(
+                    f"Not enough frames for firstlastframe mode: need at least {2 * temporal_group_size} frames, got {num_frames}"
+                )
+
+            first_ref_frames, first_ref_mask = make_ref_block(
+                prepared_refs[0], first_spatial_mask
+            )
+            last_ref_frames, last_ref_mask = make_ref_block(
+                prepared_refs[1], last_spatial_mask
+            )
+
+            dummy_frames = torch.zeros(
+                (3, num_dummy_frames, height, width), device=device, dtype=dtype
+            )
+            dummy_mask = torch.ones(
+                (1, num_dummy_frames, height, width),
+                device=device,
+                dtype=torch.float32,
+            )
+
+            frames = torch.cat([first_ref_frames, dummy_frames, last_ref_frames], dim=1)
+            masks = torch.cat([first_ref_mask, dummy_mask, last_ref_mask], dim=1)
+
+        elif ref_at_start:
+            # firstframe: [ref, ref, ref, zeros, zeros, ...]
+            num_dummy_frames = num_frames - temporal_group_size
+            ref_frames, ref_mask = make_ref_block(prepared_refs[0], first_spatial_mask)
+
+            dummy_frames = torch.zeros(
+                (3, num_dummy_frames, height, width), device=device, dtype=dtype
+            )
+            dummy_mask = torch.ones(
+                (1, num_dummy_frames, height, width),
+                device=device,
+                dtype=torch.float32,
+            )
+
+            frames = torch.cat([ref_frames, dummy_frames], dim=1)
+            masks = torch.cat([ref_mask, dummy_mask], dim=1)
+
+        elif ref_at_end:
+            # lastframe: [zeros, zeros, ..., ref, ref, ref]
+            num_dummy_frames = num_frames - temporal_group_size
+            ref_frames, ref_mask = make_ref_block(prepared_refs[0], first_spatial_mask)
+
+            dummy_frames = torch.zeros(
+                (3, num_dummy_frames, height, width), device=device, dtype=dtype
+            )
+            dummy_mask = torch.ones(
+                (1, num_dummy_frames, height, width),
+                device=device,
+                dtype=torch.float32,
+            )
+
+            frames = torch.cat([dummy_frames, ref_frames], dim=1)
+            masks = torch.cat([dummy_mask, ref_mask], dim=1)
+
+        else:
+            raise ValueError("At least one of ref_at_start or ref_at_end must be True")
+
+        return frames, masks
+
     def _encode_with_conditioning(self, components, block_state, current_start):
         """
         Encode VACE input using the standard VACE path, with optional reference images.
@@ -290,8 +558,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         # Validate resolution
         if height != block_state.height or width != block_state.width:
             raise ValueError(
-                f"VaceEncodingBlock._encode_with_conditioning: Input resolution {height}x{width} "
-                f"does not match target resolution {block_state.height}x{block_state.width}"
+                f"VaceEncodingBlock._encode_with_conditioning: Input resolution {width}x{height} "
+                f"does not match target resolution {block_state.width}x{block_state.height}"
             )
 
         # Check if we have reference images too (for combined guidance)
@@ -366,7 +634,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         if has_ref_images:
             from ..utils.encoding import load_and_prepare_reference_images
 
-            prepared_refs = load_and_prepare_reference_images(
+            # Spatial masks unused in conditioning mode (masks come from vace_input_masks)
+            prepared_refs, _ = load_and_prepare_reference_images(
                 ref_image_paths,
                 block_state.height,
                 block_state.width,
