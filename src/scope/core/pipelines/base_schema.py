@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
 if TYPE_CHECKING:
-    from scope.server.artifacts import Artifact
+    from .artifacts import Artifact
 
 
 # Field templates - use these to override defaults while keeping constraints/descriptions
