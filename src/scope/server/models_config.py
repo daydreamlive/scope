@@ -3,7 +3,7 @@ Models configuration module for daydream-scope.
 
 Provides centralized configuration for model storage location with support for:
 - Default location: ~/.daydream-scope/models
-- Environment variable override: DAYDREAM_MODELS_DIR
+- Environment variable override: DAYDREAM_SCOPE_MODELS_DIR
 """
 
 import logging

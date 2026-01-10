@@ -309,9 +309,10 @@ class CausalWanSelfAttention(nn.Module):
 
         q, k, v = qkv_fn(x)
 
-        if kv_cache is None or block_mask is not None:
-            # if it is teacher forcing training?
-            # is_tf = (s == seq_lens[0].item() * 2)
+        if kv_cache is None:
+            # Non-caching path: used for training or VACE forward (which passes kv_cache=None)
+            # Note: block_mask being set does NOT mean we should bypass KV cache
+            # VACE forward explicitly passes kv_cache=None when it doesn't want caching
             is_tf = False
             if is_tf:
                 print("Teacher forcing training")
@@ -380,12 +381,14 @@ class CausalWanSelfAttention(nn.Module):
                 roped_query = rope_apply(q, grid_sizes, freqs).type_as(v)
                 roped_key = rope_apply(k, grid_sizes, freqs).type_as(v)
 
-                local_end_index = roped_key.shape[1]
-                kv_cache["k"][:, :local_end_index] = roped_key
-                kv_cache["v"][:, :local_end_index] = v
+                # Only update kv_cache if it exists (VACE forward passes kv_cache=None)
+                if kv_cache is not None:
+                    local_end_index = roped_key.shape[1]
+                    kv_cache["k"][:, :local_end_index] = roped_key
+                    kv_cache["v"][:, :local_end_index] = v
 
-                kv_cache["global_end_index"] = local_end_index
-                kv_cache["local_end_index"] = local_end_index
+                    kv_cache["global_end_index"] = local_end_index
+                    kv_cache["local_end_index"] = local_end_index
 
                 padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
                 padded_roped_query = torch.cat(

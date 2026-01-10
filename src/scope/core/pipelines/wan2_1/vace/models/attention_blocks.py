@@ -79,6 +79,8 @@ def create_vace_attention_block_class(base_attention_block_class):
 
             # Run standard transformer block on current context
             # VACE blocks don't use caching since they process reference images once
+            # Pass block_mask to ensure the non-caching attention path is used
+            # crossattn_cache=None because VACE processes reference images without caching
             c = super().forward(
                 c,
                 e,
@@ -87,9 +89,9 @@ def create_vace_attention_block_class(base_attention_block_class):
                 freqs,
                 context,
                 context_lens,
-                block_mask,
+                block_mask,  # Must pass block_mask to trigger non-caching path in KREA
                 kv_cache=None,
-                crossattn_cache=None,
+                crossattn_cache=None,  # VACE doesn't use cross-attention caching
                 current_start=0,
             )
 
