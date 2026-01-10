@@ -29,6 +29,8 @@ Usage:
 
 from functools import partial
 
+from scope.core.pipelines.utils import VaeType
+
 from .tae import TAEWrapper
 from .wan import WanVAEWrapper
 
@@ -41,7 +43,7 @@ VAE_REGISTRY: dict[str, type] = {
     "lighttae": partial(TAEWrapper, use_lighttae=True),
 }
 
-DEFAULT_VAE_TYPE = "wan"
+DEFAULT_VAE_TYPE = VaeType.WAN
 
 
 def create_vae(
