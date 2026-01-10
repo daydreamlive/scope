@@ -243,7 +243,8 @@ export function StreamPage() {
 
     // Update temporal interpolation steps to mode-specific default
     const pipeline = pipelines?.[settings.pipelineId];
-    const pipelineDefaultSteps = pipeline?.defaultTemporalInterpolationSteps ?? 4;
+    const pipelineDefaultSteps =
+      pipeline?.defaultTemporalInterpolationSteps ?? 4;
     setTransitionSteps(
       modeDefaults.defaultTemporalInterpolationSteps ?? pipelineDefaultSteps
     );
