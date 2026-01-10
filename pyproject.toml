@@ -33,8 +33,8 @@ dependencies = [
     "httpx>=0.28.1",
     "twilio>=9.8.0",
     "uvicorn>=0.35.0",
-    "torch==2.8.0",
-    "torchvision==0.23.0",
+    "torch==2.9.1",
+    "torchvision==0.24.1",
     "easydict>=1.13",
     "diffusers>=0.31.0",
     "ftfy>=6.3.1",
@@ -50,10 +50,10 @@ dependencies = [
     "pluggy>=1.5.0",
     "click>=8.3.1",
     "peft>=0.17.1",
-    "torchao==0.13.0",
+    "torchao==0.15.0",
     "kernels>=0.10.4",
-    "triton==3.4.0; sys_platform == 'linux'",
-    "triton-windows==3.4.0.post21; sys_platform == 'win32'",
+    "triton==3.5.1; sys_platform == 'linux'",
+    "triton-windows==3.5.1.post24; sys_platform == 'win32'",
     "SpoutGL>=0.1.1; sys_platform == 'win32'",
     "PyOpenGL>=3.1.10; sys_platform == 'win32'",
 ]
@@ -70,6 +70,11 @@ Issues = "https://github.com/daydreamlive/scope/issues"
 
 [tool.uv]
 preview = true
+# Override cuDNN version to fix PyTorch 2.9.1 Conv3D bf16 performance regression
+# See: https://github.com/pytorch/pytorch/issues/168167
+override-dependencies = [
+    "nvidia-cudnn-cu12>=9.15",
+]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true, marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
@@ -86,15 +91,15 @@ torchvision = [
 ]
 flash-attn = [
     # Prebuilt Linux wheels from https://github.com/Dao-AILab/flash-attention
-    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp310-cp310-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
     # Prebuilt Windows wheels from https://github.com/kingbri1/flash-attention
-    { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
+    { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.9.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
 sageattention = [
     # Prebuilt Linux wheels from https://github.com/daydreamlive/SageAttention
     { url = "https://github.com/daydreamlive/SageAttention/releases/download/v2.2.0-linux/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
     # Prebuilt Windows wheels from https://github.com/woct0rdho/SageAttention/releases
-    { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post3/sageattention-2.2.0+cu128torch2.8.0.post3-cp39-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
+    { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
 
 [[tool.uv.index]]
@@ -158,6 +163,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scope"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# Include .pth file for automatic cuDNN patching at Python startup
+"patches.pth" = "patches.pth"
 
 [tool.hatch.build]
 include = [
