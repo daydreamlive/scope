@@ -13,7 +13,8 @@ from pathlib import Path
 
 import httpx
 
-from .artifacts import Artifact, HuggingfaceRepoArtifact
+from scope.core.pipelines.artifacts import Artifact, HuggingfaceRepoArtifact
+
 from .download_progress_manager import download_progress_manager
 from .models_config import ensure_models_dir
 
