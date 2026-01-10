@@ -334,6 +334,7 @@ class PipelineManager:
             "krea-realtime-video",
             "reward-forcing",
             "memflow",
+            "video-depth-anything",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -420,6 +421,20 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("Passthrough pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "video-depth-anything":
+            from scope.core.pipelines import VideoDepthAnythingPipeline
+
+            # Create minimal config - pipeline handles its own model paths
+            config = OmegaConf.create({})
+
+            pipeline = VideoDepthAnythingPipeline(
+                config,
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("VideoDepthAnything pipeline initialized")
             return pipeline
 
         elif pipeline_id == "longlive":
