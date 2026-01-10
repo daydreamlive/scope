@@ -1,6 +1,10 @@
 base_model_name: Wan2.1-T2V-14B
 base_model_kwargs:
   timestep_shift: 5.0
+# VACE configuration for 14B model
+# 14B model has 40 transformer layers, VACE uses 8 layers at every 5th index
+vace_in_dim: 96
+vace_layers: [0, 5, 10, 15, 20, 25, 30, 35]
 num_frame_per_block: 3
 kv_cache_num_frames: 3
 local_attn_size: 6

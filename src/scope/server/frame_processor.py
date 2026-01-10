@@ -719,7 +719,11 @@ class FrameProcessor:
             # Route video input based on VACE status
             # We do not support combining latent initialization and VACE conditioning
             if video_input is not None:
-                vace_enabled = getattr(pipeline, "vace_enabled", False)
+                # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
+                # This fixes the chicken-and-egg problem where VACE isn't enabled until vace_input_frames arrives
+                vace_enabled = self.parameters.get("vace_enabled", False)
+
+                # Check if input video should be used for VACE conditioning
                 vace_use_input_video = self.parameters.get("vace_use_input_video", True)
 
                 if vace_enabled and vace_use_input_video:

@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import torch
@@ -13,6 +14,8 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 )
 
 from ..utils import initialize_crossattn_cache, initialize_kv_cache
+
+logger = logging.getLogger(__name__)
 
 
 class SetupCachesBlock(ModularPipelineBlocks):
@@ -131,6 +134,11 @@ class SetupCachesBlock(ModularPipelineBlocks):
         is_transitioning = state.get("_transition_active", False)
         was_transitioning = state.get("_transition_active_prev", False)
 
+        if init_cache:
+            logger.info(
+                "HARD CUT: SetupCachesBlock received init_cache=True, will reset KV cache"
+            )
+
         max_current_start = (
             components.config.max_rope_freq_table_seq_len
             - components.config.num_frame_per_block
@@ -139,6 +147,7 @@ class SetupCachesBlock(ModularPipelineBlocks):
             init_cache = True
 
         # Clear KV cache when conditioning changes outside of a transition if manage_cache is enabled and video input is present.
+        # Transitions include: embedding blending (_transition_active) and soft transitions (KV bias lowering).
         transitioning_context = is_transitioning or was_transitioning
         if (
             block_state.conditioning_embeds_updated
@@ -206,6 +215,9 @@ class SetupCachesBlock(ModularPipelineBlocks):
             )
 
         if init_cache:
+            logger.info(
+                "HARD CUT: Executing cache reset - current_start_frame=0, clearing VAE cache"
+            )
             block_state.current_start_frame = 0
 
             components.vae.clear_cache()

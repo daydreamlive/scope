@@ -375,6 +375,7 @@ export interface ModeDefaults {
   denoising_steps?: number[];
   noise_scale?: number | null;
   noise_controller?: boolean | null;
+  default_temporal_interpolation_steps?: number;
 }
 
 export interface PipelineSchemaInfo {

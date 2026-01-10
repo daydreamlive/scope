@@ -22,6 +22,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     docs_url = "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/krea_realtime_video/docs/usage.md"
     estimated_vram_gb = 32.0
     supports_lora = True
+    supports_vace = True
     artifacts = [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
@@ -64,5 +65,6 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
             noise_scale=0.7,
             noise_controller=True,
             denoising_steps=[1000, 750],
+            default_temporal_interpolation_steps=0,
         ),
     }
