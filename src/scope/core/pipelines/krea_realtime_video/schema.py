@@ -7,6 +7,7 @@ from ..common_artifacts import (
     LIGHTVAE_ARTIFACT,
     TAE_ARTIFACT,
     UMT5_ENCODER_ARTIFACT,
+    VACE_14B_ARTIFACT,
     WAN_1_3B_ARTIFACT,
 )
 from ..utils import VaeType
@@ -26,6 +27,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     artifacts = [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        VACE_14B_ARTIFACT,
         LIGHTVAE_ARTIFACT,
         TAE_ARTIFACT,
         LIGHTTAE_ARTIFACT,

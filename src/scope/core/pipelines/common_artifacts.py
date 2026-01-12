@@ -24,6 +24,12 @@ VACE_ARTIFACT = HuggingfaceRepoArtifact(
     files=["Wan2_1-VACE_module_1_3B_bf16.safetensors"],
 )
 
+VACE_14B_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="Kijai/WanVideo_comfy",
+    # Use BF16 version for CPU offloading compatibility (FP8 doesn't work on CPU)
+    files=["Wan2_1-VACE_module_14B_bf16.safetensors"],
+)
+
 # Extra VAE artifacts (lightweight/alternative encoders)
 LIGHTVAE_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="lightx2v/Autoencoders",
