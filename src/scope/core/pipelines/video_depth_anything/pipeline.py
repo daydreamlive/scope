@@ -14,6 +14,7 @@ import torch
 from scope.core.config import get_model_file_path
 
 from ..interface import Pipeline, Requirements
+from ..process import normalize_frame_sizes
 from .schema import VideoDepthAnythingConfig
 
 if TYPE_CHECKING:
@@ -93,10 +94,12 @@ class VideoDepthAnythingPipeline(Pipeline):
                 "Input video cannot be None for VideoDepthAnythingPipeline"
             )
 
+        # Normalize frame sizes to handle resolution changes
+        video = normalize_frame_sizes(video)
+
         # Convert input to numpy uint8 array
         # Frames from frame_processor are always (1, H, W, C), so we squeeze the T dimension
         frames = []
-        target_shape = None
         for frame in video:
             frame_np = (
                 frame.cpu().numpy()
@@ -105,22 +108,6 @@ class VideoDepthAnythingPipeline(Pipeline):
             )
             # Squeeze T dimension: (1, H, W, C) -> (H, W, C)
             frame_np = frame_np.squeeze(0)
-            # Use first frame's shape as target for consistency
-            if target_shape is None:
-                target_shape = frame_np.shape
-            elif frame_np.shape != target_shape:
-                # Resize frame to match target shape using torch interpolate
-                frame_tensor = torch.from_numpy(frame_np).permute(2, 0, 1).unsqueeze(0)
-                frame_tensor = torch.nn.functional.interpolate(
-                    frame_tensor.float(),
-                    size=(target_shape[0], target_shape[1]),
-                    mode="bilinear",
-                    align_corners=False,
-                )
-                frame_np = frame_tensor.squeeze(0).permute(1, 2, 0).numpy()
-                # Preserve original dtype
-                if frames[0].dtype == np.uint8:
-                    frame_np = frame_np.astype(np.uint8)
             frames.append(frame_np)
         frames = np.stack(frames, axis=0)
 

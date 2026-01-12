@@ -36,6 +36,10 @@ def __getattr__(name):
         from .controller_viz.pipeline import ControllerVisualizerPipeline
 
         return ControllerVisualizerPipeline
+    elif name == "RIFEPipeline":
+        from .rife.pipeline import RIFEPipeline
+
+        return RIFEPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -69,6 +73,10 @@ def __getattr__(name):
         from .video_depth_anything.schema import VideoDepthAnythingConfig
 
         return VideoDepthAnythingConfig
+    elif name == "RIFEConfig":
+        from .rife.schema import RIFEConfig
+
+        return RIFEConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -82,6 +90,7 @@ __all__ = [
     "MemFlowPipeline",
     "VideoDepthAnythingPipeline",
     "ControllerVisualizerPipeline",
+    "RIFEPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
@@ -91,4 +100,5 @@ __all__ = [
     "RewardForcingConfig",
     "MemFlowConfig",
     "VideoDepthAnythingConfig",
+    "RIFEConfig",
 ]
