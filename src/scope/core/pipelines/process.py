@@ -6,6 +6,47 @@ from einops import rearrange
 logger = logging.getLogger(__name__)
 
 
+def normalize_frame_sizes(frames: list[torch.Tensor]) -> list[torch.Tensor]:
+    """Normalize all frames to match the first frame's dimensions.
+
+    Frames may have different sizes (e.g., from switching video sources or
+    resolution changes). This function resizes all frames to match the first
+    frame's height and width to ensure they can be stacked.
+
+    Args:
+        frames: List of tensors in THWC format
+
+    Returns:
+        List of tensors all with the same H and W dimensions
+    """
+    if not frames:
+        return frames
+
+    # Use first frame's shape as target
+    target_h, target_w = frames[0].shape[1], frames[0].shape[2]
+    normalized = []
+
+    for i, frame in enumerate(frames):
+        h, w = frame.shape[1], frame.shape[2]
+        if h == target_h and w == target_w:
+            normalized.append(frame)
+            continue
+
+        # Resize frame: THWC -> TCHW for interpolate, then back to THWC
+        frame_tchw = frame.permute(0, 3, 1, 2).float()
+        frame_resized = torch.nn.functional.interpolate(
+            frame_tchw,
+            size=(target_h, target_w),
+            mode="bilinear",
+            align_corners=False,
+        )
+        frame_thwc = frame_resized.permute(0, 2, 3, 1).to(frame.dtype)
+        logger.debug(f"Resized frame {i} from {w}x{h} to {target_w}x{target_h}")
+        normalized.append(frame_thwc)
+
+    return normalized
+
+
 def preprocess_chunk(
     chunk: list[torch.Tensor],
     device: torch.device,

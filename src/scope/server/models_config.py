@@ -101,6 +101,11 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
     """
     models_dir = get_models_dir()
 
+    from scope.core.pipelines.artifacts import (
+        GoogleDriveArtifact,
+        HuggingfaceRepoArtifact,
+    )
+
     from .artifact_registry import get_artifacts_for_pipeline
 
     if pipeline_id == "passthrough" or pipeline_id is None:
@@ -112,11 +117,27 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
 
     required_files = []
     for artifact in artifacts:
-        local_dir_name = artifact.repo_id.split("/")[-1]
+        if isinstance(artifact, HuggingfaceRepoArtifact):
+            local_dir_name = artifact.repo_id.split("/")[-1]
+            # Add each file from the artifact's files list
+            for file in artifact.files:
+                required_files.append(models_dir / local_dir_name / file)
+        elif isinstance(artifact, GoogleDriveArtifact):
+            # For Google Drive artifacts, use name if specified, otherwise use models_dir
+            if artifact.name:
+                output_dir = models_dir / artifact.name
+            else:
+                output_dir = models_dir
 
-        # Add each file from the artifact's files list
-        for file in artifact.files:
-            required_files.append(models_dir / local_dir_name / file)
+            # If files are specified, add all files from the artifact
+            if artifact.files:
+                for filename in artifact.files:
+                    required_files.append(output_dir / filename)
+            else:
+                # If files not specified, check for file_id as filename
+                required_files.append(output_dir / artifact.file_id)
+        else:
+            logger.warning(f"Unknown artifact type: {type(artifact)}")
 
     return required_files
 

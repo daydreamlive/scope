@@ -1,5 +1,5 @@
 """
-An artifact represents a resource (e.g., HuggingFace repo) used by a pipeline.
+An artifact represents a resource (e.g., HuggingFace repo, Google Drive file) used by a pipeline.
 """
 
 from pydantic import BaseModel
@@ -23,3 +23,19 @@ class HuggingfaceRepoArtifact(Artifact):
 
     repo_id: str
     files: list[str]
+
+
+class GoogleDriveArtifact(Artifact):
+    """
+    Represents a Google Drive file artifact.
+
+    Attributes:
+        file_id: Google Drive file ID (extracted from share link)
+        files: List of filenames to extract from the downloaded file/ZIP (optional).
+               If not specified, downloads the file directly using file_id as filename.
+        name: Subdirectory name within models directory (optional)
+    """
+
+    file_id: str
+    files: list[str] | None = None
+    name: str | None = None

@@ -527,6 +527,7 @@ class PipelineManager:
             "memflow",
             "video-depth-anything",
             "controller-viz",
+            "rife",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -926,7 +927,29 @@ class PipelineManager:
             )
             logger.info("ControllerVisualizer pipeline initialized")
             return pipeline
+        elif pipeline_id == "rife":
+            from scope.core.pipelines import RIFEPipeline
 
+            # Create minimal config - RIFE pipeline handles its own model paths via artifacts
+            config = OmegaConf.create({})
+
+            # Apply load parameters (resolution, seed) to config for consistency
+            # Note: RIFE doesn't use these parameters but we apply them for consistency
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
+            pipeline = RIFEPipeline(
+                config,
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("RIFE pipeline initialized")
+            return pipeline
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 
