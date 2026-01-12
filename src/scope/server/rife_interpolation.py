@@ -144,16 +144,20 @@ class RIFEInterpolator:
                 logger.info(f"Loaded RIFE HDv3 weights from {model_dir_path}/flownet.pkl")
 
                 # Compile model for faster inference (PyTorch 2.0+)
-                if hasattr(torch, "compile"):
-                    try:
-                        self.model.flownet = torch.compile(
-                            self.model.flownet,
-                            mode="reduce-overhead",  # Best for inference
-                            fullgraph=False,  # Allow graph breaks for compatibility
-                        )
-                        logger.info("RIFE flownet compiled with torch.compile()")
-                    except Exception as e:
-                        logger.warning(f"torch.compile() failed, using eager mode: {e}")
+                # Note: torch.compile() is disabled due to CUDA graph issues with the mutable
+                # backwarp_tenGrid cache in warplayer.py. The cache is mutated during inference,
+                # which conflicts with CUDA graph capture. To enable compilation, the warplayer
+                # module would need to be refactored to avoid mutable module-level state.
+                # if hasattr(torch, "compile"):
+                #     try:
+                #         self.model.flownet = torch.compile(
+                #             self.model.flownet,
+                #             mode="default",  # Avoid CUDA graphs due to mutable cache in warplayer
+                #             fullgraph=False,  # Allow graph breaks for compatibility
+                #         )
+                #         logger.info("RIFE flownet compiled with torch.compile()")
+                #     except Exception as e:
+                #         logger.warning(f"torch.compile() failed, using eager mode: {e}")
             else:
                 raise FileNotFoundError(
                     "RIFE HDv3 model weights (flownet.pkl) not found. "

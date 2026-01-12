@@ -261,6 +261,7 @@ class FrameProcessor:
         1. We don't send frames faster than they were captured (maintains temporal accuracy)
         2. We don't try to output faster than the pipeline can produce (prevents frame starvation)
         """
+        return 14.5
         input_fps = self._get_input_fps()
         pipeline_fps = self.get_current_pipeline_fps()
 
