@@ -70,7 +70,6 @@ class VACEEnabledPipeline:
         device,
         dtype,
         quantization=None,
-        text_encoder=None,
     ) -> Any:
         """Initialize VACE support if vace_path is provided in config.
 
@@ -83,7 +82,6 @@ class VACEEnabledPipeline:
             device: Target device for VACE components
             dtype: Target dtype for VACE components
             quantization: Optional quantization config (e.g., Quantization.FP8_E4M3FN)
-            text_encoder: Optional text encoder to offload to CPU before VACE loading
 
         Returns:
             Model instance, possibly wrapped with CausalVaceWanModel if VACE is enabled.
