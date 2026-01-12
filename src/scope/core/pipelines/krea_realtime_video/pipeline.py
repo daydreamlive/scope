@@ -106,7 +106,6 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
             device=device,
             dtype=dtype,
             quantization=quantization,
-            text_encoder=text_encoder,
         )
 
         # Initialize optional LoRA adapters on the underlying model AFTER VACE.
