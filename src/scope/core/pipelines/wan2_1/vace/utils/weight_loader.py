@@ -158,8 +158,9 @@ def load_vace_weights_only(model, vace_checkpoint_path: str) -> None:
             raise ValueError(error_msg)
 
     # Load into actual model (not PEFT wrapper)
+    # Use assign=False to preserve existing tensor device/dtype
     missing_keys, unexpected_keys = actual_model.load_state_dict(
-        vace_state_dict, strict=False
+        vace_state_dict, strict=False, assign=False
     )
 
     # Filter out expected missing keys (all the base model weights)

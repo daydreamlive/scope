@@ -7,15 +7,22 @@ A subset of the pipeline in Scope support using a modified version of [VACE](htt
 
 ## Compatibility
 
-At the moment, only the following Wan2.1 1.3B based pipelines support VACE tasks:
+At the moment, the following pipelines support VACE tasks:
 
+### Wan2.1 1.3B based pipelines:
 - `longlive`
 - `reward-forcing`
 - `memflow`
 
+### Wan2.1 14B based pipelines:
+- `krea_realtime_video`
+
 `streamdiffusionv2` also supports VACE capabilities, but beware that the quality is poor right now.
 
-We're investigating support for Wan2.1 14B based pipepline.
+> [!NOTE]
+> KREA + VACE requires approximately 55GB of VRAM.
+> FP8 Quantization is not currently supported.
+> Continued subsequent prompting with KREA and VACE is limited in functionality due to the nature of cache recomputation, and therefore you may require resetting the cache.
 
 ## Supported Features
 

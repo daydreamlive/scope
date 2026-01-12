@@ -104,6 +104,10 @@ class Parameters(BaseModel):
         default=None,
         description="Spout input configuration for receiving frames from external apps",
     )
+    vace_enabled: bool | None = Field(
+        default=None,
+        description="Enable VACE (Video All-In-One Creation and Editing) for reference image conditioning and structural guidance. Must be enabled at pipeline load time for VACE to be available.",
+    )
     vace_ref_images: list[str] | None = Field(
         default=None,
         description="List of reference image file paths for VACE conditioning. Images should be located in the assets directory (at the same level as the models directory).",
@@ -386,6 +390,10 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     quantization: Quantization | None = Field(
         default=Quantization.FP8_E4M3FN,
         description="Quantization method to use for diffusion model. If None, no quantization is applied.",
+    )
+    vace_enabled: bool = Field(
+        default=True,
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
     )
     vae_type: VaeType = Field(
         default=DEFAULT_VAE_TYPE,
