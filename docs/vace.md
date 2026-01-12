@@ -24,6 +24,8 @@ These features are currently supported:
 - Reference-to-video (R2V) using reference images to guide generation.
 - Video-to-video (VACE V2V) editing using control videos (eg. depth, pose, scribble, optical flow, etc.) to guide generation.
 - Animate Anything (R2V + VACE V2V) where a reference image is used to define the character and style while the control video provides the structure.
+- First Frame Last Frame (FFLF) extension mode for generating video that connects reference frames at the start and/or end.
+- Inpainting using masks to selectively regenerate regions of video while preserving others.
 
 ## Unsupported Features
 
@@ -31,8 +33,7 @@ These features are not supported right now, but we're investigating them:
 
 - Multiple reference images for R2V
 - Built-in real-time preprocessing of source videos into control videos (eg. real-time depth estimation)
-- Masked video-to-video (MV2V) editing which enables downstream tasks like inpainting, outpainting, video extension (first frame, last frame)
-- More complex tasks supported in the original VACE project such as Swap Anything, Reference Anything, Move ANything, Expand Anything
+- More complex tasks supported in the original VACE project such as Swap Anything, Reference Anything, Move Anything, Expand Anything
 
 ## Enabling VACE
 
