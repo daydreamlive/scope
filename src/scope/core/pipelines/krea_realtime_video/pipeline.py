@@ -129,11 +129,11 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         text_encoder = text_encoder.to(device=device)
 
         # Load VAE using create_vae factory (supports multiple VAE types)
+        # Note: VAE files are in Wan2.1-T2V-1.3B directory, not base_model_name directory
         vae_type = getattr(config, "vae_type", "wan")
         start = time.time()
         vae = create_vae(
             model_dir=model_dir,
-            model_name=base_model_name,
             vae_type=vae_type,
             vae_path=vae_path,
         )
