@@ -142,11 +142,12 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
                 block.compile(fullgraph=False)
 
         # Load VAE using create_vae factory (supports multiple VAE types)
+        # Note: VAE is shared across all Wan model sizes, stored in Wan2.1-T2V-1.3B
+        # By not sending model_name, create_vae will use the default "wan" VAE type.
         vae_type = getattr(config, "vae_type", "wan")
         start = time.time()
         vae = create_vae(
             model_dir=model_dir,
-            model_name=base_model_name,
             vae_type=vae_type,
             vae_path=vae_path,
         )
