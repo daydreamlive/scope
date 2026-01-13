@@ -3,7 +3,6 @@
 import asyncio
 import gc
 import logging
-import os
 import threading
 from enum import Enum
 from typing import Any
@@ -300,39 +299,6 @@ class PipelineManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.get_status_info)
 
-    async def load_pipeline(
-        self, pipeline_id: str | None = None, load_params: dict | None = None
-    ) -> bool:
-        """
-        Load a pipeline asynchronously (legacy method for backward compatibility).
-
-        This method maintains the old "main pipeline" state for backward compatibility.
-        For new code, prefer using load_pipelines() which supports multiple pipelines.
-
-        Args:
-            pipeline_id: ID of pipeline to load. If None, uses PIPELINE env var.
-            load_params: Pipeline-specific load parameters.
-
-        Returns:
-            bool: True if loaded successfully, False otherwise.
-        """
-        if pipeline_id is None:
-            pipeline_id = os.getenv("PIPELINE", "longlive")
-
-        # Use load_pipelines internally, then update legacy state
-        success = await self.load_pipelines([pipeline_id], load_params)
-
-        if success:
-            # Update legacy main pipeline state for backward compatibility
-            with self._lock:
-                if pipeline_id in self._pipelines:
-                    self._pipeline = self._pipelines[pipeline_id]
-                    self._pipeline_id = pipeline_id
-                    self._load_params = load_params
-                    self._status = PipelineStatus.LOADED
-
-        return success
-
     async def load_pipelines(
         self, pipeline_ids: list[str], load_params: dict | None = None
     ) -> bool:
@@ -364,6 +330,19 @@ class PipelineManager:
         # Store load_params for use by frame processor
         with self._lock:
             self._load_params = load_params
+
+            # Identify pipelines that need to be unloaded (currently loaded but not in new list)
+            currently_loaded = set(self._pipelines.keys())
+            # Also check main pipeline if it exists
+            if self._pipeline_id and self._pipeline_id not in currently_loaded:
+                currently_loaded.add(self._pipeline_id)
+
+            pipelines_to_unload = currently_loaded - set(pipeline_ids)
+
+            # Unload pipelines that are not in the new list
+            for pipeline_id_to_unload in pipelines_to_unload:
+                logger.info(f"Unloading pipeline {pipeline_id_to_unload}")
+                self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
 
         # Load all pipelines
         success = True
@@ -466,17 +445,49 @@ class PipelineManager:
         # Pass merge_mode directly to mixin, not via config
         config["_lora_merge_mode"] = lora_merge_mode
 
-    def _unload_pipeline_unsafe(self):
-        """Unload the current pipeline. Must be called with lock held."""
-        if self._pipeline:
-            logger.info(f"Unloading pipeline: {self._pipeline_id}")
+    def unload_pipeline_by_id(self, pipeline_id: str):
+        """Unload a specific pipeline by ID (thread-safe)."""
+        with self._lock:
+            self._unload_pipeline_by_id_unsafe(pipeline_id)
 
-        # Change status and pipeline atomically
-        self._status = PipelineStatus.NOT_LOADED
-        self._pipeline = None
-        self._pipeline_id = None
-        self._load_params = None
-        self._error_message = None
+    def unload_all_pipelines(self):
+        """Unload all pipelines (thread-safe)."""
+        with self._lock:
+            # Get all pipeline IDs to unload (from tracked pipelines and main pipeline)
+            pipeline_ids_to_unload = set(self._pipelines.keys())
+            if self._pipeline_id and self._pipeline_id not in pipeline_ids_to_unload:
+                pipeline_ids_to_unload.add(self._pipeline_id)
+
+            # Unload all pipelines
+            for pipeline_id in pipeline_ids_to_unload:
+                self._unload_pipeline_by_id_unsafe(pipeline_id)
+
+    def _unload_pipeline_by_id_unsafe(self, pipeline_id: str):
+        """Unload a specific pipeline by ID. Must be called with lock held."""
+        # Check if pipeline exists (either in _pipelines or as main pipeline)
+        pipeline_exists = (
+            pipeline_id in self._pipelines or self._pipeline_id == pipeline_id
+        )
+        if not pipeline_exists:
+            return
+
+        logger.info(f"Unloading pipeline: {pipeline_id}")
+
+        # Remove from tracked pipelines
+        if pipeline_id in self._pipelines:
+            del self._pipelines[pipeline_id]
+        if pipeline_id in self._pipeline_statuses:
+            del self._pipeline_statuses[pipeline_id]
+        if pipeline_id in self._pipeline_load_params:
+            del self._pipeline_load_params[pipeline_id]
+
+        # If this was the main pipeline, also clear main pipeline state
+        if self._pipeline_id == pipeline_id:
+            self._status = PipelineStatus.NOT_LOADED
+            self._pipeline = None
+            self._pipeline_id = None
+            self._load_params = None
+            self._error_message = None
 
         # Cleanup resources
         gc.collect()
@@ -889,11 +900,6 @@ class PipelineManager:
 
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
-
-    def unload_pipeline(self):
-        """Unload the current pipeline (thread-safe)."""
-        with self._lock:
-            self._unload_pipeline_unsafe()
 
     def is_loaded(self) -> bool:
         """Check if pipeline is loaded and ready (thread-safe)."""

@@ -12,6 +12,7 @@ Child classes can override field defaults with type-annotated assignments:
     denoising_steps: list[int] = [1000, 750, 500, 250]
 """
 
+from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -87,6 +88,13 @@ def vace_context_scale_field(default: float = 1.0) -> FieldInfo:
 
 # Type alias for input modes
 InputMode = Literal["text", "video"]
+
+
+class UsageType(str, Enum):
+    """Usage types for pipelines."""
+
+    PIPELINE = "pipeline"
+    PREPROCESSOR = "preprocessor"
 
 
 class ModeDefaults(BaseModel):
@@ -174,10 +182,10 @@ class BasePipelineConfig(BaseModel):
     # quantization=null is recommended, otherwise fp8_e4m3fn is recommended.
     # None means no specific recommendation (pipeline doesn't benefit from quantization).
     recommended_quantization_vram_threshold: ClassVar[float | None] = None
-    # Usage types: list of usage strings indicating how this pipeline can be used.
-    # Default is ["pipeline"] meaning it can be used as a main pipeline.
-    # Can also include "preprocessor" to allow use as a preprocessor.
-    usage: ClassVar[list[str]] = ["pipeline"]
+    # Usage types: list of usage types indicating how this pipeline can be used.
+    # Default is [UsageType.PIPELINE] meaning it can be used as a main pipeline.
+    # Can also include UsageType.PREPROCESSOR to allow use as a preprocessor.
+    usage: ClassVar[list[UsageType]] = [UsageType.PIPELINE]
 
     # Mode configuration - keys are mode names, values are ModeDefaults with field overrides
     # Use default=True to mark the default mode. Only include fields that differ from base.

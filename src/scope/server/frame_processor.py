@@ -2,7 +2,6 @@ import logging
 import queue
 import threading
 import time
-from collections import deque
 from typing import Any
 
 import torch
@@ -45,14 +44,10 @@ class FrameProcessor:
         self,
         pipeline_manager: PipelineManager,
         max_parameter_queue_size: int = 8,
-        max_buffer_size: int = 30,
         initial_parameters: dict = None,
         notification_callback: callable = None,
     ):
         self.pipeline_manager = pipeline_manager
-
-        self.frame_buffer = deque(maxlen=max_buffer_size)
-        self.frame_buffer_lock = threading.Lock()
 
         # Current parameters
         self.parameters = initial_parameters or {}
@@ -134,9 +129,6 @@ class FrameProcessor:
         for processor in self.pipeline_processors:
             processor.stop()
 
-        with self.frame_buffer_lock:
-            self.frame_buffer.clear()
-
         # Clear pipeline processors
         self.pipeline_processors.clear()
 
@@ -201,10 +193,6 @@ class FrameProcessor:
                 # Queue full, drop frame (non-blocking)
                 logger.debug("First processor input queue full, dropping frame")
                 return False
-        else:
-            # No processors yet, buffer the frame
-            with self.frame_buffer_lock:
-                self.frame_buffer.append(frame)
 
         return True
 
@@ -550,11 +538,6 @@ class FrameProcessor:
                             logger.debug(
                                 "First processor input queue full, dropping Spout frame"
                             )
-                    else:
-                        # No processors yet, convert to VideoFrame-like object and buffer
-                        spout_frame = _SpoutFrame(rgb_frame)
-                        with self.frame_buffer_lock:
-                            self.frame_buffer.append(spout_frame)
 
                     frame_count += 1
                     if frame_count % 100 == 0:
@@ -581,9 +564,12 @@ class FrameProcessor:
         for i, pipeline_id in enumerate(self.pipeline_ids):
             track_input_fps = i == 0  # Track input FPS for first processor
 
+            # Get pipeline instance from manager
+            pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+
             # Create processor with its own queues
             processor = PipelineProcessor(
-                pipeline_manager=self.pipeline_manager,
+                pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
                 track_input_fps=track_input_fps,

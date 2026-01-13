@@ -1,5 +1,5 @@
 from ..artifacts import HuggingfaceRepoArtifact
-from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..base_schema import BasePipelineConfig, ModeDefaults, UsageType
 
 
 class VideoDepthAnythingConfig(BasePipelineConfig):
@@ -25,6 +25,6 @@ class VideoDepthAnythingConfig(BasePipelineConfig):
     ]
     supports_prompts = False
     modified = True
-    usage = ["preprocessor"]
+    usage = [UsageType.PREPROCESSOR]
 
     modes = {"video": ModeDefaults(default=True)}

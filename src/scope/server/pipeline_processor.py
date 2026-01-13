@@ -9,7 +9,7 @@ from typing import Any
 
 import torch
 
-from .pipeline_manager import PipelineManager, PipelineNotAvailableException
+from .pipeline_manager import PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class PipelineProcessor:
 
     def __init__(
         self,
-        pipeline_manager: PipelineManager,
+        pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
         track_input_fps: bool = False,
@@ -40,18 +40,20 @@ class PipelineProcessor:
         """Initialize a pipeline processor.
 
         Args:
-            pipeline_manager: Pipeline manager for loading pipelines
-            pipeline_id: ID of the pipeline to run
+            pipeline: Pipeline instance to process frames with
+            pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
             track_input_fps: Whether to track input FPS (for first pipeline in chain)
         """
-        self.pipeline_manager = pipeline_manager
+        self.pipeline = pipeline
         self.pipeline_id = pipeline_id
         self.track_input_fps = track_input_fps
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
         self.output_queue = queue.Queue(maxsize=8)
+        # Lock to protect input_queue assignment for thread-safe reference swapping
+        self.input_queue_lock = threading.Lock()
 
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
@@ -90,13 +92,9 @@ class PipelineProcessor:
         # Used to update next processor's input_queue when output_queue is reassigned
         self.next_processor: PipelineProcessor | None = None
 
-        # Get pipeline and check VACE status once in constructor
-        self.pipeline = self.pipeline_manager.get_pipeline_by_id(self.pipeline_id)
         # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
         # This fixes the chicken-and-egg problem where VACE isn't enabled until vace_input_frames arrives
-        self.vace_enabled = (initial_parameters or {}).get(
-            "vace_enabled", False
-        )
+        self.vace_enabled = (initial_parameters or {}).get("vace_enabled", False)
         self.vace_use_input_video = (initial_parameters or {}).get(
             "vace_use_input_video", True
         )
@@ -126,8 +124,10 @@ class PipelineProcessor:
                     break
 
             # Update next processor's input_queue to point to the new output_queue
+            # Use lock to ensure thread-safe reference swapping
             if self.next_processor is not None:
-                self.next_processor.input_queue = self.output_queue
+                with self.next_processor.input_queue_lock:
+                    self.next_processor.input_queue = self.output_queue
 
     def set_next_processor(self, next_processor: "PipelineProcessor"):
         """Set the next processor in the chain and update output queue size accordingly.
@@ -146,7 +146,9 @@ class PipelineProcessor:
             self._resize_output_queue(target_size)
 
         # Update next processor's input_queue to point to this output_queue
-        next_processor.input_queue = self.output_queue
+        # Use lock to ensure thread-safe reference swapping
+        with next_processor.input_queue_lock:
+            next_processor.input_queue = self.output_queue
 
     def start(self):
         """Start the pipeline processor thread."""
@@ -174,10 +176,12 @@ class PipelineProcessor:
                 self.worker_thread.join(timeout=5.0)
 
         # Clear queues
-        if self.input_queue:
-            while not self.input_queue.empty():
+        with self.input_queue_lock:
+            input_queue_ref = self.input_queue
+        if input_queue_ref:
+            while not input_queue_ref.empty():
                 try:
-                    self.input_queue.get_nowait()
+                    input_queue_ref.get_nowait()
                 except queue.Empty:
                     break
 
@@ -205,9 +209,8 @@ class PipelineProcessor:
         with self.fps_lock:
             return self.current_pipeline_fps
 
-    def _calculate_pipeline_fps(self, start_time: float, num_frames: int):
+    def _calculate_pipeline_fps(self, processing_time: float, num_frames: int):
         """Calculate FPS based on processing time and number of frames created."""
-        processing_time = time.time() - start_time
         if processing_time <= 0 or num_frames <= 0:
             return
 
@@ -267,6 +270,52 @@ class PipelineProcessor:
                     break
 
         logger.info(f"Worker thread stopped for pipeline: {self.pipeline_id}")
+
+    def prepare_chunk(
+        self, input_queue_ref: queue.Queue, chunk_size: int
+    ) -> list[torch.Tensor]:
+        """
+        Sample frames uniformly from the queue, convert them to tensors, and remove processed frames.
+
+        This function implements uniform sampling across the entire queue to ensure
+        temporal coverage of input frames. It samples frames at evenly distributed
+        indices and removes all frames up to the last sampled frame to prevent
+        queue buildup.
+
+        Note:
+            This function must be called with a queue reference obtained while holding
+            input_queue_lock. The caller is responsible for thread safety.
+
+        Example:
+            With queue_size=8 and chunk_size=4:
+            - step = 8/4 = 2.0
+            - indices = [0, 2, 4, 6] (uniformly distributed)
+            - Returns frames at positions 0, 2, 4, 6
+            - Removes frames 0-6 from queue (7 frames total)
+            - Keeps frame 7 in queue
+
+        Args:
+            input_queue_ref: Reference to the input queue (obtained while holding lock)
+            chunk_size: Number of frames to sample
+
+        Returns:
+            List of tensor frames, each (1, H, W, C) for downstream preprocess_chunk
+        """
+
+        # Calculate uniform sampling step
+        step = input_queue_ref.qsize() / chunk_size
+        # Generate indices for uniform sampling
+        indices = [round(i * step) for i in range(chunk_size)]
+        # Extract VideoFrames at sampled indices
+        video_frames = []
+
+        # Drop all frames up to and including the last sampled frame
+        last_idx = indices[-1]
+        for i in range(last_idx + 1):
+            frame = input_queue_ref.get_nowait()
+            if i in indices:
+                video_frames.append(frame)
+        return video_frames
 
     def process_chunk(self):
         """Process a single chunk of frames."""
@@ -328,16 +377,19 @@ class PipelineProcessor:
         if requirements is not None:
             current_chunk_size = requirements.input_size
 
+            # Capture a local reference to input_queue while holding the lock
+            # This ensures thread-safe access even if input_queue is reassigned
+            with self.input_queue_lock:
+                input_queue_ref = self.input_queue
+
             # Check if queue has enough frames before consuming them
-            if self.input_queue.qsize() < current_chunk_size:
+            if input_queue_ref.qsize() < current_chunk_size:
                 # Not enough frames in queue, sleep briefly and try again next iteration
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
 
-            video_input = []
-            for _ in range(current_chunk_size):
-                frame = self.input_queue.get(timeout=0.1)
-                video_input.append(frame)
+            # Use prepare_chunk to uniformly sample frames from the queue
+            video_input = self.prepare_chunk(input_queue_ref, current_chunk_size)
 
         try:
             # Pass parameters (excluding prepare-only parameters)
@@ -357,6 +409,7 @@ class PipelineProcessor:
             if video_input is not None:
                 # Check if pipeline actually supports VACE before routing to vace_input_frames
                 from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
+
                 pipeline_supports_vace = isinstance(self.pipeline, VACEEnabledPipeline)
 
                 if (
@@ -421,15 +474,15 @@ class PipelineProcessor:
                 try:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:
-                    logger.debug(
+                    logger.info(
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
                     # Update FPS calculation
-                    self._calculate_pipeline_fps(start_time, num_frames)
+                    self._calculate_pipeline_fps(processing_time, num_frames)
                     continue
 
             # Update FPS calculation
-            self._calculate_pipeline_fps(start_time, num_frames)
+            self._calculate_pipeline_fps(processing_time, num_frames)
         except Exception as e:
             if self._is_recoverable(e):
                 logger.error(

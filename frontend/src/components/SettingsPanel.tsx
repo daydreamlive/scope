@@ -19,15 +19,7 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import {
-  ArrowUp,
-  ArrowDown,
-  Hammer,
-  Info,
-  Minus,
-  Plus,
-  RotateCcw,
-} from "lucide-react";
+import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import {
@@ -432,198 +424,51 @@ export function SettingsPanel({
                   </div>
                 </div>
 
-                {/* Preprocessors Selector */}
-                <div className="space-y-2">
+                {/* Preprocessor Selector */}
+                <div className="flex items-center justify-between gap-2">
                   <LabelWithTooltip
-                    label="Preprocessors"
-                    tooltip="Select preprocessors to apply before the main pipeline. Preprocessors are applied in the order shown."
+                    label="Preprocessor"
+                    tooltip="Select a preprocessor to apply before the main pipeline."
                     className="text-xs text-muted-foreground"
                   />
-                  <div className="space-y-2">
-                    {/* Selected preprocessors with reordering */}
-                    {preprocessorIds.map((id, index) => {
-                      const preprocessor = pipelines?.[id];
-                      return (
-                        <div
-                          key={`${id}-${index}`}
-                          className="flex items-center gap-2 rounded border bg-background p-2"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <Select
-                              value={id}
-                              onValueChange={newId => {
-                                const newIds = [...preprocessorIds];
-                                newIds[index] = newId;
-                                onPreprocessorIdsChange?.(newIds);
-                              }}
-                              disabled={isStreaming || isLoading}
-                            >
-                              <SelectTrigger className="h-8">
-                                <SelectValue>
-                                  {preprocessor?.name || id}
-                                </SelectValue>
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Object.entries(pipelines || {})
-                                  .filter(([, info]) => {
-                                    const isPreprocessor =
-                                      info.usage?.includes("preprocessor") ??
-                                      false;
-                                    if (!isPreprocessor) return false;
-                                    // Filter by input mode: only show preprocessors that support the current input mode
-                                    if (inputMode) {
-                                      return (
-                                        info.supportedModes?.includes(
-                                          inputMode
-                                        ) ?? false
-                                      );
-                                    }
-                                    return true;
-                                  })
-                                  .map(([pid, info]) => (
-                                    <SelectItem key={pid} value={pid}>
-                                      {info.name}
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="flex gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                if (index > 0) {
-                                  const newIds = [...preprocessorIds];
-                                  [newIds[index - 1], newIds[index]] = [
-                                    newIds[index],
-                                    newIds[index - 1],
-                                  ];
-                                  onPreprocessorIdsChange?.(newIds);
-                                }
-                              }}
-                              disabled={isStreaming || isLoading || index === 0}
-                              className="h-6 w-6 p-0"
-                              title="Move up"
-                            >
-                              <ArrowUp className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                if (index < preprocessorIds.length - 1) {
-                                  const newIds = [...preprocessorIds];
-                                  [newIds[index], newIds[index + 1]] = [
-                                    newIds[index + 1],
-                                    newIds[index],
-                                  ];
-                                  onPreprocessorIdsChange?.(newIds);
-                                }
-                              }}
-                              disabled={
-                                isStreaming ||
-                                isLoading ||
-                                index === preprocessorIds.length - 1
-                              }
-                              className="h-6 w-6 p-0"
-                              title="Move down"
-                            >
-                              <ArrowDown className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                const newIds = preprocessorIds.filter(
-                                  (_, i) => i !== index
-                                );
-                                onPreprocessorIdsChange?.(newIds);
-                              }}
-                              disabled={isStreaming || isLoading}
-                              className="h-6 w-6 p-0"
-                              title="Remove"
-                            >
-                              <Minus className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {/* Add preprocessor button */}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const availablePreprocessors = Object.entries(
-                          pipelines || {}
-                        )
-                          .filter(([, info]) => {
-                            const isPreprocessor =
-                              info.usage?.includes("preprocessor") ?? false;
-                            if (!isPreprocessor) return false;
-                            // Filter by input mode: only show preprocessors that support the current input mode
-                            if (inputMode) {
-                              return (
-                                info.supportedModes?.includes(inputMode) ??
-                                false
-                              );
-                            }
-                            return true;
-                          })
-                          .map(([pid]) => pid);
-                        const firstAvailable = availablePreprocessors.find(
-                          pid => !preprocessorIds.includes(pid)
-                        );
-                        if (firstAvailable) {
-                          const newIds = [...preprocessorIds, firstAvailable];
-                          console.log("Adding preprocessor, new IDs:", newIds);
-                          onPreprocessorIdsChange?.(newIds);
-                        }
-                      }}
-                      disabled={
-                        isStreaming ||
-                        isLoading ||
-                        !Object.values(pipelines || {}).some(p => {
+                  <Select
+                    value={
+                      preprocessorIds.length > 0 ? preprocessorIds[0] : "none"
+                    }
+                    onValueChange={value => {
+                      if (value === "none") {
+                        onPreprocessorIdsChange?.([]);
+                      } else {
+                        onPreprocessorIdsChange?.([value]);
+                      }
+                    }}
+                    disabled={isStreaming || isLoading}
+                  >
+                    <SelectTrigger className="h-8 flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {Object.entries(pipelines || {})
+                        .filter(([, info]) => {
                           const isPreprocessor =
-                            p.usage?.includes("preprocessor") ?? false;
+                            info.usage?.includes("preprocessor") ?? false;
                           if (!isPreprocessor) return false;
                           // Filter by input mode: only show preprocessors that support the current input mode
                           if (inputMode) {
                             return (
-                              p.supportedModes?.includes(inputMode) ?? false
+                              info.supportedModes?.includes(inputMode) ?? false
                             );
                           }
                           return true;
-                        }) ||
-                        Object.values(pipelines || {})
-                          .filter(p => {
-                            const isPreprocessor =
-                              p.usage?.includes("preprocessor") ?? false;
-                            if (!isPreprocessor) return false;
-                            // Filter by input mode: only show preprocessors that support the current input mode
-                            if (inputMode) {
-                              return (
-                                p.supportedModes?.includes(inputMode) ?? false
-                              );
-                            }
-                            return true;
-                          })
-                          .every(p =>
-                            preprocessorIds.includes(
-                              Object.keys(pipelines || {}).find(
-                                pid => pipelines?.[pid] === p
-                              ) || ""
-                            )
-                          )
-                      }
-                      className="w-full"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Preprocessor
-                    </Button>
-                  </div>
+                        })
+                        .map(([pid]) => (
+                          <SelectItem key={pid} value={pid}>
+                            {pid}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             )}

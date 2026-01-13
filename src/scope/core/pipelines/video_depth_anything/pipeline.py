@@ -74,7 +74,7 @@ class VideoDepthAnythingPipeline(Pipeline):
         logger.info(f"Loaded Video Depth Anything in {time.time() - start:.3f}s")
 
     def prepare(self, **kwargs) -> Requirements:
-        return Requirements(input_size=1)
+        return Requirements(input_size=4)
 
     def __call__(self, **kwargs) -> torch.Tensor:
         """Process video frames and return depth maps.

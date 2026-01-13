@@ -205,7 +205,7 @@ async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipeline(pipeline_id),
+            pipeline_manager.load_pipelines([pipeline_id]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
@@ -261,7 +261,7 @@ async def lifespan(app: FastAPI):
 
     if pipeline_manager:
         logger.info("Shutting down pipeline manager...")
-        pipeline_manager.unload_pipeline()
+        pipeline_manager.unload_all_pipelines()
         logger.info("Pipeline manager shutdown complete")
 
 
