@@ -12,35 +12,11 @@ This can be removed when a new PyTorch with the correct cuDNN version is release
 """
 
 import glob
-import importlib.util
 import os
 import shutil
 import sys
 
-
-def _find_package_path(package_name: str) -> str | None:
-    """Find a package's install path WITHOUT importing it.
-
-    This is critical for torch - importing it loads cuDNN DLLs which then
-    can't be overwritten. Using find_spec() locates the package without
-    executing its __init__.py.
-
-    Handles both regular packages (with __init__.py) and namespace packages.
-    """
-    try:
-        spec = importlib.util.find_spec(package_name)
-        if spec:
-            # Regular package: spec.origin points to __init__.py
-            if spec.origin:
-                return os.path.dirname(spec.origin)
-            # Namespace package: use submodule_search_locations
-            if spec.submodule_search_locations:
-                locations = list(spec.submodule_search_locations)
-                if locations:
-                    return locations[0]
-    except (ImportError, ModuleNotFoundError):
-        pass
-    return None
+from ._utils import find_package_path
 
 
 def patch_torch_cudnn(silent: bool = False):
@@ -61,8 +37,8 @@ def patch_torch_cudnn(silent: bool = False):
         return
 
     # Find package paths WITHOUT importing them (avoids loading/locking DLLs)
-    cudnn_path = _find_package_path("nvidia.cudnn")
-    torch_path = _find_package_path("torch")
+    cudnn_path = find_package_path("nvidia.cudnn")
+    torch_path = find_package_path("torch")
 
     if not cudnn_path:
         if not silent:
