@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { Slider } from "./ui/slider";
 
 interface VideoOutputProps {
   className?: string;
@@ -11,6 +13,7 @@ interface VideoOutputProps {
   pipelineError?: string | null;
   isPlaying?: boolean;
   isDownloading?: boolean;
+  hasAudio?: boolean;
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
   onVideoPlaying?: () => void;
@@ -24,6 +27,7 @@ export function VideoOutput({
   pipelineError: _pipelineError = null,
   isPlaying = true,
   isDownloading = false,
+  hasAudio = false,
   onPlayPauseToggle,
   onStartStream,
   onVideoPlaying,
@@ -33,11 +37,51 @@ export function VideoOutput({
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
 
+  // Audio state - start muted for autoplay compatibility
+  const [isMuted, setIsMuted] = useState(true);
+  const [volume, setVolume] = useState(0.7);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+
   useEffect(() => {
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
+
+  // Update video element volume when volume state changes
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+      videoRef.current.muted = isMuted;
+    }
+  }, [volume, isMuted]);
+
+  // Toggle mute/unmute
+  const toggleMute = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation(); // Prevent triggering play/pause
+      if (videoRef.current) {
+        const newMuted = !isMuted;
+        videoRef.current.muted = newMuted;
+        setIsMuted(newMuted);
+      }
+    },
+    [isMuted]
+  );
+
+  // Handle volume change
+  const handleVolumeChange = useCallback((values: number[]) => {
+    const newVolume = values[0];
+    setVolume(newVolume);
+    if (videoRef.current) {
+      videoRef.current.volume = newVolume;
+      // Unmute if volume is changed while muted
+      if (newVolume > 0 && videoRef.current.muted) {
+        videoRef.current.muted = false;
+        setIsMuted(false);
+      }
+    }
+  }, []);
 
   // Listen for video playing event to notify parent
   useEffect(() => {
@@ -141,7 +185,7 @@ export function VideoOutput({
               ref={videoRef}
               className="max-w-full max-h-full object-contain"
               autoPlay
-              muted
+              muted={isMuted}
               playsInline
             />
             {/* Play/Pause Overlay */}
@@ -156,6 +200,45 @@ export function VideoOutput({
                 >
                   <PlayOverlay isPlaying={isPlaying} size="lg" />
                 </div>
+              </div>
+            )}
+
+            {/* Audio Controls - only show if stream has audio */}
+            {hasAudio && (
+              <div
+                className="absolute bottom-3 right-3 flex items-center gap-2"
+                onMouseEnter={() => setShowVolumeSlider(true)}
+                onMouseLeave={() => setShowVolumeSlider(false)}
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Volume Slider - shows on hover */}
+                <div
+                  className={`transition-all duration-200 overflow-hidden ${
+                    showVolumeSlider ? "w-20 opacity-100" : "w-0 opacity-0"
+                  }`}
+                >
+                  <Slider
+                    value={[isMuted ? 0 : volume]}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onValueChange={handleVolumeChange}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Mute/Unmute Button */}
+                <button
+                  onClick={toggleMute}
+                  className="p-2 bg-black/60 hover:bg-black/80 rounded-full transition-colors"
+                  title={isMuted ? "Unmute" : "Mute"}
+                >
+                  {isMuted ? (
+                    <VolumeX className="w-5 h-5 text-white" />
+                  ) : (
+                    <Volume2 className="w-5 h-5 text-white" />
+                  )}
+                </button>
               </div>
             )}
           </div>

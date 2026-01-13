@@ -19,7 +19,7 @@ from aiortc.sdp import candidate_from_sdp
 from .credentials import get_turn_credentials
 from .pipeline_manager import PipelineManager
 from .schema import WebRTCOfferRequest
-from .tracks import VideoProcessingTrack
+from .tracks import AudioProcessingTrack, VideoProcessingTrack
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +39,19 @@ vpx.MAX_BITRATE = 10000000
 
 
 class Session:
-    """WebRTC Session containing peer connection and associated video track."""
+    """WebRTC Session containing peer connection and associated tracks."""
 
     def __init__(
         self,
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
+        audio_track: MediaStreamTrack | None = None,
         data_channel: RTCDataChannel | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
+        self.audio_track = audio_track
         self.data_channel = data_channel
 
     async def close(self):
@@ -58,6 +60,10 @@ class Session:
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
                 await self.video_track.stop()
+
+            # Stop audio track
+            if self.audio_track is not None:
+                await self.audio_track.stop()
 
             if self.pc.connectionState not in ["closed", "failed"]:
                 await self.pc.close()
@@ -175,6 +181,22 @@ class WebRTCManager:
             session.video_track = video_track
             pc.addTrack(video_track)
 
+            # Initialize the FrameProcessor early so audio track can share it
+            # This is normally done lazily in recv(), but we need it now for audio
+            video_track.initialize_output_processing()
+
+            # Check if audio output is enabled and add audio track
+            # Audio track shares the FrameProcessor with video track for synchronization
+            enable_audio = initial_parameters.get("enable_audio", True)
+            if enable_audio and video_track.frame_processor is not None:
+                audio_track = AudioProcessingTrack(
+                    frame_processor=video_track.frame_processor,
+                    channels=2,  # Stereo audio
+                )
+                session.audio_track = audio_track
+                pc.addTrack(audio_track)
+                logger.info("Audio track added to peer connection")
+
             logger.info(f"Created new session: {session}")
 
             @pc.on("track")
@@ -228,9 +250,12 @@ class WebRTCManager:
                         data = json.loads(message)
                         logger.info(f"Received parameter update: {data}")
 
-                        # Check for paused parameter and call pause() method on video track
-                        if "paused" in data and session.video_track:
-                            session.video_track.pause(data["paused"])
+                        # Check for paused parameter and call pause() method on tracks
+                        if "paused" in data:
+                            if session.video_track:
+                                session.video_track.pause(data["paused"])
+                            if session.audio_track:
+                                session.audio_track.pause(data["paused"])
 
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(

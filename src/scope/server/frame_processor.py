@@ -8,6 +8,8 @@ from typing import Any
 import torch
 from aiortc.mediastreams import VideoFrame
 
+from scope.core.pipelines.interface import PipelineOutput
+
 from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
@@ -109,6 +111,13 @@ class FrameProcessor:
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
+        # Audio output support
+        # Audio queue stores (audio_tensor, sample_rate) tuples for synchronized playback
+        self.audio_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
+            maxsize=max_output_queue_size
+        )
+        self.audio_sample_rate: int | None = None  # Set when first audio arrives
+
     def start(self):
         if self.running:
             return
@@ -145,6 +154,13 @@ class FrameProcessor:
         while not self.output_queue.empty():
             try:
                 self.output_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        # Clear audio queue
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
             except queue.Empty:
                 break
 
@@ -224,6 +240,26 @@ class FrameProcessor:
             return frame
         except queue.Empty:
             return None
+
+    def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
+        """Get the next audio chunk and its sample rate.
+
+        Returns:
+            Tuple of (audio_tensor, sample_rate) or (None, None) if no audio available.
+            audio_tensor shape: (channels, samples) - typically (2, N) for stereo
+        """
+        if not self.running:
+            return None, None
+
+        try:
+            audio, sample_rate = self.audio_queue.get_nowait()
+            return audio, sample_rate
+        except queue.Empty:
+            return None, None
+
+    def get_audio_sample_rate(self) -> int | None:
+        """Get the current audio sample rate if audio is available."""
+        return self.audio_sample_rate
 
     def get_current_pipeline_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS"""
@@ -740,6 +776,19 @@ class FrameProcessor:
 
             output = pipeline(**call_params)
 
+            # Handle PipelineOutput (with audio) or legacy tensor output
+            audio_output = None
+            audio_sample_rate = None
+            if isinstance(output, PipelineOutput):
+                video_output = output.video
+                audio_output = output.audio
+                audio_sample_rate = output.audio_sample_rate
+                if audio_sample_rate:
+                    self.audio_sample_rate = audio_sample_rate
+            else:
+                # Legacy: output is just a video tensor
+                video_output = output
+
             # Clear vace_ref_images from parameters after use to prevent sending them on subsequent chunks
             # vace_ref_images should only be sent when explicitly provided in parameter updates
             if (
@@ -760,14 +809,14 @@ class FrameProcessor:
                     self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
-            num_frames = output.shape[0]
+            num_frames = video_output.shape[0]
             logger.debug(
                 f"Processed pipeline in {processing_time:.4f}s, {num_frames} frames"
             )
 
-            # Normalize to [0, 255] and convert to uint8
-            output = (
-                (output * 255.0)
+            # Normalize video to [0, 255] and convert to uint8
+            video_output = (
+                (video_output * 255.0)
                 .clamp(0, 255)
                 .to(dtype=torch.uint8)
                 .contiguous()
@@ -803,7 +852,7 @@ class FrameProcessor:
                     except queue.Empty:
                         break
 
-            for frame in output:
+            for frame in video_output:
                 try:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:
@@ -811,6 +860,19 @@ class FrameProcessor:
                     # Update FPS calculation based on processing time and frame count
                     self._calculate_pipeline_fps(start_time, num_frames)
                     continue
+
+            # Queue audio if available
+            # Audio is queued as a single chunk corresponding to all video frames
+            if audio_output is not None and audio_sample_rate is not None:
+                try:
+                    # Move audio to CPU and keep as float for WebRTC encoding
+                    audio_cpu = audio_output.detach().cpu()
+                    self.audio_queue.put_nowait((audio_cpu, audio_sample_rate))
+                    logger.debug(
+                        f"Queued audio: shape={audio_cpu.shape}, sample_rate={audio_sample_rate}"
+                    )
+                except queue.Full:
+                    logger.warning("Audio queue full, dropping audio chunk")
 
             # Update FPS calculation based on processing time and frame count
             self._calculate_pipeline_fps(start_time, num_frames)

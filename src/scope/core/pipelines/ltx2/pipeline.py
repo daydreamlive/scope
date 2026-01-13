@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from ..interface import Pipeline
+from ..interface import Pipeline, PipelineOutput
 from ..process import postprocess_chunk
 from .schema import LTX2Config
 
@@ -174,6 +174,10 @@ class LTX2Pipeline(Pipeline):
         self._cached_transformer = self.model_ledger.transformer()
         logger.info("  - Loading video decoder (~3GB)...")
         self._cached_video_decoder = self.model_ledger.video_decoder()
+        logger.info("  - Loading audio decoder...")
+        self._cached_audio_decoder = self.model_ledger.audio_decoder()
+        logger.info("  - Loading vocoder...")
+        self._cached_vocoder = self.model_ledger.vocoder()
         logger.info("All models cached successfully in VRAM")
 
         logger.info(f"LTX2 models loaded in {time.time() - start:.2f}s")
@@ -192,8 +196,8 @@ class LTX2Pipeline(Pipeline):
         # - Stage 2: Upsample to full resolution (1024x1536) with distilled LoRA
         # See: https://github.com/Lightricks/LTX-2/blob/main/packages/ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages.py
 
-    def __call__(self, **kwargs) -> torch.Tensor:
-        """Generate video from text prompt.
+    def __call__(self, **kwargs) -> PipelineOutput:
+        """Generate video and audio from text prompt.
 
         Args:
             **kwargs: Generation parameters including:
@@ -203,19 +207,24 @@ class LTX2Pipeline(Pipeline):
                 - frame_rate: Frame rate for video (overrides config)
 
         Returns:
-            Generated video tensor in THWC format [0, 1] range
+            PipelineOutput containing:
+                - video: Generated video tensor in THWC format [0, 1] range
+                - audio: Generated audio tensor in (channels, samples) format
+                - audio_sample_rate: Audio sample rate (24000 Hz)
         """
         return self._generate(**kwargs)
 
     @torch.inference_mode()
-    def _generate(self, **kwargs) -> torch.Tensor:
+    def _generate(self, **kwargs) -> PipelineOutput:
         """Internal generation method."""
         from ltx_core.components.diffusion_steps import EulerDiffusionStep
         from ltx_core.components.noisers import GaussianNoiser
+        from ltx_core.model.audio_vae import decode_audio as vae_decode_audio
         from ltx_core.model.video_vae import decode_video as vae_decode_video
         from ltx_core.text_encoders.gemma import encode_text
         from ltx_core.types import VideoPixelShape
         from ltx_pipelines.utils.constants import (
+            AUDIO_SAMPLE_RATE,
             DISTILLED_SIGMA_VALUES,
         )
         from ltx_pipelines.utils.helpers import (
@@ -311,4 +320,19 @@ class LTX2Pipeline(Pipeline):
         # Normalize from [0, 255] uint8 to [0, 1] float
         video_tensor = torch.clamp(video_tensor / 255.0, 0.0, 1.0)
 
-        return video_tensor
+        # Decode audio from latents using cached audio decoder and vocoder
+        # Following the official LTX-2 pipeline:
+        # https://github.com/Lightricks/LTX-2/blob/main/packages/ltx-pipelines/src/ltx_pipelines/distilled.py
+        logger.info("Decoding audio from latents")
+        audio_tensor = vae_decode_audio(
+            audio_state.latent,
+            self._cached_audio_decoder,
+            self._cached_vocoder
+        )
+        # audio_tensor shape: (channels, samples) - typically (2, N) for stereo at 24kHz
+
+        return PipelineOutput(
+            video=video_tensor,
+            audio=audio_tensor,
+            audio_sample_rate=AUDIO_SAMPLE_RATE,  # 24000 Hz
+        )

@@ -1,6 +1,7 @@
 """Base interface for all pipelines."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
@@ -14,6 +15,25 @@ class Requirements(BaseModel):
     """Requirements for pipeline configuration."""
 
     input_size: int
+
+
+@dataclass
+class PipelineOutput:
+    """Output from pipeline inference.
+
+    Pipelines can return either a plain torch.Tensor (legacy behavior) or a
+    PipelineOutput instance for richer output including audio.
+
+    Attributes:
+        video: Video tensor in THWC format with values in [0, 1] range.
+        audio: Optional audio tensor in (channels, samples) format, float32.
+               Typically stereo (2 channels) at 24kHz sample rate.
+        audio_sample_rate: Sample rate of the audio in Hz (e.g., 24000).
+    """
+
+    video: torch.Tensor
+    audio: torch.Tensor | None = None
+    audio_sample_rate: int | None = None
 
 
 class Pipeline(ABC):
@@ -63,7 +83,7 @@ class Pipeline(ABC):
     @abstractmethod
     def __call__(
         self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | PipelineOutput:
         """
         Process a chunk of video frames.
 
@@ -72,6 +92,7 @@ class Pipeline(ABC):
             **kwargs: Additional parameters
 
         Returns:
-            A processed chunk tensor in THWC format and [0, 1] range
+            A processed chunk tensor in THWC format and [0, 1] range,
+            OR a PipelineOutput instance containing video and optional audio.
         """
         pass

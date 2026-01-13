@@ -153,6 +153,7 @@ export function StreamPage() {
     remoteStream,
     isStreaming,
     isConnecting,
+    hasAudio,
     peerConnectionRef,
     startStream,
     stopStream,
@@ -980,6 +981,7 @@ export function StreamPage() {
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
               isDownloading={isDownloading}
+              hasAudio={hasAudio}
               onPlayPauseToggle={() => {
                 // Use timeline's play/pause handler instead of direct video toggle
                 if (timelinePlayPauseRef.current) {

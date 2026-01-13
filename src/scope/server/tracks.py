@@ -3,15 +3,22 @@ import fractions
 import logging
 import threading
 import time
+from collections import deque
 
+import numpy as np
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
-from av import VideoFrame
+from av import AudioFrame, VideoFrame
 
 from .frame_processor import FrameProcessor
 from .pipeline_manager import PipelineManager
 
 logger = logging.getLogger(__name__)
+
+# Audio constants
+AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
+AUDIO_CLOCK_RATE = 48000  # WebRTC typically uses 48kHz for Opus codec
+AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
 
 
 class VideoProcessingTrack(MediaStreamTrack):
@@ -173,3 +180,219 @@ class VideoProcessingTrack(MediaStreamTrack):
             self.frame_processor.stop()
 
         await super().stop()
+
+
+class AudioProcessingTrack(MediaStreamTrack):
+    """WebRTC audio track that streams generated audio from the pipeline.
+
+    This track receives audio from the FrameProcessor and streams it via WebRTC.
+    Audio is resampled from the pipeline's native sample rate (typically 24kHz)
+    to WebRTC's standard 48kHz for Opus codec compatibility.
+    """
+
+    kind = "audio"
+
+    def __init__(
+        self,
+        frame_processor: FrameProcessor,
+        channels: int = 2,
+    ):
+        """Initialize audio processing track.
+
+        Args:
+            frame_processor: The FrameProcessor instance to get audio from.
+            channels: Number of audio channels (1=mono, 2=stereo). Default is stereo.
+        """
+        super().__init__()
+        self.frame_processor = frame_processor
+        self.channels = channels
+
+        # Audio timing
+        self._timestamp = 0
+        self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960 samples at 48kHz
+
+        # Audio buffer for accumulating samples
+        # Stores resampled audio at 48kHz
+        self._audio_buffer: deque[float] = deque()
+
+        # Track if we've logged the first audio receipt
+        self._first_audio_logged = False
+
+        # Paused state
+        self._paused = False
+        self._paused_lock = threading.Lock()
+
+        logger.info(
+            f"AudioProcessingTrack initialized: channels={channels}, "
+            f"output_rate={AUDIO_CLOCK_RATE}Hz, frame_size={self._samples_per_frame}"
+        )
+
+    def pause(self, paused: bool):
+        """Pause or resume the audio track."""
+        with self._paused_lock:
+            self._paused = paused
+        logger.info(f"Audio track {'paused' if paused else 'resumed'}")
+
+    def _resample_audio(
+        self, audio: np.ndarray, source_rate: int, target_rate: int
+    ) -> np.ndarray:
+        """Resample audio from source rate to target rate.
+
+        Args:
+            audio: Audio array of shape (channels, samples)
+            source_rate: Source sample rate in Hz
+            target_rate: Target sample rate in Hz
+
+        Returns:
+            Resampled audio array of shape (channels, new_samples)
+        """
+        if source_rate == target_rate:
+            return audio
+
+        # Calculate new length
+        duration = audio.shape[1] / source_rate
+        new_length = int(duration * target_rate)
+
+        # Simple linear interpolation resampling
+        # For production, consider using scipy.signal.resample or librosa
+        old_indices = np.linspace(0, audio.shape[1] - 1, audio.shape[1])
+        new_indices = np.linspace(0, audio.shape[1] - 1, new_length)
+
+        resampled = np.zeros((audio.shape[0], new_length), dtype=audio.dtype)
+        for ch in range(audio.shape[0]):
+            resampled[ch] = np.interp(new_indices, old_indices, audio[ch])
+
+        return resampled
+
+    async def recv(self) -> AudioFrame:
+        """Return the next audio frame for WebRTC streaming.
+
+        This method is called by aiortc to get audio frames. It:
+        1. Fetches audio from the FrameProcessor
+        2. Resamples to 48kHz if needed
+        3. Buffers samples and returns 20ms frames
+        """
+        # Check if paused
+        with self._paused_lock:
+            paused = self._paused
+
+        if paused:
+            # Return silence when paused
+            await asyncio.sleep(AUDIO_PTIME)
+            return self._create_silence_frame()
+
+        # Try to get audio from frame processor
+        audio_tensor, sample_rate = self.frame_processor.get_audio()
+
+        if audio_tensor is not None and sample_rate is not None:
+            if not self._first_audio_logged:
+                logger.info(
+                    f"First audio received: shape={audio_tensor.shape}, "
+                    f"sample_rate={sample_rate}Hz"
+                )
+                self._first_audio_logged = True
+
+            # Convert tensor to numpy: (channels, samples)
+            audio_np = audio_tensor.numpy()
+
+            # Ensure correct shape
+            if audio_np.ndim == 1:
+                # Mono audio, add channel dimension
+                audio_np = audio_np.reshape(1, -1)
+
+            # Resample to 48kHz if needed
+            if sample_rate != AUDIO_CLOCK_RATE:
+                audio_np = self._resample_audio(audio_np, sample_rate, AUDIO_CLOCK_RATE)
+
+            # Ensure we have the right number of channels
+            if audio_np.shape[0] != self.channels:
+                if audio_np.shape[0] == 1 and self.channels == 2:
+                    # Mono to stereo: duplicate channel
+                    audio_np = np.vstack([audio_np, audio_np])
+                elif audio_np.shape[0] == 2 and self.channels == 1:
+                    # Stereo to mono: average channels
+                    audio_np = audio_np.mean(axis=0, keepdims=True)
+
+            # Add samples to buffer (interleaved for stereo)
+            # Buffer stores samples in interleaved format: [L0, R0, L1, R1, ...]
+            for i in range(audio_np.shape[1]):
+                for ch in range(self.channels):
+                    self._audio_buffer.append(audio_np[ch, i])
+
+        # Check if we have enough samples for a frame
+        samples_needed = self._samples_per_frame * self.channels
+
+        if len(self._audio_buffer) >= samples_needed:
+            # Extract samples for this frame
+            samples = []
+            for _ in range(samples_needed):
+                samples.append(self._audio_buffer.popleft())
+
+            # Create audio frame
+            frame = self._create_audio_frame(samples)
+            return frame
+
+        # Not enough samples, return silence and wait
+        await asyncio.sleep(AUDIO_PTIME)
+        return self._create_silence_frame()
+
+    def _create_audio_frame(self, samples: list[float]) -> AudioFrame:
+        """Create an AudioFrame from float samples.
+
+        Args:
+            samples: List of float samples in interleaved format
+
+        Returns:
+            AudioFrame ready for WebRTC transmission
+        """
+        # Convert float samples to int16
+        # Audio from pipeline is typically in [-1, 1] range
+        samples_array = np.array(samples, dtype=np.float32)
+        samples_int16 = (samples_array * 32767).clip(-32768, 32767).astype(np.int16)
+
+        # Reshape to (samples, channels) for AudioFrame
+        samples_reshaped = samples_int16.reshape(-1, self.channels)
+
+        # Create AudioFrame
+        frame = AudioFrame.from_ndarray(
+            samples_reshaped,
+            format="s16",
+            layout="stereo" if self.channels == 2 else "mono",
+        )
+        frame.sample_rate = AUDIO_CLOCK_RATE
+        frame.pts = self._timestamp
+        frame.time_base = AUDIO_TIME_BASE
+
+        self._timestamp += self._samples_per_frame
+
+        return frame
+
+    def _create_silence_frame(self) -> AudioFrame:
+        """Create a silent audio frame.
+
+        Returns:
+            AudioFrame filled with silence
+        """
+        # Create zero-filled samples
+        samples = np.zeros(
+            (self._samples_per_frame, self.channels), dtype=np.int16
+        )
+
+        frame = AudioFrame.from_ndarray(
+            samples,
+            format="s16",
+            layout="stereo" if self.channels == 2 else "mono",
+        )
+        frame.sample_rate = AUDIO_CLOCK_RATE
+        frame.pts = self._timestamp
+        frame.time_base = AUDIO_TIME_BASE
+
+        self._timestamp += self._samples_per_frame
+
+        return frame
+
+    async def stop(self):
+        """Stop the audio track."""
+        self._audio_buffer.clear()
+        await super().stop()
+        logger.info("AudioProcessingTrack stopped")

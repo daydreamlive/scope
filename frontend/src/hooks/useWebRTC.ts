@@ -38,6 +38,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     useState<RTCPeerConnectionState>("new");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [hasAudio, setHasAudio] = useState(false);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -165,6 +166,18 @@ export function useWebRTC(options?: UseWebRTCOptions) {
           if (evt.streams && evt.streams[0]) {
             console.log("Setting remote stream:", evt.streams[0]);
             setRemoteStream(evt.streams[0]);
+
+            // Check for audio tracks
+            const audioTracks = evt.streams[0].getAudioTracks();
+            if (audioTracks.length > 0) {
+              console.log(
+                "Audio track received:",
+                audioTracks[0].label,
+                "enabled:",
+                audioTracks[0].enabled
+              );
+              setHasAudio(true);
+            }
           }
         };
 
@@ -377,6 +390,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     setRemoteStream(null);
     setConnectionState("new");
     setIsStreaming(false);
+    setHasAudio(false);
   }, []);
 
   // Cleanup on unmount
@@ -393,6 +407,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     connectionState,
     isConnecting,
     isStreaming,
+    hasAudio,
     peerConnectionRef,
     startStream,
     stopStream,
