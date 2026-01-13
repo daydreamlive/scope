@@ -3,6 +3,7 @@
 from typing import ClassVar
 
 from ..base_schema import BasePipelineConfig, ModeDefaults, height_field, width_field
+from ..artifacts import HuggingfaceRepoArtifact
 
 
 class LTX2Config(BasePipelineConfig):
@@ -22,6 +23,34 @@ class LTX2Config(BasePipelineConfig):
     docs_url: ClassVar[str | None] = "https://github.com/Lightricks/LTX-2"
     estimated_vram_gb: ClassVar[float | None] = 32.0
     requires_models: ClassVar[bool] = True
+    artifacts = [
+        HuggingfaceRepoArtifact(
+            repo_id="Lightricks/LTX-2",
+            files=[
+                "ltx-2-19b-distilled.safetensors",
+                "ltx-2-spatial-upscaler-x2-1.0.safetensors",
+            ],
+        ),
+        HuggingfaceRepoArtifact(
+            repo_id="google/gemma-3-12b-it",
+            files=[
+                "config.json",
+                "generation_config.json",
+                "model-00001-of-00005.safetensors",
+                "model-00002-of-00005.safetensors",
+                "model-00003-of-00005.safetensors",
+                "model-00004-of-00005.safetensors",
+                "model-00005-of-00005.safetensors",
+                "model.safetensors.index.json",
+                "processor_config.json",
+                "preprocessor_config.json",
+                "special_tokens_map.json",
+                "tokenizer.json",
+                "tokenizer.model",
+                "tokenizer_config.json",
+            ],
+        )
+    ]
     supports_lora: ClassVar[bool] = False
     supports_vace: ClassVar[bool] = False
 
