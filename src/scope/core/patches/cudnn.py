@@ -12,9 +12,35 @@ This can be removed when a new PyTorch with the correct cuDNN version is release
 """
 
 import glob
+import importlib.util
 import os
 import shutil
 import sys
+
+
+def _find_package_path(package_name: str) -> str | None:
+    """Find a package's install path WITHOUT importing it.
+
+    This is critical for torch - importing it loads cuDNN DLLs which then
+    can't be overwritten. Using find_spec() locates the package without
+    executing its __init__.py.
+
+    Handles both regular packages (with __init__.py) and namespace packages.
+    """
+    try:
+        spec = importlib.util.find_spec(package_name)
+        if spec:
+            # Regular package: spec.origin points to __init__.py
+            if spec.origin:
+                return os.path.dirname(spec.origin)
+            # Namespace package: use submodule_search_locations
+            if spec.submodule_search_locations:
+                locations = list(spec.submodule_search_locations)
+                if locations:
+                    return locations[0]
+    except (ImportError, ModuleNotFoundError):
+        pass
+    return None
 
 
 def patch_torch_cudnn(silent: bool = False):
@@ -22,6 +48,9 @@ def patch_torch_cudnn(silent: bool = False):
 
     This patches PyTorch to use the newer cuDNN version.
     Idempotent: skips files that are already the correct size.
+
+    IMPORTANT: This function does NOT import torch, so it can safely
+    overwrite cuDNN DLLs before they are loaded.
 
     Args:
         silent: If True, suppress all output (for use at Python startup).
@@ -31,16 +60,22 @@ def patch_torch_cudnn(silent: bool = False):
             print("Not on Windows, skipping cuDNN patch")
         return
 
-    try:
-        import nvidia.cudnn
-        import torch
-    except ImportError as e:
+    # Find package paths WITHOUT importing them (avoids loading/locking DLLs)
+    cudnn_path = _find_package_path("nvidia.cudnn")
+    torch_path = _find_package_path("torch")
+
+    if not cudnn_path:
         if not silent:
-            print(f"Required packages not installed: {e}")
+            print("nvidia-cudnn-cu12 package not found")
         return
 
-    cudnn_src = os.path.join(nvidia.cudnn.__path__[0], "bin")
-    torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+    if not torch_path:
+        if not silent:
+            print("torch package not found")
+        return
+
+    cudnn_src = os.path.join(cudnn_path, "bin")
+    torch_lib = os.path.join(torch_path, "lib")
 
     if not os.path.isdir(cudnn_src):
         if not silent:
