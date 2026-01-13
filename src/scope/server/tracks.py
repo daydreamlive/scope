@@ -179,7 +179,8 @@ class VideoProcessingTrack(MediaStreamTrack):
         if self.frame_processor is not None:
             self.frame_processor.stop()
 
-        await super().stop()
+        # MediaStreamTrack.stop() is not async
+        super().stop()
 
 
 class AudioProcessingTrack(MediaStreamTrack):
@@ -188,9 +189,15 @@ class AudioProcessingTrack(MediaStreamTrack):
     This track receives audio from the FrameProcessor and streams it via WebRTC.
     Audio is resampled from the pipeline's native sample rate (typically 24kHz)
     to WebRTC's standard 48kHz for Opus codec compatibility.
+
+    Timing follows aiortc's AudioStreamTrack pattern to ensure proper frame pacing.
     """
 
     kind = "audio"
+
+    # Timing attributes (following aiortc pattern)
+    _start: float
+    _timestamp: int
 
     def __init__(
         self,
@@ -207,12 +214,11 @@ class AudioProcessingTrack(MediaStreamTrack):
         self.frame_processor = frame_processor
         self.channels = channels
 
-        # Audio timing
-        self._timestamp = 0
-        self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960 samples at 48kHz
+        # Audio frame size: 20ms at 48kHz = 960 samples
+        self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)
 
         # Audio buffer for accumulating samples
-        # Stores resampled audio at 48kHz
+        # Stores resampled audio at 48kHz in interleaved format
         self._audio_buffer: deque[float] = deque()
 
         # Track if we've logged the first audio receipt
@@ -268,28 +274,41 @@ class AudioProcessingTrack(MediaStreamTrack):
         """Return the next audio frame for WebRTC streaming.
 
         This method is called by aiortc to get audio frames. It:
-        1. Fetches audio from the FrameProcessor
-        2. Resamples to 48kHz if needed
-        3. Buffers samples and returns 20ms frames
+        1. Manages timing to ensure proper frame pacing (following aiortc pattern)
+        2. Fetches audio from the FrameProcessor
+        3. Resamples to 48kHz if needed
+        4. Buffers samples and returns 20ms frames
         """
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        # Timing management (following aiortc's AudioStreamTrack pattern)
+        # This ensures frames are delivered at the correct rate
+        if hasattr(self, "_timestamp"):
+            self._timestamp += self._samples_per_frame
+            wait = self._start + (self._timestamp / AUDIO_CLOCK_RATE) - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+        else:
+            self._start = time.time()
+            self._timestamp = 0
+
         # Check if paused
         with self._paused_lock:
             paused = self._paused
 
         if paused:
-            # Return silence when paused
-            await asyncio.sleep(AUDIO_PTIME)
             return self._create_silence_frame()
 
-        # Try to get audio from frame processor
+        # Try to get audio from frame processor (non-blocking)
         audio_tensor, sample_rate = self.frame_processor.get_audio()
 
         if audio_tensor is not None and sample_rate is not None:
+            logger.info(
+                f"AudioTrack received audio: shape={audio_tensor.shape}, "
+                f"sample_rate={sample_rate}Hz, buffer_size={len(self._audio_buffer)}"
+            )
             if not self._first_audio_logged:
-                logger.info(
-                    f"First audio received: shape={audio_tensor.shape}, "
-                    f"sample_rate={sample_rate}Hz"
-                )
                 self._first_audio_logged = True
 
             # Convert tensor to numpy: (channels, samples)
@@ -328,12 +347,10 @@ class AudioProcessingTrack(MediaStreamTrack):
             for _ in range(samples_needed):
                 samples.append(self._audio_buffer.popleft())
 
-            # Create audio frame
-            frame = self._create_audio_frame(samples)
-            return frame
+            # Create audio frame with buffered samples
+            return self._create_audio_frame(samples)
 
-        # Not enough samples, return silence and wait
-        await asyncio.sleep(AUDIO_PTIME)
+        # Not enough samples, return silence
         return self._create_silence_frame()
 
     def _create_audio_frame(self, samples: list[float]) -> AudioFrame:
@@ -350,20 +367,15 @@ class AudioProcessingTrack(MediaStreamTrack):
         samples_array = np.array(samples, dtype=np.float32)
         samples_int16 = (samples_array * 32767).clip(-32768, 32767).astype(np.int16)
 
-        # Reshape to (samples, channels) for AudioFrame
-        samples_reshaped = samples_int16.reshape(-1, self.channels)
-
-        # Create AudioFrame
-        frame = AudioFrame.from_ndarray(
-            samples_reshaped,
-            format="s16",
-            layout="stereo" if self.channels == 2 else "mono",
-        )
+        # Create AudioFrame directly (following aiortc's pattern)
+        layout = "stereo" if self.channels == 2 else "mono"
+        frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
         frame.sample_rate = AUDIO_CLOCK_RATE
         frame.pts = self._timestamp
         frame.time_base = AUDIO_TIME_BASE
 
-        self._timestamp += self._samples_per_frame
+        # Update the frame's plane with the audio data
+        frame.planes[0].update(samples_int16.tobytes())
 
         return frame
 
@@ -373,26 +385,21 @@ class AudioProcessingTrack(MediaStreamTrack):
         Returns:
             AudioFrame filled with silence
         """
-        # Create zero-filled samples
-        samples = np.zeros(
-            (self._samples_per_frame, self.channels), dtype=np.int16
-        )
-
-        frame = AudioFrame.from_ndarray(
-            samples,
-            format="s16",
-            layout="stereo" if self.channels == 2 else "mono",
-        )
+        # Create AudioFrame (following aiortc's AudioStreamTrack pattern)
+        layout = "stereo" if self.channels == 2 else "mono"
+        frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
         frame.sample_rate = AUDIO_CLOCK_RATE
         frame.pts = self._timestamp
         frame.time_base = AUDIO_TIME_BASE
 
-        self._timestamp += self._samples_per_frame
+        # Fill with zeros (silence)
+        for p in frame.planes:
+            p.update(bytes(p.buffer_size))
 
         return frame
 
-    async def stop(self):
+    def stop(self):
         """Stop the audio track."""
         self._audio_buffer.clear()
-        await super().stop()
+        super().stop()
         logger.info("AudioProcessingTrack stopped")

@@ -59,11 +59,15 @@ class Session:
         try:
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
-                await self.video_track.stop()
+                result = self.video_track.stop()
+                if asyncio.iscoroutine(result):
+                    await result
 
             # Stop audio track
             if self.audio_track is not None:
-                await self.audio_track.stop()
+                result = self.audio_track.stop()
+                if asyncio.iscoroutine(result):
+                    await result
 
             if self.pc.connectionState not in ["closed", "failed"]:
                 await self.pc.close()

@@ -131,13 +131,15 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         };
 
         // Add video track for sending to server only if stream is provided
-        let transceiver: RTCRtpTransceiver | undefined;
+        let videoTransceiver: RTCRtpTransceiver | undefined;
         if (stream) {
           stream.getTracks().forEach(track => {
             if (track.kind === "video") {
               console.log("Adding video track for sending");
               const sender = pc.addTrack(track, stream);
-              transceiver = pc.getTransceivers().find(t => t.sender === sender);
+              videoTransceiver = pc.getTransceivers().find(
+                t => t.sender === sender
+              );
             }
           });
         } else {
@@ -145,20 +147,36 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             "No video stream provided - adding video transceiver for no-input pipelines"
           );
           // For no-video-input pipelines, add a video transceiver to establish proper WebRTC connection
-          transceiver = pc.addTransceiver("video");
+          videoTransceiver = pc.addTransceiver("video");
         }
 
         // Force VP8-only to match aiortc's reliable codec support
         // This prevents codec mismatch issues with VP9/AV1/H264
-        if (transceiver) {
+        if (videoTransceiver) {
           const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
           const vp8Codecs = codecs.filter(
             c => c.mimeType.toLowerCase() === "video/vp8"
           );
           if (vp8Codecs.length > 0) {
-            transceiver.setCodecPreferences(vp8Codecs);
+            videoTransceiver.setCodecPreferences(vp8Codecs);
             console.log("Forced VP8-only codec for aiortc compatibility");
           }
+        }
+
+        // Add audio transceiver to receive audio from server
+        // This is needed for pipelines that generate audio (e.g., LTX2)
+        const audioTransceiver = pc.addTransceiver("audio", {
+          direction: "recvonly",
+        });
+        // Force Opus codec for audio (widely supported and efficient)
+        const audioCodecs =
+          RTCRtpReceiver.getCapabilities("audio")?.codecs || [];
+        const opusCodecs = audioCodecs.filter(
+          c => c.mimeType.toLowerCase() === "audio/opus"
+        );
+        if (opusCodecs.length > 0) {
+          audioTransceiver.setCodecPreferences(opusCodecs);
+          console.log("Added audio transceiver with Opus codec");
         }
 
         // Named event handlers
