@@ -28,6 +28,10 @@ def __getattr__(name):
         from .memflow.pipeline import MemFlowPipeline
 
         return MemFlowPipeline
+    elif name == "LTX2Pipeline":
+        from .ltx2.pipeline import LTX2Pipeline
+
+        return LTX2Pipeline
     elif name == "VideoDepthAnythingPipeline":
         from .video_depth_anything.pipeline import VideoDepthAnythingPipeline
 
@@ -61,6 +65,10 @@ def __getattr__(name):
         from .memflow.schema import MemFlowConfig
 
         return MemFlowConfig
+    elif name == "LTX2Config":
+        from .ltx2.schema import LTX2Config
+
+        return LTX2Config
     elif name == "VideoDepthAnythingConfig":
         from .video_depth_anything.schema import VideoDepthAnythingConfig
 
@@ -76,6 +84,7 @@ __all__ = [
     "StreamDiffusionV2Pipeline",
     "PassthroughPipeline",
     "MemFlowPipeline",
+    "LTX2Pipeline",
     "VideoDepthAnythingPipeline",
     # Config classes
     "BasePipelineConfig",
@@ -85,5 +94,6 @@ __all__ = [
     "PassthroughConfig",
     "RewardForcingConfig",
     "MemFlowConfig",
+    "LTX2Config",
     "VideoDepthAnythingConfig",
 ]

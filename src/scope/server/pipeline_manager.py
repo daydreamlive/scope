@@ -334,6 +334,7 @@ class PipelineManager:
             "krea-realtime-video",
             "reward-forcing",
             "memflow",
+            "ltx2",
             "video-depth-anything",
         }
 
@@ -679,6 +680,48 @@ class PipelineManager:
                 dtype=torch.bfloat16,
             )
             logger.info("MemFlow pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "ltx2":
+            from scope.core.pipelines import LTX2Pipeline
+
+            from .models_config import get_model_file_path, get_models_dir
+
+            models_dir = get_models_dir()
+
+            # LTX2 requires checkpoint_path to point to the .safetensors file
+            config = OmegaConf.create(
+                {
+                    "checkpoint_path": str(models_dir / "LTX-2" / "ltx-2-19b-distilled.safetensors"),
+                    "gemma_root": str(models_dir / "gemma-3-12b-it"),
+                }
+            )
+
+            # Apply load parameters (resolution, num_frames, frame_rate, seed)
+            # LTX2 defaults: 512x768, 33 frames, 24fps (reduced to fit in 96GB VRAM)
+            # Activations during denoising are NOT quantized and are the main memory bottleneck
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=768,
+                default_seed=42,
+            )
+
+            # Add LTX2-specific parameters
+            if load_params:
+                config["num_frames"] = load_params.get("num_frames", 121)
+                config["frame_rate"] = load_params.get("frame_rate", 24.0)
+            else:
+                config["num_frames"] = 121
+                config["frame_rate"] = 24.0
+
+            pipeline = LTX2Pipeline(
+                config,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("LTX2 pipeline initialized")
             return pipeline
 
         else:
