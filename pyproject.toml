@@ -3,7 +3,7 @@ name = "daydream-scope"
 version = "0.1.0b3"
 description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
-requires-python = ">=3.10.12"
+requires-python = ">=3.12"
 authors = [
     {name = "Yondon Fu", email = "yondon@livepeer.org"},
     {name = "Rafal Leszko", email = "rafal@livepeer.org"}
@@ -93,11 +93,11 @@ flash-attn = [
     # Prebuilt Linux wheels from https://github.com/Dao-AILab/flash-attention
     { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
     # Prebuilt Windows wheels from https://github.com/kingbri1/flash-attention
-    { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.9.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
+    { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.9.0cxx11abiFALSE-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
 sageattention = [
-    # Prebuilt Linux wheels from https://github.com/daydreamlive/SageAttention
-    { url = "https://github.com/daydreamlive/SageAttention/releases/download/v2.2.0-linux/sageattention-2.2.0-cp310-cp310-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+    # Prebuilt Linux wheels from https://huggingface.co/Kijai/PrecompiledWheels
+    { url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
     # Prebuilt Windows wheels from https://github.com/woct0rdho/SageAttention/releases
     { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
@@ -123,7 +123,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py312"
 exclude = [
     "*/vendor/*",
     "**/vendor/**",
