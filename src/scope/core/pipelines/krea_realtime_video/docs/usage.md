@@ -4,6 +4,9 @@
 
 The model is trained using Self-Forcing on Wan2.1 14b.
 
+> [!IMPORTANT]
+> Regular V2V (eg. using input video for latent initialization) is known to have quality issues right now. VACE V2V (eg. using input video for VACE visual conditioning) does not have these quality issues.
+
 ## Examples
 
 The following examples include timeline JSON files with the prompts used so you can try them as well.

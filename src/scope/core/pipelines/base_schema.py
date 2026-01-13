@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
 if TYPE_CHECKING:
-    from scope.server.artifacts import Artifact
+    from .artifacts import Artifact
 
 
 # Field templates - use these to override defaults while keeping constraints/descriptions
@@ -124,6 +124,9 @@ class ModeDefaults(BaseModel):
     noise_scale: float | None = None
     noise_controller: bool | None = None
     input_size: int | None = None
+
+    # Temporal interpolation
+    default_temporal_interpolation_steps: int | None = None
 
 
 class BasePipelineConfig(BaseModel):

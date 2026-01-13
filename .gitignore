@@ -21,4 +21,6 @@ notes/
 .cursorignore
 .cursorindexingignore
 
+.cursor/
+.specstory/
 *.local*

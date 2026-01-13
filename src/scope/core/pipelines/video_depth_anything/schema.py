@@ -1,3 +1,4 @@
+from ..artifacts import HuggingfaceRepoArtifact
 from ..base_schema import BasePipelineConfig, ModeDefaults
 
 
@@ -16,8 +17,12 @@ class VideoDepthAnythingConfig(BasePipelineConfig):
         "for video sequences using Video-Depth-Anything Small model."
     )
     docs_url = "https://github.com/DepthAnything/Video-Depth-Anything"
-
-    requires_models = True
+    artifacts = [
+        HuggingfaceRepoArtifact(
+            repo_id="depth-anything/Video-Depth-Anything-Small",
+            files=["video_depth_anything_vits.pth"],
+        ),
+    ]
     supports_prompts = False
     modified = True
 

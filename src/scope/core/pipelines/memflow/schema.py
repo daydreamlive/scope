@@ -1,6 +1,15 @@
 from pydantic import Field
 
+from ..artifacts import HuggingfaceRepoArtifact
 from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..common_artifacts import (
+    LIGHTTAE_ARTIFACT,
+    LIGHTVAE_ARTIFACT,
+    TAE_ARTIFACT,
+    UMT5_ENCODER_ARTIFACT,
+    VACE_ARTIFACT,
+    WAN_1_3B_ARTIFACT,
+)
 from ..utils import VaeType
 
 
@@ -14,9 +23,20 @@ class MemFlowConfig(BasePipelineConfig):
     )
     docs_url = "https://github.com/daydreamlive/scope/blob/main/src/scope/core/pipelines/memflow/docs/usage.md"
     estimated_vram_gb = 20.0
-    requires_models = True
     supports_lora = True
     supports_vace = True
+    artifacts = [
+        WAN_1_3B_ARTIFACT,
+        UMT5_ENCODER_ARTIFACT,
+        VACE_ARTIFACT,
+        LIGHTVAE_ARTIFACT,
+        TAE_ARTIFACT,
+        LIGHTTAE_ARTIFACT,
+        HuggingfaceRepoArtifact(
+            repo_id="KlingTeam/MemFlow",
+            files=["base.pt", "lora.pt"],
+        ),
+    ]
 
     supports_cache_management = True
     supports_quantization = True

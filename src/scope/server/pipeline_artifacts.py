@@ -1,14 +1,10 @@
 """
 Defines which artifacts each pipeline requires.
-
-This module maintains the legacy PIPELINE_ARTIFACTS dict for backwards compatibility.
-New pipelines (especially plugins) should declare artifacts via the `artifacts` ClassVar
-on their config class instead.
 """
 
 from .artifacts import HuggingfaceRepoArtifact
 
-# Common artifacts shared across built-in pipelines
+# Common artifacts shared across pipelines
 WAN_1_3B_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="Wan-AI/Wan2.1-T2V-1.3B",
     files=["config.json", "Wan2.1_VAE.pth", "google"],
@@ -22,6 +18,12 @@ UMT5_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
 VACE_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="Kijai/WanVideo_comfy",
     files=["Wan2_1-VACE_module_1_3B_bf16.safetensors"],
+)
+
+VACE_14B_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="Kijai/WanVideo_comfy",
+    # Use BF16 version for CPU offloading compatibility (FP8 doesn't work on CPU)
+    files=["Wan2_1-VACE_module_14B_bf16.safetensors"],
 )
 
 # Extra VAE artifacts (lightweight/alternative encoders)
@@ -69,12 +71,13 @@ PIPELINE_ARTIFACTS = {
     "krea-realtime-video": [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        VACE_14B_ARTIFACT,
         LIGHTVAE_ARTIFACT,
         TAE_ARTIFACT,
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="Wan-AI/Wan2.1-T2V-14B",
-            files=["config.json"],
+            files=["config.json", "Wan2.1_VAE.pth"],
         ),
         HuggingfaceRepoArtifact(
             repo_id="krea/krea-realtime-video",
@@ -103,12 +106,6 @@ PIPELINE_ARTIFACTS = {
         HuggingfaceRepoArtifact(
             repo_id="KlingTeam/MemFlow",
             files=["base.pt", "lora.pt"],
-        ),
-    ],
-    "video-depth-anything": [
-        HuggingfaceRepoArtifact(
-            repo_id="depth-anything/Video-Depth-Anything-Small",
-            files=["video_depth_anything_vits.pth"],
         ),
     ],
 }

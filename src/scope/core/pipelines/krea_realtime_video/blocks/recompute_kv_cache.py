@@ -33,6 +33,29 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
     def description(self) -> str:
         return "Recompute KV Cache block that recomputes KV cache using context frames"
 
+    @staticmethod
+    def _get_block_mask_model(model: torch.nn.Module) -> torch.nn.Module:
+        """Return the underlying model object that owns `block_mask`.
+
+        When VACE is enabled, `components.generator.model` is wrapped by `CausalVaceWanModel`,
+        but the actual `block_mask` lives on the wrapped base model (`causal_wan_model`).
+        """
+        causal_wan_model = getattr(model, "causal_wan_model", None)
+        if causal_wan_model is not None:
+            return causal_wan_model
+
+        # PEFT models (runtime_peft) expose the wrapped module at base_model.model.
+        base_model = getattr(model, "base_model", None)
+        if base_model is not None:
+            inner = getattr(base_model, "model", None)
+            if inner is not None:
+                causal_wan_model = getattr(inner, "causal_wan_model", None)
+                if causal_wan_model is not None:
+                    return causal_wan_model
+                return inner
+
+        return model
+
     @property
     def inputs(self) -> list[InputParam]:
         return [
@@ -201,11 +224,15 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             local_attn_size=components.config.local_attn_size,
             frame_seq_length=frame_seq_length,
             kv_cache_existing=block_state.kv_cache,
+            # The recompute pass immediately overwrites the active cache window and
+            # updates indices, so zeroing the full cache is wasted bandwidth.
+            zero_cache=False,
         )
 
         # Prepare blockwise causal mask
-        components.generator.model.block_mask = (
-            components.generator.model._prepare_blockwise_causal_attn_mask(
+        block_mask_model = self._get_block_mask_model(components.generator.model)
+        block_mask_model.block_mask = (
+            block_mask_model._prepare_blockwise_causal_attn_mask(
                 device=context_frames.device,
                 num_frames=num_context_frames,
                 frame_seqlen=frame_seq_length,
@@ -214,13 +241,10 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             )
         )
 
-        context_timestep = (
-            torch.ones(
-                [1, num_context_frames],
-                device=context_frames.device,
-                dtype=torch.int64,
-            )
-            * 0
+        context_timestep = torch.zeros(
+            [1, num_context_frames],
+            device=context_frames.device,
+            dtype=torch.int64,
         )
 
         # Cache recomputation: no bias to faithfully store context frames
@@ -234,7 +258,7 @@ class RecomputeKVCacheBlock(ModularPipelineBlocks):
             current_start=start_frame * frame_seq_length,
         )
 
-        components.generator.model.block_mask = None
+        block_mask_model.block_mask = None
 
         self.set_block_state(state, block_state)
         return components, state
