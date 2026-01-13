@@ -80,3 +80,15 @@ Electron main process → spawns Python backend → waits for health check → l
 ### Python
 
 - Use relative imports if it is single or double dot (eg .package or ..package) and otherwise use an absolute import
+
+## Verifying Work
+
+Follow these guidelines for verifing work when implementation for a task is complete.
+
+### Backend
+
+- Use `uv run daydream-scope` to confirm that the server starts up without errors.
+
+### Frontend
+
+- Use `npm run build` to confirm that builds work properly.
