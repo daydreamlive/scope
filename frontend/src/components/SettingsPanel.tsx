@@ -56,6 +56,10 @@ interface SettingsPanelProps {
   onResolutionChange?: (resolution: { height: number; width: number }) => void;
   seed?: number;
   onSeedChange?: (seed: number) => void;
+  randomizeSeed?: boolean;
+  onRandomizeSeedChange?: (enabled: boolean) => void;
+  numFrames?: number;
+  onNumFramesChange?: (numFrames: number) => void;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
   // Default denoising steps for reset functionality - derived from backend schema
@@ -108,6 +112,10 @@ export function SettingsPanel({
   onResolutionChange,
   seed = 42,
   onSeedChange,
+  randomizeSeed = false,
+  onRandomizeSeedChange,
+  numFrames = 33,
+  onNumFramesChange,
   denoisingSteps = [700, 500],
   onDenoisingStepsChange,
   defaultDenoisingSteps,
@@ -155,6 +163,7 @@ export function SettingsPanel({
   const [heightError, setHeightError] = useState<string | null>(null);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+  const [numFramesError, setNumFramesError] = useState<string | null>(null);
 
   // Check if resolution needs adjustment
   const scaleFactor = getResolutionScaleFactor(pipelineId);
@@ -250,6 +259,40 @@ export function SettingsPanel({
     const minValue = 0;
     const newValue = Math.max(minValue, seed - 1);
     handleSeedChange(newValue);
+  };
+
+  // LTX2 uses num_frames = (8 × K) + 1, so valid values are 1, 9, 17, 25, 33, 41, 49, etc.
+  const handleNumFramesChange = (value: number) => {
+    const minValue = 1;
+    const maxValue = 257; // 32 * 8 + 1
+
+    // Validate range
+    if (value < minValue) {
+      setNumFramesError(`Must be at least ${minValue}`);
+    } else if (value > maxValue) {
+      setNumFramesError(`Must be at most ${maxValue}`);
+    } else if ((value - 1) % 8 !== 0) {
+      // Warn about non-optimal values
+      const nearestValid = Math.round((value - 1) / 8) * 8 + 1;
+      setNumFramesError(`Recommended: ${nearestValid} (formula: 8×K+1)`);
+    } else {
+      setNumFramesError(null);
+    }
+
+    // Always update the value
+    onNumFramesChange?.(value);
+  };
+
+  const incrementNumFrames = () => {
+    // Increment by 8 to get next valid LTX2 value
+    const newValue = Math.min(257, numFrames + 8);
+    handleNumFramesChange(newValue);
+  };
+
+  const decrementNumFrames = () => {
+    // Decrement by 8 to get previous valid LTX2 value
+    const newValue = Math.max(1, numFrames - 8);
+    handleNumFramesChange(newValue);
   };
 
   const currentPipeline = pipelines?.[pipelineId];
@@ -595,7 +638,7 @@ export function SettingsPanel({
                       size="icon"
                       className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                       onClick={decrementSeed}
-                      disabled={isStreaming}
+                      disabled={isStreaming || randomizeSeed}
                     >
                       <Minus className="h-3.5 w-3.5" />
                     </Button>
@@ -608,7 +651,7 @@ export function SettingsPanel({
                           handleSeedChange(value);
                         }
                       }}
-                      disabled={isStreaming}
+                      disabled={isStreaming || randomizeSeed}
                       className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       min={0}
                       max={2147483647}
@@ -618,7 +661,7 @@ export function SettingsPanel({
                       size="icon"
                       className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
                       onClick={incrementSeed}
-                      disabled={isStreaming}
+                      disabled={isStreaming || randomizeSeed}
                     >
                       <Plus className="h-3.5 w-3.5" />
                     </Button>
@@ -628,6 +671,80 @@ export function SettingsPanel({
                   <p className="text-xs text-red-500 ml-16">{seedError}</p>
                 )}
               </div>
+
+              {/* Randomize seed toggle - shown for pipelines that support it */}
+              {pipelines?.[pipelineId]?.supportsRandomizeSeed && (
+                <div className="flex items-center justify-between gap-2">
+                  <LabelWithTooltip
+                    label={PARAMETER_METADATA.randomizeSeed.label}
+                    tooltip={PARAMETER_METADATA.randomizeSeed.tooltip}
+                    className="text-sm text-foreground"
+                  />
+                  <Toggle
+                    pressed={randomizeSeed}
+                    onPressedChange={onRandomizeSeedChange || (() => {})}
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                  >
+                    {randomizeSeed ? "ON" : "OFF"}
+                  </Toggle>
+                </div>
+              )}
+
+              {/* Number of frames input - shown for pipelines that support it */}
+              {pipelines?.[pipelineId]?.supportsNumFrames && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <LabelWithTooltip
+                      label={PARAMETER_METADATA.numFrames.label}
+                      tooltip={PARAMETER_METADATA.numFrames.tooltip}
+                      className="text-sm text-foreground w-14"
+                    />
+                    <div
+                      className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${numFramesError ? "border-amber-500" : ""}`}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={decrementNumFrames}
+                        disabled={isStreaming}
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </Button>
+                      <Input
+                        type="number"
+                        value={numFrames}
+                        onChange={e => {
+                          const value = parseInt(e.target.value);
+                          if (!isNaN(value)) {
+                            handleNumFramesChange(value);
+                          }
+                        }}
+                        disabled={isStreaming}
+                        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        min={1}
+                        max={257}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+                        onClick={incrementNumFrames}
+                        disabled={isStreaming}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  {numFramesError && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500 ml-16">
+                      {numFramesError}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

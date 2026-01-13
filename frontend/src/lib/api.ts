@@ -406,6 +406,10 @@ export interface PipelineSchemaInfo {
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
+  // Whether this pipeline supports randomize seed (useful for non-autoregressive models)
+  supports_randomize_seed: boolean;
+  // Whether this pipeline supports configurable number of frames
+  supports_num_frames: boolean;
 }
 
 export interface PipelineSchemasResponse {

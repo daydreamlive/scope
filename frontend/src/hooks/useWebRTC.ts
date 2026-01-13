@@ -359,6 +359,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       vace_ref_images?: string[];
       vace_use_input_video?: boolean;
       vace_context_scale?: number;
+      randomize_seed?: boolean;
     }) => {
       if (
         dataChannelRef.current &&

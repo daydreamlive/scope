@@ -59,6 +59,12 @@ export function usePipelines() {
               schema.recommended_quantization_vram_threshold ?? undefined,
             modified: schema.modified,
             vaeTypes,
+            supportsRandomizeSeed: schema.supports_randomize_seed,
+            supportsNumFrames: schema.supports_num_frames,
+            defaultNumFrames:
+              (schema.config_schema?.properties?.num_frames?.default as
+                | number
+                | undefined) ?? undefined,
           };
         }
 

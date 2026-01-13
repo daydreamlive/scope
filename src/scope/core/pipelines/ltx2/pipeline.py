@@ -234,6 +234,8 @@ class LTX2Pipeline(Pipeline):
             simple_denoising_func,
         )
 
+        import random
+
         # Extract parameters
         prompts = kwargs.get("prompts", [{"text": "a beautiful sunset", "weight": 1.0}])
         seed = kwargs.get("seed", kwargs.get("base_seed", 42))
@@ -241,6 +243,13 @@ class LTX2Pipeline(Pipeline):
         frame_rate = kwargs.get("frame_rate", self.config.frame_rate)
         height = kwargs.get("height", self.config.height)
         width = kwargs.get("width", self.config.width)
+        randomize_seed = kwargs.get("randomize_seed", self.config.randomize_seed)
+
+        # Randomize seed if enabled (useful for non-autoregressive models like LTX2)
+        # This ensures each chunk gets a different seed for varied outputs
+        if randomize_seed:
+            seed = random.randint(0, 2**31 - 1)
+            logger.info(f"Randomized seed: {seed}")
 
         # Convert prompts to single text (for now, just use first prompt)
         prompt_text = prompts[0]["text"] if prompts else "a beautiful sunset"

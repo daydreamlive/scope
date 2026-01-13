@@ -61,6 +61,10 @@ class LTX2Config(BasePipelineConfig):
     min_dimension: ClassVar[int] = 64
     modified: ClassVar[bool] = False
     recommended_quantization_vram_threshold: ClassVar[float | None] = 32.0
+    # LTX2 is bidirectional (not autoregressive), so randomize seed is useful
+    supports_randomize_seed: ClassVar[bool] = True
+    # LTX2 supports configurable number of frames per generation
+    supports_num_frames: ClassVar[bool] = True
 
     # Mode configuration - only supports text mode for now
     modes: ClassVar[dict[str, ModeDefaults]] = {"text": ModeDefaults(default=True)}
@@ -87,3 +91,9 @@ class LTX2Config(BasePipelineConfig):
     # According to official LTX-2 docs, this significantly reduces VRAM usage
     # Requires PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     use_fp8: bool = True
+
+    # Randomize seed on every generation
+    # LTX2 is bidirectional (not autoregressive), so each chunk is independent.
+    # With a fixed seed, the same chunk is regenerated unless the prompt changes.
+    # Enable this to get varied outputs between chunks.
+    randomize_seed: bool = False

@@ -52,6 +52,8 @@ export interface SettingsState {
     width: number;
   };
   seed?: number;
+  randomizeSeed?: boolean;
+  numFrames?: number;
   denoisingSteps?: number[];
   noiseScale?: number;
   noiseController?: boolean;
@@ -108,6 +110,12 @@ export interface PipelineInfo {
   recommendedQuantizationVramThreshold?: number | null;
   // Available VAE types from config schema enum (derived from vae_type field presence)
   vaeTypes?: string[];
+  // Whether this pipeline supports randomize seed (useful for non-autoregressive models)
+  supportsRandomizeSeed?: boolean;
+  // Whether this pipeline supports configurable number of frames
+  supportsNumFrames?: boolean;
+  // Default number of frames for pipelines that support it
+  defaultNumFrames?: number;
 }
 
 export interface DownloadProgress {

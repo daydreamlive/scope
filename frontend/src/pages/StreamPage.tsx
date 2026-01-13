@@ -426,6 +426,21 @@ export function StreamPage() {
     updateSettings({ seed });
   };
 
+  const handleRandomizeSeedChange = (enabled: boolean) => {
+    updateSettings({ randomizeSeed: enabled });
+    // Send randomize seed update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        randomize_seed: enabled,
+      });
+    }
+  };
+
+  const handleNumFramesChange = (numFrames: number) => {
+    updateSettings({ numFrames });
+    // Note: This setting requires pipeline reload, so we don't send parameter update here
+  };
+
   const handleDenoisingStepsChange = (denoisingSteps: number[]) => {
     updateSettings({ denoisingSteps });
     // Send denoising steps update to backend
@@ -761,6 +776,17 @@ export function StreamPage() {
           loadParams.seed = settings.seed ?? 42;
           loadParams.quantization = settings.quantization ?? null;
           loadParams.vae_type = settings.vaeType ?? "wan";
+        }
+
+        // Add randomize seed if pipeline supports it
+        if (currentPipeline?.supportsRandomizeSeed) {
+          loadParams.randomize_seed = settings.randomizeSeed ?? false;
+        }
+
+        // Add num_frames if pipeline supports it
+        if (currentPipeline?.supportsNumFrames) {
+          loadParams.num_frames =
+            settings.numFrames ?? currentPipeline.defaultNumFrames ?? 33;
         }
 
         // Add LoRA parameters if pipeline supports LoRA
@@ -1124,6 +1150,14 @@ export function StreamPage() {
             onResolutionChange={handleResolutionChange}
             seed={settings.seed ?? 42}
             onSeedChange={handleSeedChange}
+            randomizeSeed={settings.randomizeSeed ?? false}
+            onRandomizeSeedChange={handleRandomizeSeedChange}
+            numFrames={
+              settings.numFrames ??
+              pipelines?.[settings.pipelineId]?.defaultNumFrames ??
+              33
+            }
+            onNumFramesChange={handleNumFramesChange}
             denoisingSteps={
               settings.denoisingSteps ||
               getDefaults(settings.pipelineId, settings.inputMode)

@@ -712,9 +712,11 @@ class PipelineManager:
             if load_params:
                 config["num_frames"] = load_params.get("num_frames", 121)
                 config["frame_rate"] = load_params.get("frame_rate", 24.0)
+                config["randomize_seed"] = load_params.get("randomize_seed", False)
             else:
                 config["num_frames"] = 121
                 config["frame_rate"] = 24.0
+                config["randomize_seed"] = False
 
             pipeline = LTX2Pipeline(
                 config,

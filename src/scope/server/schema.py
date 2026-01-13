@@ -123,6 +123,10 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    randomize_seed: bool | None = Field(
+        default=None,
+        description="Randomize seed on every generation. Useful for non-autoregressive models like LTX2 to get varied outputs between chunks.",
+    )
 
 
 class SpoutConfig(BaseModel):
@@ -432,6 +436,10 @@ class LTX2LoadParams(PipelineLoadParams):
         default=LTX2Config.model_fields["base_seed"].default,
         description="Random seed for generation",
         ge=0,
+    )
+    randomize_seed: bool = Field(
+        default=False,
+        description="Randomize seed on every generation. Useful for non-autoregressive models like LTX2 to get varied outputs between chunks.",
     )
 
 

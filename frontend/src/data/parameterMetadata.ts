@@ -27,6 +27,16 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Random seed for reproducible generation. Using the same seed with the same settings will produce similar results.",
   },
+  randomizeSeed: {
+    label: "Randomize:",
+    tooltip:
+      "Randomize seed on every generation. Useful for non-autoregressive models like LTX2 where each chunk is independent. Enable this to get varied outputs between chunks instead of regenerating the same content.",
+  },
+  numFrames: {
+    label: "Frames:",
+    tooltip:
+      "Number of frames to generate per chunk. LTX2 uses the formula: num_frames = (8 × K) + 1, where K is a non-negative integer. Valid values: 1, 9, 17, 25, 33, 41, 49, etc. Higher values generate longer clips but require more VRAM (~1.5GB per frame at 512×768).",
+  },
   manageCache: {
     label: "Manage Cache:",
     tooltip:
