@@ -18,6 +18,7 @@ from ..process import postprocess_chunk
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
+from ..wan2_1.vace import VACEEnabledPipeline
 from ..wan2_1.vae import create_vae
 from .modular_blocks import KreaRealtimeVideoBlocks
 from .schema import KreaRealtimeVideoConfig
@@ -35,7 +36,7 @@ DEFAULT_KV_CACHE_ATTENTION_BIAS = 0.3
 WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
-class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
+class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return KreaRealtimeVideoConfig
@@ -83,7 +84,31 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         for block in generator.model.blocks:
             block.self_attn.fuse_projections()
 
-        # Initialize optional LoRA adapters on the underlying model BEFORE quantization.
+        # Load text encoder before VACE initialization
+        start = time.time()
+        text_encoder = WanTextEncoderWrapper(
+            model_name=base_model_name,
+            model_dir=model_dir,
+            text_encoder_path=text_encoder_path,
+            tokenizer_path=tokenizer_path,
+        )
+        print(f"Loaded text encoder in {time.time() - start:3f}s")
+        # Move text encoder to target device but use dtype of weights
+        text_encoder = text_encoder.to(device=device)
+
+        # Apply VACE wrapper if vace_path is configured (upfront loading)
+        # This must happen before LoRA to get correct ordering: LoRA -> VACE -> Base
+        # Pass model_config to _init_vace so it can extract vace_layers
+        config.model_config = model_config
+        generator.model = self._init_vace(
+            config,
+            generator.model,
+            device=device,
+            dtype=dtype,
+            quantization=quantization,
+        )
+
+        # Initialize optional LoRA adapters on the underlying model AFTER VACE.
         generator.model = self._init_loras(config, generator.model)
 
         if quantization == Quantization.FP8_E4M3FN:
@@ -116,24 +141,13 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
                 # Disable fullgraph right now due to issues with RoPE
                 block.compile(fullgraph=False)
 
-        # Load text encoder
-        start = time.time()
-        text_encoder = WanTextEncoderWrapper(
-            model_name=base_model_name,
-            model_dir=model_dir,
-            text_encoder_path=text_encoder_path,
-            tokenizer_path=tokenizer_path,
-        )
-        print(f"Loaded text encoder in {time.time() - start:3f}s")
-        # Move text encoder to target device but use dtype of weights
-        text_encoder = text_encoder.to(device=device)
-
         # Load VAE using create_vae factory (supports multiple VAE types)
+        # Note: VAE is shared across all Wan model sizes, stored in Wan2.1-T2V-1.3B
+        # By not sending model_name, create_vae will use the default "wan" VAE type.
         vae_type = getattr(config, "vae_type", "wan")
         start = time.time()
         vae = create_vae(
             model_dir=model_dir,
-            model_name=base_model_name,
             vae_type=vae_type,
             vae_path=vae_path,
         )
@@ -227,6 +241,14 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline):
         # Clear video from state if not provided to prevent stale video data
         if "video" not in kwargs:
             self.state.set("video", None)
+
+        # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
+        if "vace_ref_images" not in kwargs:
+            self.state.set("vace_ref_images", None)
+        if "vace_input_frames" not in kwargs:
+            self.state.set("vace_input_frames", None)
+        if "vace_input_masks" not in kwargs:
+            self.state.set("vace_input_masks", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

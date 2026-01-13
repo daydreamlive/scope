@@ -335,6 +335,7 @@ class PipelineManager:
             "reward-forcing",
             "memflow",
             "ltx2",
+            "video-depth-anything",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -423,6 +424,20 @@ class PipelineManager:
             logger.info("Passthrough pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "video-depth-anything":
+            from scope.core.pipelines import VideoDepthAnythingPipeline
+
+            # Create minimal config - pipeline handles its own model paths
+            config = OmegaConf.create({})
+
+            pipeline = VideoDepthAnythingPipeline(
+                config,
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("VideoDepthAnything pipeline initialized")
+            return pipeline
+
         elif pipeline_id == "longlive":
             from scope.core.pipelines import LongLivePipeline
 
@@ -504,10 +519,26 @@ class PipelineManager:
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
-                    # Note: vae_path is intentionally omitted to allow create_vae()
-                    # to construct the correct path based on vae_type
                 }
             )
+
+            # Configure VACE support if enabled in load_params (default: True)
+            vace_enabled = True
+            if load_params:
+                vace_enabled = load_params.get("vace_enabled", True)
+
+            if vace_enabled:
+                # Use 14B VACE checkpoint for Krea (not the default 1.3B from _configure_vace)
+                config["vace_path"] = str(
+                    get_model_file_path(
+                        "WanVideo_comfy/Wan2_1-VACE_module_14B_bf16.safetensors"
+                    )
+                )
+                logger.debug(
+                    f"Krea: Using 14B VACE checkpoint at {config['vace_path']}"
+                )
+            else:
+                logger.info("VACE disabled by load_params, skipping VACE configuration")
 
             # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(

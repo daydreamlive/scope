@@ -12,5 +12,18 @@
       "Bash(uv run daydream-scope:*)",
       "Bash(uv run download_models:*)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python .claude/hooks/format.py"
+          }
+        ]
+      }
+    ]
   }
 }

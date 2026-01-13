@@ -138,7 +138,7 @@ export function SettingsPanel({
   onVaceContextScaleChange,
   vaeType = "wan",
   onVaeTypeChange,
-  vaeTypes = ["wan"],
+  vaeTypes,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);

@@ -39,6 +39,10 @@ uv run -m scope.core.pipelines.longlive.test  # Test specific pipeline
 
 ### Backend (`src/scope/`)
 
+- **`server/`**: FastAPI application, WebRTC streaming, model downloading
+- **`core/`**: Pipeline definitions, registry, base classes
+
+Key files:
 - **`server/app.py`**: Main FastAPI application entry point
 - **`server/pipeline_manager.py`**: Manages pipeline lifecycle with lazy loading
 - **`server/webrtc.py`**: WebRTC streaming implementation
@@ -46,6 +50,7 @@ uv run -m scope.core.pipelines.longlive.test  # Test specific pipeline
   - `interface.py`: Abstract `Pipeline` base class - all pipelines implement `__call__()`
   - `registry.py`: Registry pattern for dynamic pipeline discovery
   - `base_schema.py`: Pydantic config base classes (`BasePipelineConfig`)
+  - `artifacts.py`: Artifact definitions for model dependencies
 
 ### Frontend (`frontend/src/`)
 
@@ -77,6 +82,19 @@ Electron main process → spawns Python backend → waits for health check → l
 
 ## Style Guidelines
 
-### Python
+### Backend
 
 - Use relative imports if it is single or double dot (eg .package or ..package) and otherwise use an absolute import
+- `scope.server` can import from `scope.core`, but `scope.core` must never import from `scope.server`
+
+## Verifying Work
+
+Follow these guidelines for verifing work when implementation for a task is complete.
+
+### Backend
+
+- Use `uv run daydream-scope` to confirm that the server starts up without errors.
+
+### Frontend
+
+- Use `npm run build` to confirm that builds work properly.

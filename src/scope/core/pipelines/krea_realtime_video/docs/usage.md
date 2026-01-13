@@ -4,6 +4,9 @@
 
 The model is trained using Self-Forcing on Wan2.1 14b.
 
+> [!IMPORTANT]
+> Regular V2V (eg. using input video for latent initialization) is known to have quality issues right now. VACE V2V (eg. using input video for VACE visual conditioning) does not have these quality issues.
+
 ## Examples
 
 The following examples include timeline JSON files with the prompts used so you can try them as well.
@@ -40,7 +43,7 @@ The pipeline uses different attention kernels to accelerate inference depending 
 
 ## Resolution
 
-The generation will be faster for smaller resolutions resulting in smoother video. The visual quality will be better at higher resolutsion (eg 480x832 and larger), but you may need a more powerful GPU in order to achieve a higher FPS.
+The generation will be faster for smaller resolutions resulting in smoother video. The visual quality will be better at higher resolutions (eg 832x480 and larger), but you may need a more powerful GPU in order to achieve a higher FPS.
 
 ## Seed
 

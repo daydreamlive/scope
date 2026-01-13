@@ -36,6 +36,7 @@ function getFallbackDefaults(mode?: InputMode) {
     denoisingSteps: BASE_FALLBACK.denoisingSteps,
     noiseScale: isVideoMode ? 0.7 : undefined,
     noiseController: isVideoMode ? true : undefined,
+    defaultTemporalInterpolationSteps: undefined as number | undefined,
     inputMode: effectiveMode,
     seed: BASE_FALLBACK.seed,
     quantization: undefined as "fp8_e4m3fn" | undefined,
@@ -82,6 +83,8 @@ export function useStreamState() {
         // Apply mode-specific overrides if mode is specified and mode_defaults exist
         const effectiveMode = mode ?? schema.default_mode;
         const modeOverrides = schema.mode_defaults?.[effectiveMode];
+        let defaultTemporalInterpolationSteps =
+          schema.default_temporal_interpolation_steps;
         if (modeOverrides) {
           if (modeOverrides.height !== undefined) height = modeOverrides.height;
           if (modeOverrides.width !== undefined) width = modeOverrides.width;
@@ -91,6 +94,9 @@ export function useStreamState() {
             noiseScale = modeOverrides.noise_scale ?? undefined;
           if (modeOverrides.noise_controller !== undefined)
             noiseController = modeOverrides.noise_controller ?? undefined;
+          if (modeOverrides.default_temporal_interpolation_steps !== undefined)
+            defaultTemporalInterpolationSteps =
+              modeOverrides.default_temporal_interpolation_steps;
         }
 
         return {
@@ -99,6 +105,7 @@ export function useStreamState() {
           denoisingSteps,
           noiseScale,
           noiseController,
+          defaultTemporalInterpolationSteps,
           inputMode: effectiveMode,
           seed: (props.base_seed?.default as number) ?? 42,
           quantization: undefined as "fp8_e4m3fn" | undefined,

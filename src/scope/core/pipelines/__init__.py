@@ -32,6 +32,10 @@ def __getattr__(name):
         from .ltx2.pipeline import LTX2Pipeline
 
         return LTX2Pipeline
+    elif name == "VideoDepthAnythingPipeline":
+        from .video_depth_anything.pipeline import VideoDepthAnythingPipeline
+
+        return VideoDepthAnythingPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -65,6 +69,10 @@ def __getattr__(name):
         from .ltx2.schema import LTX2Config
 
         return LTX2Config
+    elif name == "VideoDepthAnythingConfig":
+        from .video_depth_anything.schema import VideoDepthAnythingConfig
+
+        return VideoDepthAnythingConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -77,6 +85,7 @@ __all__ = [
     "PassthroughPipeline",
     "MemFlowPipeline",
     "LTX2Pipeline",
+    "VideoDepthAnythingPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
@@ -86,4 +95,5 @@ __all__ = [
     "RewardForcingConfig",
     "MemFlowConfig",
     "LTX2Config",
+    "VideoDepthAnythingConfig",
 ]
