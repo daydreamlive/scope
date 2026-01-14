@@ -435,14 +435,26 @@ export function SettingsPanel({
           </div>
         )}
 
+        {currentPipeline?.supportsLoRA && (
+          <div className="space-y-4">
+            <LoRAManager
+              loras={loras}
+              onLorasChange={onLorasChange}
+              disabled={isLoading}
+              isStreaming={isStreaming}
+              loraMergeStrategy={loraMergeStrategy}
+            />
+          </div>
+        )}
+
         {/* Preprocessor Selector - shown for pipelines that support VACE */}
         {currentPipeline?.supportsVACE && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
-                label="Preprocessor"
-                tooltip="Select a preprocessor to apply before the main pipeline."
-                className="text-sm font-medium"
+                label={PARAMETER_METADATA.preprocessor.label}
+                tooltip={PARAMETER_METADATA.preprocessor.tooltip}
+                className="text-sm text-foreground"
               />
               <Select
                 value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
@@ -455,7 +467,7 @@ export function SettingsPanel({
                 }}
                 disabled={isStreaming || isLoading}
               >
-                <SelectTrigger className="h-8 flex-1">
+                <SelectTrigger className="w-[140px] h-7">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -481,18 +493,6 @@ export function SettingsPanel({
                 </SelectContent>
               </Select>
             </div>
-          </div>
-        )}
-
-        {currentPipeline?.supportsLoRA && (
-          <div className="space-y-4">
-            <LoRAManager
-              loras={loras}
-              onLorasChange={onLorasChange}
-              disabled={isLoading}
-              isStreaming={isStreaming}
-              loraMergeStrategy={loraMergeStrategy}
-            />
           </div>
         )}
 
