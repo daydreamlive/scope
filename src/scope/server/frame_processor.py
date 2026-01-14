@@ -17,14 +17,7 @@ logger = logging.getLogger(__name__)
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 
 # FPS calculation constants
-MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
-MAX_FPS = 60.0  # Maximum FPS cap
 DEFAULT_FPS = 30.0  # Default FPS
-SLEEP_TIME = 0.01
-
-# Input FPS measurement constants
-INPUT_FPS_SAMPLE_SIZE = 30  # Number of frame intervals to track
-INPUT_FPS_MIN_SAMPLES = 5  # Minimum samples needed before using input FPS
 
 
 class _SpoutFrame:
@@ -182,10 +175,6 @@ class FrameProcessor:
             frame_tensor = torch.from_numpy(frame_array)
             frame_tensor = frame_tensor.unsqueeze(0)
 
-            # Track input frame for FPS measurement
-            if first_processor.track_input_fps:
-                first_processor.track_input_frame()
-
             # Put frame into first processor's input queue
             try:
                 first_processor.input_queue.put_nowait(frame_tensor)
@@ -226,39 +215,18 @@ class FrameProcessor:
         except queue.Empty:
             return None
 
-    def get_current_pipeline_fps(self) -> float:
+    def get_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS.
 
-        Returns the FPS from the last pipeline processor (bottleneck).
+        Returns the FPS based on how fast frames are produced into the last processor's output queue,
+        adjusted for queue fill level to prevent buildup.
         """
         if not self.pipeline_processors:
             return DEFAULT_FPS
 
-        # Get FPS from the last pipeline (bottleneck)
+        # Get FPS from the last processor in the chain
         last_processor = self.pipeline_processors[-1]
-        return last_processor.get_current_pipeline_fps()
-
-    def get_output_fps(self) -> float:
-        """Get the output FPS that frames should be sent at.
-
-        Returns the minimum of input FPS and pipeline FPS to ensure:
-        1. We don't send frames faster than they were captured (maintains temporal accuracy)
-        2. We don't try to output faster than the pipeline can produce (prevents frame starvation)
-        """
-        if not self.pipeline_processors:
-            return DEFAULT_FPS
-
-        # Get input FPS from first processor (if available)
-        first_processor = self.pipeline_processors[0]
-        input_fps = first_processor.get_input_fps()
-
-        pipeline_fps = self.get_current_pipeline_fps()
-
-        if input_fps is None:
-            return pipeline_fps
-
-        # Use minimum to respect both input rate and pipeline capacity
-        return min(input_fps, pipeline_fps)
+        return last_processor.get_fps()
 
     def _get_pipeline_dimensions(self) -> tuple[int, int]:
         """Get current pipeline dimensions from pipeline manager."""
@@ -492,7 +460,7 @@ class FrameProcessor:
         logger.info("Spout input thread started")
 
         # Initial target frame rate
-        target_fps = self.get_current_pipeline_fps()
+        target_fps = self.get_fps()
         frame_interval = 1.0 / target_fps
         last_frame_time = 0.0
         frame_count = 0
@@ -504,7 +472,7 @@ class FrameProcessor:
         ):
             try:
                 # Update target FPS dynamically from pipeline performance
-                current_pipeline_fps = self.get_current_pipeline_fps()
+                current_pipeline_fps = self.get_fps()
                 if current_pipeline_fps > 0:
                     target_fps = current_pipeline_fps
                     frame_interval = 1.0 / target_fps
@@ -527,10 +495,6 @@ class FrameProcessor:
                         first_processor = self.pipeline_processors[0]
                         frame_tensor = torch.from_numpy(rgb_frame)
                         frame_tensor = frame_tensor.unsqueeze(0)
-
-                        # Track input frame for FPS measurement
-                        if first_processor.track_input_fps:
-                            first_processor.track_input_frame()
 
                         try:
                             first_processor.input_queue.put_nowait(frame_tensor)
@@ -561,9 +525,7 @@ class FrameProcessor:
             return
 
         # Create pipeline processors (each creates its own queues)
-        for i, pipeline_id in enumerate(self.pipeline_ids):
-            track_input_fps = i == 0  # Track input FPS for first processor
-
+        for pipeline_id in self.pipeline_ids:
             # Get pipeline instance from manager
             pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
 
@@ -572,7 +534,6 @@ class FrameProcessor:
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
-                track_input_fps=track_input_fps,
             )
 
             self.pipeline_processors.append(processor)
