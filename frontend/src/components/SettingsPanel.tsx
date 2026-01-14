@@ -277,15 +277,11 @@ export function SettingsPanel({
             </SelectTrigger>
             <SelectContent>
               {pipelines &&
-                Object.entries(pipelines)
-                  .filter(
-                    ([, info]) => info.usage?.includes("pipeline") ?? true
-                  )
-                  .map(([id]) => (
-                    <SelectItem key={id} value={id}>
-                      {id}
-                    </SelectItem>
-                  ))}
+                Object.entries(pipelines).map(([id]) => (
+                  <SelectItem key={id} value={id}>
+                    {id}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -423,55 +419,57 @@ export function SettingsPanel({
                     />
                   </div>
                 </div>
-
-                {/* Preprocessor Selector */}
-                <div className="flex items-center justify-between gap-2">
-                  <LabelWithTooltip
-                    label="Preprocessor"
-                    tooltip="Select a preprocessor to apply before the main pipeline."
-                    className="text-xs text-muted-foreground"
-                  />
-                  <Select
-                    value={
-                      preprocessorIds.length > 0 ? preprocessorIds[0] : "none"
-                    }
-                    onValueChange={value => {
-                      if (value === "none") {
-                        onPreprocessorIdsChange?.([]);
-                      } else {
-                        onPreprocessorIdsChange?.([value]);
-                      }
-                    }}
-                    disabled={isStreaming || isLoading}
-                  >
-                    <SelectTrigger className="h-8 flex-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {Object.entries(pipelines || {})
-                        .filter(([, info]) => {
-                          const isPreprocessor =
-                            info.usage?.includes("preprocessor") ?? false;
-                          if (!isPreprocessor) return false;
-                          // Filter by input mode: only show preprocessors that support the current input mode
-                          if (inputMode) {
-                            return (
-                              info.supportedModes?.includes(inputMode) ?? false
-                            );
-                          }
-                          return true;
-                        })
-                        .map(([pid]) => (
-                          <SelectItem key={pid} value={pid}>
-                            {pid}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Preprocessor Selector - shown for pipelines that support VACE */}
+        {currentPipeline?.supportsVACE && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label="Preprocessor"
+                tooltip="Select a preprocessor to apply before the main pipeline."
+                className="text-sm font-medium"
+              />
+              <Select
+                value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
+                onValueChange={value => {
+                  if (value === "none") {
+                    onPreprocessorIdsChange?.([]);
+                  } else {
+                    onPreprocessorIdsChange?.([value]);
+                  }
+                }}
+                disabled={isStreaming || isLoading}
+              >
+                <SelectTrigger className="h-8 flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {Object.entries(pipelines || {})
+                    .filter(([, info]) => {
+                      const isPreprocessor =
+                        info.usage?.includes("preprocessor") ?? false;
+                      if (!isPreprocessor) return false;
+                      // Filter by input mode: only show preprocessors that support the current input mode
+                      if (inputMode) {
+                        return (
+                          info.supportedModes?.includes(inputMode) ?? false
+                        );
+                      }
+                      return true;
+                    })
+                    .map(([pid]) => (
+                      <SelectItem key={pid} value={pid}>
+                        {pid}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
 
