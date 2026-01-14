@@ -264,6 +264,33 @@ export function useStreamState() {
     }
   }, [settings.pipelineId, hardwareInfo, pipelineSchemas]);
 
+  // Set recommended VACE enabled state based on pipeline schema and available VRAM
+  // VACE is enabled by default, but disabled if VRAM is below recommended_quantization_vram_threshold
+  useEffect(() => {
+    const schema = pipelineSchemas?.pipelines[settings.pipelineId];
+    const quantizationThreshold =
+      schema?.recommended_quantization_vram_threshold;
+
+    // Only set vaceEnabled if pipeline supports VACE and has a quantization VRAM threshold
+    if (
+      schema?.supports_vace &&
+      quantizationThreshold !== null &&
+      quantizationThreshold !== undefined &&
+      hardwareInfo?.vram_gb !== null &&
+      hardwareInfo?.vram_gb !== undefined
+    ) {
+      // VACE is enabled by default, but disabled if VRAM is below the quantization threshold
+      // (because FP8 quantization will be recommended in that case)
+      const recommendedVaceEnabled =
+        hardwareInfo.vram_gb > quantizationThreshold;
+      setSettings(prev => ({
+        ...prev,
+        vaceEnabled: recommendedVaceEnabled,
+      }));
+    }
+    // If no threshold is set, VACE remains enabled by default (from schema)
+  }, [settings.pipelineId, hardwareInfo, pipelineSchemas]);
+
   const updateMetrics = useCallback((newMetrics: Partial<SystemMetrics>) => {
     setSystemMetrics(prev => ({ ...prev, ...newMetrics }));
   }, []);
