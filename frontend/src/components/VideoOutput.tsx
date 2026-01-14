@@ -14,6 +14,13 @@ interface VideoOutputProps {
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
   onVideoPlaying?: () => void;
+  // Controller input props
+  supportsControllerInput?: boolean;
+  isPointerLocked?: boolean;
+  onRequestPointerLock?: () => void;
+  onReleasePointerLock?: () => void;
+  /** Ref to expose the video container element for pointer lock */
+  videoContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export function VideoOutput({
@@ -27,11 +34,20 @@ export function VideoOutput({
   onPlayPauseToggle,
   onStartStream,
   onVideoPlaying,
+  supportsControllerInput = false,
+  isPointerLocked = false,
+  onRequestPointerLock,
+  onReleasePointerLock: _onReleasePointerLock,
+  videoContainerRef,
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
+
+  // Use external ref if provided, otherwise use internal
+  const containerRef = videoContainerRef || internalContainerRef;
 
   useEffect(() => {
     if (videoRef.current && remoteStream) {
@@ -87,7 +103,15 @@ export function VideoOutput({
   }, [onPlayPauseToggle, remoteStream]);
 
   const handleVideoClick = () => {
-    triggerPlayPause();
+    // If controller input is supported and not locked, request pointer lock
+    if (supportsControllerInput && !isPointerLocked && onRequestPointerLock) {
+      onRequestPointerLock();
+      return;
+    }
+    // Otherwise toggle play/pause (only if not pointer locked)
+    if (!isPointerLocked) {
+      triggerPlayPause();
+    }
   };
 
   // Handle spacebar press for play/pause
@@ -134,6 +158,7 @@ export function VideoOutput({
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
         {remoteStream ? (
           <div
+            ref={containerRef}
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
           >
@@ -156,6 +181,12 @@ export function VideoOutput({
                 >
                   <PlayOverlay isPlaying={isPlaying} size="lg" />
                 </div>
+              </div>
+            )}
+            {/* Controller Input Overlay - only show before pointer lock (browser shows ESC hint) */}
+            {supportsControllerInput && !isPointerLocked && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-lg text-sm pointer-events-none">
+                Click to enable controller input
               </div>
             )}
           </div>

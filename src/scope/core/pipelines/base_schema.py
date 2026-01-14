@@ -10,12 +10,18 @@ Child classes can override field defaults with type-annotated assignments:
     height: int = 320
     width: int = 576
     denoising_steps: list[int] = [1000, 750, 500, 250]
+
+For pipelines that support controller input (WASD/mouse), include a ctrl_input field:
+    ctrl_input: CtrlInput | None = None
 """
 
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
+
+# Re-export CtrlInput for convenient import by pipeline schemas
+from scope.core.pipelines.controller import CtrlInput as CtrlInput  # noqa: PLC0414
 
 if TYPE_CHECKING:
     from .artifacts import Artifact

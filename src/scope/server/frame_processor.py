@@ -8,6 +8,8 @@ from typing import Any
 import torch
 from aiortc.mediastreams import VideoFrame
 
+from scope.core.pipelines.controller import parse_ctrl_input
+
 from .pipeline_manager import PipelineManager, PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
@@ -341,6 +343,21 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
+        # Handle controller input with pygame-style accumulation into self.parameters
+        if "ctrl_input" in parameters:
+            new_ctrl = parameters.pop("ctrl_input")
+
+            if "ctrl_input" in self.parameters:
+                # Accumulate: keys = latest, mouse = sum
+                existing = self.parameters["ctrl_input"]
+                existing["button"] = new_ctrl.get("button", [])
+                existing["mouse"] = [
+                    existing["mouse"][0] + new_ctrl.get("mouse", [0, 0])[0],
+                    existing["mouse"][1] + new_ctrl.get("mouse", [0, 0])[1],
+                ]
+            else:
+                self.parameters["ctrl_input"] = new_ctrl
+
         # Handle Spout output settings
         if "spout_sender" in parameters:
             spout_config = parameters.pop("spout_sender")
@@ -715,6 +732,16 @@ class FrameProcessor:
             # Pass lora_scales only when present (one-time update)
             if lora_scales is not None:
                 call_params["lora_scales"] = lora_scales
+
+            # Extract ctrl_input from parameters, parse, and reset mouse for next frame
+            if "ctrl_input" in self.parameters:
+                ctrl_data = self.parameters["ctrl_input"]
+                call_params["ctrl_input"] = parse_ctrl_input(ctrl_data)
+                # Reset mouse accumulator, keep key state
+                # Each pipeline call consumes accumulated mouse delta since last call
+                # and the next call starts with a fresh mouse delta of 0
+                # Each pipeline call consumes the current key state
+                self.parameters["ctrl_input"]["mouse"] = [0.0, 0.0]
 
             # Route video input based on VACE status
             # We do not support combining latent initialization and VACE conditioning
