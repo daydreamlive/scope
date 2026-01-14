@@ -32,6 +32,10 @@ def __getattr__(name):
         from .video_depth_anything.pipeline import VideoDepthAnythingPipeline
 
         return VideoDepthAnythingPipeline
+    elif name == "ControllerVisualizerPipeline":
+        from .controller_viz.pipeline import ControllerVisualizerPipeline
+
+        return ControllerVisualizerPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -77,6 +81,7 @@ __all__ = [
     "PassthroughPipeline",
     "MemFlowPipeline",
     "VideoDepthAnythingPipeline",
+    "ControllerVisualizerPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",

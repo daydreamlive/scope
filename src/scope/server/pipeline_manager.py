@@ -517,6 +517,7 @@ class PipelineManager:
             "reward-forcing",
             "memflow",
             "video-depth-anything",
+            "controller-viz",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -896,6 +897,25 @@ class PipelineManager:
                 dtype=torch.float16,
             )
             logger.info("VideoDepthAnything pipeline initialized")
+            return pipeline
+
+        elif pipeline_id == "controller-viz":
+            from scope.core.pipelines import ControllerVisualizerPipeline
+
+            # Use load parameters for resolution, default to 512x512
+            height = 512
+            width = 512
+            if load_params:
+                height = load_params.get("height", 512)
+                width = load_params.get("width", 512)
+
+            pipeline = ControllerVisualizerPipeline(
+                height=height,
+                width=width,
+                device=get_device(),
+                dtype=torch.float32,
+            )
+            logger.info("ControllerVisualizer pipeline initialized")
             return pipeline
 
         else:
