@@ -31,8 +31,16 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     width: number;
     height: number;
   } | null>(null);
+  const [pingPongEnabled, setPingPongEnabled] = useState(false);
 
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const pingPongEnabledRef = useRef(false);
+  const framesRef = useRef<ImageData[]>([]);
+  const framesReadyRef = useRef(false);
+  const frameIndexRef = useRef(0);
+  const directionRef = useRef<1 | -1>(1);
+  const videoIdRef = useRef(0); // Unique ID for each video to detect stale frames
 
   const createVideoFromSource = useCallback((videoSource: string | File) => {
     const video = document.createElement("video");
@@ -43,11 +51,13 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       video.src = URL.createObjectURL(videoSource);
     }
 
-    video.loop = true;
+    // Disable native loop - we handle looping (and pingpong) manually
+    video.loop = false;
     video.muted = true;
     video.playsInline = true;
     video.autoplay = true;
     videoElementRef.current = video;
+    directionRef.current = 1;
     return video;
   }, []);
 
@@ -59,48 +69,107 @@ export function useVideoSource(props?: UseVideoSourceProps) {
         stream: MediaStream;
         resolution: { width: number; height: number };
       }>((resolve, reject) => {
-        // Add timeout to prevent hanging promises
         const timeout = setTimeout(() => {
           reject(new Error("Video loading timeout"));
-        }, 10000); // 10 second timeout
+        }, 10000);
 
         video.onloadedmetadata = () => {
           clearTimeout(timeout);
           try {
-            // Detect and store video resolution
             const detectedResolution = {
               width: video.videoWidth,
               height: video.videoHeight,
             };
             setVideoResolution(detectedResolution);
 
-            // Create canvas matching the video resolution
             const canvas = document.createElement("canvas");
             canvas.width = detectedResolution.width;
             canvas.height = detectedResolution.height;
-            const ctx = canvas.getContext("2d")!;
+            const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+
+            // Cancel old animation frame before starting new one
+            if (animationFrameRef.current) {
+              cancelAnimationFrame(animationFrameRef.current);
+              animationFrameRef.current = null;
+            }
+
+            // Assign unique ID to this video instance
+            videoIdRef.current += 1;
+            const thisVideoId = videoIdRef.current;
+
+            // Clear any old frames
+            framesRef.current = [];
+            framesReadyRef.current = false;
+            frameIndexRef.current = 0;
+            directionRef.current = 1;
+
+            const frameInterval = 1000 / fps;
+            let lastFrameTime = 0;
+
+            // Handle video end - this is the reliable way to know video finished
+            video.onended = () => {
+              if (thisVideoId !== videoIdRef.current) return;
+              if (pingPongEnabledRef.current && !framesReadyRef.current) {
+                ctx.drawImage(video, 0, 0);
+                framesRef.current.push(
+                  ctx.getImageData(0, 0, canvas.width, canvas.height)
+                );
+                framesReadyRef.current = true;
+                frameIndexRef.current = framesRef.current.length - 1;
+                directionRef.current = -1;
+              }
+            };
 
             video
               .play()
               .then(() => {
-                // Draw video frame to canvas at original resolution
-                const drawFrame = () => {
-                  ctx.drawImage(
-                    video,
-                    0,
-                    0,
-                    detectedResolution.width,
-                    detectedResolution.height
-                  );
-                  if (!video.paused && !video.ended) {
-                    requestAnimationFrame(drawFrame);
+                const drawFrame = (timestamp: number) => {
+                  if (thisVideoId !== videoIdRef.current) return;
+
+                  const elapsed = timestamp - lastFrameTime;
+                  if (elapsed < frameInterval) {
+                    animationFrameRef.current =
+                      requestAnimationFrame(drawFrame);
+                    return;
                   }
+                  lastFrameTime = timestamp;
+
+                  if (pingPongEnabledRef.current) {
+                    if (!framesReadyRef.current) {
+                      // Capture phase: draw video and store frame
+                      ctx.drawImage(video, 0, 0);
+                      framesRef.current.push(
+                        ctx.getImageData(0, 0, canvas.width, canvas.height)
+                      );
+                    } else {
+                      // Playback phase: draw from buffer
+                      const frames = framesRef.current;
+                      if (frames.length > 0) {
+                        ctx.putImageData(frames[frameIndexRef.current], 0, 0);
+                        frameIndexRef.current += directionRef.current;
+                        if (frameIndexRef.current >= frames.length) {
+                          frameIndexRef.current = frames.length - 1;
+                          directionRef.current = -1;
+                        } else if (frameIndexRef.current < 0) {
+                          frameIndexRef.current = 0;
+                          directionRef.current = 1;
+                        }
+                      }
+                    }
+                  } else {
+                    // Normal loop: draw video, restart when ended
+                    ctx.drawImage(video, 0, 0);
+                    if (video.ended) {
+                      video.currentTime = 0;
+                      video.play();
+                    }
+                  }
+
+                  animationFrameRef.current = requestAnimationFrame(drawFrame);
                 };
-                drawFrame();
+                animationFrameRef.current = requestAnimationFrame(drawFrame);
 
-                // Capture stream from canvas at original resolution
                 const stream = canvas.captureStream(fps);
-
                 resolve({ stream, resolution: detectedResolution });
               })
               .catch(error => {
@@ -307,6 +376,11 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       videoElementRef.current.pause();
       videoElementRef.current = null;
     }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
   }, [localStream]);
 
   const reinitializeVideoSource = useCallback(async () => {
@@ -320,6 +394,12 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       // Stop current stream if it exists
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
+      }
+
+      // Cancel any ongoing animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
 
       // Create new video file stream
@@ -344,6 +424,10 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       if (videoElementRef.current) {
         videoElementRef.current.pause();
         videoElementRef.current = null;
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
       return;
     }
@@ -371,6 +455,9 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       if (videoElementRef.current) {
         videoElementRef.current.pause();
       }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
     };
   }, [props?.enabled, createVideoFileStream]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -380,6 +467,20 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       reinitializeVideoSource();
     }
   }, [props?.shouldReinitialize, reinitializeVideoSource]);
+
+  // Sync ping pong ref when state changes
+  useEffect(() => {
+    pingPongEnabledRef.current = pingPongEnabled;
+
+    if (videoElementRef.current) {
+      videoElementRef.current.currentTime = 0;
+      videoElementRef.current.play();
+      framesRef.current = [];
+      framesReadyRef.current = false;
+      frameIndexRef.current = 0;
+      directionRef.current = 1;
+    }
+  }, [pingPongEnabled]);
 
   return {
     localStream,
@@ -391,5 +492,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     stopVideo,
     handleVideoFileUpload,
     reinitializeVideoSource,
+    pingPongEnabled,
+    setPingPongEnabled,
   };
 }

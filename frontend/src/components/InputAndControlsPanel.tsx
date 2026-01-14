@@ -10,7 +10,13 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Upload, ArrowUp } from "lucide-react";
+import { Upload, ArrowUp, Repeat } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "./ui/tooltip";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type { PromptItem, PromptTransition } from "../lib/api";
@@ -69,6 +75,9 @@ interface InputAndControlsPanelProps {
   onRefImagesChange?: (images: string[]) => void;
   onSendHints?: (imagePaths: string[]) => void;
   isDownloading?: boolean;
+  // Ping pong mode for video looping
+  pingPongEnabled?: boolean;
+  onPingPongChange?: (enabled: boolean) => void;
 }
 
 export function InputAndControlsPanel({
@@ -115,6 +124,8 @@ export function InputAndControlsPanel({
   onRefImagesChange,
   onSendHints,
   isDownloading = false,
+  pingPongEnabled = false,
+  onPingPongChange,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -267,9 +278,57 @@ export function InputAndControlsPanel({
                   </div>
                 )}
 
-                {/* Upload button - only show in video mode */}
-                {mode === "video" && onVideoFileUpload && (
-                  <>
+                {/* Video overlay controls - only show in video file mode */}
+                {mode === "video" && (
+                  <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
+                    <TooltipProvider>
+                      {/* Ping Pong button */}
+                      {onPingPongChange && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => onPingPongChange(!pingPongEnabled)}
+                              className={`p-2 rounded-full transition-colors ${
+                                pingPongEnabled
+                                  ? "bg-white/90 text-black"
+                                  : "bg-black/50 text-white hover:bg-black/70"
+                              }`}
+                            >
+                              <Repeat className="h-4 w-4" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>
+                              {pingPongEnabled ? "Disable" : "Enable"} ping pong
+                              mode
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+
+                      {/* Upload button */}
+                      {onVideoFileUpload && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <label
+                              htmlFor="video-upload"
+                              className={`p-2 rounded-full bg-black/50 transition-colors ${
+                                isStreaming || isConnecting
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : "hover:bg-black/70 cursor-pointer"
+                              }`}
+                            >
+                              <Upload className="h-4 w-4 text-white" />
+                            </label>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>Upload video file</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </TooltipProvider>
+
                     <input
                       type="file"
                       accept="video/*"
@@ -278,17 +337,7 @@ export function InputAndControlsPanel({
                       id="video-upload"
                       disabled={isStreaming || isConnecting}
                     />
-                    <label
-                      htmlFor="video-upload"
-                      className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                        isStreaming || isConnecting
-                          ? "opacity-50 cursor-not-allowed"
-                          : "hover:bg-black/70 cursor-pointer"
-                      }`}
-                    >
-                      <Upload className="h-4 w-4 text-white" />
-                    </label>
-                  </>
+                  </div>
                 )}
               </div>
             )}

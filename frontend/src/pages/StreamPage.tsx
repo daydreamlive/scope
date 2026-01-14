@@ -179,6 +179,8 @@ export function StreamPage() {
     videoResolution,
     switchMode,
     handleVideoFileUpload,
+    pingPongEnabled,
+    setPingPongEnabled,
   } = useVideoSource({
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
@@ -965,6 +967,8 @@ export function StreamPage() {
             onRefImagesChange={handleRefImagesChange}
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
+            pingPongEnabled={pingPongEnabled}
+            onPingPongChange={setPingPongEnabled}
           />
         </div>
 
