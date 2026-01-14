@@ -98,6 +98,9 @@ interface SettingsPanelProps {
   // Preprocessors
   preprocessorIds?: string[];
   onPreprocessorIdsChange?: (ids: string[]) => void;
+  // Postprocessors
+  postprocessorIds?: string[];
+  onPostprocessorIdsChange?: (ids: string[]) => void;
 }
 
 export function SettingsPanel({
@@ -144,6 +147,8 @@ export function SettingsPanel({
   vaeTypes,
   preprocessorIds = [],
   onPreprocessorIdsChange,
+  postprocessorIds = [],
+  onPostprocessorIdsChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -495,6 +500,49 @@ export function SettingsPanel({
             </div>
           </div>
         )}
+
+        {/* Postprocessor Selector */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label="Postprocessor"
+              tooltip="Select a postprocessor to apply after the main pipeline."
+              className="text-sm font-medium"
+            />
+            <Select
+              value={postprocessorIds.length > 0 ? postprocessorIds[0] : "none"}
+              onValueChange={value => {
+                if (value === "none") {
+                  onPostprocessorIdsChange?.([]);
+                } else {
+                  onPostprocessorIdsChange?.([value]);
+                }
+              }}
+              disabled={isStreaming || isLoading}
+            >
+              <SelectTrigger className="h-8 flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {Object.entries(pipelines || {})
+                  .filter(([, info]) => {
+                    const isPostprocessor =
+                      info.usage?.includes("postprocessor") ?? false;
+                    if (!isPostprocessor) return false;
+                    // Postprocessors run after the main pipeline, so they receive video output.
+                    // Show any postprocessor that supports video mode, regardless of current input mode.
+                    return info.supportedModes?.includes("video") ?? false;
+                  })
+                  .map(([pid]) => (
+                    <SelectItem key={pid} value={pid}>
+                      {pid}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         {/* VAE Type Selection */}
         {vaeTypes && vaeTypes.length > 0 && (

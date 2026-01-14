@@ -1,5 +1,5 @@
 from ..artifacts import GoogleDriveArtifact
-from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..base_schema import BasePipelineConfig, ModeDefaults, UsageType
 
 
 class RIFEConfig(BasePipelineConfig):
@@ -32,5 +32,7 @@ class RIFEConfig(BasePipelineConfig):
     ]
     supports_prompts = False
     modified = True
+
+    usage = [UsageType.POSTPROCESSOR]
 
     modes = {"video": ModeDefaults(default=True)}

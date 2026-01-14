@@ -100,6 +100,7 @@ class UsageType(str, Enum):
     """Usage types for pipelines."""
 
     PREPROCESSOR = "preprocessor"
+    POSTPROCESSOR = "postprocessor"
 
 
 class ModeDefaults(BaseModel):
@@ -319,7 +320,8 @@ class BasePipelineConfig(BaseModel):
             cls.recommended_quantization_vram_threshold
         )
         metadata["modified"] = cls.modified
-        metadata["usage"] = cls.usage
+        # Convert UsageType enum values to strings for JSON serialization
+        metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults (excluding None values and the "default" flag)

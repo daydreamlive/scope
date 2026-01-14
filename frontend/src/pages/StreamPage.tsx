@@ -596,6 +596,10 @@ export function StreamPage() {
     updateSettings({ preprocessorIds: ids });
   };
 
+  const handlePostprocessorIdsChange = (ids: string[]) => {
+    updateSettings({ postprocessorIds: ids });
+  };
+
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
     // Send VACE context scale update to backend if streaming
@@ -824,12 +828,15 @@ export function StreamPage() {
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
-      // Build pipeline chain: preprocessors + main pipeline
+      // Build pipeline chain: preprocessors + main pipeline + postprocessors
       const pipelineIds: string[] = [];
       if (settings.preprocessorIds && settings.preprocessorIds.length > 0) {
         pipelineIds.push(...settings.preprocessorIds);
       }
       pipelineIds.push(pipelineIdToUse);
+      if (settings.postprocessorIds && settings.postprocessorIds.length > 0) {
+        pipelineIds.push(...settings.postprocessorIds);
+      }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
       // Collect all missing pipelines/preprocessors
@@ -1346,6 +1353,8 @@ export function StreamPage() {
             vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
             preprocessorIds={settings.preprocessorIds ?? []}
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
+            postprocessorIds={settings.postprocessorIds ?? []}
+            onPostprocessorIdsChange={handlePostprocessorIdsChange}
           />
         </div>
       </div>
