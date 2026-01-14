@@ -10,6 +10,7 @@ import { StatusBar } from "../components/StatusBar";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
+import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
@@ -171,6 +172,20 @@ export function StreamPage() {
     peerConnectionRef,
     isStreaming,
   });
+
+  // Video container ref for controller input pointer lock
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+
+  // Check if current pipeline supports controller input
+  const currentPipelineSupportsController =
+    pipelines?.[settings.pipelineId]?.supportsControllerInput ?? false;
+
+  // Controller input hook - captures WASD/mouse and streams to backend
+  const { isPointerLocked, requestPointerLock } = useControllerInput(
+    sendParameterUpdate,
+    isStreaming && currentPipelineSupportsController,
+    videoContainerRef
+  );
 
   // Video source for preview (camera or video)
   // Enable based on input mode, not pipeline category
@@ -1067,6 +1082,11 @@ export function StreamPage() {
                   onVideoPlayingCallbackRef.current = null; // Clear after execution
                 }
               }}
+              // Controller input props
+              supportsControllerInput={currentPipelineSupportsController}
+              isPointerLocked={isPointerLocked}
+              onRequestPointerLock={requestPointerLock}
+              videoContainerRef={videoContainerRef}
             />
           </div>
           {/* Timeline area - compact, always visible */}

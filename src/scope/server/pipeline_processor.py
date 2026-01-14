@@ -9,6 +9,8 @@ from typing import Any
 
 import torch
 
+from scope.core.pipelines.controller import parse_ctrl_input
+
 from .pipeline_manager import PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
@@ -337,6 +339,21 @@ class PipelineProcessor:
                 if "input_mode" in new_parameters:
                     self._video_mode = new_parameters.get("input_mode") == "video"
 
+                # Accumulate ctrl_input: keys = latest, mouse = sum
+                if "ctrl_input" in new_parameters:
+                    if "ctrl_input" in self.parameters:
+                        existing = self.parameters["ctrl_input"]
+                        new_ctrl = new_parameters["ctrl_input"]
+                        new_parameters["ctrl_input"] = {
+                            "button": new_ctrl.get("button", []),
+                            "mouse": [
+                                existing.get("mouse", [0, 0])[0]
+                                + new_ctrl.get("mouse", [0, 0])[0],
+                                existing.get("mouse", [0, 0])[1]
+                                + new_ctrl.get("mouse", [0, 0])[1],
+                            ],
+                        }
+
                 # Merge new parameters with existing ones
                 self.parameters = {**self.parameters, **new_parameters}
         except queue.Empty:
@@ -403,6 +420,13 @@ class PipelineProcessor:
             # Pass lora_scales only when present
             if lora_scales is not None:
                 call_params["lora_scales"] = lora_scales
+
+            # Extract ctrl_input, parse it, and reset mouse for next frame
+            if "ctrl_input" in self.parameters:
+                ctrl_data = self.parameters["ctrl_input"]
+                call_params["ctrl_input"] = parse_ctrl_input(ctrl_data)
+                # Reset mouse accumulator, keep key state
+                self.parameters["ctrl_input"]["mouse"] = [0.0, 0.0]
 
             # Route video input based on VACE status
             # We do not support combining latent initialization and VACE conditioning

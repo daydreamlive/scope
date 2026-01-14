@@ -111,6 +111,8 @@ export interface PipelineInfo {
   recommendedQuantizationVramThreshold?: number | null;
   // Available VAE types from config schema enum (derived from vae_type field presence)
   vaeTypes?: string[];
+  // Controller input support - presence of ctrl_input field in pipeline schema
+  supportsControllerInput?: boolean;
 }
 
 export interface DownloadProgress {
