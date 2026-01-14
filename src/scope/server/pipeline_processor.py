@@ -18,15 +18,13 @@ logger = logging.getLogger(__name__)
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 
+SLEEP_TIME = 0.01
+
 # FPS calculation constants
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
 MAX_FPS = 60.0  # Maximum FPS cap
-DEFAULT_FPS = 30.0  # Default FPS
-SLEEP_TIME = 0.01
-
-# Input FPS measurement constants
-INPUT_FPS_SAMPLE_SIZE = 30  # Number of frame intervals to track
-INPUT_FPS_MIN_SAMPLES = 5  # Minimum samples needed before using input FPS
+OUTPUT_FPS_SAMPLE_SIZE = 30
+OUTPUT_FPS_MIN_SAMPLES = 2
 
 
 class PipelineProcessor:
@@ -37,7 +35,6 @@ class PipelineProcessor:
         pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
-        track_input_fps: bool = False,
     ):
         """Initialize a pipeline processor.
 
@@ -45,11 +42,9 @@ class PipelineProcessor:
             pipeline: Pipeline instance to process frames with
             pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
-            track_input_fps: Whether to track input FPS (for first pipeline in chain)
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
-        self.track_input_fps = track_input_fps
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
@@ -68,25 +63,13 @@ class PipelineProcessor:
 
         self.is_prepared = False
 
-        # FPS tracking variables
-        self.processing_time_per_frame = deque(maxlen=2)
-        self.last_fps_update = time.time()
-        self.fps_update_interval = 0.5
-        self.min_fps = MIN_FPS
-        self.max_fps = MAX_FPS
-        self.current_pipeline_fps = DEFAULT_FPS
-        self.fps_lock = threading.Lock()
-
-        # Input FPS tracking (when enabled)
-        self.input_frame_times = (
-            deque(maxlen=INPUT_FPS_SAMPLE_SIZE) if track_input_fps else None
-        )
-        self.current_input_fps = DEFAULT_FPS if track_input_fps else None
-        self.last_input_fps_update = time.time() if track_input_fps else None
-        self.input_fps_lock = threading.Lock() if track_input_fps else None
+        # Output FPS tracking (based on frames added to output queue)
+        self.output_frame_times = deque(maxlen=OUTPUT_FPS_SAMPLE_SIZE)
+        # Start with a higher initial FPS to prevent initial queue buildup
+        self.current_output_fps = MAX_FPS
+        self.output_fps_lock = threading.Lock()
 
         self.paused = False
-
         # Input mode is signaled by the frontend at stream start
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
@@ -205,43 +188,6 @@ class PipelineProcessor:
                 f"Parameter queue full for {self.pipeline_id}, dropping parameter update"
             )
             return False
-
-    def get_current_pipeline_fps(self) -> float:
-        """Get the current dynamically calculated pipeline FPS."""
-        with self.fps_lock:
-            return self.current_pipeline_fps
-
-    def _calculate_pipeline_fps(self, processing_time: float, num_frames: int):
-        """Calculate FPS based on processing time and number of frames created."""
-        if processing_time <= 0 or num_frames <= 0:
-            return
-
-        # Store processing time per frame for averaging
-        time_per_frame = processing_time / num_frames
-        self.processing_time_per_frame.append(time_per_frame)
-
-        # Update FPS if enough time has passed
-        current_time = time.time()
-        if current_time - self.last_fps_update >= self.fps_update_interval:
-            if len(self.processing_time_per_frame) >= 1:
-                # Calculate average processing time per frame
-                avg_time_per_frame = sum(self.processing_time_per_frame) / len(
-                    self.processing_time_per_frame
-                )
-
-                # Calculate FPS: 1 / average_time_per_frame
-                with self.fps_lock:
-                    current_fps = self.current_pipeline_fps
-                estimated_fps = (
-                    1.0 / avg_time_per_frame if avg_time_per_frame > 0 else current_fps
-                )
-
-                # Clamp to reasonable bounds
-                estimated_fps = max(self.min_fps, min(self.max_fps, estimated_fps))
-                with self.fps_lock:
-                    self.current_pipeline_fps = estimated_fps
-
-            self.last_fps_update = current_time
 
     def worker_loop(self):
         """Main worker loop that processes frames."""
@@ -501,16 +447,13 @@ class PipelineProcessor:
                 frame = frame.unsqueeze(0)
                 try:
                     self.output_queue.put_nowait(frame)
+                    # Track when a frame is added to output queue for FPS calculation
+                    self._track_output_frame()
                 except queue.Full:
                     logger.info(
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
-                    # Update FPS calculation
-                    self._calculate_pipeline_fps(processing_time, num_frames)
                     continue
-
-            # Update FPS calculation
-            self._calculate_pipeline_fps(processing_time, num_frames)
         except Exception as e:
             if self._is_recoverable(e):
                 logger.error(
@@ -521,54 +464,40 @@ class PipelineProcessor:
 
         self.is_prepared = True
 
-    def track_input_frame(self):
-        """Track timestamp of an incoming frame for FPS measurement"""
-        if not self.track_input_fps:
-            return
+    def _track_output_frame(self):
+        """Track when a frame is added to the output queue (production rate)."""
+        with self.output_fps_lock:
+            self.output_frame_times.append(time.time())
 
-        with self.input_fps_lock:
-            self.input_frame_times.append(time.time())
+        self._calculate_output_fps()
 
-        # Update input FPS calculation
-        self._calculate_input_fps()
+    def _calculate_output_fps(self):
+        """Calculate FPS based on how fast frames are produced into the output queue."""
+        with self.output_fps_lock:
+            if len(self.output_frame_times) >= OUTPUT_FPS_MIN_SAMPLES:
+                times = list(self.output_frame_times)
+                # Time span from first to last frame
+                time_span = times[-1] - times[0]
+                # Require minimum time span to avoid unstable estimates from very short intervals
+                if time_span >= 0.05:  # At least 50ms
+                    # FPS = number of frames / time_span
+                    # e.g., if 4 frames are produced in 1s, then we have 4 FPS
+                    num_frames = len(times)
+                    estimated_fps = num_frames / time_span
 
-    def _calculate_input_fps(self):
-        """Calculate and update input FPS from recent frame timestamps."""
-        if not self.track_input_fps:
-            return
+                    # Clamp to reasonable bounds
+                    estimated_fps = max(MIN_FPS, min(MAX_FPS, estimated_fps))
+                    self.current_output_fps = estimated_fps
 
-        # Update FPS if enough time has passed
-        current_time = time.time()
-        if current_time - self.last_input_fps_update >= self.fps_update_interval:
-            with self.input_fps_lock:
-                if len(self.input_frame_times) >= INPUT_FPS_MIN_SAMPLES:
-                    # Calculate FPS from frame intervals
-                    times = list(self.input_frame_times)
-                    if len(times) >= 2:
-                        # Time span from first to last frame
-                        time_span = times[-1] - times[0]
-                        if time_span > 0:
-                            # FPS = (number of intervals) / time_span
-                            num_intervals = len(times) - 1
-                            estimated_fps = num_intervals / time_span
+    def get_fps(self) -> float:
+        """Get the current dynamically calculated pipeline FPS.
 
-                            # Clamp to reasonable bounds
-                            estimated_fps = max(
-                                self.min_fps, min(self.max_fps, estimated_fps)
-                            )
-                            self.current_input_fps = estimated_fps
-
-            self.last_input_fps_update = current_time
-
-    def get_input_fps(self) -> float | None:
-        """Get the current measured input FPS."""
-        if not self.track_input_fps:
-            return None
-
-        with self.input_fps_lock:
-            if len(self.input_frame_times) < INPUT_FPS_MIN_SAMPLES:
-                return None
-            return self.current_input_fps
+        Returns the FPS based on how fast frames are produced into the output queue,
+        adjusted for queue fill level to prevent buildup.
+        """
+        with self.output_fps_lock:
+            output_fps = self.current_output_fps
+        return min(MAX_FPS, output_fps)
 
     @staticmethod
     def _is_recoverable(error: Exception) -> bool:
