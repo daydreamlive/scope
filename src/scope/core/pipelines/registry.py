@@ -183,14 +183,24 @@ def _initialize_registry():
     # Register built-in pipelines first
     _register_pipelines()
 
-    # Load and register plugin pipelines
-    from scope.core.plugins import load_plugins, register_plugin_pipelines
+    # Load and register plugin pipelines and preprocessors
+    from scope.core.plugins import (
+        PreprocessorRegistry,
+        load_plugins,
+        register_plugin_pipelines,
+        register_plugin_preprocessors,
+    )
 
     load_plugins()
     register_plugin_pipelines(PipelineRegistry)
+    register_plugin_preprocessors()
 
     pipeline_count = len(PipelineRegistry.list_pipelines())
-    logger.info(f"Registry initialized with {pipeline_count} pipeline(s)")
+    preprocessor_count = len(PreprocessorRegistry.list_preprocessors())
+    logger.info(
+        f"Registry initialized with {pipeline_count} pipeline(s) "
+        f"and {preprocessor_count} preprocessor(s)"
+    )
 
 
 # Auto-register pipelines on module import

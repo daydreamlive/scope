@@ -77,6 +77,7 @@ export interface SettingsState {
   vaceUseInputVideo?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
+  vacePreprocessor?: string | null;
   // VAE type selection
   vaeType?: VaeType;
 }

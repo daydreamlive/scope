@@ -160,6 +160,23 @@ export function StreamPage() {
     sendParameterUpdate,
   } = useWebRTC();
 
+  // Available preprocessors from backend
+  const [preprocessors, setPreprocessors] = useState<
+    { id: string; name: string }[]
+  >([]);
+
+  // Fetch available preprocessors on mount
+  useEffect(() => {
+    fetch("/api/v1/preprocessors")
+      .then(res => res.json())
+      .then(data => {
+        setPreprocessors(data.preprocessors || []);
+      })
+      .catch(err => {
+        console.error("Failed to fetch preprocessors:", err);
+      });
+  }, []);
+
   // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
   const isLoading = isDownloading || isPipelineLoading || isConnecting;
 
@@ -532,6 +549,16 @@ export function StreamPage() {
     }
   };
 
+  const handleVacePreprocessorChange = (preprocessor: string | null) => {
+    updateSettings({ vacePreprocessor: preprocessor });
+    // Send preprocessor update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        vace_preprocessor: preprocessor,
+      });
+    }
+  };
+
   const handleResetCache = () => {
     // Send reset cache command to backend
     sendParameterUpdate({
@@ -826,6 +853,7 @@ export function StreamPage() {
         vace_ref_images?: string[];
         vace_use_input_video?: boolean;
         vace_context_scale?: number;
+        vace_preprocessor?: string | null;
         vace_enabled?: boolean;
       } = {
         // Signal the intended input mode to the backend so it doesn't
@@ -866,6 +894,10 @@ export function StreamPage() {
       if (currentMode === "video") {
         initialParameters.vace_use_input_video =
           settings.vaceUseInputVideo ?? false;
+        // Add preprocessor if selected
+        if (settings.vacePreprocessor) {
+          initialParameters.vace_preprocessor = settings.vacePreprocessor;
+        }
       }
 
       // Explicitly pass vace_enabled state
@@ -1168,6 +1200,9 @@ export function StreamPage() {
             vaeType={settings.vaeType ?? "wan"}
             onVaeTypeChange={handleVaeTypeChange}
             vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
+            vacePreprocessor={settings.vacePreprocessor}
+            onVacePreprocessorChange={handleVacePreprocessorChange}
+            preprocessors={preprocessors}
           />
         </div>
       </div>

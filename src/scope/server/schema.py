@@ -122,6 +122,10 @@ class Parameters(BaseModel):
         ge=0.0,
         le=2.0,
     )
+    vace_preprocessor: str | None = Field(
+        default=None,
+        description="Video preprocessor for VACE conditioning (e.g., 'pose', 'depth'). Set to 'none' or null for raw video input.",
+    )
 
 
 class SpoutConfig(BaseModel):

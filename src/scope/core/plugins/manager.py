@@ -5,6 +5,7 @@ import logging
 import pluggy
 
 from .hookspecs import ScopeHookSpec
+from .preprocessor_registry import PreprocessorRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -34,3 +35,13 @@ def register_plugin_pipelines(registry):
         logger.info(f"Registered plugin pipeline: {pipeline_id}")
 
     pm.hook.register_pipelines(register=register_callback)
+
+
+def register_plugin_preprocessors():
+    """Call register_preprocessors hook for all plugins."""
+
+    def register_callback(preprocessor_id: str, name: str, preprocessor_class: type):
+        """Callback function passed to plugins."""
+        PreprocessorRegistry.register(preprocessor_id, name, preprocessor_class)
+
+    pm.hook.register_preprocessors(register=register_callback)

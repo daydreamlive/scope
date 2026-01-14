@@ -95,6 +95,11 @@ interface SettingsPanelProps {
   onVaeTypeChange?: (vaeType: VaeType) => void;
   // Available VAE types from backend registry
   vaeTypes?: string[];
+  // VACE preprocessor selection
+  vacePreprocessor?: string | null;
+  onVacePreprocessorChange?: (preprocessor: string | null) => void;
+  // Available preprocessors from backend registry
+  preprocessors?: { id: string; name: string }[];
 }
 
 export function SettingsPanel({
@@ -139,6 +144,9 @@ export function SettingsPanel({
   vaeType = "wan",
   onVaeTypeChange,
   vaeTypes,
+  vacePreprocessor,
+  onVacePreprocessorChange,
+  preprocessors = [],
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -414,6 +422,36 @@ export function SettingsPanel({
                     />
                   </div>
                 </div>
+                {preprocessors.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <LabelWithTooltip
+                      label="Conditioning:"
+                      tooltip="Video preprocessor for VACE conditioning. Transforms input video before sending to VACE (e.g., pose detection, depth estimation)."
+                      className="text-xs text-muted-foreground w-16"
+                    />
+                    <Select
+                      value={vacePreprocessor || "none"}
+                      onValueChange={value => {
+                        onVacePreprocessorChange?.(
+                          value === "none" ? null : value
+                        );
+                      }}
+                      disabled={!vaceUseInputVideo || inputMode !== "video"}
+                    >
+                      <SelectTrigger className="h-7 text-xs flex-1">
+                        <SelectValue placeholder="None" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None (Raw Video)</SelectItem>
+                        {preprocessors.map(p => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             )}
           </div>

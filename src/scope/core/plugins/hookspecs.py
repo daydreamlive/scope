@@ -18,7 +18,21 @@ class ScopeHookSpec:
                      Usage: register(PipelineClass)
 
         Example:
-            @scope.core.hookimpl
+            @hookimpl
             def register_pipelines(register):
                 register(MyPipeline)
+        """
+
+    @hookspec
+    def register_preprocessors(self, register):
+        """Register video preprocessors for VACE conditioning.
+
+        Args:
+            register: Callback to register preprocessor classes.
+                     Usage: register(id, name, PreprocessorClass)
+
+        Example:
+            @hookimpl
+            def register_preprocessors(register):
+                register("pose", "Pose", PoseTensorRTPreprocessor)
         """

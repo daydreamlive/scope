@@ -387,6 +387,17 @@ async def get_pipeline_schemas():
     return PipelineSchemasResponse(pipelines=pipelines)
 
 
+@app.get("/api/v1/preprocessors")
+async def get_preprocessors():
+    """Get list of available video preprocessors for VACE conditioning.
+
+    Returns a list of preprocessor info objects with id and name.
+    """
+    from scope.core.plugins import PreprocessorRegistry
+
+    return {"preprocessors": PreprocessorRegistry.list_preprocessors()}
+
+
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
     webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),

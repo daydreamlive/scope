@@ -727,6 +727,36 @@ class FrameProcessor:
                 vace_use_input_video = self.parameters.get("vace_use_input_video", True)
 
                 if vace_enabled and vace_use_input_video:
+                    # Apply preprocessor if selected
+                    vace_preprocessor = self.parameters.get("vace_preprocessor")
+                    if vace_preprocessor and vace_preprocessor != "none":
+                        from scope.core.plugins import PreprocessorRegistry
+
+                        preprocessor = PreprocessorRegistry.get_instance(
+                            vace_preprocessor
+                        )
+                        if preprocessor is not None:
+                            # Convert video_input to preprocessor format and run
+                            # video_input is list of [1, H, W, C] tensors in [0, 255]
+                            # Preprocessor expects [B, C, F, H, W] in [0, 1]
+                            import torch
+
+                            frames = torch.cat(video_input, dim=0)  # [F, H, W, C]
+                            frames = frames.permute(3, 0, 1, 2).unsqueeze(
+                                0
+                            )  # [1, C, F, H, W]
+                            frames = frames.float() / 255.0  # [0, 1] range
+
+                            # Get target resolution from pipeline dimensions
+                            target_width, target_height = (
+                                self._get_pipeline_dimensions()
+                            )
+                            video_input = preprocessor(
+                                frames,
+                                target_height=target_height,
+                                target_width=target_width,
+                            )  # Returns [1, C, F, H, W] in [-1, 1]
+
                     # VACE conditioning: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
                 else:
