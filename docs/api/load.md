@@ -12,14 +12,11 @@ Loading a pipeline:
 ## Load a Pipeline
 
 ```javascript
-async function loadPipeline(pipelineId, loadParams = {}) {
+async function loadPipeline(request) {
   const response = await fetch("http://localhost:8000/api/v1/pipeline/load", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      pipeline_id: pipelineId,
-      load_params: loadParams
-    })
+    body: JSON.stringify(request)
   });
 
   if (!response.ok) {
@@ -31,13 +28,28 @@ async function loadPipeline(pipelineId, loadParams = {}) {
 }
 
 // Example: Load longlive with default settings
-await loadPipeline("longlive");
+await loadPipeline({
+  pipeline_ids: ["longlive"]
+});
 
 // Example: Load with custom resolution
-await loadPipeline("longlive", {
-  height: 512,
-  width: 512,
-  seed: 42
+await loadPipeline({
+  pipeline_ids: ["longlive"],
+  load_params: {
+    height: 512,
+    width: 512,
+    seed: 42
+  }
+});
+
+// Example: Load with preprocessor
+await loadPipeline({
+  pipeline_ids: ["video-depth-anything", "longlive"],
+  load_params: {
+    height: 512,
+    width: 512,
+    seed: 42
+  }
 });
 ```
 
@@ -45,7 +57,7 @@ await loadPipeline("longlive", {
 
 ```json
 {
-  "pipeline_id": "longlive",
+  "pipeline_ids": ["longlive"],
   "load_params": {
     "height": 320,
     "width": 576,
@@ -60,6 +72,20 @@ await loadPipeline("longlive", {
       }
     ],
     "lora_merge_mode": "permanent_merge"
+  }
+}
+```
+
+To load a pipeline with a preprocessor, include the preprocessor ID before the main pipeline in the `pipeline_ids` array:
+
+```json
+{
+  "pipeline_ids": ["video-depth-anything", "longlive"],
+  "load_params": {
+    "height": 320,
+    "width": 576,
+    "seed": 42,
+    "vace_enabled": true
   }
 }
 ```
@@ -155,15 +181,25 @@ async function waitForPipelineLoaded(timeoutMs = 300000, pollIntervalMs = 1000) 
 }
 
 // Complete workflow
-async function loadAndWait(pipelineId, loadParams = {}) {
-  console.log(`Loading ${pipelineId}...`);
-  await loadPipeline(pipelineId, loadParams);
+async function loadAndWait(pipelineIds, loadParams = {}) {
+  console.log(`Loading ${pipelineIds.join(" -> ")}...`);
+  await loadPipeline({
+    pipeline_ids: pipelineIds,
+    load_params: loadParams
+  });
   return await waitForPipelineLoaded();
 }
 
-// Usage
-const status = await loadAndWait("longlive", { height: 320, width: 576 });
+// Usage: Load single pipeline
+const status = await loadAndWait(["longlive"], { height: 320, width: 576 });
 console.log(`Pipeline ${status.pipeline_id} ready`);
+
+// Usage: Load with preprocessor
+const statusWithPreprocessor = await loadAndWait(
+  ["video-depth-anything", "longlive"],
+  { height: 320, width: 576, vace_enabled: true }
+);
+console.log(`Pipeline ${statusWithPreprocessor.pipeline_id} ready`);
 ```
 
 ## Switching Pipelines
@@ -172,10 +208,15 @@ When you load a different pipeline (or the same pipeline with different paramete
 
 ```javascript
 // Load longlive
-await loadAndWait("longlive");
+await loadAndWait(["longlive"]);
 
 // This automatically unloads longlive and loads streamdiffusionv2
-await loadAndWait("streamdiffusionv2");
+await loadAndWait(["streamdiffusionv2"]);
+
+// Load with preprocessor
+await loadAndWait(["video-depth-anything", "longlive"], {
+  vace_enabled: true
+});
 ```
 
 ## LoRA Configuration
@@ -183,24 +224,74 @@ await loadAndWait("streamdiffusionv2");
 Load LoRA adapters at pipeline load time:
 
 ```javascript
-await loadPipeline("longlive", {
-  loras: [
-    {
-      path: "/path/to/style.safetensors",
-      scale: 0.8
-    },
-    {
-      path: "/path/to/character.safetensors",
-      scale: 1.0
-    }
-  ],
-  // permanent_merge: Maximum FPS, no runtime updates
-  // runtime_peft: Allows runtime scale updates, lower FPS
-  lora_merge_mode: "runtime_peft"
+await loadPipeline({
+  pipeline_ids: ["longlive"],
+  load_params: {
+    loras: [
+      {
+        path: "/path/to/style.safetensors",
+        scale: 0.8
+      },
+      {
+        path: "/path/to/character.safetensors",
+        scale: 1.0
+      }
+    ],
+    // permanent_merge: Maximum FPS, no runtime updates
+    // runtime_peft: Allows runtime scale updates, lower FPS
+    lora_merge_mode: "runtime_peft"
+  }
 });
 ```
 
 With `runtime_peft` mode, you can update LoRA scales during streaming via the data channel. See [Send Parameters](parameters.md) for details.
+
+## Preprocessor Configuration
+
+Preprocessors can be configured to automatically process input videos before they reach the main pipeline. For example, the `video-depth-anything` preprocessor can generate depth maps from source videos in real-time for use with VACE V2V.
+
+To configure a preprocessor, include it in the `pipeline_ids` array before the main pipeline:
+
+```javascript
+// Load longlive with video-depth-anything preprocessor
+await loadPipeline({
+  pipeline_ids: ["video-depth-anything", "longlive"],
+  load_params: {
+    height: 320,
+    width: 576,
+    seed: 42
+  }
+});
+```
+
+The preprocessor will automatically process input videos and pass the results to the main pipeline. When using VACE V2V with a preprocessor, the preprocessor's output (e.g., depth maps) will be used as the control video.
+
+```javascript
+// Example: Load with preprocessor for real-time depth estimation
+async function loadWithPreprocessor(pipelineId, preprocessorId, loadParams = {}) {
+  const pipelineIds = [];
+  
+  if (preprocessorId) {
+    pipelineIds.push(preprocessorId);
+  }
+  pipelineIds.push(pipelineId);
+  
+  return await loadPipeline({
+    pipeline_ids: pipelineIds,
+    load_params: loadParams
+  });
+}
+
+// Usage: Load longlive with depth preprocessor
+await loadWithPreprocessor("longlive", "video-depth-anything", {
+  height: 320,
+  width: 576,
+  vace_enabled: true
+});
+```
+
+> [!NOTE]
+> Currently, only the `video-depth-anything` preprocessor is available. Additional preprocessors will be available via plugins in the future.
 
 ## VAE Types
 
@@ -217,18 +308,27 @@ The lightx2v [docs](https://huggingface.co/lightx2v/Autoencoders) contain more d
 
 ```javascript
 // Load with LightVAE
-await loadPipeline("longlive", {
-  vae_type: "lightvae"
+await loadPipeline({
+  pipeline_ids: ["longlive"],
+  load_params: {
+    vae_type: "lightvae"
+  }
 });
 
 // Load with LightTAE
-await loadPipeline("longlive", {
-  vae_type: "lighttae"
+await loadPipeline({
+  pipeline_ids: ["longlive"],
+  load_params: {
+    vae_type: "lighttae"
+  }
 });
 
 // Load with TAE
-await loadPipeline("longlive", {
-  vae_type: "tae"
+await loadPipeline({
+  pipeline_ids: ["longlive"],
+  load_params: {
+    vae_type: "tae"
+  }
 });
 ```
 
@@ -236,7 +336,9 @@ await loadPipeline("longlive", {
 
 ```javascript
 try {
-  await loadPipeline("longlive");
+  await loadPipeline({
+    pipeline_ids: ["longlive"]
+  });
   await waitForPipelineLoaded();
 } catch (error) {
   if (error.message.includes("CUDA")) {
