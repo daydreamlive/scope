@@ -11,6 +11,7 @@ import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
+import { useLayoutControlStream } from "../hooks/useLayoutControlStream";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
@@ -203,54 +204,26 @@ export function StreamPage() {
   const controllerInputEnabled =
     currentPipelineSupportsController || preprocessorNeedsController;
 
-  // Controller input hook - captures WASD/mouse and streams to backend
+  // Controller input hook - captures WASD/mouse and streams to backend (for non-layout-control modes)
+  const { isPointerLocked, requestPointerLock, releasePointerLock } =
+    useControllerInput(
+      sendParameterUpdate,
+      isStreaming && controllerInputEnabled && !preprocessorNeedsController,
+      videoContainerRef
+    );
+
+  // Layout control stream - generates frames from canvas for VACE conditioning
+  // This ensures the frontend-rendered frames are exactly what VACE receives
   const {
-    isPointerLocked,
-    pressedKeys,
-    requestPointerLock,
-    releasePointerLock,
-  } = useControllerInput(
-    sendParameterUpdate,
-    isStreaming && controllerInputEnabled,
-    videoContainerRef
-  );
-
-  // Layout control position state (synced between preview and backend)
-  const [layoutControlPosition, setLayoutControlPosition] = useState<
-    [number, number]
-  >([0.5, 0.35]);
-
-  // Update layout control position when streaming with pointer lock
-  // This keeps the preview in sync with what's being sent to backend
-  useEffect(() => {
-    if (!isStreaming || !isPointerLocked || !preprocessorNeedsController)
-      return;
-
-    const moveSpeed = 0.004;
-    const intervalMs = 1000 / 60;
-
-    const interval = setInterval(() => {
-      setLayoutControlPosition(prev => {
-        let [x, y] = prev;
-
-        if (pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp"))
-          y -= moveSpeed;
-        if (pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown"))
-          y += moveSpeed;
-        if (pressedKeys.has("KeyA") || pressedKeys.has("ArrowLeft"))
-          x -= moveSpeed;
-        if (pressedKeys.has("KeyD") || pressedKeys.has("ArrowRight"))
-          x += moveSpeed;
-
-        x = Math.max(0.1, Math.min(0.9, x));
-        y = Math.max(0.1, Math.min(0.9, y));
-
-        return [x, y];
-      });
-    }, intervalMs);
-
-    return () => clearInterval(interval);
-  }, [isStreaming, isPointerLocked, preprocessorNeedsController, pressedKeys]);
+    stream: layoutControlStream,
+    position: layoutControlPosition,
+    setPosition: setLayoutControlPosition,
+  } = useLayoutControlStream({
+    width: settings.resolution?.width || 512,
+    height: settings.resolution?.height || 512,
+    enabled: preprocessorNeedsController,
+    captureInput: isStreaming && preprocessorNeedsController,
+  });
 
   // Video source for preview (camera or video)
   // Enable based on input mode, not pipeline category
@@ -895,11 +868,28 @@ export function StreamPage() {
       const needsVideoInput = currentMode === "video";
       const isSpoutMode = mode === "spout" && settings.spoutReceiver?.enabled;
 
-      // Only send video stream for pipelines that need video input (not in Spout mode)
-      const streamToSend =
-        needsVideoInput && !isSpoutMode ? localStream || undefined : undefined;
+      // Check if layout control preprocessor is selected
+      const useLayoutControlInput =
+        settings.vacePreprocessor === "layout-control" && layoutControlStream;
 
-      if (needsVideoInput && !isSpoutMode && !localStream) {
+      // Determine which stream to send:
+      // 1. Layout control stream takes priority when that preprocessor is selected
+      // 2. Otherwise use local video stream for video mode
+      let streamToSend: MediaStream | undefined;
+      if (useLayoutControlInput) {
+        // Send layout control canvas frames for VACE conditioning
+        streamToSend = layoutControlStream;
+        console.log("Using layout control stream for VACE conditioning");
+      } else if (needsVideoInput && !isSpoutMode) {
+        streamToSend = localStream || undefined;
+      }
+
+      if (
+        needsVideoInput &&
+        !isSpoutMode &&
+        !localStream &&
+        !useLayoutControlInput
+      ) {
         console.error("Video input required but no local stream available");
         return false;
       }
@@ -956,11 +946,20 @@ export function StreamPage() {
         initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         initialParameters.vace_context_scale = vaceParams.vace_context_scale;
       }
-      // Add vace_use_input_video parameter
-      if (currentMode === "video") {
+
+      // Handle layout-control preprocessor specially:
+      // When layout-control is selected, we send the layout control canvas stream
+      // as video input and tell the backend to use it directly for VACE (no preprocessing)
+      if (useLayoutControlInput) {
+        // Use the layout control stream directly for VACE conditioning
+        initialParameters.vace_use_input_video = true;
+        // Don't set a preprocessor - backend should use video frames directly
+        // The "preprocessing" (rendering the circle) is done on the frontend
+      } else if (currentMode === "video") {
+        // Normal video mode - use settings
         initialParameters.vace_use_input_video =
           settings.vaceUseInputVideo ?? false;
-        // Add preprocessor if selected
+        // Add preprocessor if selected (for other preprocessors like depth, etc.)
         if (settings.vacePreprocessor) {
           initialParameters.vace_preprocessor = settings.vacePreprocessor;
         }

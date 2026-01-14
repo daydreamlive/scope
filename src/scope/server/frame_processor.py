@@ -765,8 +765,6 @@ class FrameProcessor:
                     # Prepare video frames tensor if available
                     video_frames = None
                     if video_input is not None and vace_use_input_video:
-                        import torch
-
                         # Convert video_input to preprocessor format
                         # video_input is list of [1, H, W, C] tensors in [0, 255]
                         # Preprocessor expects [B, C, F, H, W] in [0, 1]
@@ -792,37 +790,6 @@ class FrameProcessor:
                     vace_conditioning = preprocessor(ctx)
                     call_params["vace_input_frames"] = vace_conditioning
 
-                    # Send conditioning preview via data channel
-                    # Take middle frame for preview, encode as JPEG
-                    if self.notification_callback:
-                        viz_frames = vace_conditioning.squeeze(0)  # [C, F, H, W]
-                        viz_frames = viz_frames.permute(1, 2, 3, 0)  # [F, H, W, C]
-                        viz_frames = ((viz_frames + 1.0) / 2.0 * 255.0).clamp(0, 255)
-                        viz_frames = viz_frames.to(dtype=torch.uint8).cpu().numpy()
-
-                        # Take middle frame
-                        mid_idx = len(viz_frames) // 2
-                        frame = viz_frames[mid_idx]
-
-                        # Encode as JPEG
-                        import base64
-                        import io
-
-                        from PIL import Image
-
-                        img = Image.fromarray(frame)
-                        buffer = io.BytesIO()
-                        img.save(buffer, format="JPEG", quality=70)
-                        jpeg_bytes = buffer.getvalue()
-                        b64_data = base64.b64encode(jpeg_bytes).decode("utf-8")
-
-                        self.notification_callback(
-                            {
-                                "type": "conditioning_preview",
-                                "data": b64_data,
-                            }
-                        )
-
             elif video_input is not None:
                 # No preprocessor selected, route video based on VACE status
                 if vace_enabled and vace_use_input_video:
@@ -831,6 +798,47 @@ class FrameProcessor:
                 else:
                     # Latent initialization: route to video
                     call_params["video"] = video_input
+
+            # Send conditioning preview for whatever is in vace_input_frames
+            if self.notification_callback and "vace_input_frames" in call_params:
+                import base64
+                import io
+
+                from PIL import Image
+
+                vace_frames = call_params["vace_input_frames"]
+
+                # Handle different input formats:
+                # - Preprocessor output: tensor [1, C, F, H, W] in [-1, 1]
+                # - Direct video input: list of [1, H, W, C] tensors in [0, 255]
+                if isinstance(vace_frames, list):
+                    # List of tensors format
+                    if len(vace_frames) > 0:
+                        mid_idx = len(vace_frames) // 2
+                        frame = vace_frames[mid_idx].squeeze(0)  # [H, W, C]
+                        frame = frame.to(dtype=torch.uint8).cpu().numpy()
+                else:
+                    # Tensor format [1, C, F, H, W] in [-1, 1]
+                    viz_frames = vace_frames.squeeze(0)  # [C, F, H, W]
+                    viz_frames = viz_frames.permute(1, 2, 3, 0)  # [F, H, W, C]
+                    viz_frames = ((viz_frames + 1.0) / 2.0 * 255.0).clamp(0, 255)
+                    viz_frames = viz_frames.to(dtype=torch.uint8).cpu().numpy()
+                    mid_idx = len(viz_frames) // 2
+                    frame = viz_frames[mid_idx]
+
+                # Encode as JPEG
+                img = Image.fromarray(frame)
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=70)
+                jpeg_bytes = buffer.getvalue()
+                b64_data = base64.b64encode(jpeg_bytes).decode("utf-8")
+
+                self.notification_callback(
+                    {
+                        "type": "conditioning_preview",
+                        "data": b64_data,
+                    }
+                )
 
             output = pipeline(**call_params)
 

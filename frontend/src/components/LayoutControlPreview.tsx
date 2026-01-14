@@ -5,7 +5,7 @@ interface LayoutControlPreviewProps {
   position?: [number, number];
   /** Callback when position changes (for syncing with parent) */
   onPositionChange?: (position: [number, number]) => void;
-  /** Whether streaming is active */
+  /** Whether streaming is active - disables local keyboard handling */
   isStreaming?: boolean;
   /** Whether pointer lock is active on video output */
   isPointerLocked?: boolean;
@@ -17,14 +17,15 @@ interface LayoutControlPreviewProps {
 
 /**
  * Interactive layout control preview.
- * Click to focus, then use WASD/arrows to move the circle.
- * Works independently of streaming state.
+ *
+ * When NOT streaming: Click to focus, then use WASD/arrows to move the circle.
+ * When streaming: Just displays the position (WASD is handled by useLayoutControlStream).
  */
 export function LayoutControlPreview({
   position,
   onPositionChange,
   isStreaming = false,
-  isPointerLocked = false,
+  isPointerLocked: _isPointerLocked = false,
   width = 160,
   height = 120,
 }: LayoutControlPreviewProps) {
@@ -44,36 +45,44 @@ export function LayoutControlPreview({
     }
   }, [position]);
 
-  // Notify parent of position changes
+  // Notify parent of position changes (only when not streaming to avoid feedback loop)
   useEffect(() => {
-    onPositionChange?.(localPosition);
-  }, [localPosition, onPositionChange]);
-
-  // Handle keyboard input
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    const validKeys = new Set([
-      "KeyW",
-      "KeyA",
-      "KeyS",
-      "KeyD",
-      "ArrowUp",
-      "ArrowDown",
-      "ArrowLeft",
-      "ArrowRight",
-    ]);
-    if (validKeys.has(e.code)) {
-      e.preventDefault();
-      pressedKeysRef.current.add(e.code);
+    if (!isStreaming) {
+      onPositionChange?.(localPosition);
     }
-  }, []);
+  }, [localPosition, onPositionChange, isStreaming]);
+
+  // Handle keyboard input (only when not streaming)
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (isStreaming) return; // Hook handles WASD during streaming
+
+      const validKeys = new Set([
+        "KeyW",
+        "KeyA",
+        "KeyS",
+        "KeyD",
+        "ArrowUp",
+        "ArrowDown",
+        "ArrowLeft",
+        "ArrowRight",
+      ]);
+      if (validKeys.has(e.code)) {
+        e.preventDefault();
+        pressedKeysRef.current.add(e.code);
+      }
+    },
+    [isStreaming]
+  );
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
     pressedKeysRef.current.delete(e.code);
   }, []);
 
-  // Animation loop for smooth movement
+  // Animation loop for smooth movement (only when not streaming)
   useEffect(() => {
-    if (!isFocused) {
+    // When streaming, the hook handles position updates
+    if (isStreaming || !isFocused) {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
@@ -116,11 +125,11 @@ export function LayoutControlPreview({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isFocused]);
+  }, [isFocused, isStreaming]);
 
-  // Set up keyboard listeners when focused
+  // Set up keyboard listeners when focused (only when not streaming)
   useEffect(() => {
-    if (isFocused) {
+    if (isFocused && !isStreaming) {
       window.addEventListener("keydown", handleKeyDown);
       window.addEventListener("keyup", handleKeyUp);
     }
@@ -130,12 +139,14 @@ export function LayoutControlPreview({
       window.removeEventListener("keyup", handleKeyUp);
       keysRef.current.clear();
     };
-  }, [isFocused, handleKeyDown, handleKeyUp]);
+  }, [isFocused, isStreaming, handleKeyDown, handleKeyUp]);
 
   // Handle focus/blur
   const handleClick = () => {
-    setIsFocused(true);
-    containerRef.current?.focus();
+    if (!isStreaming) {
+      setIsFocused(true);
+      containerRef.current?.focus();
+    }
   };
 
   const handleBlur = () => {
@@ -175,34 +186,35 @@ export function LayoutControlPreview({
     ctx.fill();
   }, [localPosition, width, height]);
 
+  // Determine status text
+  const getStatusText = () => {
+    if (isStreaming) {
+      return <span className="text-green-500">● WASD active</span>;
+    }
+    if (isFocused) {
+      return <span className="text-green-500">● Preview control</span>;
+    }
+    return <span className="text-muted-foreground">○ Click to try</span>;
+  };
+
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">Layout Control</span>
-        <span className="text-xs">
-          {isPointerLocked ? (
-            <span className="text-green-500">● Video control</span>
-          ) : isFocused ? (
-            <span className="text-green-500">● Preview control</span>
-          ) : isStreaming ? (
-            <span className="text-blue-500">○ Click video</span>
-          ) : (
-            <span className="text-muted-foreground">○ Click to try</span>
-          )}
-        </span>
+        <span className="text-xs">{getStatusText()}</span>
       </div>
       <div
         ref={containerRef}
-        className={`relative border rounded overflow-hidden cursor-pointer outline-none ${
-          isFocused || isPointerLocked
+        className={`relative border rounded overflow-hidden outline-none ${
+          isStreaming || isFocused
             ? "border-green-500 ring-1 ring-green-500"
-            : "border-border"
+            : "border-border cursor-pointer"
         }`}
         style={{ width, height }}
-        tabIndex={0}
+        tabIndex={isStreaming ? -1 : 0}
         onClick={handleClick}
         onBlur={handleBlur}
-        title="Click to control with WASD"
+        title={isStreaming ? "Use WASD to move" : "Click to control with WASD"}
       >
         <canvas
           ref={canvasRef}
@@ -210,7 +222,7 @@ export function LayoutControlPreview({
           height={height}
           className="block"
         />
-        {!isFocused && (
+        {!isStreaming && !isFocused && (
           <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
             <span className="text-xs text-white bg-black/50 px-2 py-1 rounded">
               Click, then WASD
@@ -221,9 +233,6 @@ export function LayoutControlPreview({
       <div className="text-xs text-muted-foreground text-center">
         ({(localPosition[0] * 100).toFixed(0)}%,{" "}
         {(localPosition[1] * 100).toFixed(0)}%)
-        {isStreaming && (
-          <span className="text-green-500 ml-1">● Streaming</span>
-        )}
       </div>
     </div>
   );
