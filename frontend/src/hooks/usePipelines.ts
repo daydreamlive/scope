@@ -36,6 +36,10 @@ export function usePipelines() {
             }
           }
 
+          // Check if pipeline supports controller input (has ctrl_input field in schema)
+          const supportsControllerInput =
+            schema.config_schema?.properties?.ctrl_input !== undefined;
+
           transformed[id] = {
             name: schema.name,
             about: schema.description,
@@ -60,6 +64,7 @@ export function usePipelines() {
               schema.recommended_quantization_vram_threshold ?? undefined,
             modified: schema.modified,
             vaeTypes,
+            supportsControllerInput,
           };
         }
 

@@ -329,6 +329,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       vace_ref_images?: string[];
       vace_use_input_video?: boolean;
       vace_context_scale?: number;
+      ctrl_input?: { button: string[]; mouse: [number, number] };
     }) => {
       if (
         dataChannelRef.current &&
