@@ -1,10 +1,55 @@
-"""Registry for video preprocessors."""
+"""Registry for video preprocessors.
+
+This module provides:
+- PreprocessorContext: Unified context object for all preprocessors
+- PreprocessorRegistry: Registry for managing available preprocessors
+
+Preprocessors can be either:
+- Video preprocessors: Transform video frames (e.g., optical flow, pose)
+- Generator preprocessors: Generate frames from other inputs (e.g., controller input)
+
+All preprocessors receive PreprocessorContext and return VACE-compatible tensors.
+"""
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import torch
+
+if TYPE_CHECKING:
+    from scope.core.pipelines.controller import CtrlInput
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PreprocessorContext:
+    """Unified context for all preprocessors.
+
+    Preprocessors receive this context and extract what they need:
+    - Video preprocessors use video_frames
+    - Generator preprocessors use ctrl_input
+    - Hybrid preprocessors can use both
+
+    All preprocessors must return tensors in VACE format:
+    [1, C, F, H, W] in [-1, 1] range.
+
+    Attributes:
+        video_frames: Input video frames [B, C, F, H, W] in [0, 1] range.
+                     None if no video input available.
+        ctrl_input: Controller input (keyboard/mouse state).
+                   None if no controller input available.
+        target_height: Target output height in pixels.
+        target_width: Target output width in pixels.
+        num_frames: Number of frames to generate (for generators).
+    """
+
+    video_frames: torch.Tensor | None = None
+    ctrl_input: "CtrlInput | None" = None
+    target_height: int = 512
+    target_width: int = 512
+    num_frames: int = 12
 
 
 @dataclass

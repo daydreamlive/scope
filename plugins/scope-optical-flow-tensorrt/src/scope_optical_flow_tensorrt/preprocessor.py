@@ -4,11 +4,15 @@ Ported from StreamDiffusion's temporal_net_tensorrt.py
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
 from torchvision.models.optical_flow import Raft_Small_Weights
 from torchvision.utils import flow_to_image
+
+if TYPE_CHECKING:
+    from scope.core.plugins import PreprocessorContext
 
 from .download import get_engine_path, get_models_dir, get_onnx_path
 from .engine import (
@@ -238,25 +242,49 @@ class OpticalFlowTensorRTPreprocessor:
 
     def __call__(
         self,
-        frames: torch.Tensor,
+        ctx_or_frames: "PreprocessorContext | torch.Tensor",
         target_height: int | None = None,
         target_width: int | None = None,
     ) -> torch.Tensor:
         """Process input frames to produce optical flow maps for VACE conditioning.
 
+        Accepts either PreprocessorContext (new unified interface) or raw tensors
+        (backward compatible for internal use).
+
         Args:
-            frames: Input video frames. Supported formats:
-                - [B, C, F, H, W]: Batch of videos (B batches, F frames each)
-                - [C, F, H, W]: Single video (F frames)
-                - [F, H, W, C]: Single video in FHWC format (will be converted)
+            ctx_or_frames: Either PreprocessorContext or input video frames.
+                If PreprocessorContext: extracts video_frames, target_height, target_width
+                If tensor, supported formats:
+                    - [B, C, F, H, W]: Batch of videos (B batches, F frames each)
+                    - [C, F, H, W]: Single video (F frames)
+                    - [F, H, W, C]: Single video in FHWC format (will be converted)
                 All inputs should be in [0, 1] float range.
             target_height: Output height. If None, uses flow computation height.
+                          Ignored if ctx_or_frames is PreprocessorContext.
             target_width: Output width. If None, uses flow computation width.
+                         Ignored if ctx_or_frames is PreprocessorContext.
 
         Returns:
             Flow maps in VACE format: [1, C, F, H, W] float in [-1, 1] range,
             with optical flow rendered as RGB visualization.
+
+        Raises:
+            ValueError: If PreprocessorContext is provided but video_frames is None.
         """
+        from scope.core.plugins import PreprocessorContext
+
+        # Handle both signatures: PreprocessorContext or raw tensor
+        if isinstance(ctx_or_frames, PreprocessorContext):
+            if ctx_or_frames.video_frames is None:
+                raise ValueError(
+                    "OpticalFlowTensorRTPreprocessor requires video_frames in context"
+                )
+            frames = ctx_or_frames.video_frames
+            target_height = ctx_or_frames.target_height
+            target_width = ctx_or_frames.target_width
+        else:
+            frames = ctx_or_frames
+
         # Handle different input formats
         if frames.dim() == 4:
             if frames.shape[-1] == 3:

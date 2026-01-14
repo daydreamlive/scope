@@ -194,11 +194,19 @@ export function StreamPage() {
   const currentPipelineSupportsController =
     pipelines?.[settings.pipelineId]?.supportsControllerInput ?? false;
 
+  // Check if selected preprocessor needs controller input (e.g., layout-control)
+  const preprocessorNeedsController =
+    settings.vacePreprocessor === "layout-control";
+
+  // Enable controller input if pipeline supports it OR preprocessor needs it
+  const controllerInputEnabled =
+    currentPipelineSupportsController || preprocessorNeedsController;
+
   // Controller input hook - captures WASD/mouse and streams to backend
   const { isPointerLocked, requestPointerLock, releasePointerLock } =
     useControllerInput(
       sendParameterUpdate,
-      isStreaming && currentPipelineSupportsController,
+      isStreaming && controllerInputEnabled,
       videoContainerRef
     );
 
@@ -1048,7 +1056,7 @@ export function StreamPage() {
                 }
               }}
               // Controller input props
-              supportsControllerInput={currentPipelineSupportsController}
+              supportsControllerInput={controllerInputEnabled}
               isPointerLocked={isPointerLocked}
               onRequestPointerLock={requestPointerLock}
               onReleasePointerLock={releasePointerLock}

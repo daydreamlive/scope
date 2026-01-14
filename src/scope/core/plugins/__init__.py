@@ -7,7 +7,7 @@ from .manager import (
     register_plugin_pipelines,
     register_plugin_preprocessors,
 )
-from .preprocessor_registry import PreprocessorRegistry
+from .preprocessor_registry import PreprocessorContext, PreprocessorRegistry
 
 __all__ = [
     "hookimpl",
@@ -15,5 +15,6 @@ __all__ = [
     "pm",
     "register_plugin_pipelines",
     "register_plugin_preprocessors",
+    "PreprocessorContext",
     "PreprocessorRegistry",
 ]
