@@ -203,17 +203,53 @@ export function StreamPage() {
     currentPipelineSupportsController || preprocessorNeedsController;
 
   // Controller input hook - captures WASD/mouse and streams to backend
-  const { isPointerLocked, requestPointerLock, releasePointerLock } =
-    useControllerInput(
-      sendParameterUpdate,
-      isStreaming && controllerInputEnabled,
-      videoContainerRef
-    );
+  const {
+    isPointerLocked,
+    pressedKeys,
+    requestPointerLock,
+    releasePointerLock,
+  } = useControllerInput(
+    sendParameterUpdate,
+    isStreaming && controllerInputEnabled,
+    videoContainerRef
+  );
 
   // Layout control position state (synced between preview and backend)
   const [layoutControlPosition, setLayoutControlPosition] = useState<
     [number, number]
   >([0.5, 0.35]);
+
+  // Update layout control position when streaming with pointer lock
+  // This keeps the preview in sync with what's being sent to backend
+  useEffect(() => {
+    if (!isStreaming || !isPointerLocked || !preprocessorNeedsController)
+      return;
+
+    const moveSpeed = 0.015;
+    const intervalMs = 1000 / 60;
+
+    const interval = setInterval(() => {
+      setLayoutControlPosition(prev => {
+        let [x, y] = prev;
+
+        if (pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp"))
+          y -= moveSpeed;
+        if (pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown"))
+          y += moveSpeed;
+        if (pressedKeys.has("KeyA") || pressedKeys.has("ArrowLeft"))
+          x -= moveSpeed;
+        if (pressedKeys.has("KeyD") || pressedKeys.has("ArrowRight"))
+          x += moveSpeed;
+
+        x = Math.max(0.1, Math.min(0.9, x));
+        y = Math.max(0.1, Math.min(0.9, y));
+
+        return [x, y];
+      });
+    }, intervalMs);
+
+    return () => clearInterval(interval);
+  }, [isStreaming, isPointerLocked, preprocessorNeedsController, pressedKeys]);
 
   // Video source for preview (camera or video)
   // Enable based on input mode, not pipeline category
@@ -1240,6 +1276,9 @@ export function StreamPage() {
             preprocessors={preprocessors}
             layoutControlPosition={layoutControlPosition}
             onLayoutControlPositionChange={setLayoutControlPosition}
+            isLayoutControlPointerLocked={
+              isPointerLocked && preprocessorNeedsController
+            }
           />
         </div>
       </div>

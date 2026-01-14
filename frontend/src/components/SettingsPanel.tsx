@@ -104,6 +104,7 @@ interface SettingsPanelProps {
   // Layout control preview props
   layoutControlPosition?: [number, number];
   onLayoutControlPositionChange?: (position: [number, number]) => void;
+  isLayoutControlPointerLocked?: boolean;
 }
 
 export function SettingsPanel({
@@ -153,6 +154,7 @@ export function SettingsPanel({
   preprocessors = [],
   layoutControlPosition,
   onLayoutControlPositionChange,
+  isLayoutControlPointerLocked = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -462,6 +464,7 @@ export function SettingsPanel({
                         position={layoutControlPosition}
                         onPositionChange={onLayoutControlPositionChange}
                         isStreaming={isStreaming}
+                        isPointerLocked={isLayoutControlPointerLocked}
                       />
                     )}
                   </div>

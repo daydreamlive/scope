@@ -5,8 +5,10 @@ interface LayoutControlPreviewProps {
   position?: [number, number];
   /** Callback when position changes (for syncing with parent) */
   onPositionChange?: (position: [number, number]) => void;
-  /** Whether streaming is active (shows different status) */
+  /** Whether streaming is active */
   isStreaming?: boolean;
+  /** Whether pointer lock is active on video output */
+  isPointerLocked?: boolean;
   /** Width of the preview canvas */
   width?: number;
   /** Height of the preview canvas */
@@ -22,6 +24,7 @@ export function LayoutControlPreview({
   position,
   onPositionChange,
   isStreaming = false,
+  isPointerLocked = false,
   width = 160,
   height = 120,
 }: LayoutControlPreviewProps) {
@@ -177,10 +180,12 @@ export function LayoutControlPreview({
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">Layout Control</span>
         <span className="text-xs">
-          {isFocused ? (
-            <span className="text-green-500">● Active</span>
+          {isPointerLocked ? (
+            <span className="text-green-500">● Video control</span>
+          ) : isFocused ? (
+            <span className="text-green-500">● Preview control</span>
           ) : isStreaming ? (
-            <span className="text-blue-500">○ Click to control</span>
+            <span className="text-blue-500">○ Click video</span>
           ) : (
             <span className="text-muted-foreground">○ Click to try</span>
           )}
@@ -189,7 +194,9 @@ export function LayoutControlPreview({
       <div
         ref={containerRef}
         className={`relative border rounded overflow-hidden cursor-pointer outline-none ${
-          isFocused ? "border-green-500 ring-1 ring-green-500" : "border-border"
+          isFocused || isPointerLocked
+            ? "border-green-500 ring-1 ring-green-500"
+            : "border-border"
         }`}
         style={{ width, height }}
         tabIndex={0}
