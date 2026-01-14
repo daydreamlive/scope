@@ -203,56 +203,17 @@ export function StreamPage() {
     currentPipelineSupportsController || preprocessorNeedsController;
 
   // Controller input hook - captures WASD/mouse and streams to backend
-  const {
-    isPointerLocked,
-    pressedKeys,
-    requestPointerLock,
-    releasePointerLock,
-  } = useControllerInput(
-    sendParameterUpdate,
-    isStreaming && controllerInputEnabled,
-    videoContainerRef
-  );
+  const { isPointerLocked, requestPointerLock, releasePointerLock } =
+    useControllerInput(
+      sendParameterUpdate,
+      isStreaming && controllerInputEnabled,
+      videoContainerRef
+    );
 
-  // Layout control position state (for preview visualization)
+  // Layout control position state (synced between preview and backend)
   const [layoutControlPosition, setLayoutControlPosition] = useState<
     [number, number]
   >([0.5, 0.35]);
-
-  // Update layout control position based on pressed keys
-  useEffect(() => {
-    if (!preprocessorNeedsController || !isPointerLocked) return;
-
-    const moveSpeed = 0.015;
-    const intervalMs = 1000 / 60; // 60 FPS update
-
-    const interval = setInterval(() => {
-      setLayoutControlPosition(prev => {
-        let [x, y] = prev;
-
-        if (pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp")) {
-          y -= moveSpeed;
-        }
-        if (pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown")) {
-          y += moveSpeed;
-        }
-        if (pressedKeys.has("KeyA") || pressedKeys.has("ArrowLeft")) {
-          x -= moveSpeed;
-        }
-        if (pressedKeys.has("KeyD") || pressedKeys.has("ArrowRight")) {
-          x += moveSpeed;
-        }
-
-        // Clamp to valid range
-        x = Math.max(0.1, Math.min(0.9, x));
-        y = Math.max(0.1, Math.min(0.9, y));
-
-        return [x, y];
-      });
-    }, intervalMs);
-
-    return () => clearInterval(interval);
-  }, [preprocessorNeedsController, isPointerLocked, pressedKeys]);
 
   // Video source for preview (camera or video)
   // Enable based on input mode, not pipeline category
@@ -1278,10 +1239,7 @@ export function StreamPage() {
             onVacePreprocessorChange={handleVacePreprocessorChange}
             preprocessors={preprocessors}
             layoutControlPosition={layoutControlPosition}
-            isLayoutControlActive={
-              isPointerLocked && preprocessorNeedsController
-            }
-            onRequestLayoutControlPointerLock={requestPointerLock}
+            onLayoutControlPositionChange={setLayoutControlPosition}
           />
         </div>
       </div>
