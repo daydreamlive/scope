@@ -88,6 +88,8 @@ export interface SettingsState {
   vaeType?: VaeType;
   // Preprocessors
   preprocessorIds?: string[];
+  // Postprocessors
+  postprocessorIds?: string[];
 }
 
 export interface PipelineInfo {
