@@ -38,6 +38,7 @@ import type {
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
 import { LayoutControlPreview } from "./LayoutControlPreview";
+import { VACEConditioningPreview } from "./VACEConditioningPreview";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
@@ -105,6 +106,8 @@ interface SettingsPanelProps {
   layoutControlPosition?: [number, number];
   onLayoutControlPositionChange?: (position: [number, number]) => void;
   isLayoutControlPointerLocked?: boolean;
+  // VACE conditioning preview image (base64 data URL)
+  conditioningPreview?: string | null;
 }
 
 export function SettingsPanel({
@@ -155,6 +158,7 @@ export function SettingsPanel({
   layoutControlPosition,
   onLayoutControlPositionChange,
   isLayoutControlPointerLocked = false,
+  conditioningPreview,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -465,6 +469,12 @@ export function SettingsPanel({
                         onPositionChange={onLayoutControlPositionChange}
                         isStreaming={isStreaming}
                         isPointerLocked={isLayoutControlPointerLocked}
+                      />
+                    )}
+                    {/* Show live VACE conditioning preview when streaming with a preprocessor */}
+                    {isStreaming && vacePreprocessor && (
+                      <VACEConditioningPreview
+                        imageData={conditioningPreview}
                       />
                     )}
                   </div>

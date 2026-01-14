@@ -81,7 +81,7 @@ export function LayoutControlPreview({
       return;
     }
 
-    const moveSpeed = 0.02;
+    const moveSpeed = 0.004;
     let lastTime = performance.now();
 
     const animate = (currentTime: number) => {

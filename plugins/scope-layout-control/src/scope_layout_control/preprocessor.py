@@ -49,7 +49,7 @@ class LayoutControlPreprocessor:
     def __init__(
         self,
         radius: int = 80,
-        move_speed: float = 0.02,
+        move_speed: float = 0.004,
         mouse_sensitivity: float = 0.002,
         initial_x: float = 0.5,
         initial_y: float = 0.35,

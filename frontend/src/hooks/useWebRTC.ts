@@ -35,6 +35,9 @@ interface UseWebRTCOptions {
  */
 export function useWebRTC(options?: UseWebRTCOptions) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [conditioningPreview, setConditioningPreview] = useState<string | null>(
+    null
+  );
   const [connectionState, setConnectionState] =
     useState<RTCPeerConnectionState>("new");
   const [isConnecting, setIsConnecting] = useState(false);
@@ -102,6 +105,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
               setIsStreaming(false);
               setIsConnecting(false);
               setRemoteStream(null);
+              setConditioningPreview(null);
 
               // Show error toast if there's an error message
               if (data.error_message) {
@@ -120,6 +124,11 @@ export function useWebRTC(options?: UseWebRTCOptions) {
               if (options?.onStreamStop) {
                 options.onStreamStop();
               }
+            }
+
+            // Handle conditioning preview frame from backend
+            if (data.type === "conditioning_preview" && data.data) {
+              setConditioningPreview(`data:image/jpeg;base64,${data.data}`);
             }
           } catch (error) {
             console.error("Failed to parse data channel message:", error);
@@ -378,6 +387,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     queuedCandidatesRef.current = [];
 
     setRemoteStream(null);
+    setConditioningPreview(null);
     setConnectionState("new");
     setIsStreaming(false);
   }, []);
@@ -393,6 +403,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
 
   return {
     remoteStream,
+    conditioningPreview,
     connectionState,
     isConnecting,
     isStreaming,

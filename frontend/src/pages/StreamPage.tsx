@@ -152,6 +152,7 @@ export function StreamPage() {
   // WebRTC for streaming
   const {
     remoteStream,
+    conditioningPreview,
     isStreaming,
     isConnecting,
     peerConnectionRef,
@@ -225,7 +226,7 @@ export function StreamPage() {
     if (!isStreaming || !isPointerLocked || !preprocessorNeedsController)
       return;
 
-    const moveSpeed = 0.015;
+    const moveSpeed = 0.004;
     const intervalMs = 1000 / 60;
 
     const interval = setInterval(() => {
@@ -1279,6 +1280,7 @@ export function StreamPage() {
             isLayoutControlPointerLocked={
               isPointerLocked && preprocessorNeedsController
             }
+            conditioningPreview={conditioningPreview}
           />
         </div>
       </div>

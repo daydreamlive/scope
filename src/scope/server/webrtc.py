@@ -262,7 +262,7 @@ class WebRTCManager:
             }
 
         except Exception as e:
-            logger.error(f"Error handling WebRTC offer: {e}")
+            logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
             if "session" in locals():
                 await self.remove_session(session.id)
             raise
