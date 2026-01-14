@@ -309,6 +309,8 @@ class OpticalFlowTensorRTPreprocessor:
             self.reset()
 
             batch_flows = []
+            first_computed_flow = None
+
             for f in range(num_frames):
                 frame = frames[b, :, f]  # [C, H, W]
 
@@ -327,6 +329,10 @@ class OpticalFlowTensorRTPreprocessor:
                         flow_rgb = self._compute_flow_to_rgb_tensor(
                             self._prev_input, input_tensor
                         )
+                        # Store the first computed flow for duplicating to frame 0
+                        # (matches VACE's FlowVisAnnotator behavior)
+                        if first_computed_flow is None:
+                            first_computed_flow = flow_rgb.clone()
                     except Exception as e:
                         logger.error(f"TensorRT optical flow failed: {e}")
                         # Fallback: zero flow
@@ -338,18 +344,12 @@ class OpticalFlowTensorRTPreprocessor:
                             dtype=torch.float32,
                         )
                 else:
-                    # First frame: no previous frame, output zero flow
+                    # First frame: placeholder, will be replaced with first computed flow
                     self._first_frame = False
-                    flow_rgb = torch.zeros(
-                        3,
-                        self._height,
-                        self._width,
-                        device=self._device,
-                        dtype=torch.float32,
-                    )
+                    flow_rgb = None  # Placeholder
 
                 # Resize to target size if needed
-                if (
+                if flow_rgb is not None and (
                     flow_rgb.shape[-2] != target_height
                     or flow_rgb.shape[-1] != target_width
                 ):
@@ -364,6 +364,31 @@ class OpticalFlowTensorRTPreprocessor:
                 self._prev_input = input_tensor.clone()
 
                 batch_flows.append(flow_rgb)
+
+            # Replace first frame's placeholder with duplicated first computed flow
+            # This matches VACE's behavior: flow_up_vis_list[:1] + flow_up_vis_list
+            if first_computed_flow is not None:
+                # Resize first computed flow if needed
+                if (
+                    first_computed_flow.shape[-2] != target_height
+                    or first_computed_flow.shape[-1] != target_width
+                ):
+                    first_computed_flow = F.interpolate(
+                        first_computed_flow.unsqueeze(0),
+                        size=(target_height, target_width),
+                        mode="bilinear",
+                        align_corners=False,
+                    ).squeeze(0)
+                batch_flows[0] = first_computed_flow
+            else:
+                # Single frame or no valid flow computed - use zero flow
+                batch_flows[0] = torch.zeros(
+                    3,
+                    target_height,
+                    target_width,
+                    device=self._device,
+                    dtype=torch.float32,
+                )
 
             all_flow_frames.append(batch_flows)
 
