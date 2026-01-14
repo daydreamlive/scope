@@ -28,7 +28,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 
 ## Features
 
-- Autoregressive video diffusion models
+- Autoregressive video diffusion models with configurable [VAEs](./docs/vae.md)
   - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md) (text-to-video, video-to-video)
   - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video, video-to-video)
   - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)

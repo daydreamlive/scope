@@ -270,12 +270,12 @@ The preprocessor will automatically process input videos and pass the results to
 // Example: Load with preprocessor for real-time depth estimation
 async function loadWithPreprocessor(pipelineId, preprocessorId, loadParams = {}) {
   const pipelineIds = [];
-  
+
   if (preprocessorId) {
     pipelineIds.push(preprocessorId);
   }
   pipelineIds.push(pipelineId);
-  
+
   return await loadPipeline({
     pipeline_ids: pipelineIds,
     load_params: loadParams
@@ -304,30 +304,13 @@ The `vae_type` parameter controls which VAE (Variational Autoencoder) is used fo
 | `tae`      | Average | Fast   |
 | `lighttae` | High    | Fast   |
 
-The lightx2v [docs](https://huggingface.co/lightx2v/Autoencoders) contain more details.
+See [VAE Types](../vae.md) for detailed descriptions of each type.
 
 ```javascript
-// Load with LightVAE
-await loadPipeline({
-  pipeline_ids: ["longlive"],
-  load_params: {
-    vae_type: "lightvae"
-  }
-});
-
-// Load with LightTAE
 await loadPipeline({
   pipeline_ids: ["longlive"],
   load_params: {
     vae_type: "lighttae"
-  }
-});
-
-// Load with TAE
-await loadPipeline({
-  pipeline_ids: ["longlive"],
-  load_params: {
-    vae_type: "tae"
   }
 });
 ```
