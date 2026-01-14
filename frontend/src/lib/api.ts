@@ -25,6 +25,7 @@ export interface WebRTCOfferRequest {
     kv_cache_attention_bias?: number;
     vace_ref_images?: string[];
     vace_context_scale?: number;
+    pipeline_ids?: string[];
   };
 }
 
@@ -37,7 +38,7 @@ export interface PipelineLoadParams {
 export type PipelineLoadParamsGeneric = Record<string, unknown>;
 
 export interface PipelineLoadRequest {
-  pipeline_id?: string;
+  pipeline_ids: string[];
   load_params?: PipelineLoadParamsGeneric | null;
 }
 
@@ -122,7 +123,7 @@ export const sendIceCandidates = async (
 };
 
 export const loadPipeline = async (
-  data: PipelineLoadRequest = {}
+  data: PipelineLoadRequest
 ): Promise<{ message: string }> => {
   const response = await fetch("/api/v1/pipeline/load", {
     method: "POST",
@@ -388,6 +389,7 @@ export interface PipelineSchemaInfo {
   requires_models: boolean;
   supports_lora: boolean;
   supports_vace: boolean;
+  usage: string[];
   // Pipeline config schema
   config_schema: PipelineConfigSchema;
   // Mode support - comes from config class

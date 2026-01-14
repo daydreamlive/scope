@@ -123,9 +123,12 @@ export function StreamPage() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] =
     useState<DownloadProgress | null>(null);
-  const [pipelineNeedsModels, setPipelineNeedsModels] = useState<string | null>(
-    null
-  );
+  const [pipelinesNeedingModels, setPipelinesNeedingModels] = useState<
+    string[]
+  >([]);
+  const [currentDownloadPipeline, setCurrentDownloadPipeline] = useState<
+    string | null
+  >(null);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -314,20 +317,20 @@ export function StreamPage() {
     });
   };
 
-  const handleDownloadModels = async () => {
-    if (!pipelineNeedsModels) return;
-
-    setIsDownloading(true);
+  const downloadPipelineSequentially = async (
+    pipelineId: string,
+    remainingPipelines: string[]
+  ) => {
+    setCurrentDownloadPipeline(pipelineId);
     setDownloadProgress(null);
-    setShowDownloadDialog(true); // Keep dialog open to show progress
 
     try {
-      await downloadPipelineModels(pipelineNeedsModels);
+      await downloadPipelineModels(pipelineId);
 
       // Enhanced polling with progress updates
       const checkDownloadProgress = async () => {
         try {
-          const status = await checkModelStatus(pipelineNeedsModels);
+          const status = await checkModelStatus(pipelineId);
 
           // Update progress state
           if (status.progress) {
@@ -335,56 +338,80 @@ export function StreamPage() {
           }
 
           if (status.downloaded) {
-            // Download complete
-            setIsDownloading(false);
-            setDownloadProgress(null);
-            setShowDownloadDialog(false);
-            setPipelineNeedsModels(null);
+            // Download complete for this pipeline
+            // Remove it from the list
+            const newRemaining = remainingPipelines;
+            setPipelinesNeedingModels(newRemaining);
 
-            // Now update the pipeline since download is complete
-            const pipelineId = pipelineNeedsModels as PipelineId;
+            // Check if this was a preprocessor or the main pipeline
+            const pipelineInfo = pipelines?.[pipelineId];
+            const isPreprocessor =
+              pipelineInfo?.usage?.includes("preprocessor") ?? false;
 
-            if (timelineRef.current) {
-              timelineRef.current.resetTimelineCompletely();
+            // Only update the main pipeline ID if this was NOT a preprocessor
+            // and it matches the current pipeline ID
+            if (!isPreprocessor && pipelineId === settings.pipelineId) {
+              // This is the main pipeline, update settings
+              if (timelineRef.current) {
+                timelineRef.current.resetTimelineCompletely();
+              }
+
+              setSelectedTimelinePrompt(null);
+              setExternalSelectedPromptId(null);
+
+              // Preserve the current input mode that the user selected before download
+              const newPipeline = pipelines?.[pipelineId];
+              const currentMode =
+                settings.inputMode || newPipeline?.defaultMode || "text";
+              const defaults = getDefaults(
+                pipelineId as PipelineId,
+                currentMode
+              );
+
+              // Use custom video resolution if mode is video and one exists
+              const resolution =
+                currentMode === "video" && customVideoResolution
+                  ? customVideoResolution
+                  : { height: defaults.height, width: defaults.width };
+
+              // Only update pipeline-related settings, preserving current input mode and prompts
+              updateSettings({
+                pipelineId: pipelineId as PipelineId,
+                inputMode: currentMode,
+                denoisingSteps: defaults.denoisingSteps,
+                resolution,
+                noiseScale: defaults.noiseScale,
+                noiseController: defaults.noiseController,
+              });
             }
 
-            setSelectedTimelinePrompt(null);
-            setExternalSelectedPromptId(null);
+            // If there are more pipelines to download, continue with the next one
+            if (newRemaining.length > 0) {
+              // Continue with next pipeline
+              setTimeout(() => {
+                downloadPipelineSequentially(
+                  newRemaining[0],
+                  newRemaining.slice(1)
+                );
+              }, 1000);
+            } else {
+              // All downloads complete
+              setIsDownloading(false);
+              setDownloadProgress(null);
+              setShowDownloadDialog(false);
+              setCurrentDownloadPipeline(null);
 
-            // Preserve the current input mode that the user selected before download
-            // Only fall back to pipeline's default mode if no mode is currently set
-            const newPipeline = pipelines?.[pipelineId];
-            const currentMode =
-              settings.inputMode || newPipeline?.defaultMode || "text";
-            const defaults = getDefaults(pipelineId, currentMode);
-
-            // Use custom video resolution if mode is video and one exists
-            const resolution =
-              currentMode === "video" && customVideoResolution
-                ? customVideoResolution
-                : { height: defaults.height, width: defaults.width };
-
-            // Only update pipeline-related settings, preserving current input mode and prompts
-            updateSettings({
-              pipelineId,
-              inputMode: currentMode,
-              denoisingSteps: defaults.denoisingSteps,
-              resolution,
-              noiseScale: defaults.noiseScale,
-              noiseController: defaults.noiseController,
-            });
-
-            // Automatically start the stream after download completes
-            // Use setTimeout to ensure state updates are processed first
-            setTimeout(async () => {
-              const started = await handleStartStream();
-              // If stream started successfully, also start the timeline
-              if (started && timelinePlayPauseRef.current) {
-                setTimeout(() => {
-                  timelinePlayPauseRef.current?.();
-                }, 2000); // Give stream time to fully initialize
-              }
-            }, 100);
+              // Automatically start the stream after all downloads complete
+              setTimeout(async () => {
+                const started = await handleStartStream();
+                // If stream started successfully, also start the timeline
+                if (started && timelinePlayPauseRef.current) {
+                  setTimeout(() => {
+                    timelinePlayPauseRef.current?.();
+                  }, 2000); // Give stream time to fully initialize
+                }
+              }, 100);
+            }
           } else {
             setTimeout(checkDownloadProgress, 2000);
           }
@@ -393,6 +420,7 @@ export function StreamPage() {
           setIsDownloading(false);
           setDownloadProgress(null);
           setShowDownloadDialog(false);
+          setCurrentDownloadPipeline(null);
         }
       };
 
@@ -403,12 +431,26 @@ export function StreamPage() {
       setIsDownloading(false);
       setDownloadProgress(null);
       setShowDownloadDialog(false);
+      setCurrentDownloadPipeline(null);
     }
+  };
+
+  const handleDownloadModels = async () => {
+    if (pipelinesNeedingModels.length === 0) return;
+
+    setIsDownloading(true);
+    setShowDownloadDialog(true); // Keep dialog open to show progress
+
+    // Start downloading the first pipeline in the list
+    const firstPipeline = pipelinesNeedingModels[0];
+    const remaining = pipelinesNeedingModels.slice(1);
+    await downloadPipelineSequentially(firstPipeline, remaining);
   };
 
   const handleDialogClose = () => {
     setShowDownloadDialog(false);
-    setPipelineNeedsModels(null);
+    setPipelinesNeedingModels([]);
+    setCurrentDownloadPipeline(null);
 
     // When user cancels, no stream or timeline has started yet, so nothing to clean up
     // Just close the dialog and return early without any state changes
@@ -520,6 +562,10 @@ export function StreamPage() {
     sendParameterUpdate({
       vace_ref_images: imagePaths,
     });
+  };
+
+  const handlePreprocessorIdsChange = (ids: string[]) => {
+    updateSettings({ preprocessorIds: ids });
   };
 
   const handleVaceContextScaleChange = (scale: number) => {
@@ -699,21 +745,39 @@ export function StreamPage() {
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
-      // Check if models are needed but not downloaded
-      const pipelineInfo = pipelines?.[pipelineIdToUse];
-      if (pipelineInfo?.requiresModels) {
-        try {
-          const status = await checkModelStatus(pipelineIdToUse);
-          if (!status.downloaded) {
-            // Show download dialog
-            setPipelineNeedsModels(pipelineIdToUse);
-            setShowDownloadDialog(true);
-            return false; // Stream did not start
+      // Build pipeline chain: preprocessors + main pipeline
+      const pipelineIds: string[] = [];
+      if (settings.preprocessorIds && settings.preprocessorIds.length > 0) {
+        pipelineIds.push(...settings.preprocessorIds);
+      }
+      pipelineIds.push(pipelineIdToUse);
+
+      // Check if models are needed but not downloaded for all pipelines in the chain
+      // Collect all missing pipelines/preprocessors
+      const missingPipelines: string[] = [];
+      for (const pipelineId of pipelineIds) {
+        const pipelineInfo = pipelines?.[pipelineId];
+        if (pipelineInfo?.requiresModels) {
+          try {
+            const status = await checkModelStatus(pipelineId);
+            if (!status.downloaded) {
+              missingPipelines.push(pipelineId);
+            }
+          } catch (error) {
+            console.error(
+              `Error checking model status for ${pipelineId}:`,
+              error
+            );
+            // Continue anyway if check fails
           }
-        } catch (error) {
-          console.error("Error checking model status:", error);
-          // Continue anyway if check fails
         }
+      }
+
+      // If any pipelines are missing models, show download dialog
+      if (missingPipelines.length > 0) {
+        setPipelinesNeedingModels(missingPipelines);
+        setShowDownloadDialog(true);
+        return false; // Stream did not start
       }
 
       // Always load pipeline with current parameters - backend will handle the rest
@@ -784,13 +848,13 @@ export function StreamPage() {
         }
 
         console.log(
-          `Loading ${pipelineIdToUse} with resolution ${resolution.width}x${resolution.height}`,
+          `Loading ${pipelineIds.length} pipeline(s) (${pipelineIds.join(", ")}) with resolution ${resolution.width}x${resolution.height}`,
           loadParams
         );
       }
 
       const loadSuccess = await loadPipeline(
-        pipelineIdToUse,
+        pipelineIds,
         loadParams || undefined
       );
       if (!loadSuccess) {
@@ -827,6 +891,7 @@ export function StreamPage() {
         vace_use_input_video?: boolean;
         vace_context_scale?: number;
         vace_enabled?: boolean;
+        pipeline_ids?: string[];
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -834,7 +899,7 @@ export function StreamPage() {
       };
 
       // Common parameters for pipelines that support prompts
-      if (pipelineInfo?.supportsPrompts !== false) {
+      if (currentPipeline?.supportsPrompts !== false) {
         initialParameters.prompts = promptItems;
         initialParameters.prompt_interpolation_method = interpolationMethod;
         initialParameters.denoising_step_list = settings.denoisingSteps || [
@@ -843,15 +908,18 @@ export function StreamPage() {
       }
 
       // Cache management for pipelines that support it
-      if (pipelineInfo?.supportsCacheManagement) {
+      if (currentPipeline?.supportsCacheManagement) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
       // KV cache bias for pipelines that support it
-      if (pipelineInfo?.supportsKvCacheBias) {
+      if (currentPipeline?.supportsKvCacheBias) {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
       }
+
+      // Pipeline chain: preprocessors + main pipeline (already built above)
+      initialParameters.pipeline_ids = pipelineIds;
 
       // VACE-specific parameters - backend will ignore if not supported
       const vaceParams = getVaceParams(
@@ -1168,6 +1236,8 @@ export function StreamPage() {
             vaeType={settings.vaeType ?? "wan"}
             onVaeTypeChange={handleVaeTypeChange}
             vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
+            preprocessorIds={settings.preprocessorIds ?? []}
+            onPreprocessorIdsChange={handlePreprocessorIdsChange}
           />
         </div>
       </div>
@@ -1176,11 +1246,12 @@ export function StreamPage() {
       <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
 
       {/* Download Dialog */}
-      {pipelineNeedsModels && (
+      {pipelinesNeedingModels.length > 0 && (
         <DownloadDialog
           open={showDownloadDialog}
           pipelines={pipelines}
-          pipelineId={pipelineNeedsModels as PipelineId}
+          pipelineIds={pipelinesNeedingModels}
+          currentDownloadPipeline={currentDownloadPipeline}
           onClose={handleDialogClose}
           onDownload={handleDownloadModels}
           isDownloading={isDownloading}

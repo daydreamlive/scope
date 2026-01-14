@@ -205,7 +205,7 @@ async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipeline(pipeline_id),
+            pipeline_manager.load_pipelines([pipeline_id]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
@@ -261,7 +261,7 @@ async def lifespan(app: FastAPI):
 
     if pipeline_manager:
         logger.info("Shutting down pipeline manager...")
-        pipeline_manager.unload_pipeline()
+        pipeline_manager.unload_all_pipelines()
         logger.info("Pipeline manager shutdown complete")
 
 
@@ -328,16 +328,24 @@ async def load_pipeline(
     request: PipelineLoadRequest,
     pipeline_manager: PipelineManager = Depends(get_pipeline_manager),
 ):
-    """Load a pipeline."""
+    """Load one or more pipelines."""
     try:
         # Convert pydantic model to dict for pipeline manager
         load_params_dict = None
         if request.load_params:
             load_params_dict = request.load_params.model_dump()
 
+        # Get pipeline IDs to load
+        pipeline_ids = request.pipeline_ids
+        if not pipeline_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="pipeline_ids must be provided and cannot be empty",
+            )
+
         # Start loading in background without blocking
         asyncio.create_task(
-            pipeline_manager.load_pipeline(request.pipeline_id, load_params_dict)
+            pipeline_manager.load_pipelines(pipeline_ids, load_params_dict)
         )
         return {"message": "Pipeline loading initiated successfully"}
     except Exception as e:
