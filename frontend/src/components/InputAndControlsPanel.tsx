@@ -69,6 +69,8 @@ interface InputAndControlsPanelProps {
   onRefImagesChange?: (images: string[]) => void;
   onSendHints?: (imagePaths: string[]) => void;
   isDownloading?: boolean;
+  // Images input support - presence of images field in pipeline schema
+  supportsImages?: boolean;
 }
 
 export function InputAndControlsPanel({
@@ -115,6 +117,7 @@ export function InputAndControlsPanel({
   onRefImagesChange,
   onSendHints,
   isDownloading = false,
+  supportsImages = false,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -295,13 +298,23 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* VACE Reference Images - only show when VACE is enabled */}
-        {vaceEnabled && (
+        {/* Reference Images - show when VACE enabled OR when pipeline supports images without VACE */}
+        {(vaceEnabled || (supportsImages && !pipeline?.supportsVACE)) && (
           <div>
             <ImageManager
               images={refImages}
               onImagesChange={onRefImagesChange || (() => {})}
               disabled={isDownloading}
+              title={
+                vaceEnabled && pipeline?.supportsVACE
+                  ? "Reference Images"
+                  : "Images"
+              }
+              tooltip={
+                vaceEnabled && pipeline?.supportsVACE
+                  ? "Select reference images for VACE conditioning. Images will guide the video generation style and content."
+                  : "Select images to send to the pipeline for conditioning."
+              }
             />
             {onSendHints && refImages && refImages.length > 0 && (
               <div className="flex items-center justify-end mt-2">

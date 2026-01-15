@@ -40,6 +40,10 @@ export function usePipelines() {
           const supportsControllerInput =
             schema.config_schema?.properties?.ctrl_input !== undefined;
 
+          // Check if pipeline supports images input (has images field in schema)
+          const supportsImages =
+            schema.config_schema?.properties?.images !== undefined;
+
           transformed[id] = {
             name: schema.name,
             about: schema.description,
@@ -65,6 +69,7 @@ export function usePipelines() {
             modified: schema.modified,
             vaeTypes,
             supportsControllerInput,
+            supportsImages,
           };
         }
 
