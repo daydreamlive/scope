@@ -59,6 +59,14 @@ class ControllerVisualizerPipeline(Pipeline):
         self._cursor_x = width / 2.0
         self._cursor_y = height / 2.0
 
+        # Mouse button indicators - positioned near cursor
+        # (offset_x, offset_y) relative to cursor, color (R, G, B)
+        self._mouse_buttons = {
+            "MouseLeft": ((-15, -15), (0.2, 0.8, 0.2)),  # Green, top-left
+            "MouseMiddle": ((0, -20), (0.8, 0.8, 0.2)),  # Yellow, top-center
+            "MouseRight": ((15, -15), (0.2, 0.2, 0.8)),  # Blue, top-right
+        }
+
     def __call__(self, **kwargs) -> torch.Tensor:
         """Render controller input visualization.
 
@@ -124,5 +132,25 @@ class ControllerVisualizerPipeline(Pipeline):
         self._output[0, y1:y2, x1:x2, 0] = 0.9  # Red
         self._output[0, y1:y2, x1:x2, 1] = 0.1
         self._output[0, y1:y2, x1:x2, 2] = 0.1
+
+        # Draw mouse button indicators near cursor
+        indicator_size = 4
+        for button_name, ((offset_x, offset_y), color) in self._mouse_buttons.items():
+            is_pressed = button_name in ctrl_input.button
+            if is_pressed:
+                # Calculate indicator position relative to cursor
+                ind_x = int(self._cursor_x + offset_x)
+                ind_y = int(self._cursor_y + offset_y)
+
+                # Clamp to bounds
+                iy1 = max(0, ind_y - indicator_size)
+                iy2 = min(self.height, ind_y + indicator_size)
+                ix1 = max(0, ind_x - indicator_size)
+                ix2 = min(self.width, ind_x + indicator_size)
+
+                # Draw colored indicator
+                self._output[0, iy1:iy2, ix1:ix2, 0] = color[0]
+                self._output[0, iy1:iy2, ix1:ix2, 1] = color[1]
+                self._output[0, iy1:iy2, ix1:ix2, 2] = color[2]
 
         return self._output.clamp(0, 1)
