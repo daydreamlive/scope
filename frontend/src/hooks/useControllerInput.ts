@@ -45,6 +45,15 @@ const DEFAULT_CAPTURED_KEYS = new Set([
   "KeyZ",
 ]);
 
+/** Map browser MouseEvent.button values to descriptive names */
+const MOUSE_BUTTON_NAMES: Record<number, string> = {
+  0: "MouseLeft",
+  1: "MouseMiddle",
+  2: "MouseRight",
+  3: "MouseBack",
+  4: "MouseForward",
+};
+
 /**
  * Hook for capturing WASD keyboard and mouse input for streaming to backend.
  *
@@ -76,6 +85,7 @@ export function useControllerInput(
 
   // Refs for tracking input state (mutable for performance)
   const pressedKeysRef = useRef<Set<string>>(new Set());
+  const pressedMouseButtonsRef = useRef<Set<string>>(new Set());
   const mouseDeltaRef = useRef<[number, number]>([0, 0]);
   const lastSentStateRef = useRef<string>("");
   const sendIntervalRef = useRef<number | null>(null);
@@ -130,14 +140,66 @@ export function useControllerInput(
     [enabled, isPointerLocked, mouseSensitivity]
   );
 
+  // Handle mouse button down (only when pointer is locked)
+  const handleMouseDown = useCallback(
+    (e: MouseEvent) => {
+      if (!enabled || !isPointerLocked) return;
+
+      const buttonName = MOUSE_BUTTON_NAMES[e.button];
+      if (buttonName) {
+        e.preventDefault();
+        pressedMouseButtonsRef.current.add(buttonName);
+        // Combine mouse buttons with keyboard keys for UI state
+        setPressedKeys(
+          new Set([
+            ...pressedKeysRef.current,
+            ...pressedMouseButtonsRef.current,
+          ])
+        );
+      }
+    },
+    [enabled, isPointerLocked]
+  );
+
+  // Handle mouse button up
+  const handleMouseUp = useCallback(
+    (e: MouseEvent) => {
+      if (!enabled) return;
+
+      const buttonName = MOUSE_BUTTON_NAMES[e.button];
+      if (buttonName) {
+        e.preventDefault();
+        pressedMouseButtonsRef.current.delete(buttonName);
+        setPressedKeys(
+          new Set([
+            ...pressedKeysRef.current,
+            ...pressedMouseButtonsRef.current,
+          ])
+        );
+      }
+    },
+    [enabled]
+  );
+
+  // Prevent context menu when pointer is locked
+  const handleContextMenu = useCallback(
+    (e: MouseEvent) => {
+      if (isPointerLocked) {
+        e.preventDefault();
+      }
+    },
+    [isPointerLocked]
+  );
+
   // Handle pointer lock changes
   const handlePointerLockChange = useCallback(() => {
     const isLocked = document.pointerLockElement === targetRef.current;
     setIsPointerLocked(isLocked);
 
     if (!isLocked) {
-      // Clear pressed keys when pointer lock is released
+      // Clear pressed keys and mouse buttons when pointer lock is released
       pressedKeysRef.current.clear();
+      pressedMouseButtonsRef.current.clear();
       setPressedKeys(new Set());
       mouseDeltaRef.current = [0, 0];
     }
@@ -162,7 +224,11 @@ export function useControllerInput(
     if (!enabled || !isPointerLocked) return;
 
     const state: ControllerInputState = {
-      button: Array.from(pressedKeysRef.current),
+      // Combine keyboard keys and mouse buttons into a single array
+      button: [
+        ...Array.from(pressedKeysRef.current),
+        ...Array.from(pressedMouseButtonsRef.current),
+      ],
       mouse: [...mouseDeltaRef.current] as [number, number],
     };
 
@@ -184,12 +250,18 @@ export function useControllerInput(
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("pointerlockchange", handlePointerLockChange);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener(
         "pointerlockchange",
         handlePointerLockChange
@@ -200,6 +272,9 @@ export function useControllerInput(
     handleKeyDown,
     handleKeyUp,
     handleMouseMove,
+    handleMouseDown,
+    handleMouseUp,
+    handleContextMenu,
     handlePointerLockChange,
   ]);
 

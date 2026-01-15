@@ -93,6 +93,12 @@ W3C_TO_WIN: dict[str, int] = {
     "Digit8": 56,
     "Digit9": 57,
     "Digit0": 48,
+    # Mouse buttons (using descriptive names from frontend)
+    "MouseLeft": 1,  # VK_LBUTTON
+    "MouseRight": 2,  # VK_RBUTTON
+    "MouseMiddle": 4,  # VK_MBUTTON
+    "MouseBack": 5,  # VK_XBUTTON1
+    "MouseForward": 6,  # VK_XBUTTON2
 }
 
 
