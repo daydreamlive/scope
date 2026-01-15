@@ -3,7 +3,7 @@ name = "daydream-scope"
 version = "0.1.0b2"
 description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
-requires-python = ">=3.10.12"
+requires-python = ">=3.10.12,<3.11"
 authors = [
     {name = "Yondon Fu", email = "yondon@livepeer.org"},
     {name = "Rafal Leszko", email = "rafal@livepeer.org"}
@@ -21,8 +21,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Multimedia :: Video",
     "Topic :: Software Development :: Libraries :: Python Modules",
