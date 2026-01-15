@@ -576,10 +576,19 @@ export function StreamPage() {
   };
 
   const handleSendHints = (imagePaths: string[]) => {
-    // Send all reference images together to backend
-    sendParameterUpdate({
-      vace_ref_images: imagePaths,
-    });
+    const currentPipeline = pipelines?.[settings.pipelineId];
+
+    if (currentPipeline?.supportsVACE) {
+      // VACE pipeline - use vace_ref_images
+      sendParameterUpdate({
+        vace_ref_images: imagePaths,
+      });
+    } else if (currentPipeline?.supportsImages) {
+      // Non-VACE pipeline with images support - use images
+      sendParameterUpdate({
+        images: imagePaths,
+      });
+    }
   };
 
   const handlePreprocessorIdsChange = (ids: string[]) => {
@@ -1051,6 +1060,7 @@ export function StreamPage() {
             onRefImagesChange={handleRefImagesChange}
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
+            supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
           />
         </div>
 

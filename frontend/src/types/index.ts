@@ -113,6 +113,8 @@ export interface PipelineInfo {
   vaeTypes?: string[];
   // Controller input support - presence of ctrl_input field in pipeline schema
   supportsControllerInput?: boolean;
+  // Images input support - presence of images field in pipeline schema
+  supportsImages?: boolean;
 }
 
 export interface DownloadProgress {

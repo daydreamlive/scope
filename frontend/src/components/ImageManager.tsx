@@ -8,12 +8,16 @@ interface ImageManagerProps {
   images: string[];
   onImagesChange: (images: string[]) => void;
   disabled?: boolean;
+  title?: string;
+  tooltip?: string;
 }
 
 export function ImageManager({
   images,
   onImagesChange,
   disabled,
+  title = "Reference Images",
+  tooltip = "Select reference images for VACE conditioning. Images will guide the video generation style and content.",
 }: ImageManagerProps) {
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
 
@@ -28,8 +32,8 @@ export function ImageManager({
   return (
     <div>
       <LabelWithTooltip
-        label="Reference Images"
-        tooltip="Select reference images for VACE conditioning. Images will guide the video generation style and content."
+        label={title}
+        tooltip={tooltip}
         className="text-sm font-medium mb-2 block"
       />
 

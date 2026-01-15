@@ -457,6 +457,9 @@ class PipelineProcessor:
             ):
                 self.parameters.pop("vace_ref_images", None)
 
+            if "images" in call_params and "images" in self.parameters:
+                self.parameters.pop("images", None)
+
             # Clear transition when complete
             if "transition" in call_params and "transition" in self.parameters:
                 transition_active = False
