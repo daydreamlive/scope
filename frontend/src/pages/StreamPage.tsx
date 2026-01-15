@@ -114,6 +114,9 @@ export function StreamPage() {
   const [timelineCurrentTime, setTimelineCurrentTime] = useState(0);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
 
+  // Video display state
+  const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
+
   // External control of timeline selection
   const [externalSelectedPromptId, setExternalSelectedPromptId] = useState<
     string | null
@@ -1087,6 +1090,8 @@ export function StreamPage() {
               isPointerLocked={isPointerLocked}
               onRequestPointerLock={requestPointerLock}
               videoContainerRef={videoContainerRef}
+              // Video scale mode
+              videoScaleMode={videoScaleMode}
             />
           </div>
           {/* Timeline area - compact, always visible */}
@@ -1186,6 +1191,10 @@ export function StreamPage() {
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
               isLoading={isLoading}
+              videoScaleMode={videoScaleMode}
+              onVideoScaleModeToggle={() =>
+                setVideoScaleMode(prev => (prev === "fit" ? "native" : "fit"))
+              }
             />
           </div>
         </div>
