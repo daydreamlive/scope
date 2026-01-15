@@ -20,6 +20,8 @@ interface VideoOutputProps {
   onRequestPointerLock?: () => void;
   /** Ref to expose the video container element for pointer lock */
   videoContainerRef?: React.RefObject<HTMLDivElement | null>;
+  /** Video scale mode: 'fit' fills available space, 'native' shows at actual resolution */
+  videoScaleMode?: "fit" | "native";
 }
 
 export function VideoOutput({
@@ -37,6 +39,7 @@ export function VideoOutput({
   isPointerLocked = false,
   onRequestPointerLock,
   videoContainerRef,
+  videoScaleMode = "fit",
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const internalContainerRef = useRef<HTMLDivElement>(null);
@@ -163,7 +166,11 @@ export function VideoOutput({
           >
             <video
               ref={videoRef}
-              className="max-w-full max-h-full object-contain"
+              className={
+                videoScaleMode === "fit"
+                  ? "w-full h-full object-contain"
+                  : "max-w-full max-h-full object-contain"
+              }
               autoPlay
               muted
               playsInline
