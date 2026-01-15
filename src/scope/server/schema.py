@@ -5,11 +5,22 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from scope.core.pipelines.krea_realtime_video.schema import KreaRealtimeVideoConfig
-from scope.core.pipelines.longlive.schema import LongLiveConfig
-from scope.core.pipelines.streamdiffusionv2.schema import StreamDiffusionV2Config
-from scope.core.pipelines.utils import Quantization, VaeType
-from scope.core.pipelines.wan2_1.vae import DEFAULT_VAE_TYPE
+# Import enums from torch-free module to avoid loading torch at CLI startup
+from scope.core.pipelines.enums import Quantization, VaeType
+
+# Default values for pipeline load params (duplicated from pipeline configs to avoid
+# importing torch-dependent modules). These should match the defaults in:
+# - StreamDiffusionV2Config: height=512, width=512, base_seed=42
+# - LongLiveConfig: height=320, width=576, base_seed=42
+# - KreaRealtimeVideoConfig: height=320, width=576, base_seed=42
+_STREAMDIFFUSIONV2_HEIGHT = 512
+_STREAMDIFFUSIONV2_WIDTH = 512
+_LONGLIVE_HEIGHT = 320
+_LONGLIVE_WIDTH = 576
+_KREA_HEIGHT = 320
+_KREA_WIDTH = 576
+_DEFAULT_SEED = 42
+_DEFAULT_VAE_TYPE = VaeType.WAN
 
 
 class HealthResponse(BaseModel):
@@ -291,23 +302,23 @@ class LoRAEnabledLoadParams(PipelineLoadParams):
 class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
     """Load parameters for StreamDiffusion V2 pipeline.
 
-    Defaults are derived from StreamDiffusionV2Config to ensure consistency.
+    Defaults match StreamDiffusionV2Config values.
     """
 
     height: int = Field(
-        default=StreamDiffusionV2Config.model_fields["height"].default,
+        default=_STREAMDIFFUSIONV2_HEIGHT,
         description="Target video height",
         ge=64,
         le=2048,
     )
     width: int = Field(
-        default=StreamDiffusionV2Config.model_fields["width"].default,
+        default=_STREAMDIFFUSIONV2_WIDTH,
         description="Target video width",
         ge=64,
         le=2048,
     )
     seed: int = Field(
-        default=StreamDiffusionV2Config.model_fields["base_seed"].default,
+        default=_DEFAULT_SEED,
         description="Random seed for generation",
         ge=0,
     )
@@ -320,7 +331,7 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
     )
     vae_type: VaeType = Field(
-        default=DEFAULT_VAE_TYPE,
+        default=_DEFAULT_VAE_TYPE,
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
@@ -334,23 +345,23 @@ class PassthroughLoadParams(PipelineLoadParams):
 class LongLiveLoadParams(LoRAEnabledLoadParams):
     """Load parameters for LongLive pipeline.
 
-    Defaults are derived from LongLiveConfig to ensure consistency.
+    Defaults match LongLiveConfig values.
     """
 
     height: int = Field(
-        default=LongLiveConfig.model_fields["height"].default,
+        default=_LONGLIVE_HEIGHT,
         description="Target video height",
         ge=16,
         le=2048,
     )
     width: int = Field(
-        default=LongLiveConfig.model_fields["width"].default,
+        default=_LONGLIVE_WIDTH,
         description="Target video width",
         ge=16,
         le=2048,
     )
     seed: int = Field(
-        default=LongLiveConfig.model_fields["base_seed"].default,
+        default=_DEFAULT_SEED,
         description="Random seed for generation",
         ge=0,
     )
@@ -363,7 +374,7 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
     )
     vae_type: VaeType = Field(
-        default=DEFAULT_VAE_TYPE,
+        default=_DEFAULT_VAE_TYPE,
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
@@ -371,23 +382,23 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
 class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     """Load parameters for KreaRealtimeVideo pipeline.
 
-    Defaults are derived from KreaRealtimeVideoConfig to ensure consistency.
+    Defaults match KreaRealtimeVideoConfig values.
     """
 
     height: int = Field(
-        default=KreaRealtimeVideoConfig.model_fields["height"].default,
+        default=_KREA_HEIGHT,
         description="Target video height",
         ge=64,
         le=2048,
     )
     width: int = Field(
-        default=KreaRealtimeVideoConfig.model_fields["width"].default,
+        default=_KREA_WIDTH,
         description="Target video width",
         ge=64,
         le=2048,
     )
     seed: int = Field(
-        default=KreaRealtimeVideoConfig.model_fields["base_seed"].default,
+        default=_DEFAULT_SEED,
         description="Random seed for generation",
         ge=0,
     )
@@ -400,7 +411,7 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
         description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, input video in Video input mode can be used for VACE conditioning. When disabled, video uses faster regular encoding for latent initialization.",
     )
     vae_type: VaeType = Field(
-        default=DEFAULT_VAE_TYPE,
+        default=_DEFAULT_VAE_TYPE,
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality), 'tae' is a tiny autoencoder for fast preview quality, 'lighttae' is LightTAE with WanVAE normalization.",
     )
 
