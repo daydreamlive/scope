@@ -57,25 +57,25 @@ def resolve_input_mode(kwargs: dict[str, Any]) -> str:
 def extract_load_params(
     pipeline_class: type["Pipeline"], load_params: dict | None = None
 ) -> tuple[int, int, int]:
-    """Extract height, width, and seed from load_params with pipeline defaults as fallback.
+    """Extract height, width, and base_seed from load_params with pipeline defaults as fallback.
 
     Uses the pipeline's default config values as fallbacks.
 
     Args:
         pipeline_class: The pipeline class to get defaults from
-        load_params: Optional dictionary with height, width, seed overrides
+        load_params: Optional dictionary with height, width, base_seed overrides
 
     Returns:
-        Tuple of (height, width, seed)
+        Tuple of (height, width, base_seed)
     """
     config = get_pipeline_config(pipeline_class)
 
     params = load_params or {}
     height = params.get("height", config.height)
     width = params.get("width", config.width)
-    seed = params.get("seed", config.base_seed)
+    base_seed = params.get("base_seed", config.base_seed)
 
-    return height, width, seed
+    return height, width, base_seed
 
 
 def apply_mode_defaults_to_state(

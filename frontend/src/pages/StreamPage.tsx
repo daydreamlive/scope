@@ -735,10 +735,19 @@ export function StreamPage() {
   // Initialize dynamic config values from schema defaults when schema or pipeline changes
   useEffect(() => {
     const currentSchema = pipelineSchemas?.pipelines[settings.pipelineId];
-    if (!currentSchema?.config_schema?.properties) return;
+    if (!currentSchema?.config_schema?.properties) {
+      console.log(
+        `[StreamPage] No schema properties for pipeline ${settings.pipelineId}`
+      );
+      return;
+    }
 
     const newDynamicValues: Record<string, unknown> = {};
     const properties = currentSchema.config_schema.properties;
+    console.log(
+      `[StreamPage] Initializing dynamic config values. Available properties:`,
+      Object.keys(properties)
+    );
 
     // Get mode-specific defaults
     const modeDefaults =
@@ -775,10 +784,22 @@ export function StreamPage() {
 
       if (defaultValue !== undefined) {
         newDynamicValues[fieldName] = defaultValue;
+        console.log(
+          `[StreamPage] Initializing ${fieldName} with default value:`,
+          defaultValue
+        );
+      } else {
+        console.log(
+          `[StreamPage] Field ${fieldName} has no default value, skipping`
+        );
       }
     }
 
     if (Object.keys(newDynamicValues).length > 0) {
+      console.log(
+        `[StreamPage] Setting dynamic config values:`,
+        newDynamicValues
+      );
       setDynamicConfigValues(prev => {
         // Only add values that don't already exist to avoid overwriting user changes
         const updated = { ...prev };

@@ -49,12 +49,6 @@ class LongLiveConfig(BasePipelineConfig):
         default=VaeType.WAN,
         description="VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
     )
-    new_param: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Some new parameter that is not in the base schema",
-    )
 
     modes = {
         "text": ModeDefaults(
@@ -70,7 +64,6 @@ class LongLiveConfig(BasePipelineConfig):
                 SettingsControlType.CACHE_MANAGEMENT,
                 SettingsControlType.DENOISING_STEPS,
                 "quantization",
-                "new_param",
             ],
         ),
         "video": ModeDefaults(
@@ -91,7 +84,6 @@ class LongLiveConfig(BasePipelineConfig):
                 SettingsControlType.DENOISING_STEPS,
                 SettingsControlType.NOISE_CONTROLS,
                 "quantization",
-                "new_param",
             ],
         ),
     }

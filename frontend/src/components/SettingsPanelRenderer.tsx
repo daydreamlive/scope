@@ -620,7 +620,12 @@ export function SettingsPanelRenderer({
   // Render a dynamic control based on field name
   const renderDynamicControl = (fieldName: string, index: number) => {
     const configSchema = schema.config_schema;
-    if (!configSchema?.properties) return null;
+    if (!configSchema?.properties) {
+      console.warn(
+        `[SettingsPanelRenderer] No config schema properties for field "${fieldName}"`
+      );
+      return null;
+    }
 
     // Handle special field names that should use custom handlers (even if in schema)
     if (fieldName === "quantization") {
@@ -642,7 +647,7 @@ export function SettingsPanelRenderer({
     const property = configSchema.properties[fieldName];
     if (!property) {
       console.warn(
-        `[SettingsPanelRenderer] Unknown field name: "${fieldName}"`
+        `[SettingsPanelRenderer] Field "${fieldName}" not found in schema properties. Available fields: ${Object.keys(configSchema.properties).join(", ")}`
       );
       return null;
     }
@@ -668,9 +673,18 @@ export function SettingsPanelRenderer({
     const { value, onChange } = getFieldValueAndHandler(fieldName, property);
     if (onChange === undefined) {
       console.warn(
-        `[SettingsPanelRenderer] No handler for field "${fieldName}"`
+        `[SettingsPanelRenderer] No handler for field "${fieldName}". onConfigValueChange provided: ${!!onConfigValueChange}, configValues provided: ${!!configValues}`
       );
       return null;
+    }
+
+    // Log for debugging dynamic fields
+    if (fieldName === "new_param") {
+      console.log(`[SettingsPanelRenderer] Rendering new_param:`, {
+        value,
+        hasOnChange: !!onChange,
+        propertyDefault: property.default,
+      });
     }
 
     return (
@@ -725,7 +739,19 @@ export function SettingsPanelRenderer({
       default:
         // Check if this field has a value in configValues (for dynamic fields)
         if (configValues && fieldName in configValues) {
-          return configValues[fieldName];
+          const configValue = configValues[fieldName];
+          // If configValue has an onChange handler, use it; otherwise use generic handler
+          if (configValue.onChange) {
+            return configValue;
+          }
+          // If only value is provided, use generic handler
+          if (onConfigValueChange) {
+            return {
+              value: configValue.value,
+              onChange: (val: unknown) => onConfigValueChange(fieldName, val),
+            };
+          }
+          return configValue;
         }
         // For dynamic fields not in configValues, use schema default and generic handler
         if (onConfigValueChange) {
@@ -737,6 +763,9 @@ export function SettingsPanelRenderer({
             onChange: (val: unknown) => onConfigValueChange(fieldName, val),
           };
         }
+        console.warn(
+          `[SettingsPanelRenderer] No handler for dynamic field "${fieldName}" and onConfigValueChange not provided`
+        );
         return { value: undefined, onChange: undefined };
     }
   };
