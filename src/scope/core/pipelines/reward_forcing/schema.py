@@ -39,6 +39,7 @@ class RewardForcingConfig(BasePipelineConfig):
 
     min_dimension = 16
     modified = True
+    supports_quantization = True
 
     height: int = 320
     width: int = 576
@@ -59,7 +60,7 @@ class RewardForcingConfig(BasePipelineConfig):
                 "vae_type",
                 "height",
                 "width",
-                "seed",
+                "base_seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 SettingsControlType.DENOISING_STEPS,
                 "quantization",
@@ -79,7 +80,7 @@ class RewardForcingConfig(BasePipelineConfig):
                 "vae_type",
                 "height",
                 "width",
-                "seed",
+                "base_seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 SettingsControlType.DENOISING_STEPS,
                 SettingsControlType.NOISE_CONTROLS,

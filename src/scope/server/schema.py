@@ -10,9 +10,9 @@ from scope.core.pipelines.enums import Quantization, VaeType
 
 # Default values for pipeline load params (duplicated from pipeline configs to avoid
 # importing torch-dependent modules). These should match the defaults in:
-# - StreamDiffusionV2Config: height=512, width=512, seed=42
-# - LongLiveConfig: height=320, width=576, seed=42
-# - KreaRealtimeVideoConfig: height=320, width=576, seed=42
+# - StreamDiffusionV2Config: height=512, width=512, base_seed=42
+# - LongLiveConfig: height=320, width=576, base_seed=42
+# - KreaRealtimeVideoConfig: height=320, width=576, base_seed=42
 _STREAMDIFFUSIONV2_HEIGHT = 512
 _STREAMDIFFUSIONV2_WIDTH = 512
 _LONGLIVE_HEIGHT = 320
@@ -317,7 +317,7 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
         ge=64,
         le=2048,
     )
-    seed: int = Field(
+    base_seed: int = Field(
         default=_DEFAULT_SEED,
         description="Random seed for generation",
         ge=0,
@@ -360,7 +360,7 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
         ge=16,
         le=2048,
     )
-    seed: int = Field(
+    base_seed: int = Field(
         default=_DEFAULT_SEED,
         description="Random seed for generation",
         ge=0,
@@ -397,7 +397,7 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
         ge=64,
         le=2048,
     )
-    seed: int = Field(
+    base_seed: int = Field(
         default=_DEFAULT_SEED,
         description="Random seed for generation",
         ge=0,

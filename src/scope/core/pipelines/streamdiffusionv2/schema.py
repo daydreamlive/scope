@@ -40,6 +40,7 @@ class StreamDiffusionV2Config(BasePipelineConfig):
 
     min_dimension = 16
     modified = True
+    supports_quantization = True
 
     denoising_steps: list[int] = [750, 250]
     noise_scale: float = 0.7
@@ -63,7 +64,7 @@ class StreamDiffusionV2Config(BasePipelineConfig):
                 "vae_type",
                 "height",
                 "width",
-                "seed",
+                "base_seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 SettingsControlType.DENOISING_STEPS,
                 "quantization",
@@ -81,7 +82,7 @@ class StreamDiffusionV2Config(BasePipelineConfig):
                 "vae_type",
                 "height",
                 "width",
-                "seed",
+                "base_seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 SettingsControlType.DENOISING_STEPS,
                 SettingsControlType.NOISE_CONTROLS,

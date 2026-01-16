@@ -117,6 +117,12 @@ export function StreamPage() {
   // Video display state
   const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
 
+  // Dynamic config values for fields not in SettingsState (e.g., new_param)
+  // Maps field names to their current values, initialized from schema defaults
+  const [dynamicConfigValues, setDynamicConfigValues] = useState<
+    Record<string, unknown>
+  >({});
+
   // External control of timeline selection
   const [externalSelectedPromptId, setExternalSelectedPromptId] = useState<
     string | null
@@ -595,6 +601,20 @@ export function StreamPage() {
     updateSettings({ preprocessorIds: ids });
   };
 
+  // Handle dynamic config value changes (for fields not in SettingsState)
+  const handleConfigValueChange = (fieldName: string, value: unknown) => {
+    setDynamicConfigValues(prev => ({
+      ...prev,
+      [fieldName]: value,
+    }));
+    // Send parameter update to backend if streaming
+    if (isStreaming) {
+      sendParameterUpdate({
+        [fieldName]: value,
+      });
+    }
+  };
+
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
     // Send VACE context scale update to backend if streaming
@@ -711,6 +731,67 @@ export function StreamPage() {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
+
+  // Initialize dynamic config values from schema defaults when schema or pipeline changes
+  useEffect(() => {
+    const currentSchema = pipelineSchemas?.pipelines[settings.pipelineId];
+    if (!currentSchema?.config_schema?.properties) return;
+
+    const newDynamicValues: Record<string, unknown> = {};
+    const properties = currentSchema.config_schema.properties;
+
+    // Get mode-specific defaults
+    const modeDefaults =
+      currentSchema.mode_defaults?.[settings.inputMode || "text"];
+
+    // Initialize values for fields that are in the schema but not in SettingsState
+    // Exclude fields that are already handled explicitly
+    const excludedFields = new Set([
+      "height",
+      "width",
+      "base_seed",
+      "denoising_steps",
+      "noise_scale",
+      "noise_controller",
+      "manage_cache",
+      "quantization",
+      "kv_cache_attention_bias",
+      "vae_type",
+      "vace_context_scale",
+      "ref_images",
+      "preprocessor_ids",
+    ]);
+
+    for (const [fieldName, property] of Object.entries(properties)) {
+      if (excludedFields.has(fieldName)) continue;
+
+      // Check if we already have a value for this field
+      if (dynamicConfigValues[fieldName] !== undefined) continue;
+
+      // Get default from mode overrides or schema
+      const defaultValue =
+        modeDefaults?.[fieldName as keyof typeof modeDefaults] ??
+        property.default;
+
+      if (defaultValue !== undefined) {
+        newDynamicValues[fieldName] = defaultValue;
+      }
+    }
+
+    if (Object.keys(newDynamicValues).length > 0) {
+      setDynamicConfigValues(prev => {
+        // Only add values that don't already exist to avoid overwriting user changes
+        const updated = { ...prev };
+        for (const [key, value] of Object.entries(newDynamicValues)) {
+          if (updated[key] === undefined) {
+            updated[key] = value;
+          }
+        }
+        return updated;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipelineSchemas, settings.pipelineId, settings.inputMode]);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
@@ -848,7 +929,7 @@ export function StreamPage() {
 
         // Add seed if pipeline supports quantization (implies it needs seed)
         if (currentPipeline?.supportsQuantization) {
-          loadParams.seed = settings.seed ?? 42;
+          loadParams.base_seed = settings.seed ?? 42;
           loadParams.quantization = settings.quantization ?? null;
           loadParams.vae_type = settings.vaeType ?? "wan";
         }
@@ -873,6 +954,9 @@ export function StreamPage() {
           );
           loadParams = { ...loadParams, ...vaceParams };
         }
+
+        // Add dynamic config values (e.g., new_param)
+        loadParams = { ...loadParams, ...dynamicConfigValues };
 
         console.log(
           `Loading ${pipelineIds.length} pipeline(s) (${pipelineIds.join(", ")}) with resolution ${resolution.width}x${resolution.height}`,
@@ -1284,6 +1368,13 @@ export function StreamPage() {
             vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
             preprocessorIds={settings.preprocessorIds ?? []}
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
+            configValues={Object.fromEntries(
+              Object.entries(dynamicConfigValues).map(([key, value]) => [
+                key,
+                { value },
+              ])
+            )}
+            onConfigValueChange={handleConfigValueChange}
           />
         </div>
       </div>

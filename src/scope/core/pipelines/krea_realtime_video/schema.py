@@ -43,6 +43,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
 
     min_dimension = 16
     modified = True
+    supports_quantization = True
     recommended_quantization_vram_threshold = 40.0
 
     default_temporal_interpolation_method = "linear"
@@ -67,7 +68,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
                 "vae_type",
                 "height",
                 "width",
-                "seed",
+                "base_seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 "kv_cache_attention_bias",
                 SettingsControlType.DENOISING_STEPS,
@@ -89,7 +90,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
                 "vae_type",
                 "height",
                 "width",
-                "seed",
+                "base_seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 "kv_cache_attention_bias",
                 SettingsControlType.DENOISING_STEPS,

@@ -73,7 +73,7 @@ def extract_load_params(
     params = load_params or {}
     height = params.get("height", config.height)
     width = params.get("width", config.width)
-    seed = params.get("seed", config.seed)
+    seed = params.get("seed", config.base_seed)
 
     return height, width, seed
 

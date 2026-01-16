@@ -184,7 +184,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
-        self.state.set("seed", getattr(config, "seed", 42))
+        self.state.set("seed", getattr(config, "base_seed", 42))
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection

@@ -83,6 +83,20 @@ interface SettingsPanelProps {
   // Preprocessors
   preprocessorIds?: string[];
   onPreprocessorIdsChange?: (ids: string[]) => void;
+
+  // Generic config values for dynamic fields (e.g., new_param, new_field, etc.)
+  // Maps field names to their current values and onChange handlers
+  configValues?: Record<
+    string,
+    {
+      value: unknown;
+      onChange?: (value: unknown) => void;
+    }
+  >;
+
+  // Generic handler for any config field that doesn't have an explicit handler
+  // Called with (fieldName, value) when a dynamic field changes
+  onConfigValueChange?: (fieldName: string, value: unknown) => void;
 }
 
 export function SettingsPanel({
@@ -129,6 +143,8 @@ export function SettingsPanel({
   vaeTypes,
   preprocessorIds = [],
   onPreprocessorIdsChange,
+  configValues,
+  onConfigValueChange,
 }: SettingsPanelProps) {
   const handlePipelineIdChange = (value: string) => {
     if (pipelines && value in pipelines) {
@@ -326,6 +342,8 @@ export function SettingsPanel({
             vaeTypes={vaeTypes}
             quantization={quantization}
             onQuantizationChange={onQuantizationChange}
+            configValues={configValues}
+            onConfigValueChange={onConfigValueChange}
           />
         )}
       </CardContent>

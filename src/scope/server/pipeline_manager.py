@@ -416,7 +416,7 @@ class PipelineManager:
 
         Args:
             config: Pipeline config dict to update
-            load_params: Load parameters dict (may contain height, width, seed, loras, lora_merge_mode, vae_type)
+            load_params: Load parameters dict (may contain height, width, base_seed, loras, lora_merge_mode, vae_type)
             default_height: Default height if not in load_params
             default_width: Default width if not in load_params
             default_seed: Default seed if not in load_params
@@ -431,14 +431,14 @@ class PipelineManager:
         if load_params:
             height = load_params.get("height", default_height)
             width = load_params.get("width", default_width)
-            seed = load_params.get("seed", default_seed)
+            seed = load_params.get("base_seed", default_seed)
             loras = load_params.get("loras", None)
             lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
             vae_type = load_params.get("vae_type", vae_type)
 
         config["height"] = height
         config["width"] = width
-        config["seed"] = seed
+        config["base_seed"] = seed
         config["vae_type"] = vae_type
         if loras:
             config["loras"] = loras

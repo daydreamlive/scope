@@ -21,6 +21,7 @@ import type {
   SettingsPanelItem,
   SettingsControlType,
   PipelineSchemaInfo,
+  PipelineSchemaProperty,
 } from "../lib/api";
 import type {
   LoRAConfig,
@@ -151,6 +152,20 @@ export interface SettingsPanelRendererProps {
   // Quantization controls
   quantization: "fp8_e4m3fn" | null;
   onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
+
+  // Generic config values for dynamic fields (e.g., new_param, new_field, etc.)
+  // Maps field names to their current values and onChange handlers
+  configValues?: Record<
+    string,
+    {
+      value: unknown;
+      onChange?: (value: unknown) => void;
+    }
+  >;
+
+  // Generic handler for any config field that doesn't have an explicit handler
+  // Called with (fieldName, value) when a dynamic field changes
+  onConfigValueChange?: (fieldName: string, value: unknown) => void;
 }
 
 export function SettingsPanelRenderer({
@@ -196,6 +211,8 @@ export function SettingsPanelRenderer({
   vaeTypes,
   quantization,
   onQuantizationChange,
+  configValues,
+  onConfigValueChange,
 }: SettingsPanelRendererProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -605,24 +622,25 @@ export function SettingsPanelRenderer({
     const configSchema = schema.config_schema;
     if (!configSchema?.properties) return null;
 
+    // Handle special field names that should use custom handlers (even if in schema)
+    if (fieldName === "quantization") {
+      return renderQuantizationControl(index);
+    }
+    if (fieldName === "height") {
+      return renderHeightControl(index);
+    }
+    if (fieldName === "width") {
+      return renderWidthControl(index);
+    }
+    if (fieldName === "base_seed") {
+      return renderSeedControl(index);
+    }
+    if (fieldName === "kv_cache_attention_bias") {
+      return renderKvCacheBiasControl(index);
+    }
+
     const property = configSchema.properties[fieldName];
     if (!property) {
-      // Handle special field names that may not be in schema but are standard
-      if (fieldName === "height") {
-        return renderHeightControl(index);
-      }
-      if (fieldName === "width") {
-        return renderWidthControl(index);
-      }
-      if (fieldName === "seed") {
-        return renderSeedControl(index);
-      }
-      if (fieldName === "quantization") {
-        return renderQuantizationControl(index);
-      }
-      if (fieldName === "kv_cache_attention_bias") {
-        return renderKvCacheBiasControl(index);
-      }
       console.warn(
         `[SettingsPanelRenderer] Unknown field name: "${fieldName}"`
       );
@@ -647,8 +665,8 @@ export function SettingsPanelRenderer({
     }
 
     // Get current value and onChange handler based on field name
-    const { value, onChange } = getFieldValueAndHandler(fieldName);
-    if (value === undefined || onChange === undefined) {
+    const { value, onChange } = getFieldValueAndHandler(fieldName, property);
+    if (onChange === undefined) {
       console.warn(
         `[SettingsPanelRenderer] No handler for field "${fieldName}"`
       );
@@ -674,7 +692,8 @@ export function SettingsPanelRenderer({
 
   // Get value and onChange handler for a field
   const getFieldValueAndHandler = (
-    fieldName: string
+    fieldName: string,
+    property?: PipelineSchemaProperty
   ): { value: unknown; onChange: ((value: unknown) => void) | undefined } => {
     // Map field names to their corresponding props
     // This is a simplified version - in practice you'd want more comprehensive mapping
@@ -691,14 +710,33 @@ export function SettingsPanelRenderer({
           onChange: val =>
             onResolutionChange?.({ ...resolution, width: val as number }),
         };
-      case "seed":
+      case "base_seed":
         return { value: seed, onChange: val => onSeedChange?.(val as number) };
       case "vae_type":
         return {
           value: vaeType,
           onChange: val => onVaeTypeChange?.(val as VaeType),
         };
+      case "quantization":
+        return {
+          value: quantization,
+          onChange: val => onQuantizationChange?.(val as "fp8_e4m3fn" | null),
+        };
       default:
+        // Check if this field has a value in configValues (for dynamic fields)
+        if (configValues && fieldName in configValues) {
+          return configValues[fieldName];
+        }
+        // For dynamic fields not in configValues, use schema default and generic handler
+        if (onConfigValueChange) {
+          // Get value from configValues if provided, otherwise use schema default
+          const configValue = configValues?.[fieldName]?.value;
+          const defaultValue = property?.default;
+          return {
+            value: configValue !== undefined ? configValue : defaultValue,
+            onChange: (val: unknown) => onConfigValueChange(fieldName, val),
+          };
+        }
         return { value: undefined, onChange: undefined };
     }
   };
@@ -840,7 +878,7 @@ export function SettingsPanelRenderer({
 
   // Render seed control
   const renderSeedControl = (index: number) => {
-    const displayInfo = getDisplayInfo("seed");
+    const displayInfo = getDisplayInfo("base_seed");
     return (
       <div key={`seed-${index}`} className="space-y-1">
         <div className="flex items-center gap-2">

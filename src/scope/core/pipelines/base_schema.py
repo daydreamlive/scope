@@ -261,7 +261,7 @@ class BasePipelineConfig(BaseModel):
         default=True,
         description="Enable automatic cache management for performance optimization",
     )
-    seed: Annotated[int, Field(ge=0)] = Field(
+    base_seed: Annotated[int, Field(ge=0)] = Field(
         default=42,
         description="Random seed for reproducible generation. Using the same seed with the same settings will produce similar results.",
     )
