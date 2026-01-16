@@ -1102,6 +1102,9 @@ export function StreamPage() {
               videoContainerRef={videoContainerRef}
               // Video scale mode
               videoScaleMode={videoScaleMode}
+              onVideoScaleModeToggle={() =>
+                setVideoScaleMode(prev => (prev === "fit" ? "native" : "fit"))
+              }
             />
           </div>
           {/* Timeline area - compact, always visible */}

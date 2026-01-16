@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { Maximize2, Minimize2 } from "lucide-react";
 
 interface VideoOutputProps {
   className?: string;
@@ -22,6 +23,8 @@ interface VideoOutputProps {
   videoContainerRef?: React.RefObject<HTMLDivElement | null>;
   /** Video scale mode: 'fit' fills available space, 'native' shows at actual resolution */
   videoScaleMode?: "fit" | "native";
+  /** Callback to toggle video scale mode */
+  onVideoScaleModeToggle?: () => void;
 }
 
 export function VideoOutput({
@@ -40,11 +43,13 @@ export function VideoOutput({
   onRequestPointerLock,
   videoContainerRef,
   videoScaleMode = "fit",
+  onVideoScaleModeToggle,
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
+  const [isHovering, setIsHovering] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
 
   // Use external ref if provided, otherwise use internal
@@ -163,6 +168,8 @@ export function VideoOutput({
             ref={containerRef}
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
+            onMouseEnter={() => setIsHovering(true)}
+            onMouseLeave={() => setIsHovering(false)}
           >
             <video
               ref={videoRef}
@@ -194,6 +201,29 @@ export function VideoOutput({
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-lg text-sm pointer-events-none">
                 Click to enable controller input
               </div>
+            )}
+            {/* Scale Mode Toggle Button - shows on hover */}
+            {onVideoScaleModeToggle && (
+              <button
+                className={`absolute bottom-3 right-3 p-2 rounded-md bg-black/60 hover:bg-black/80 text-white transition-opacity duration-200 ${
+                  isHovering ? "opacity-100" : "opacity-0"
+                }`}
+                onClick={e => {
+                  e.stopPropagation();
+                  onVideoScaleModeToggle();
+                }}
+                title={
+                  videoScaleMode === "fit"
+                    ? "Show at native resolution"
+                    : "Fit to window"
+                }
+              >
+                {videoScaleMode === "fit" ? (
+                  <Minimize2 className="h-5 w-5" />
+                ) : (
+                  <Maximize2 className="h-5 w-5" />
+                )}
+              </button>
             )}
           </div>
         ) : isDownloading ? (
