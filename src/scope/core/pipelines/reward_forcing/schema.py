@@ -50,22 +50,23 @@ class RewardForcingConfig(BasePipelineConfig):
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
     )
 
-    # Settings panel for text mode (no noise controls)
-    settings_panel = [
-        SettingsControlType.VACE,
-        SettingsControlType.LORA,
-        SettingsControlType.PREPROCESSOR,
-        "vae_type",
-        "height",
-        "width",
-        "base_seed",
-        SettingsControlType.CACHE_MANAGEMENT,
-        SettingsControlType.DENOISING_STEPS,
-        "quantization",
-    ]
-
     modes = {
-        "text": ModeDefaults(default=True),
+        "text": ModeDefaults(
+            default=True,
+            # Settings panel for text mode (no noise controls)
+            settings_panel=[
+                SettingsControlType.VACE,
+                SettingsControlType.LORA,
+                SettingsControlType.PREPROCESSOR,
+                "vae_type",
+                "height",
+                "width",
+                "base_seed",
+                SettingsControlType.CACHE_MANAGEMENT,
+                SettingsControlType.DENOISING_STEPS,
+                "quantization",
+            ],
+        ),
         "video": ModeDefaults(
             height=512,
             width=512,
