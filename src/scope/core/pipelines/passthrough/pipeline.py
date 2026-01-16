@@ -1,9 +1,10 @@
+import math
 from typing import TYPE_CHECKING
 
 import torch
 from einops import rearrange
 
-from ..interface import Pipeline, Requirements
+from ..interface import Pipeline, PipelineOutput, Requirements
 from ..process import postprocess_chunk, preprocess_chunk
 from .schema import PassthroughConfig
 
@@ -41,7 +42,7 @@ class PassthroughPipeline(Pipeline):
     def __call__(
         self,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | PipelineOutput:
         input = kwargs.get("video")
 
         if input is None:
@@ -53,4 +54,48 @@ class PassthroughPipeline(Pipeline):
 
         input = rearrange(input, "B C T H W -> B T C H W")
 
-        return postprocess_chunk(input)
+        video_tensor = postprocess_chunk(input)
+
+        # Generate beep audio matching video duration
+        # Default FPS: 16 (common for video generation)
+        # Audio sample rate: 24000 Hz (matching LTX2 pipeline)
+        fps = kwargs.get("fps", 16.0)
+        audio_sample_rate = 24000
+
+        # Get number of frames from video tensor (THWC format)
+        num_frames = video_tensor.shape[0]
+        video_duration_seconds = num_frames / fps
+
+        # Calculate number of audio samples needed
+        num_audio_samples = int(audio_sample_rate * video_duration_seconds)
+
+        # Generate beep tones: alternating frequencies for variety
+        # Use multiple beeps at different frequencies
+        beep_frequency_1 = 440.0  # A4 note
+        beep_frequency_2 = 523.25  # C5 note
+
+        # Create time array
+        t = torch.linspace(0, video_duration_seconds, num_audio_samples, device=self.device, dtype=torch.float32)
+
+        # Generate beeps: alternate between two frequencies every 0.5 seconds
+        beep_period = 0.5  # seconds
+        # Determine which frequency to use for each sample (alternating every 0.5s)
+        period_index = (t / beep_period).long()
+        freq_mask = (period_index % 2 == 0)
+        frequencies = torch.where(freq_mask, beep_frequency_1, beep_frequency_2)
+
+        # Generate envelope to avoid clicks (triangular envelope within each period)
+        period_position = t % beep_period
+        envelope = 0.3 * (1.0 - torch.abs(period_position - beep_period / 2) / (beep_period / 2))
+
+        # Generate sine wave with varying frequency and envelope
+        beep_wave = envelope * torch.sin(2 * math.pi * frequencies * t)
+
+        # Convert to stereo (2 channels)
+        audio_tensor = torch.stack([beep_wave, beep_wave], dim=0)  # Shape: (2, num_samples)
+
+        return PipelineOutput(
+            video=video_tensor,
+            audio=audio_tensor,
+            audio_sample_rate=audio_sample_rate,
+        )
