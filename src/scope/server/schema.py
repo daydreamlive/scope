@@ -137,14 +137,6 @@ class Parameters(BaseModel):
         default=None,
         description="List of pipeline IDs to execute in a chain. If not provided, uses the currently loaded pipeline.",
     )
-    first_frame_image: str | None = Field(
-        default=None,
-        description="Path to first frame reference image for extension mode. When provided alone, enables 'firstframe' mode (reference at start, generate continuation). When provided with last_frame_image, enables 'firstlastframe' mode (references at both ends). Images should be located in the assets directory.",
-    )
-    last_frame_image: str | None = Field(
-        default=None,
-        description="Path to last frame reference image for extension mode. When provided alone, enables 'lastframe' mode (generate lead-up, reference at end). When provided with first_frame_image, enables 'firstlastframe' mode (references at both ends). Images should be located in the assets directory.",
-    )
 
 
 class SpoutConfig(BaseModel):
