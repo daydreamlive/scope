@@ -37,7 +37,7 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
-                "base_seed",
+                "seed",
                 type_hint=int,
                 default=42,
                 description="Base seed for random number generation",
@@ -85,12 +85,12 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
 
         # The default param for InputParam does not work right now
         # The workaround is to set the default values here
-        base_seed = block_state.base_seed
-        if base_seed is None:
-            base_seed = 42
+        seed = block_state.seed
+        if seed is None:
+            seed = 42
 
         # Create generator from seed for reproducible generation
-        block_seed = base_seed + block_state.current_start_frame
+        block_seed = seed + block_state.current_start_frame
         rng = torch.Generator(device=generator_param.device).manual_seed(block_seed)
 
         # Determine number of latent frames to generate

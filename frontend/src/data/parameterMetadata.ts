@@ -12,21 +12,6 @@ export interface ParameterMetadata {
 }
 
 export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
-  height: {
-    label: "Height:",
-    tooltip:
-      "Output video height in pixels. Higher values produce more detailed vertical resolution but reduces speed.",
-  },
-  width: {
-    label: "Width:",
-    tooltip:
-      "Output video width in pixels. Higher values produce more detailed horizontal resolution but reduces speed.",
-  },
-  seed: {
-    label: "Seed:",
-    tooltip:
-      "Random seed for reproducible generation. Using the same seed with the same settings will produce similar results.",
-  },
   manageCache: {
     label: "Manage Cache:",
     tooltip:
@@ -52,16 +37,6 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Controls the amount of noise added during generation. Higher values add more variation and creativity and lower values produce more stable results.",
   },
-  quantization: {
-    label: "Quantization:",
-    tooltip:
-      "Quantization method for the diffusion model. fp8_e4m3fn (Dynamic) reduces memory usage, but might affect performance and quality. None uses full precision and uses more memory, but does not affect performance and quality.",
-  },
-  kvCacheAttentionBias: {
-    label: "Cache Bias:",
-    tooltip:
-      "Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
-  },
   loraMergeStrategy: {
     label: "LoRA Strategy:",
     tooltip:
@@ -81,11 +56,6 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     label: "Spout Sender:",
     tooltip:
       "The configuration of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS.",
-  },
-  vaeType: {
-    label: "VAE:",
-    tooltip:
-      "VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
   },
   preprocessor: {
     label: "Preprocessor:",

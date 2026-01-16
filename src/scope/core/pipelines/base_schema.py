@@ -23,6 +23,7 @@ from pydantic.fields import FieldInfo
 
 # Re-export CtrlInput for convenient import by pipeline schemas
 from scope.core.pipelines.controller import CtrlInput as CtrlInput  # noqa: PLC0414
+from scope.core.pipelines.enums import Quantization
 
 if TYPE_CHECKING:
     from .artifacts import Artifact
@@ -31,12 +32,20 @@ if TYPE_CHECKING:
 # Field templates - use these to override defaults while keeping constraints/descriptions
 def height_field(default: int = 512) -> FieldInfo:
     """Height field with standard constraints."""
-    return Field(default=default, ge=1, description="Output height in pixels")
+    return Field(
+        default=default,
+        ge=1,
+        description="Output video height in pixels. Higher values produce more detailed vertical resolution but reduces speed.",
+    )
 
 
 def width_field(default: int = 512) -> FieldInfo:
     """Width field with standard constraints."""
-    return Field(default=default, ge=1, description="Output width in pixels")
+    return Field(
+        default=default,
+        ge=1,
+        description="Output video width in pixels. Higher values produce more detailed horizontal resolution but reduces speed.",
+    )
 
 
 def denoising_steps_field(default: list[int] | None = None) -> FieldInfo:
@@ -252,9 +261,9 @@ class BasePipelineConfig(BaseModel):
         default=True,
         description="Enable automatic cache management for performance optimization",
     )
-    base_seed: Annotated[int, Field(ge=0)] = Field(
+    seed: Annotated[int, Field(ge=0)] = Field(
         default=42,
-        description="Base random seed for reproducible generation",
+        description="Random seed for reproducible generation. Using the same seed with the same settings will produce similar results.",
     )
     denoising_steps: list[int] | None = denoising_steps_field()
 
@@ -266,6 +275,18 @@ class BasePipelineConfig(BaseModel):
     # VACE (optional reference image conditioning)
     ref_images: list[str] | None = ref_images_field()
     vace_context_scale: float = vace_context_scale_field()
+
+    # Quantization (optional, only used if supports_quantization is True)
+    quantization: Quantization | None = Field(
+        default=None,
+        description="Quantization method for the diffusion model. fp8_e4m3fn (Dynamic) reduces memory usage, but might affect performance and quality. None uses full precision and uses more memory, but does not affect performance and quality.",
+    )
+
+    # KV cache attention bias (optional, only used if supports_kv_cache_bias is True)
+    kv_cache_attention_bias: Annotated[float, Field(ge=0.01, le=1.0)] | None = Field(
+        default=None,
+        description="Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
+    )
 
     @classmethod
     def get_pipeline_metadata(cls) -> dict[str, str]:

@@ -184,7 +184,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
-        self.state.set("base_seed", getattr(config, "seed", 42))
+        self.state.set("seed", getattr(config, "seed", 42))
 
         # Warm-up: Run enough iterations to fill the KV cache completely.
         # This ensures torch.compile compiles the flex_attention kernel at the

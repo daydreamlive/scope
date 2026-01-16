@@ -107,7 +107,7 @@ export function useStreamState() {
           noiseController,
           defaultTemporalInterpolationSteps,
           inputMode: effectiveMode,
-          seed: (props.base_seed?.default as number) ?? 42,
+          seed: (props.seed?.default as number) ?? 42,
           quantization: undefined as "fp8_e4m3fn" | undefined,
         };
       }

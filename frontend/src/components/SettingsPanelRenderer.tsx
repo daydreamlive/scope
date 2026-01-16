@@ -615,7 +615,7 @@ export function SettingsPanelRenderer({
       if (fieldName === "width") {
         return renderWidthControl(index);
       }
-      if (fieldName === "base_seed") {
+      if (fieldName === "seed") {
         return renderSeedControl(index);
       }
       if (fieldName === "quantization") {
@@ -695,7 +695,7 @@ export function SettingsPanelRenderer({
           onChange: val =>
             onResolutionChange?.({ ...resolution, width: val as number }),
         };
-      case "base_seed":
+      case "seed":
         return { value: seed, onChange: val => onSeedChange?.(val as number) };
       case "vae_type":
         return {
@@ -707,175 +707,204 @@ export function SettingsPanelRenderer({
     }
   };
 
+  // Helper to get display info from schema
+  const getDisplayInfo = (fieldName: string) => {
+    const configSchema = schema.config_schema;
+    if (!configSchema?.properties) {
+      return { label: fieldName, tooltip: undefined };
+    }
+    const property = configSchema.properties[fieldName];
+    if (!property) {
+      return { label: fieldName, tooltip: undefined };
+    }
+    return getParameterDisplayInfo(fieldName, property);
+  };
+
   // Render height control
-  const renderHeightControl = (index: number) => (
-    <div key={`height-${index}`} className="space-y-1">
-      <div className="flex items-center gap-2">
-        <LabelWithTooltip
-          label={PARAMETER_METADATA.height.label}
-          tooltip={PARAMETER_METADATA.height.tooltip}
-          className="text-sm text-foreground w-14"
-        />
-        <div
-          className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${heightError ? "border-red-500" : ""}`}
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-            onClick={() => decrementResolution("height")}
-            disabled={isStreaming}
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <Input
-            type="number"
-            value={resolution.height}
-            onChange={e => {
-              const value = parseInt(e.target.value);
-              if (!isNaN(value)) {
-                handleResolutionChange("height", value);
-              }
-            }}
-            disabled={isStreaming}
-            className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            min={pipelines?.[pipelineId]?.minDimension ?? DEFAULT_MIN_DIMENSION}
-            max={2048}
+  const renderHeightControl = (index: number) => {
+    const displayInfo = getDisplayInfo("height");
+    return (
+      <div key={`height-${index}`} className="space-y-1">
+        <div className="flex items-center gap-2">
+          <LabelWithTooltip
+            label={displayInfo.label}
+            tooltip={displayInfo.tooltip}
+            className="text-sm text-foreground w-14"
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-            onClick={() => incrementResolution("height")}
-            disabled={isStreaming}
+          <div
+            className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${heightError ? "border-red-500" : ""}`}
           >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+              onClick={() => decrementResolution("height")}
+              disabled={isStreaming}
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            <Input
+              type="number"
+              value={resolution.height}
+              onChange={e => {
+                const value = parseInt(e.target.value);
+                if (!isNaN(value)) {
+                  handleResolutionChange("height", value);
+                }
+              }}
+              disabled={isStreaming}
+              className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              min={
+                pipelines?.[pipelineId]?.minDimension ?? DEFAULT_MIN_DIMENSION
+              }
+              max={2048}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+              onClick={() => incrementResolution("height")}
+              disabled={isStreaming}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
+        {heightError && (
+          <p className="text-xs text-red-500 ml-16">{heightError}</p>
+        )}
       </div>
-      {heightError && (
-        <p className="text-xs text-red-500 ml-16">{heightError}</p>
-      )}
-    </div>
-  );
+    );
+  };
 
   // Render width control
-  const renderWidthControl = (index: number) => (
-    <div key={`width-${index}`} className="space-y-1">
-      <div className="flex items-center gap-2">
-        <LabelWithTooltip
-          label={PARAMETER_METADATA.width.label}
-          tooltip={PARAMETER_METADATA.width.tooltip}
-          className="text-sm text-foreground w-14"
-        />
-        <div
-          className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${widthError ? "border-red-500" : ""}`}
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-            onClick={() => decrementResolution("width")}
-            disabled={isStreaming}
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <Input
-            type="number"
-            value={resolution.width}
-            onChange={e => {
-              const value = parseInt(e.target.value);
-              if (!isNaN(value)) {
-                handleResolutionChange("width", value);
-              }
-            }}
-            disabled={isStreaming}
-            className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            min={pipelines?.[pipelineId]?.minDimension ?? DEFAULT_MIN_DIMENSION}
-            max={2048}
+  const renderWidthControl = (index: number) => {
+    const displayInfo = getDisplayInfo("width");
+    return (
+      <div key={`width-${index}`} className="space-y-1">
+        <div className="flex items-center gap-2">
+          <LabelWithTooltip
+            label={displayInfo.label}
+            tooltip={displayInfo.tooltip}
+            className="text-sm text-foreground w-14"
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-            onClick={() => incrementResolution("width")}
-            disabled={isStreaming}
+          <div
+            className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${widthError ? "border-red-500" : ""}`}
           >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+              onClick={() => decrementResolution("width")}
+              disabled={isStreaming}
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            <Input
+              type="number"
+              value={resolution.width}
+              onChange={e => {
+                const value = parseInt(e.target.value);
+                if (!isNaN(value)) {
+                  handleResolutionChange("width", value);
+                }
+              }}
+              disabled={isStreaming}
+              className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              min={
+                pipelines?.[pipelineId]?.minDimension ?? DEFAULT_MIN_DIMENSION
+              }
+              max={2048}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+              onClick={() => incrementResolution("width")}
+              disabled={isStreaming}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
+        {widthError && (
+          <p className="text-xs text-red-500 ml-16">{widthError}</p>
+        )}
+        {resolutionWarning && (
+          <div className="flex items-start gap-1">
+            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              {resolutionWarning}
+            </p>
+          </div>
+        )}
       </div>
-      {widthError && <p className="text-xs text-red-500 ml-16">{widthError}</p>}
-      {resolutionWarning && (
-        <div className="flex items-start gap-1">
-          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
-          <p className="text-xs text-amber-600 dark:text-amber-500">
-            {resolutionWarning}
-          </p>
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   // Render seed control
-  const renderSeedControl = (index: number) => (
-    <div key={`seed-${index}`} className="space-y-1">
-      <div className="flex items-center gap-2">
-        <LabelWithTooltip
-          label={PARAMETER_METADATA.seed.label}
-          tooltip={PARAMETER_METADATA.seed.tooltip}
-          className="text-sm text-foreground w-14"
-        />
-        <div
-          className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${seedError ? "border-red-500" : ""}`}
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-            onClick={decrementSeed}
-            disabled={isStreaming}
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <Input
-            type="number"
-            value={seed}
-            onChange={e => {
-              const value = parseInt(e.target.value);
-              if (!isNaN(value)) {
-                handleSeedChange(value);
-              }
-            }}
-            disabled={isStreaming}
-            className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            min={0}
-            max={2147483647}
+  const renderSeedControl = (index: number) => {
+    const displayInfo = getDisplayInfo("seed");
+    return (
+      <div key={`seed-${index}`} className="space-y-1">
+        <div className="flex items-center gap-2">
+          <LabelWithTooltip
+            label={displayInfo.label}
+            tooltip={displayInfo.tooltip}
+            className="text-sm text-foreground w-14"
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-            onClick={incrementSeed}
-            disabled={isStreaming}
+          <div
+            className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${seedError ? "border-red-500" : ""}`}
           >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+              onClick={decrementSeed}
+              disabled={isStreaming}
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            <Input
+              type="number"
+              value={seed}
+              onChange={e => {
+                const value = parseInt(e.target.value);
+                if (!isNaN(value)) {
+                  handleSeedChange(value);
+                }
+              }}
+              disabled={isStreaming}
+              className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              min={0}
+              max={2147483647}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+              onClick={incrementSeed}
+              disabled={isStreaming}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
+        {seedError && <p className="text-xs text-red-500 ml-16">{seedError}</p>}
       </div>
-      {seedError && <p className="text-xs text-red-500 ml-16">{seedError}</p>}
-    </div>
-  );
+    );
+  };
 
   // Render VAE type control
   const renderVaeTypeControl = (index: number) => {
     if (!vaeTypes || vaeTypes.length === 0) return null;
+    const displayInfo = getDisplayInfo("vae_type");
     return (
       <div key={`vae-${index}`} className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <LabelWithTooltip
-            label={PARAMETER_METADATA.vaeType.label}
-            tooltip={PARAMETER_METADATA.vaeType.tooltip}
+            label={displayInfo.label}
+            tooltip={displayInfo.tooltip}
             className="text-sm text-foreground"
           />
           <Select
@@ -904,13 +933,14 @@ export function SettingsPanelRenderer({
   // Render quantization control
   const renderQuantizationControl = (index: number) => {
     if (!schema.supports_quantization) return null;
+    const displayInfo = getDisplayInfo("quantization");
     return (
       <div key={`quant-${index}`} className="space-y-4">
         <div className="space-y-2 pt-2">
           <div className="flex items-center justify-between gap-2">
             <LabelWithTooltip
-              label={PARAMETER_METADATA.quantization.label}
-              tooltip={PARAMETER_METADATA.quantization.tooltip}
+              label={displayInfo.label}
+              tooltip={displayInfo.tooltip}
               className="text-sm text-foreground"
             />
             <Select
@@ -943,23 +973,26 @@ export function SettingsPanelRenderer({
   };
 
   // Render KV cache bias control
-  const renderKvCacheBiasControl = (index: number) => (
-    <SliderWithInput
-      key={`kvcache-${index}`}
-      label={PARAMETER_METADATA.kvCacheAttentionBias.label}
-      tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
-      value={kvCacheAttentionBiasSlider.localValue}
-      onValueChange={kvCacheAttentionBiasSlider.handleValueChange}
-      onValueCommit={kvCacheAttentionBiasSlider.handleValueCommit}
-      min={0.01}
-      max={1.0}
-      step={0.01}
-      incrementAmount={0.01}
-      labelClassName="text-sm text-foreground w-20"
-      valueFormatter={kvCacheAttentionBiasSlider.formatValue}
-      inputParser={v => parseFloat(v) || 1.0}
-    />
-  );
+  const renderKvCacheBiasControl = (index: number) => {
+    const displayInfo = getDisplayInfo("kv_cache_attention_bias");
+    return (
+      <SliderWithInput
+        key={`kvcache-${index}`}
+        label={displayInfo.label}
+        tooltip={displayInfo.tooltip}
+        value={kvCacheAttentionBiasSlider.localValue}
+        onValueChange={kvCacheAttentionBiasSlider.handleValueChange}
+        onValueCommit={kvCacheAttentionBiasSlider.handleValueCommit}
+        min={0.01}
+        max={1.0}
+        step={0.01}
+        incrementAmount={0.01}
+        labelClassName="text-sm text-foreground w-20"
+        valueFormatter={kvCacheAttentionBiasSlider.formatValue}
+        inputParser={v => parseFloat(v) || 1.0}
+      />
+    );
+  };
 
   return (
     <div className="space-y-6">

@@ -48,7 +48,7 @@ class LongLiveConfig(BasePipelineConfig):
     denoising_steps: list[int] = [1000, 750, 500, 250]
     vae_type: VaeType = Field(
         default=VaeType.WAN,
-        description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+        description="VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
     )
 
     modes = {
@@ -61,7 +61,7 @@ class LongLiveConfig(BasePipelineConfig):
                 SettingsControlType.PREPROCESSOR,
                 "height",
                 "width",
-                "base_seed",
+                "seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 SettingsControlType.DENOISING_STEPS,
                 "quantization",
@@ -80,7 +80,7 @@ class LongLiveConfig(BasePipelineConfig):
                 SettingsControlType.PREPROCESSOR,
                 "height",
                 "width",
-                "base_seed",
+                "seed",
                 SettingsControlType.CACHE_MANAGEMENT,
                 SettingsControlType.DENOISING_STEPS,
                 SettingsControlType.NOISE_CONTROLS,
