@@ -44,6 +44,23 @@ export function usePipelines() {
           const supportsImages =
             schema.config_schema?.properties?.images !== undefined;
 
+          // Extract settings panel configuration
+          const settingsPanel = schema.settings_panel;
+
+          // Extract mode-specific settings panels
+          const modeSettingsPanels: Record<InputMode, string[]> | undefined =
+            schema.mode_defaults
+              ? Object.entries(schema.mode_defaults).reduce(
+                  (acc, [mode, defaults]) => {
+                    if (defaults.settings_panel) {
+                      acc[mode as InputMode] = defaults.settings_panel;
+                    }
+                    return acc;
+                  },
+                  {} as Record<InputMode, string[]>
+                )
+              : undefined;
+
           transformed[id] = {
             name: schema.name,
             about: schema.description,
@@ -70,6 +87,11 @@ export function usePipelines() {
             vaeTypes,
             supportsControllerInput,
             supportsImages,
+            settingsPanel,
+            modeSettingsPanels:
+              modeSettingsPanels && Object.keys(modeSettingsPanels).length > 0
+                ? modeSettingsPanels
+                : undefined,
           };
         }
 

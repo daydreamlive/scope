@@ -102,6 +102,33 @@ class UsageType(str, Enum):
     PREPROCESSOR = "preprocessor"
 
 
+class SettingsControlType(str, Enum):
+    """Special control types that require custom UI handling.
+
+    These controls have complex UI behavior that cannot be inferred
+    from the field definition alone (e.g., enabling one control affects others).
+    """
+
+    # VACE toggle with nested controls (use_input_video, context_scale)
+    VACE = "vace"
+    # LoRA adapters manager
+    LORA = "lora"
+    # Preprocessor selector
+    PREPROCESSOR = "preprocessor"
+    # Cache management (manage_cache toggle + reset_cache button)
+    CACHE_MANAGEMENT = "cache_management"
+    # Denoising step list with custom slider UI
+    DENOISING_STEPS = "denoising_steps"
+    # Noise controls group (noise_controller toggle + noise_scale slider)
+    NOISE_CONTROLS = "noise_controls"
+    # Spout sender configuration
+    SPOUT_SENDER = "spout_sender"
+
+
+# Type for settings panel items: either a special control type or a field name string
+SettingsPanelItem = SettingsControlType | str
+
+
 class ModeDefaults(BaseModel):
     """Mode-specific default values.
 
@@ -140,6 +167,10 @@ class ModeDefaults(BaseModel):
 
     # Temporal interpolation
     default_temporal_interpolation_steps: int | None = None
+
+    # Settings panel configuration for this mode (overrides base settings_panel)
+    # If not set, uses the pipeline's base settings_panel
+    settings_panel: list[SettingsControlType | str] | None = None
 
 
 class BasePipelineConfig(BaseModel):
@@ -197,6 +228,14 @@ class BasePipelineConfig(BaseModel):
     # Use default=True to mark the default mode. Only include fields that differ from base.
     modes: ClassVar[dict[str, ModeDefaults]] = {"text": ModeDefaults(default=True)}
 
+    # Settings panel configuration - defines order and which controls to show
+    # Items can be:
+    #   - SettingsControlType enum values for special controls (VACE, LORA, etc.)
+    #   - Field name strings for dynamic controls (e.g., "vae_type", "height")
+    # If not set, frontend uses legacy hardcoded logic.
+    # Can be overridden per-mode in ModeDefaults.settings_panel
+    settings_panel: ClassVar[list[SettingsControlType | str] | None] = None
+
     # Prompt and temporal interpolation support
     supports_prompts: ClassVar[bool] = True
     default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
@@ -220,7 +259,7 @@ class BasePipelineConfig(BaseModel):
     denoising_steps: list[int] | None = denoising_steps_field()
 
     # Video mode parameters (None means not applicable/text mode)
-    noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = noise_scale_field()
+    noise_scale: Annotated[float, Field(ge=0.0, le=5.0)] | None = noise_scale_field()
     noise_controller: bool | None = noise_controller_field()
     input_size: int | None = input_size_field()
 
@@ -322,10 +361,27 @@ class BasePipelineConfig(BaseModel):
         metadata["usage"] = cls.usage
         metadata["config_schema"] = cls.model_json_schema()
 
+        # Include base settings_panel if defined
+        if cls.settings_panel is not None:
+            # Convert enum values to their string representation
+            metadata["settings_panel"] = [
+                item.value if isinstance(item, SettingsControlType) else item
+                for item in cls.settings_panel
+            ]
+
         # Include mode-specific defaults (excluding None values and the "default" flag)
         mode_defaults = {}
         for mode_name, mode_config in cls.modes.items():
             overrides = mode_config.model_dump(exclude={"default"}, exclude_none=True)
+            # Convert settings_panel enum values to strings if present
+            if (
+                "settings_panel" in overrides
+                and overrides["settings_panel"] is not None
+            ):
+                overrides["settings_panel"] = [
+                    item.value if isinstance(item, SettingsControlType) else item
+                    for item in overrides["settings_panel"]
+                ]
             if overrides:
                 mode_defaults[mode_name] = overrides
         if mode_defaults:

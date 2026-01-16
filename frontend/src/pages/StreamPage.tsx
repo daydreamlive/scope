@@ -78,8 +78,8 @@ export function StreamPage() {
     settings,
     updateSettings,
     getDefaults,
-    supportsNoiseControls,
     spoutAvailable,
+    pipelineSchemas,
   } = useStreamState();
 
   // Prompt state - use unified default prompts based on mode
@@ -1218,6 +1218,7 @@ export function StreamPage() {
             onPipelineIdChange={handlePipelineIdChange}
             isStreaming={isStreaming}
             isLoading={isLoading}
+            schema={pipelineSchemas?.pipelines[settings.pipelineId]}
             resolution={
               settings.resolution || {
                 height: getDefaults(settings.pipelineId, settings.inputMode)
@@ -1258,7 +1259,6 @@ export function StreamPage() {
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
-            supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}

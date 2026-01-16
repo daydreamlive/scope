@@ -115,6 +115,11 @@ export interface PipelineInfo {
   supportsControllerInput?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
+  // Settings panel configuration - defines order and which controls to show
+  // Can be overridden per mode via modeSettingsPanels
+  settingsPanel?: string[];
+  // Mode-specific settings panel overrides
+  modeSettingsPanels?: Record<InputMode, string[]>;
 }
 
 export interface DownloadProgress {

@@ -1,7 +1,7 @@
 from pydantic import Field
 
 from ..artifacts import HuggingfaceRepoArtifact
-from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..base_schema import BasePipelineConfig, ModeDefaults, SettingsControlType
 from ..common_artifacts import (
     LIGHTTAE_ARTIFACT,
     LIGHTVAE_ARTIFACT,
@@ -52,11 +52,43 @@ class StreamDiffusionV2Config(BasePipelineConfig):
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
     )
 
+    # Settings panel for text mode (no noise controls)
+    settings_panel = [
+        SettingsControlType.VACE,
+        SettingsControlType.LORA,
+        SettingsControlType.PREPROCESSOR,
+        "vae_type",
+        "height",
+        "width",
+        "base_seed",
+        SettingsControlType.CACHE_MANAGEMENT,
+        SettingsControlType.DENOISING_STEPS,
+        "quantization",
+    ]
+
     modes = {
         "text": ModeDefaults(
             height=512,
             width=512,
             denoising_steps=[1000, 750],
         ),
-        "video": ModeDefaults(default=True),
+        "video": ModeDefaults(
+            default=True,
+            noise_scale=0.7,
+            noise_controller=True,
+            # Video mode includes noise controls
+            settings_panel=[
+                SettingsControlType.VACE,
+                SettingsControlType.LORA,
+                SettingsControlType.PREPROCESSOR,
+                "vae_type",
+                "height",
+                "width",
+                "base_seed",
+                SettingsControlType.CACHE_MANAGEMENT,
+                SettingsControlType.DENOISING_STEPS,
+                SettingsControlType.NOISE_CONTROLS,
+                "quantization",
+            ],
+        ),
     }

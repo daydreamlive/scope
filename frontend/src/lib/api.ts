@@ -370,6 +370,20 @@ export interface PipelineConfigSchema {
   $defs?: Record<string, { enum?: unknown[] }>;
 }
 
+// Special control types that require custom UI handling
+// Must match SettingsControlType enum in backend base_schema.py
+export type SettingsControlType =
+  | "vace"
+  | "lora"
+  | "preprocessor"
+  | "cache_management"
+  | "denoising_steps"
+  | "noise_controls"
+  | "spout_sender";
+
+// Settings panel item: either a special control type or a field name string
+export type SettingsPanelItem = SettingsControlType | string;
+
 // Mode-specific default overrides
 export interface ModeDefaults {
   height?: number;
@@ -378,6 +392,8 @@ export interface ModeDefaults {
   noise_scale?: number | null;
   noise_controller?: boolean | null;
   default_temporal_interpolation_steps?: number;
+  // Settings panel configuration for this mode
+  settings_panel?: SettingsPanelItem[];
 }
 
 export interface PipelineSchemaInfo {
@@ -409,6 +425,8 @@ export interface PipelineSchemaInfo {
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
+  // Settings panel configuration (base, can be overridden per-mode in mode_defaults)
+  settings_panel?: SettingsPanelItem[];
 }
 
 export interface PipelineSchemasResponse {
