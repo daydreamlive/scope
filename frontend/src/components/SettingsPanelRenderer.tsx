@@ -451,7 +451,6 @@ export function SettingsPanelRenderer({
         );
 
       case "cache_management":
-        if (!schema.supports_cache_management) return null;
         return (
           <div key={`special-${index}`} className="space-y-4">
             <div className="space-y-2 pt-2">
@@ -621,10 +620,7 @@ export function SettingsPanelRenderer({
       if (fieldName === "quantization") {
         return renderQuantizationControl(index);
       }
-      if (
-        fieldName === "kv_cache_attention_bias" &&
-        schema.supports_kv_cache_bias
-      ) {
+      if (fieldName === "kv_cache_attention_bias") {
         return renderKvCacheBiasControl(index);
       }
       console.warn(
@@ -932,7 +928,6 @@ export function SettingsPanelRenderer({
 
   // Render quantization control
   const renderQuantizationControl = (index: number) => {
-    if (!schema.supports_quantization) return null;
     const displayInfo = getDisplayInfo("quantization");
     return (
       <div key={`quant-${index}`} className="space-y-4">

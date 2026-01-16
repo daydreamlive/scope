@@ -934,13 +934,20 @@ export function StreamPage() {
         ];
       }
 
-      // Cache management for pipelines that support it
-      if (currentPipeline?.supportsCacheManagement) {
+      // Check if items are in settings_panel for current mode
+      const currentSchema = pipelineSchemas?.pipelines[pipelineIdToUse];
+      const modeSettingsPanel =
+        currentSchema?.mode_defaults?.[currentMode]?.settings_panel ||
+        currentSchema?.settings_panel ||
+        [];
+
+      // Cache management for pipelines that support it (check settings_panel)
+      if (modeSettingsPanel.includes("cache_management")) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
-      // KV cache bias for pipelines that support it
-      if (currentPipeline?.supportsKvCacheBias) {
+      // KV cache bias for pipelines that support it (check settings_panel)
+      if (modeSettingsPanel.includes("kv_cache_attention_bias")) {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
       }

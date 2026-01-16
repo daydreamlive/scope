@@ -419,9 +419,6 @@ export interface PipelineSchemaInfo {
   // Mode-specific default overrides (optional)
   mode_defaults?: Record<"text" | "video", ModeDefaults>;
   // UI capabilities
-  supports_cache_management: boolean;
-  supports_kv_cache_bias: boolean;
-  supports_quantization: boolean;
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;

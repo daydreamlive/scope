@@ -38,8 +38,6 @@ class StreamDiffusionV2Config(BasePipelineConfig):
         ),
     ]
 
-    supports_cache_management = True
-    supports_quantization = True
     min_dimension = 16
     modified = True
 

@@ -61,6 +61,23 @@ export function usePipelines() {
                 )
               : undefined;
 
+          // Helper to check if item exists in any settings_panel (base or mode-specific)
+          const hasItemInSettingsPanel = (item: string): boolean => {
+            // Check base settings_panel
+            if (settingsPanel?.includes(item)) {
+              return true;
+            }
+            // Check mode-specific settings_panels
+            if (modeSettingsPanels) {
+              for (const panel of Object.values(modeSettingsPanels)) {
+                if (panel.includes(item)) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          };
+
           transformed[id] = {
             name: schema.name,
             about: schema.description,
@@ -77,9 +94,11 @@ export function usePipelines() {
             supportsLoRA: schema.supports_lora,
             supportsVACE: schema.supports_vace,
             usage: schema.usage,
-            supportsCacheManagement: schema.supports_cache_management,
-            supportsKvCacheBias: schema.supports_kv_cache_bias,
-            supportsQuantization: schema.supports_quantization,
+            supportsCacheManagement: hasItemInSettingsPanel("cache_management"),
+            supportsKvCacheBias: hasItemInSettingsPanel(
+              "kv_cache_attention_bias"
+            ),
+            supportsQuantization: hasItemInSettingsPanel("quantization"),
             minDimension: schema.min_dimension,
             recommendedQuantizationVramThreshold:
               schema.recommended_quantization_vram_threshold ?? undefined,

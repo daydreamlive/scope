@@ -371,9 +371,6 @@ class BasePipelineConfig(BaseModel):
         metadata["requires_models"] = cls.requires_models or bool(cls.artifacts)
         metadata["supports_lora"] = cls.supports_lora
         metadata["supports_vace"] = cls.supports_vace
-        metadata["supports_cache_management"] = cls.supports_cache_management
-        metadata["supports_kv_cache_bias"] = cls.supports_kv_cache_bias
-        metadata["supports_quantization"] = cls.supports_quantization
         metadata["min_dimension"] = cls.min_dimension
         metadata["recommended_quantization_vram_threshold"] = (
             cls.recommended_quantization_vram_threshold
