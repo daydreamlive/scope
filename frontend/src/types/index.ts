@@ -88,6 +88,13 @@ export interface SettingsState {
   vaeType?: VaeType;
   // Preprocessors
   preprocessorIds?: string[];
+  // Enhancement settings (FreSca and TSR)
+  enableFresca?: boolean;
+  frescaScaleHigh?: number;
+  frescaFreqCutoff?: number;
+  enableTsr?: boolean;
+  tsrK?: number;
+  tsrSigma?: number;
 }
 
 export interface PipelineInfo {

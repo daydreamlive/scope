@@ -91,4 +91,35 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     label: "Preprocessor:",
     tooltip: "Select a preprocessor to apply before the main pipeline.",
   },
+  // Enhancement parameters (FreSca and TSR)
+  enableFresca: {
+    label: "FreSca:",
+    tooltip:
+      "Enable frequency-selective scaling (FreSca) for detail enhancement. Boosts high-frequency details while preserving low-frequency structure.",
+  },
+  frescaScaleHigh: {
+    label: "Detail Scale:",
+    tooltip:
+      "High-frequency scaling factor for FreSca. Higher values enhance fine details and edges. Typical range: 1.0-1.5. Default: 1.15",
+  },
+  frescaFreqCutoff: {
+    label: "Freq Cutoff:",
+    tooltip:
+      "Frequency cutoff radius for FreSca. Defines the boundary between low and high frequencies. Higher values = larger low-frequency region. Default: 20",
+  },
+  enableTsr: {
+    label: "TSR:",
+    tooltip:
+      "Enable Temporal Score Rescaling (TSR) for improved temporal coherence. Adjusts denoising based on signal-to-noise ratio.",
+  },
+  tsrK: {
+    label: "TSR Temperature:",
+    tooltip:
+      "TSR sampling temperature. Controls overall rescaling strength. Typical range: 0.9-1.0. Default: 0.95",
+  },
+  tsrSigma: {
+    label: "TSR Sigma:",
+    tooltip:
+      "TSR SNR influence factor. Controls when rescaling activates relative to noise level. Default: 0.1",
+  },
 };

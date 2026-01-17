@@ -596,6 +596,49 @@ export function StreamPage() {
     updateSettings({ preprocessorIds: ids });
   };
 
+  // Enhancement handlers (FreSca and TSR)
+  const handleEnableFrescaChange = (enabled: boolean) => {
+    updateSettings({ enableFresca: enabled });
+    if (isStreaming) {
+      sendParameterUpdate({ enable_fresca: enabled });
+    }
+  };
+
+  const handleFrescaScaleHighChange = (value: number) => {
+    updateSettings({ frescaScaleHigh: value });
+    if (isStreaming) {
+      sendParameterUpdate({ fresca_scale_high: value });
+    }
+  };
+
+  const handleFrescaFreqCutoffChange = (value: number) => {
+    updateSettings({ frescaFreqCutoff: value });
+    if (isStreaming) {
+      sendParameterUpdate({ fresca_freq_cutoff: value });
+    }
+  };
+
+  const handleEnableTsrChange = (enabled: boolean) => {
+    updateSettings({ enableTsr: enabled });
+    if (isStreaming) {
+      sendParameterUpdate({ enable_tsr: enabled });
+    }
+  };
+
+  const handleTsrKChange = (value: number) => {
+    updateSettings({ tsrK: value });
+    if (isStreaming) {
+      sendParameterUpdate({ tsr_k: value });
+    }
+  };
+
+  const handleTsrSigmaChange = (value: number) => {
+    updateSettings({ tsrSigma: value });
+    if (isStreaming) {
+      sendParameterUpdate({ tsr_sigma: value });
+    }
+  };
+
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
     // Send VACE context scale update to backend if streaming
@@ -973,6 +1016,13 @@ export function StreamPage() {
         pipeline_ids?: string[];
         first_frame_image?: string;
         last_frame_image?: string;
+        // Enhancement parameters
+        enable_fresca?: boolean;
+        fresca_scale_high?: number;
+        fresca_freq_cutoff?: number;
+        enable_tsr?: boolean;
+        tsr_k?: number;
+        tsr_sigma?: number;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1042,6 +1092,16 @@ export function StreamPage() {
       }
       if (settings.spoutReceiver?.enabled) {
         initialParameters.spout_receiver = settings.spoutReceiver;
+      }
+
+      // Enhancement parameters (FreSca and TSR) - for longlive pipeline
+      if (settings.pipelineId === "longlive") {
+        initialParameters.enable_fresca = settings.enableFresca ?? false;
+        initialParameters.fresca_scale_high = settings.frescaScaleHigh ?? 1.15;
+        initialParameters.fresca_freq_cutoff = settings.frescaFreqCutoff ?? 20;
+        initialParameters.enable_tsr = settings.enableTsr ?? false;
+        initialParameters.tsr_k = settings.tsrK ?? 0.95;
+        initialParameters.tsr_sigma = settings.tsrSigma ?? 0.1;
       }
 
       // Reset paused state when starting a fresh stream
@@ -1346,6 +1406,19 @@ export function StreamPage() {
             vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
             preprocessorIds={settings.preprocessorIds ?? []}
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
+            // Enhancement settings
+            enableFresca={settings.enableFresca ?? false}
+            onEnableFrescaChange={handleEnableFrescaChange}
+            frescaScaleHigh={settings.frescaScaleHigh ?? 1.15}
+            onFrescaScaleHighChange={handleFrescaScaleHighChange}
+            frescaFreqCutoff={settings.frescaFreqCutoff ?? 20}
+            onFrescaFreqCutoffChange={handleFrescaFreqCutoffChange}
+            enableTsr={settings.enableTsr ?? false}
+            onEnableTsrChange={handleEnableTsrChange}
+            tsrK={settings.tsrK ?? 0.95}
+            onTsrKChange={handleTsrKChange}
+            tsrSigma={settings.tsrSigma ?? 0.1}
+            onTsrSigmaChange={handleTsrSigmaChange}
           />
         </div>
       </div>

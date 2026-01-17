@@ -336,6 +336,13 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       images?: string[];
       first_frame_image?: string;
       last_frame_image?: string;
+      // Enhancement parameters (FreSca and TSR)
+      enable_fresca?: boolean;
+      fresca_scale_high?: number;
+      fresca_freq_cutoff?: number;
+      enable_tsr?: boolean;
+      tsr_k?: number;
+      tsr_sigma?: number;
     }) => {
       if (
         dataChannelRef.current &&

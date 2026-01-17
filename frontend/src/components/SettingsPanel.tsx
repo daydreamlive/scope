@@ -98,6 +98,19 @@ interface SettingsPanelProps {
   // Preprocessors
   preprocessorIds?: string[];
   onPreprocessorIdsChange?: (ids: string[]) => void;
+  // Enhancement settings (FreSca and TSR)
+  enableFresca?: boolean;
+  onEnableFrescaChange?: (enabled: boolean) => void;
+  frescaScaleHigh?: number;
+  onFrescaScaleHighChange?: (value: number) => void;
+  frescaFreqCutoff?: number;
+  onFrescaFreqCutoffChange?: (value: number) => void;
+  enableTsr?: boolean;
+  onEnableTsrChange?: (enabled: boolean) => void;
+  tsrK?: number;
+  onTsrKChange?: (value: number) => void;
+  tsrSigma?: number;
+  onTsrSigmaChange?: (value: number) => void;
 }
 
 export function SettingsPanel({
@@ -144,6 +157,19 @@ export function SettingsPanel({
   vaeTypes,
   preprocessorIds = [],
   onPreprocessorIdsChange,
+  // Enhancement settings
+  enableFresca = false,
+  onEnableFrescaChange,
+  frescaScaleHigh = 1.15,
+  onFrescaScaleHighChange,
+  frescaFreqCutoff = 20,
+  onFrescaFreqCutoffChange,
+  enableTsr = false,
+  onEnableTsrChange,
+  tsrK = 0.95,
+  onTsrKChange,
+  tsrSigma = 0.1,
+  onTsrSigmaChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -155,6 +181,17 @@ export function SettingsPanel({
     vaceContextScale,
     onVaceContextScaleChange
   );
+  // Enhancement slider states
+  const frescaScaleHighSlider = useLocalSliderValue(
+    frescaScaleHigh,
+    onFrescaScaleHighChange
+  );
+  const frescaFreqCutoffSlider = useLocalSliderValue(
+    frescaFreqCutoff,
+    onFrescaFreqCutoffChange
+  );
+  const tsrKSlider = useLocalSliderValue(tsrK, onTsrKChange);
+  const tsrSigmaSlider = useLocalSliderValue(tsrSigma, onTsrSigmaChange);
 
   // Validation error states
   const [heightError, setHeightError] = useState<string | null>(null);
@@ -851,6 +888,119 @@ export function SettingsPanel({
                   </p>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Enhancement Settings (FreSca and TSR) - shown for longlive pipeline */}
+        {pipelineId === "longlive" && (
+          <div className="space-y-4">
+            <h3 className="text-sm font-medium">Enhancements</h3>
+
+            {/* FreSca Controls */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.enableFresca.label}
+                  tooltip={PARAMETER_METADATA.enableFresca.tooltip}
+                  className="text-sm text-foreground"
+                />
+                <Toggle
+                  pressed={enableFresca}
+                  onPressedChange={onEnableFrescaChange || (() => {})}
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                >
+                  {enableFresca ? "ON" : "OFF"}
+                </Toggle>
+              </div>
+
+              {enableFresca && (
+                <div className="rounded-lg border bg-card p-3 space-y-3">
+                  <SliderWithInput
+                    label={PARAMETER_METADATA.frescaScaleHigh.label}
+                    tooltip={PARAMETER_METADATA.frescaScaleHigh.tooltip}
+                    value={frescaScaleHighSlider.localValue}
+                    onValueChange={frescaScaleHighSlider.handleValueChange}
+                    onValueCommit={frescaScaleHighSlider.handleValueCommit}
+                    min={1.0}
+                    max={2.0}
+                    step={0.05}
+                    incrementAmount={0.05}
+                    labelClassName="text-xs text-muted-foreground w-24"
+                    valueFormatter={frescaScaleHighSlider.formatValue}
+                    inputParser={v => parseFloat(v) || 1.15}
+                  />
+                  <SliderWithInput
+                    label={PARAMETER_METADATA.frescaFreqCutoff.label}
+                    tooltip={PARAMETER_METADATA.frescaFreqCutoff.tooltip}
+                    value={frescaFreqCutoffSlider.localValue}
+                    onValueChange={frescaFreqCutoffSlider.handleValueChange}
+                    onValueCommit={frescaFreqCutoffSlider.handleValueCommit}
+                    min={5}
+                    max={50}
+                    step={1}
+                    incrementAmount={1}
+                    labelClassName="text-xs text-muted-foreground w-24"
+                    valueFormatter={frescaFreqCutoffSlider.formatValue}
+                    inputParser={v => parseInt(v) || 20}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* TSR Controls */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.enableTsr.label}
+                  tooltip={PARAMETER_METADATA.enableTsr.tooltip}
+                  className="text-sm text-foreground"
+                />
+                <Toggle
+                  pressed={enableTsr}
+                  onPressedChange={onEnableTsrChange || (() => {})}
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                >
+                  {enableTsr ? "ON" : "OFF"}
+                </Toggle>
+              </div>
+
+              {enableTsr && (
+                <div className="rounded-lg border bg-card p-3 space-y-3">
+                  <SliderWithInput
+                    label={PARAMETER_METADATA.tsrK.label}
+                    tooltip={PARAMETER_METADATA.tsrK.tooltip}
+                    value={tsrKSlider.localValue}
+                    onValueChange={tsrKSlider.handleValueChange}
+                    onValueCommit={tsrKSlider.handleValueCommit}
+                    min={0.5}
+                    max={1.5}
+                    step={0.01}
+                    incrementAmount={0.01}
+                    labelClassName="text-xs text-muted-foreground w-28"
+                    valueFormatter={tsrKSlider.formatValue}
+                    inputParser={v => parseFloat(v) || 0.95}
+                  />
+                  <SliderWithInput
+                    label={PARAMETER_METADATA.tsrSigma.label}
+                    tooltip={PARAMETER_METADATA.tsrSigma.tooltip}
+                    value={tsrSigmaSlider.localValue}
+                    onValueChange={tsrSigmaSlider.handleValueChange}
+                    onValueCommit={tsrSigmaSlider.handleValueCommit}
+                    min={0.01}
+                    max={1.0}
+                    step={0.01}
+                    incrementAmount={0.01}
+                    labelClassName="text-xs text-muted-foreground w-28"
+                    valueFormatter={tsrSigmaSlider.formatValue}
+                    inputParser={v => parseFloat(v) || 0.1}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -1,3 +1,4 @@
+# Enhanced modular blocks with FreSca and TSR support
 from diffusers.modular_pipelines import SequentialPipelineBlocks
 from diffusers.modular_pipelines.modular_pipeline_utils import InsertableDict
 from diffusers.utils import logging as diffusers_logging
@@ -23,12 +24,9 @@ from .blocks import (
 
 logger = diffusers_logging.get_logger(__name__)
 
-# Main pipeline blocks with multi-mode support (text-to-video and video-to-video)
-# AutoPreprocessVideoBlock: Routes to video preprocessing when 'video' input provided
-# AutoPrepareLatentsBlock: Routes to PrepareVideoLatentsBlock or PrepareLatentsBlock
-# VaceEncodingBlock: Encodes VACE context for conditioning
-# EnhancedDenoiseBlock: Denoise with FreSca and TSR enhancement support
-ALL_BLOCKS = InsertableDict(
+# Enhanced pipeline blocks with FreSca and TSR support
+# Uses EnhancedDenoiseBlock instead of standard DenoiseBlock
+ENHANCED_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("embedding_blending", EmbeddingBlendingBlock),
@@ -42,7 +40,7 @@ ALL_BLOCKS = InsertableDict(
         ("auto_prepare_latents", AutoPrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),
         ("vace_encoding", VaceEncodingBlock),
-        ("denoise", EnhancedDenoiseBlock),
+        ("denoise", EnhancedDenoiseBlock),  # Enhanced version
         ("clean_kv_cache", CleanKVCacheBlock),
         ("decode", DecodeBlock),
         ("prepare_recache_frames", PrepareRecacheFramesBlock),
@@ -51,6 +49,20 @@ ALL_BLOCKS = InsertableDict(
 )
 
 
-class LongLiveBlocks(SequentialPipelineBlocks):
-    block_classes = list(ALL_BLOCKS.values())
-    block_names = list(ALL_BLOCKS.keys())
+class EnhancedLongLiveBlocks(SequentialPipelineBlocks):
+    """
+    Enhanced LongLive blocks with FreSca and TSR support.
+
+    Enhancement parameters can be passed via pipeline __call__:
+    - enable_fresca: Enable frequency-selective scaling
+    - fresca_scale_low: Low-frequency scaling (default 1.0)
+    - fresca_scale_high: High-frequency scaling (default 1.15)
+    - fresca_freq_cutoff: Frequency cutoff radius (default 20)
+    - fresca_adaptive: Step-adaptive scaling (default False)
+    - enable_tsr: Enable temporal score rescaling
+    - tsr_k: TSR sampling temperature (default 0.95)
+    - tsr_sigma: TSR SNR influence factor (default 0.1)
+    """
+
+    block_classes = list(ENHANCED_BLOCKS.values())
+    block_names = list(ENHANCED_BLOCKS.keys())
