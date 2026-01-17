@@ -16,6 +16,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 from ..enhancements import (
     apply_step_adaptive_scaling,
     fourier_filter,
+    normalized_fourier_filter,
     temporal_score_rescaling,
 )
 
@@ -166,6 +167,14 @@ class EnhancedDenoiseBlock(ModularPipelineBlocks):
                 description="Enable step-adaptive FreSca scaling",
             ),
             InputParam(
+                "fresca_tau",
+                default=None,
+                type_hint=float | None,
+                description="Normalized FreSca tau (max norm ratio). When set, enables "
+                "self-limiting enhancement that prevents accumulation over time. "
+                "Typical value: 1.2 means enhanced output is at most 1.2x original norm.",
+            ),
+            InputParam(
                 "enable_tsr",
                 default=False,
                 type_hint=bool,
@@ -230,6 +239,7 @@ class EnhancedDenoiseBlock(ModularPipelineBlocks):
         fresca_scale_high = getattr(block_state, "fresca_scale_high", None)
         fresca_freq_cutoff = getattr(block_state, "fresca_freq_cutoff", None)
         fresca_adaptive = getattr(block_state, "fresca_adaptive", False) or False
+        fresca_tau = getattr(block_state, "fresca_tau", None)
 
         # Apply defaults for None values
         if fresca_scale_low is None:
@@ -312,6 +322,15 @@ class EnhancedDenoiseBlock(ModularPipelineBlocks):
                             scale_high_end=fresca_scale_high,
                             freq_cutoff=fresca_freq_cutoff,
                         )
+                    elif fresca_tau is not None:
+                        # Normalized FreSca: self-limiting to prevent accumulation
+                        denoised_pred = normalized_fourier_filter(
+                            denoised_pred,
+                            scale_low=fresca_scale_low,
+                            scale_high=fresca_scale_high,
+                            freq_cutoff=fresca_freq_cutoff,
+                            tau=fresca_tau,
+                        )
                     else:
                         denoised_pred = fourier_filter(
                             denoised_pred,
@@ -382,6 +401,15 @@ class EnhancedDenoiseBlock(ModularPipelineBlocks):
                             scale_high_start=1.0,
                             scale_high_end=fresca_scale_high,
                             freq_cutoff=fresca_freq_cutoff,
+                        )
+                    elif fresca_tau is not None:
+                        # Normalized FreSca: self-limiting to prevent accumulation
+                        denoised_pred = normalized_fourier_filter(
+                            denoised_pred,
+                            scale_low=fresca_scale_low,
+                            scale_high=fresca_scale_high,
+                            freq_cutoff=fresca_freq_cutoff,
+                            tau=fresca_tau,
                         )
                     else:
                         denoised_pred = fourier_filter(

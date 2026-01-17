@@ -1,13 +1,17 @@
 """
-Test script for FreSca and TSR enhancements in LongLive pipeline.
+Test script for FreSca enhancements in LongLive pipeline.
 
 Generates comparison videos with baseline on left, enhanced on right.
 
 Usage:
     uv run python -m scope.core.pipelines.longlive.test_enhancements
     uv run python -m scope.core.pipelines.longlive.test_enhancements --fresca-only
-    uv run python -m scope.core.pipelines.longlive.test_enhancements --tsr-only
+    uv run python -m scope.core.pipelines.longlive.test_enhancements --normalized-only
     uv run python -m scope.core.pipelines.longlive.test_enhancements --all-variants
+
+The default test compares normalized FreSca (with tau-based self-limiting)
+against the baseline. Normalized FreSca prevents accumulation over long
+generations by clamping the enhancement to a maximum norm ratio (tau).
 """
 
 import argparse
@@ -113,17 +117,17 @@ def main():
     parser.add_argument(
         "--fresca-only",
         action="store_true",
-        help="Test FreSca enhancement only",
+        help="Test unbounded FreSca enhancement only (no tau limit)",
     )
     parser.add_argument(
-        "--tsr-only",
+        "--normalized-only",
         action="store_true",
-        help="Test TSR enhancement only",
+        help="Test normalized FreSca only (with tau-based self-limiting)",
     )
     parser.add_argument(
         "--all-variants",
         action="store_true",
-        help="Generate all variants for comparison",
+        help="Generate all variants for comparison (fresca, normalized, both tau values)",
     )
     parser.add_argument(
         "--fresca-scale-high",
@@ -138,22 +142,18 @@ def main():
         help="FreSca frequency cutoff radius (default: 20)",
     )
     parser.add_argument(
-        "--tsr-k",
+        "--fresca-tau",
         type=float,
-        default=0.95,
-        help="TSR sampling temperature (default: 0.95)",
-    )
-    parser.add_argument(
-        "--tsr-sigma",
-        type=float,
-        default=0.1,
-        help="TSR SNR influence factor (default: 0.1)",
+        default=1.2,
+        help="Normalized FreSca tau - max norm ratio (default: 1.2). "
+        "This bounds the enhancement to prevent accumulation over time.",
     )
     parser.add_argument(
         "--max-chunks",
         type=int,
-        default=6,
-        help="Maximum chunks to generate (default: 6)",
+        default=20,
+        help="Maximum chunks to generate (default: 20). Use higher values to test "
+        "long-generation behavior and accumulation effects.",
     )
     parser.add_argument(
         "--prompt",
@@ -210,37 +210,47 @@ def main():
     if args.all_variants:
         variants = [
             (
-                "fresca",
+                "fresca_unbounded",
                 {
                     "enable_fresca": True,
                     "fresca_scale_high": args.fresca_scale_high,
                     "fresca_freq_cutoff": args.fresca_freq_cutoff,
+                    # No tau = unbounded, can accumulate
                 },
             ),
             (
-                "tsr",
-                {
-                    "enable_tsr": True,
-                    "tsr_k": args.tsr_k,
-                    "tsr_sigma": args.tsr_sigma,
-                },
-            ),
-            (
-                "fresca_tsr",
+                f"fresca_normalized_tau{args.fresca_tau}",
                 {
                     "enable_fresca": True,
                     "fresca_scale_high": args.fresca_scale_high,
                     "fresca_freq_cutoff": args.fresca_freq_cutoff,
-                    "enable_tsr": True,
-                    "tsr_k": args.tsr_k,
-                    "tsr_sigma": args.tsr_sigma,
+                    "fresca_tau": args.fresca_tau,
+                },
+            ),
+            (
+                "fresca_normalized_tau1.1",
+                {
+                    "enable_fresca": True,
+                    "fresca_scale_high": args.fresca_scale_high,
+                    "fresca_freq_cutoff": args.fresca_freq_cutoff,
+                    "fresca_tau": 1.1,
+                },
+            ),
+            (
+                "fresca_normalized_tau1.3",
+                {
+                    "enable_fresca": True,
+                    "fresca_scale_high": args.fresca_scale_high,
+                    "fresca_freq_cutoff": args.fresca_freq_cutoff,
+                    "fresca_tau": 1.3,
                 },
             ),
         ]
     elif args.fresca_only:
+        # Test unbounded FreSca (original, can accumulate)
         variants = [
             (
-                "fresca",
+                "fresca_unbounded",
                 {
                     "enable_fresca": True,
                     "fresca_scale_high": args.fresca_scale_high,
@@ -248,29 +258,29 @@ def main():
                 },
             ),
         ]
-    elif args.tsr_only:
+    elif args.normalized_only:
+        # Test normalized FreSca only
         variants = [
             (
-                "tsr",
+                f"fresca_normalized_tau{args.fresca_tau}",
                 {
-                    "enable_tsr": True,
-                    "tsr_k": args.tsr_k,
-                    "tsr_sigma": args.tsr_sigma,
+                    "enable_fresca": True,
+                    "fresca_scale_high": args.fresca_scale_high,
+                    "fresca_freq_cutoff": args.fresca_freq_cutoff,
+                    "fresca_tau": args.fresca_tau,
                 },
             ),
         ]
     else:
-        # Default: test combined enhancements
+        # Default: test normalized FreSca (recommended for long generations)
         variants = [
             (
-                "fresca_tsr",
+                f"fresca_normalized_tau{args.fresca_tau}",
                 {
                     "enable_fresca": True,
                     "fresca_scale_high": args.fresca_scale_high,
                     "fresca_freq_cutoff": args.fresca_freq_cutoff,
-                    "enable_tsr": True,
-                    "tsr_k": args.tsr_k,
-                    "tsr_sigma": args.tsr_sigma,
+                    "fresca_tau": args.fresca_tau,
                 },
             ),
         ]

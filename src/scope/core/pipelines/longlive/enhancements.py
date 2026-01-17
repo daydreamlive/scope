@@ -89,6 +89,74 @@ def fourier_filter(
     return x_filtered
 
 
+def normalized_fourier_filter(
+    x: torch.Tensor,
+    scale_low: float | None = 1.0,
+    scale_high: float | None = 1.25,
+    freq_cutoff: int | None = 20,
+    tau: float | None = 1.2,
+) -> torch.Tensor:
+    """
+    Apply frequency-dependent scaling with NAG-style normalization (Normalized FreSca).
+
+    Like fourier_filter, but with self-limiting behavior to prevent accumulation.
+    The enhancement is bounded: if the norm ratio exceeds tau, the enhancement
+    is scaled back to maintain tau as the maximum amplification.
+
+    This makes the enhancement convergent instead of accumulative:
+    - First few chunks see improvement
+    - Once norm reaches tau * original, no further boost occurs
+    - Prevents runaway amplification over long generations
+
+    Args:
+        x: Input tensor of shape [B, F, C, H, W] or [B, C, H, W]
+        scale_low: Scaling factor for low-frequency components (structure)
+        scale_high: Scaling factor for high-frequency components (details)
+        freq_cutoff: Radius in frequency space defining low-frequency region
+        tau: Maximum allowed norm ratio (enhancement ceiling). Default 1.2 means
+             the enhanced output can be at most 1.2x the original norm.
+
+    Returns:
+        Filtered tensor with same shape as input, norm-bounded to tau * original
+    """
+    # Handle None values with defaults
+    if scale_low is None:
+        scale_low = 1.0
+    if scale_high is None:
+        scale_high = 1.25
+    if freq_cutoff is None:
+        freq_cutoff = 20
+    if tau is None:
+        tau = 1.2
+
+    if scale_low == 1.0 and scale_high == 1.0:
+        return x
+
+    # Apply the base fourier filter
+    enhanced = fourier_filter(x, scale_low, scale_high, freq_cutoff)
+
+    # NAG-style normalization to prevent accumulation
+    # Compute norms over spatial dimensions (last 2 dims)
+    # Keep other dims for broadcasting
+    norm_dims = (-2, -1)
+
+    norm_original = torch.norm(x.float(), p=2, dim=norm_dims, keepdim=True)
+    norm_enhanced = torch.norm(enhanced.float(), p=2, dim=norm_dims, keepdim=True)
+
+    # Compute ratio (with epsilon for numerical stability)
+    ratio = norm_enhanced / (norm_original + 1e-7)
+
+    # Self-limiting: if enhancement exceeds tau, scale it back
+    # This prevents accumulation over multiple chunks
+    mask = ratio > tau
+    adjustment = (norm_original * tau) / (norm_enhanced + 1e-7)
+
+    # Apply adjustment only where ratio exceeds tau
+    enhanced = torch.where(mask, enhanced * adjustment.to(enhanced.dtype), enhanced)
+
+    return enhanced
+
+
 def temporal_score_rescaling(
     model_output: torch.Tensor,
     sample: torch.Tensor,
