@@ -3,7 +3,6 @@
 import asyncio
 import gc
 import logging
-import os
 import threading
 from enum import Enum
 from typing import Any
@@ -45,6 +44,11 @@ class PipelineManager:
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
 
+        # Support for multiple pipelines (for pipeline chaining)
+        self._pipelines: dict[str, Any] = {}  # pipeline_id -> pipeline instance
+        self._pipeline_statuses: dict[str, PipelineStatus] = {}  # pipeline_id -> status
+        self._pipeline_load_params: dict[str, dict] = {}  # pipeline_id -> load_params
+
     @property
     def status(self) -> PipelineStatus:
         """Get current pipeline status."""
@@ -61,7 +65,11 @@ class PipelineManager:
         return self._error_message
 
     def get_pipeline(self):
-        """Get the loaded pipeline instance (thread-safe)."""
+        """Get the loaded pipeline instance (thread-safe).
+
+        This is the legacy method that returns the main pipeline.
+        For pipeline chaining, use get_pipeline_by_id() instead.
+        """
         with self._lock:
             if self._status != PipelineStatus.LOADED or self._pipeline is None:
                 raise PipelineNotAvailableException(
@@ -69,126 +77,105 @@ class PipelineManager:
                 )
             return self._pipeline
 
-    def get_status_info(self) -> dict[str, Any]:
-        """Get detailed status information (thread-safe).
-
-        Note: If status is ERROR, the error message is returned once and then cleared
-        to prevent persistence across page reloads.
-        """
-        with self._lock:
-            # Capture current state before clearing
-            current_status = self._status
-            error_message = self._error_message
-            pipeline_id = self._pipeline_id
-            load_params = self._load_params
-
-            # Capture loaded LoRA adapters if pipeline exposes them
-            loaded_lora_adapters = None
-            if self._pipeline is not None and hasattr(
-                self._pipeline, "loaded_lora_adapters"
-            ):
-                loaded_lora_adapters = getattr(
-                    self._pipeline, "loaded_lora_adapters", None
-                )
-
-            # If there's an error, clear it after capturing it
-            # This ensures errors don't persist across page reloads
-            if self._status == PipelineStatus.ERROR and error_message:
-                self._error_message = None
-                # Reset status to NOT_LOADED after error is retrieved
-                self._status = PipelineStatus.NOT_LOADED
-                self._pipeline_id = None
-                self._load_params = None
-
-            # Return the captured state (with error status if it was an error)
-            return {
-                "status": current_status.value,
-                "pipeline_id": pipeline_id,
-                "load_params": load_params,
-                "loaded_lora_adapters": loaded_lora_adapters,
-                "error": error_message,
-            }
-
-    async def get_pipeline_async(self):
-        """Get the loaded pipeline instance (async wrapper)."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_pipeline)
-
-    async def get_status_info_async(self) -> dict[str, Any]:
-        """Get detailed status information (async wrapper)."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_status_info)
-
-    async def load_pipeline(
-        self, pipeline_id: str | None = None, load_params: dict | None = None
-    ) -> bool:
-        """
-        Load a pipeline asynchronously.
+    def get_pipeline_by_id(self, pipeline_id: str):
+        """Get a pipeline instance by ID (thread-safe).
 
         Args:
-            pipeline_id: ID of pipeline to load. If None, uses PIPELINE env var.
-            load_params: Pipeline-specific load parameters.
+            pipeline_id: ID of the pipeline to retrieve
+
+        Returns:
+            Pipeline instance
+
+        Raises:
+            PipelineNotAvailableException: If pipeline is not loaded
+        """
+        with self._lock:
+            if pipeline_id not in self._pipelines:
+                raise PipelineNotAvailableException(
+                    f"Pipeline {pipeline_id} not loaded"
+                )
+            status = self._pipeline_statuses.get(pipeline_id, PipelineStatus.NOT_LOADED)
+            if status != PipelineStatus.LOADED:
+                raise PipelineNotAvailableException(
+                    f"Pipeline {pipeline_id} not available. Status: {status.value}"
+                )
+            return self._pipelines[pipeline_id]
+
+    async def _load_pipeline_by_id(
+        self, pipeline_id: str, load_params: dict | None = None
+    ) -> bool:
+        """
+        Load a pipeline by ID asynchronously (private method).
+
+        Args:
+            pipeline_id: ID of pipeline to load
+            load_params: Pipeline-specific load parameters
 
         Returns:
             bool: True if loaded successfully, False otherwise.
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._load_pipeline_sync_wrapper, pipeline_id, load_params
+            None, self._load_pipeline_by_id_sync, pipeline_id, load_params
         )
 
-    def _load_pipeline_sync_wrapper(
-        self, pipeline_id: str | None = None, load_params: dict | None = None
+    def _load_pipeline_by_id_sync(
+        self, pipeline_id: str, load_params: dict | None = None
     ) -> bool:
-        """Synchronous wrapper for pipeline loading with proper locking."""
-
-        if pipeline_id is None:
-            pipeline_id = os.getenv("PIPELINE", "longlive")
-
+        """Synchronous wrapper for loading a pipeline by ID."""
         with self._lock:
-            # Normalize None to empty dict for comparison
-            current_params = self._load_params or {}
+            # Check if already loaded with same params
+            current_params = self._pipeline_load_params.get(pipeline_id, {})
             new_params = load_params or {}
 
-            # If already loaded with same type and same params, return success
-            if (
-                self._status == PipelineStatus.LOADED
-                and self._pipeline_id == pipeline_id
-                and current_params == new_params
+            # Check if pipeline is already loaded (either in _pipelines or as main pipeline)
+            is_loaded = False
+            if pipeline_id in self._pipelines:
+                if (
+                    self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADED
+                    and current_params == new_params
+                ):
+                    is_loaded = True
+            elif (
+                self._pipeline_id == pipeline_id
+                and self._status == PipelineStatus.LOADED
             ):
+                # Check if load params match
+                current_main_params = self._load_params or {}
+                if current_main_params == new_params:
+                    # Main pipeline is loaded, register it in _pipelines for chaining
+                    if self._pipeline is not None:
+                        self._pipelines[pipeline_id] = self._pipeline
+                        self._pipeline_load_params[pipeline_id] = current_main_params
+                        self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
+                        is_loaded = True
+
+            if is_loaded:
                 logger.info(
                     f"Pipeline {pipeline_id} already loaded with matching parameters"
                 )
                 return True
 
-            # If a different pipeline is loaded OR same pipeline with different params, unload it first
-            if self._status == PipelineStatus.LOADED and (
-                self._pipeline_id != pipeline_id or current_params != new_params
-            ):
-                self._unload_pipeline_unsafe()
-
-            # If already loading, someone else is handling it
-            if self._status == PipelineStatus.LOADING:
-                logger.info("Pipeline already loading by another thread")
+            # If already loading, wait
+            if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADING:
+                logger.info(f"Pipeline {pipeline_id} already loading by another thread")
                 return False
 
             # Mark as loading
-            self._status = PipelineStatus.LOADING
-            self._error_message = None
+            self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
 
         # Release lock during slow loading operation
         logger.info(f"Loading pipeline: {pipeline_id}")
 
         try:
-            # Load the pipeline synchronously (we're already in executor thread)
+            # Load the pipeline synchronously
             pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
 
-            # Hold lock while updating state with loaded pipeline
+            # Hold lock while updating state
             with self._lock:
-                self._pipeline = pipeline
-                self._pipeline_id = pipeline_id
-                self._load_params = load_params
-                self._status = PipelineStatus.LOADED
+                self._pipelines[pipeline_id] = pipeline
+                self._pipeline_load_params[pipeline_id] = load_params or {}
+                self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
 
             logger.info(f"Pipeline {pipeline_id} loaded successfully")
             return True
@@ -205,13 +192,185 @@ class PipelineManager:
 
             # Hold lock while updating state with error
             with self._lock:
-                self._status = PipelineStatus.ERROR
-                self._error_message = error_msg
-                self._pipeline = None
-                self._pipeline_id = None
-                self._load_params = None
+                self._pipeline_statuses[pipeline_id] = PipelineStatus.ERROR
+                if pipeline_id in self._pipelines:
+                    del self._pipelines[pipeline_id]
+                if pipeline_id in self._pipeline_load_params:
+                    del self._pipeline_load_params[pipeline_id]
 
             return False
+
+    def get_status_info(self) -> dict[str, Any]:
+        """Get detailed status information (thread-safe).
+
+        Note: If status is ERROR, the error message is returned once and then cleared
+        to prevent persistence across page reloads.
+
+        Returns "loading" if any pipeline is loading,
+        "error" if any pipeline has an error, and "loaded" only if all pipelines are loaded.
+        """
+        with self._lock:
+            # Check status of all tracked pipelines
+            has_loading = False
+            has_error = False
+            all_loaded = True
+
+            # Check all tracked pipeline statuses
+            for _pipeline_id, status in self._pipeline_statuses.items():
+                if status == PipelineStatus.LOADING:
+                    has_loading = True
+                elif status == PipelineStatus.ERROR:
+                    has_error = True
+                elif status != PipelineStatus.LOADED:
+                    all_loaded = False
+
+            # Determine overall status
+            if has_loading:
+                overall_status = PipelineStatus.LOADING
+            elif has_error:
+                overall_status = PipelineStatus.ERROR
+            elif all_loaded and len(self._pipelines) > 0:
+                overall_status = PipelineStatus.LOADED
+            else:
+                overall_status = PipelineStatus.NOT_LOADED
+
+            # Capture current state before clearing
+            current_status = overall_status
+            # Use load_params from first pipeline or stored load_params
+            load_params = self._load_params
+            if not load_params and self._pipeline_load_params:
+                # Get load_params from first tracked pipeline
+                load_params = next(iter(self._pipeline_load_params.values()))
+
+            # Get pipeline_id from first loaded pipeline (for backward compatibility with API response)
+            pipeline_id = None
+            if self._pipelines:
+                pipeline_id = next(iter(self._pipelines.keys()))
+
+            # Capture loaded LoRA adapters from all pipelines
+            # Collect from all pipelines that expose this attribute
+            loaded_lora_adapters = None
+            if self._pipelines:
+                all_adapters = []
+                seen_paths = set()
+
+                for pipeline in self._pipelines.values():
+                    if hasattr(pipeline, "loaded_lora_adapters"):
+                        adapters = getattr(pipeline, "loaded_lora_adapters", None)
+                        if adapters:
+                            # Add adapters, avoiding duplicates by path
+                            for adapter in adapters:
+                                adapter_path = adapter.get("path")
+                                if adapter_path and adapter_path not in seen_paths:
+                                    all_adapters.append(adapter)
+                                    seen_paths.add(adapter_path)
+
+                if all_adapters:
+                    loaded_lora_adapters = all_adapters
+
+            # If there's an error, clear error statuses after capturing them
+            # This ensures errors don't persist across page reloads
+            if overall_status == PipelineStatus.ERROR:
+                # Clear error statuses from tracked pipelines
+                for pid in list(self._pipeline_statuses.keys()):
+                    if self._pipeline_statuses[pid] == PipelineStatus.ERROR:
+                        self._pipeline_statuses[pid] = PipelineStatus.NOT_LOADED
+
+            # Error messages are logged but not tracked per-pipeline
+            # The ERROR status is sufficient for the frontend
+            combined_error = None
+
+            # Return the captured state (with error status if it was an error)
+            return {
+                "status": current_status.value,
+                "pipeline_id": pipeline_id,
+                "load_params": load_params,
+                "loaded_lora_adapters": loaded_lora_adapters,
+                "error": combined_error,
+            }
+
+    async def get_pipeline_async(self):
+        """Get the loaded pipeline instance (async wrapper)."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_pipeline)
+
+    async def get_status_info_async(self) -> dict[str, Any]:
+        """Get detailed status information (async wrapper)."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_status_info)
+
+    async def load_pipelines(
+        self, pipeline_ids: list[str], load_params: dict | None = None
+    ) -> bool:
+        """
+        Load multiple pipelines asynchronously.
+
+        Args:
+            pipeline_ids: List of pipeline IDs to load
+            load_params: Pipeline-specific load parameters (applies to all pipelines)
+
+        Returns:
+            bool: True if all pipelines loaded successfully, False otherwise.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._load_pipelines_sync, pipeline_ids, load_params
+        )
+
+    def _load_pipelines_sync(
+        self, pipeline_ids: list[str], load_params: dict | None = None
+    ) -> bool:
+        """Synchronous wrapper for loading multiple pipelines."""
+        if not pipeline_ids:
+            logger.error("No pipeline IDs provided")
+            return False
+
+        logger.info(f"Loading {len(pipeline_ids)} pipeline(s): {pipeline_ids}")
+
+        # Store load_params for use by frame processor
+        with self._lock:
+            self._load_params = load_params
+
+            # Identify pipelines that need to be unloaded:
+            # 1. Currently loaded but not in new list
+            # 2. In new list but with different load_params (e.g., different resolution)
+            currently_loaded = set(self._pipelines.keys())
+            # Also check main pipeline if it exists
+            if self._pipeline_id and self._pipeline_id not in currently_loaded:
+                currently_loaded.add(self._pipeline_id)
+
+            new_params = load_params or {}
+            pipelines_to_unload = set()
+
+            for loaded_id in currently_loaded:
+                # Unload if pipeline not in new list or if load_params changed
+                current_params = self._pipeline_load_params.get(loaded_id, {})
+                if loaded_id not in pipeline_ids or current_params != new_params:
+                    pipelines_to_unload.add(loaded_id)
+
+            # Unload pipelines that need to be unloaded
+            for pipeline_id_to_unload in pipelines_to_unload:
+                logger.info(f"Unloading pipeline {pipeline_id_to_unload}")
+                self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
+
+        # Load all pipelines
+        success = True
+        for pipeline_id in pipeline_ids:
+            try:
+                result = self._load_pipeline_by_id_sync(pipeline_id, load_params)
+                if not result:
+                    logger.error(f"Failed to load pipeline: {pipeline_id}")
+                    success = False
+            except Exception as e:
+                logger.error(f"Error loading pipeline {pipeline_id}: {e}")
+                success = False
+
+        if success:
+            logger.info(f"All {len(pipeline_ids)} pipeline(s) loaded successfully")
+        else:
+            logger.error("Some pipelines failed to load")
+
+        return success
 
     def _get_vace_checkpoint_path(self) -> str:
         """Get the path to the VACE module checkpoint.
@@ -295,17 +454,49 @@ class PipelineManager:
         # Pass merge_mode directly to mixin, not via config
         config["_lora_merge_mode"] = lora_merge_mode
 
-    def _unload_pipeline_unsafe(self):
-        """Unload the current pipeline. Must be called with lock held."""
-        if self._pipeline:
-            logger.info(f"Unloading pipeline: {self._pipeline_id}")
+    def unload_pipeline_by_id(self, pipeline_id: str):
+        """Unload a specific pipeline by ID (thread-safe)."""
+        with self._lock:
+            self._unload_pipeline_by_id_unsafe(pipeline_id)
 
-        # Change status and pipeline atomically
-        self._status = PipelineStatus.NOT_LOADED
-        self._pipeline = None
-        self._pipeline_id = None
-        self._load_params = None
-        self._error_message = None
+    def unload_all_pipelines(self):
+        """Unload all pipelines (thread-safe)."""
+        with self._lock:
+            # Get all pipeline IDs to unload (from tracked pipelines and main pipeline)
+            pipeline_ids_to_unload = set(self._pipelines.keys())
+            if self._pipeline_id and self._pipeline_id not in pipeline_ids_to_unload:
+                pipeline_ids_to_unload.add(self._pipeline_id)
+
+            # Unload all pipelines
+            for pipeline_id in pipeline_ids_to_unload:
+                self._unload_pipeline_by_id_unsafe(pipeline_id)
+
+    def _unload_pipeline_by_id_unsafe(self, pipeline_id: str):
+        """Unload a specific pipeline by ID. Must be called with lock held."""
+        # Check if pipeline exists (either in _pipelines or as main pipeline)
+        pipeline_exists = (
+            pipeline_id in self._pipelines or self._pipeline_id == pipeline_id
+        )
+        if not pipeline_exists:
+            return
+
+        logger.info(f"Unloading pipeline: {pipeline_id}")
+
+        # Remove from tracked pipelines
+        if pipeline_id in self._pipelines:
+            del self._pipelines[pipeline_id]
+        if pipeline_id in self._pipeline_statuses:
+            del self._pipeline_statuses[pipeline_id]
+        if pipeline_id in self._pipeline_load_params:
+            del self._pipeline_load_params[pipeline_id]
+
+        # If this was the main pipeline, also clear main pipeline state
+        if self._pipeline_id == pipeline_id:
+            self._status = PipelineStatus.NOT_LOADED
+            self._pipeline = None
+            self._pipeline_id = None
+            self._load_params = None
+            self._error_message = None
 
         # Cleanup resources
         gc.collect()
@@ -336,6 +527,7 @@ class PipelineManager:
             "memflow",
             "ltx2",
             "video-depth-anything",
+            "controller-viz",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -710,11 +902,11 @@ class PipelineManager:
 
             # Add LTX2-specific parameters
             if load_params:
-                config["num_frames"] = load_params.get("num_frames", 121)
+                config["num_frames"] = load_params.get("num_frames", 33)
                 config["frame_rate"] = load_params.get("frame_rate", 24.0)
                 config["randomize_seed"] = load_params.get("randomize_seed", False)
             else:
-                config["num_frames"] = 121
+                config["num_frames"] = 33
                 config["frame_rate"] = 24.0
                 config["randomize_seed"] = False
 
@@ -726,13 +918,27 @@ class PipelineManager:
             logger.info("LTX2 pipeline initialized")
             return pipeline
 
+        elif pipeline_id == "controller-viz":
+            from scope.core.pipelines import ControllerVisualizerPipeline
+
+            # Use load parameters for resolution, default to 512x512
+            height = 512
+            width = 512
+            if load_params:
+                height = load_params.get("height", 512)
+                width = load_params.get("width", 512)
+
+            pipeline = ControllerVisualizerPipeline(
+                height=height,
+                width=width,
+                device=get_device(),
+                dtype=torch.float32,
+            )
+            logger.info("ControllerVisualizer pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
-
-    def unload_pipeline(self):
-        """Unload the current pipeline (thread-safe)."""
-        with self._lock:
-            self._unload_pipeline_unsafe()
 
     def is_loaded(self) -> bool:
         """Check if pipeline is loaded and ready (thread-safe)."""

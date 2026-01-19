@@ -121,9 +121,9 @@ class VideoProcessingTrack(MediaStreamTrack):
         # Keep running while either WebRTC input is active OR Spout input is enabled
         while self.input_task_running or self._spout_receiver_enabled:
             try:
-                # Update FPS: use minimum of input FPS and pipeline FPS
+                # Update FPS: use the FPS from the pipeline chain
                 if self.frame_processor:
-                    self.fps = self.frame_processor.get_output_fps()
+                    self.fps = self.frame_processor.get_fps()
                     self.frame_ptime = 1.0 / self.fps
 
                 # If paused, wait for the appropriate frame interval before returning

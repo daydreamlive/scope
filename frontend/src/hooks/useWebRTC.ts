@@ -19,6 +19,10 @@ interface InitialParameters {
   kv_cache_attention_bias?: number;
   vace_ref_images?: string[];
   vace_context_scale?: number;
+  pipeline_ids?: string[];
+  images?: string[];
+  first_frame_image?: string;
+  last_frame_image?: string;
 }
 
 interface UseWebRTCOptions {
@@ -360,6 +364,10 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       vace_use_input_video?: boolean;
       vace_context_scale?: number;
       randomize_seed?: boolean;
+      ctrl_input?: { button: string[]; mouse: [number, number] };
+      images?: string[];
+      first_frame_image?: string;
+      last_frame_image?: string;
     }) => {
       if (
         dataChannelRef.current &&

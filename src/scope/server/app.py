@@ -15,15 +15,19 @@ from functools import wraps
 from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
-import torch
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from .pipeline_manager import PipelineManager
+    from .webrtc import WebRTCManager
 
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
@@ -40,7 +44,6 @@ from .models_config import (
     get_models_dir,
     models_are_downloaded,
 )
-from .pipeline_manager import PipelineManager
 from .schema import (
     AssetFileInfo,
     AssetsResponse,
@@ -55,7 +58,6 @@ from .schema import (
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
-from .webrtc import WebRTCManager
 
 
 class STUNErrorFilter(logging.Filter):
@@ -205,7 +207,7 @@ async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipeline(pipeline_id),
+            pipeline_manager.load_pipelines([pipeline_id]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
@@ -215,6 +217,12 @@ async def prewarm_pipeline(pipeline_id: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup and shutdown events."""
+    # Lazy imports to avoid loading torch at CLI startup (fixes Windows DLL locking)
+    import torch
+
+    from .pipeline_manager import PipelineManager
+    from .webrtc import WebRTCManager
+
     # Startup
     global webrtc_manager, pipeline_manager
 
@@ -261,16 +269,16 @@ async def lifespan(app: FastAPI):
 
     if pipeline_manager:
         logger.info("Shutting down pipeline manager...")
-        pipeline_manager.unload_pipeline()
+        pipeline_manager.unload_all_pipelines()
         logger.info("Pipeline manager shutdown complete")
 
 
-def get_webrtc_manager() -> WebRTCManager:
+def get_webrtc_manager() -> "WebRTCManager":
     """Dependency to get WebRTC manager instance."""
     return webrtc_manager
 
 
-def get_pipeline_manager() -> PipelineManager:
+def get_pipeline_manager() -> "PipelineManager":
     """Dependency to get pipeline manager instance."""
     return pipeline_manager
 
@@ -326,18 +334,26 @@ async def root():
 @app.post("/api/v1/pipeline/load")
 async def load_pipeline(
     request: PipelineLoadRequest,
-    pipeline_manager: PipelineManager = Depends(get_pipeline_manager),
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
 ):
-    """Load a pipeline."""
+    """Load one or more pipelines."""
     try:
         # Convert pydantic model to dict for pipeline manager
         load_params_dict = None
         if request.load_params:
             load_params_dict = request.load_params.model_dump()
 
+        # Get pipeline IDs to load
+        pipeline_ids = request.pipeline_ids
+        if not pipeline_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="pipeline_ids must be provided and cannot be empty",
+            )
+
         # Start loading in background without blocking
         asyncio.create_task(
-            pipeline_manager.load_pipeline(request.pipeline_id, load_params_dict)
+            pipeline_manager.load_pipelines(pipeline_ids, load_params_dict)
         )
         return {"message": "Pipeline loading initiated successfully"}
     except Exception as e:
@@ -347,7 +363,7 @@ async def load_pipeline(
 
 @app.get("/api/v1/pipeline/status", response_model=PipelineStatusResponse)
 async def get_pipeline_status(
-    pipeline_manager: PipelineManager = Depends(get_pipeline_manager),
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
 ):
     """Get current pipeline status."""
     try:
@@ -389,7 +405,7 @@ async def get_pipeline_schemas():
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
-    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
 ):
     """Return ICE server configuration for frontend WebRTC connection."""
     ice_servers = []
@@ -409,8 +425,8 @@ async def get_ice_servers(
 @app.post("/api/v1/webrtc/offer", response_model=WebRTCOfferResponse)
 async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
-    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
-    pipeline_manager: PipelineManager = Depends(get_pipeline_manager),
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
 ):
     """Handle WebRTC offer and return answer."""
     try:
@@ -435,7 +451,7 @@ async def handle_webrtc_offer(
 async def add_ice_candidate(
     session_id: str,
     candidate_request: IceCandidateRequest,
-    webrtc_manager: WebRTCManager = Depends(get_webrtc_manager),
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
 ):
     """Add ICE candidate(s) to an existing WebRTC session (Trickle ICE).
 
@@ -769,6 +785,8 @@ def is_spout_available() -> bool:
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info():
     """Get hardware information including available VRAM and Spout availability."""
+    import torch  # Lazy import to avoid loading at CLI startup
+
     try:
         vram_gb = None
 

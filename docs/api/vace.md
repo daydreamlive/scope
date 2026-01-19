@@ -8,6 +8,8 @@ VACE allows you to:
 
 - Condition generation on reference images (style, character, scene)
 - Use control videos to preserve structure and motion
+- Extend video from first and/or last frames (FFLF extension mode)
+- Inpaint specific regions using masks
 - Control the influence strength of visual conditioning
 
 ## Prerequisites
@@ -106,10 +108,13 @@ dataChannel.send(JSON.stringify({
 
 ## VACE Parameters
 
-| Parameter            | Type  | Range   | Default | Description                   |
-| -------------------- | ----- | ------- | ------- | ----------------------------- |
-| `vace_ref_images`    | array | -       | `[]`    | List of reference image paths |
-| `vace_context_scale` | float | 0.0-2.0 | 1.0     | Visual conditioning strength  |
+| Parameter            | Type   | Range   | Default | Description                                      |
+| -------------------- | ------ | ------- | ------- | ------------------------------------------------ |
+| `vace_ref_images`    | array  | -       | `[]`    | List of reference image paths                    |
+| `vace_context_scale` | float  | 0.0-2.0 | 1.0     | Visual conditioning strength                     |
+| `first_frame_image`  | string | -       | `null`  | Path to first frame for FFLF extension mode      |
+| `last_frame_image`   | string | -       | `null`  | Path to last frame for FFLF extension mode       |
+| `vace_input_masks`   | tensor | -       | `null`  | Masks for inpainting (1=generate, 0=preserve)    |
 
 ### Context Scale
 
@@ -187,6 +192,39 @@ dataChannel.send(JSON.stringify({
 This allows you to:
 - Use the control video for motion and structure
 - Use reference images for style, character appearance, or scene elements
+
+## First Frame Last Frame (FFLF) Extension Mode
+
+FFLF extension mode generates video that connects reference frames at the start and/or end of the sequence. This is useful for creating smooth transitions or extending existing video clips.
+
+You can provide `first_frame_image`, `last_frame_image`, or both:
+
+- `first_frame_image`: Generate video extending after this frame
+- `last_frame_image`: Generate video extending before this frame
+- Both: Generate video connecting the two frames
+
+### Usage Examples
+
+```javascript
+// Extend from first frame
+dataChannel.send(JSON.stringify({
+  first_frame_image: "/path/to/start_frame.png",
+  prompts: [{ text: "A person walking through a forest", weight: 1.0 }]
+}));
+
+// Extend to last frame
+dataChannel.send(JSON.stringify({
+  last_frame_image: "/path/to/end_frame.png",
+  prompts: [{ text: "A person walking through a forest", weight: 1.0 }]
+}));
+
+// Connect first and last frames
+dataChannel.send(JSON.stringify({
+  first_frame_image: "/path/to/start_frame.png",
+  last_frame_image: "/path/to/end_frame.png",
+  prompts: [{ text: "A smooth transition between scenes", weight: 1.0 }]
+}));
+```
 
 ## Listing Available Assets
 

@@ -7,6 +7,9 @@ export type InputMode = "text" | "video";
 // VAE type for model selection (dynamic from backend registry)
 export type VaeType = string;
 
+// Extension mode for FFLF (First-Frame-Last-Frame) feature
+export type ExtensionMode = "firstframe" | "lastframe" | "firstlastframe";
+
 // WebRTC ICE server configuration
 export interface IceServerConfig {
   urls: string | string[];
@@ -79,8 +82,14 @@ export interface SettingsState {
   vaceUseInputVideo?: boolean;
   refImages?: string[];
   vaceContextScale?: number;
+  // FFLF (First-Frame-Last-Frame) extension mode
+  firstFrameImage?: string;
+  lastFrameImage?: string;
+  extensionMode?: ExtensionMode;
   // VAE type selection
   vaeType?: VaeType;
+  // Preprocessors
+  preprocessorIds?: string[];
 }
 
 export interface PipelineInfo {
@@ -97,6 +106,7 @@ export interface PipelineInfo {
   defaultTemporalInterpolationSteps?: number;
   supportsLoRA?: boolean;
   supportsVACE?: boolean;
+  usage?: string[];
 
   // Multi-mode support
   supportedModes: InputMode[];
@@ -116,6 +126,10 @@ export interface PipelineInfo {
   supportsNumFrames?: boolean;
   // Default number of frames for pipelines that support it
   defaultNumFrames?: number;
+  // Controller input support - presence of ctrl_input field in pipeline schema
+  supportsControllerInput?: boolean;
+  // Images input support - presence of images field in pipeline schema
+  supportsImages?: boolean;
 }
 
 export interface DownloadProgress {

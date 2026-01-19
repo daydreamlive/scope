@@ -1,26 +1,14 @@
 import json
 import os
-from enum import Enum
 from pathlib import Path
 
 import torch
 from omegaconf import OmegaConf
 from safetensors.torch import load_file as load_safetensors
 
-
-class Quantization(str, Enum):
-    """Quantization method enumeration."""
-
-    FP8_E4M3FN = "fp8_e4m3fn"
-
-
-class VaeType(str, Enum):
-    """VAE type enumeration."""
-
-    WAN = "wan"
-    LIGHTVAE = "lightvae"
-    TAE = "tae"
-    LIGHTTAE = "lighttae"
+# Re-export enums for backwards compatibility
+from .enums import Quantization as Quantization  # noqa: PLC0414
+from .enums import VaeType as VaeType  # noqa: PLC0414
 
 
 def load_state_dict(weights_path: str) -> dict:

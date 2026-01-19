@@ -1,6 +1,6 @@
 # VACE Implementation Design
 
-This document outlines the key architectural differences between the Scope VACE implementation and the original VACE implementation from Alibaba's repository.
+This document outlines the key architectural differences between the Scope VACE implementation and the [original VACE implementation](https://github.com/ali-vilab/VACE) from Alibaba.
 
 ## Overview
 
@@ -10,7 +10,7 @@ Our VACE (All-In-One Video Creation and Editing) implementation adapts the origi
 
 ### Original VACE: Reference Frames in Diffusion Latent Space
 
-**Encoding (notes/VACE/vace/models/wan/wan_vace.py:153):**
+**Encoding (`wan_vace.py`, `vace_encode_frames()`):**
 ```python
 # Reference latents concatenated with video latents in temporal dimension
 latent = torch.cat([*ref_latent, latent], dim=1)
@@ -18,7 +18,7 @@ latent = torch.cat([*ref_latent, latent], dim=1)
 
 If you have 2 reference images and 20 video frames, the concatenated latent has shape `[channels, 22 frames, H, W]`.
 
-**Noise Generation (wan_vace.py:343-354):**
+**Noise Generation (`wan_vace.py`, `generate()`):**
 ```python
 target_shape = list(z0[0].shape)  # e.g., [32, 22, H, W] with refs
 target_shape[0] = int(target_shape[0] / 2)  # [16, 22, H, W]
@@ -27,7 +27,7 @@ noise = torch.randn(target_shape[0], target_shape[1], ...)  # Noise for ALL 22 f
 
 The noise tensor includes positions for reference frames. The diffusion model denoises a unified latent space containing both reference and video frame positions.
 
-**Decoding (wan_vace.py:252-256):**
+**Decoding (`wan_vace.py`, `decode_latent()`):**
 ```python
 # Must strip reference frames before VAE decode
 trimed_zs = []
@@ -42,15 +42,15 @@ return vae.decode(trimed_zs)
 
 ### Our Implementation: Reference Frames in Conditioning Space Only
 
-**Encoding (src/scope/core/pipelines/wan2_1/vace/blocks/vace_encoding.py:236-237):**
+**Encoding (`vace_encoding.py`, `_encode_reference_only()`):**
 ```python
 # R2V mode: vace_context contains ONLY reference images
 vace_context = [ref_latent_batch]  # Shape: [96, num_refs, H, W]
 ```
 
-For conditioning mode (depth/flow/etc.), references ARE concatenated with conditioning frames in `vace_context` (via vace_utils.vace_encode_frames line 95), but this concatenated tensor is used ONLY for hint generation, not for diffusion latent space.
+For conditioning mode (depth/flow/etc.), references ARE concatenated with conditioning frames in `vace_context` (via `vace_encode_frames()`), but this concatenated tensor is used ONLY for hint generation, not for diffusion latent space.
 
-**Noise Generation (src/scope/core/pipelines/wan2_1/blocks/prepare_latents.py:104-115):**
+**Noise Generation (`prepare_latents.py`):**
 ```python
 # Noise generated ONLY for video frames (no reference frame positions)
 latents = torch.randn([
@@ -64,7 +64,7 @@ latents = torch.randn([
 
 The noise tensor contains NO reference frame positions. It's sized only for the video frames to be generated.
 
-**Denoising Flow (src/scope/core/pipelines/wan2_1/vace/models/causal_vace_model.py:342-354):**
+**Denoising Flow (`causal_vace_model.py`, `forward()`):**
 ```python
 # vace_context processed separately to generate hints
 hints = self.forward_vace(x, vace_context, seq_len, ...)
@@ -78,7 +78,7 @@ for block_index, block in enumerate(self.blocks):
     x = block(x, **kwargs)  # Denoises video latents, hints injected via residual
 ```
 
-**Decoding (src/scope/core/pipelines/wan2_1/blocks/decode.py:52):**
+**Decoding (`decode.py`):**
 ```python
 # No frame stripping needed - latents contain ONLY video frames
 video = components.vae.decode_to_pixel(block_state.latents, use_cache=True)
@@ -164,7 +164,7 @@ Including reference frames in the latent space would break chunk size consistenc
 
 Both implementations use the same hint injection pattern (this is NOT a difference):
 
-**VACE Blocks (notes/VACE/vace/models/wan/modules/model.py:120-142):**
+**VACE Blocks (`forward_vace()`):**
 ```python
 def forward_vace(self, x, vace_context, seq_len, kwargs):
     # Embed vace_context (refs + conditioning)
@@ -179,7 +179,7 @@ def forward_vace(self, x, vace_context, seq_len, kwargs):
     return hints
 ```
 
-**Hint Injection (modules/model.py:63-67, our attention_blocks.py:175-181):**
+**Hint Injection (both `model.py` and `attention_blocks.py`):**
 ```python
 def forward(self, x, hints, context_scale=1.0, **kwargs):
     x = super().forward(x, **kwargs)  # Standard transformer block
@@ -197,20 +197,20 @@ The hint injection uses simple **residual addition** (not cross-attention). Zero
 For R2V (reference-to-video) generation, when there is no source video, the original VACE uses zero tensors as temporal placeholders:
 
 ```python
-# From vace/models/wan/wan_vace.py:214
+# wan_vace.py, prepare_source()
 if sub_src_video is None:
     src_video[i] = torch.zeros((3, num_frames, image_size[0], image_size[1]), device=device)
     src_mask[i] = torch.ones_like(src_video[i], device=device)
 ```
 
-This zero tensor is then passed as `input_frames` to `vace_encode_frames()` (line 339), which encodes it for VACE context. The bidirectional DiT expects a full temporal sequence, and these zero placeholder frames fill the positions where new content will be generated.
+This zero tensor is then passed as `input_frames` to `vace_encode_frames()`, which encodes it for VACE context. The bidirectional DiT expects a full temporal sequence, and these zero placeholder frames fill the positions where new content will be generated.
 
 Note: While the `frameref.py` annotator uses grayscale frames (127.5) for preprocessing/annotation purposes, the actual VACE model receives zero tensors when no source video is provided.
 
 ### Our Approach
 
 ```python
-# src/scope/core/pipelines/wan2_1/vace/blocks/vace_encoding.py:206-213
+# vace_encoding.py, _encode_reference_only()
 prepared_refs_stacked = torch.cat(prepared_refs, dim=1).unsqueeze(0)
 ref_latents_out = vae.encode_to_latent(prepared_refs_stacked, use_cache=False)
 ```
@@ -223,21 +223,60 @@ We encode reference images directly without dummy frames. This works because:
 
 When we tested grayscale placeholder frames in our causal setup, it produced artifacts. Direct encoding works cleanly for streaming generation.
 
+## Extension to FFLF, Conditioning, and Inpainting
+
+The architectural separation described above (refs in conditioning space, not diffusion latents) applies uniformly to all VACE modes:
+
+### Shared Mechanism: Dual-Stream Encoding
+
+All three features use the same dual-stream encoding from original VACE:
+
+```python
+# Both implementations use this pattern for masked encoding
+masks = [torch.where(m > 0.5, 1.0, 0.0) for m in masks]
+inactive = [i * (1 - m) + 0 * m for i, m in zip(frames, masks)]  # Preserved regions
+reactive = [i * m + 0 * (1 - m) for i, m in zip(frames, masks)]  # Generated regions
+latents = [torch.cat((inactive, reactive), dim=0) for ...]       # Channel concat
+```
+
+This is **not** a difference—it's shared infrastructure. The difference is where the resulting latents live (vace_context vs diffusion latents).
+
+### Implementation Adaptations
+
+| Adaptation | Reason |
+|------------|--------|
+| **Temporal replication** of refs across VAE group | Preserves reference fidelity through VAE/TAE's temporal convolutions |
+| **Separate encoder caches** for inactive/reactive | Prevents VAE/TAE memory pollution between streams |
+| **Cache-skipping for reactive** in FFLF/inpainting modes | Weakens temporal blending in newly generated regions, preventing ghosting |
+
+### Mode Detection
+
+Original VACE uses explicit mode parameters. We infer mode from inputs:
+
+- `first_frame_image` provided → firstframe mode
+- `last_frame_image` provided → lastframe mode
+- Both provided → firstlastframe mode
+- `vace_input_frames` with all-1s masks → conditioning mode
+- `vace_input_frames` with mixed masks → inpainting mode
+
+The cache behavior auto-adapts: conditioning mode caches both streams; inpainting mode skips reactive cache.
+
 ## Implementation Files
 
 Key files in our VACE infrastructure:
 
-- `src/scope/core/pipelines/wan2_1/vace/models/causal_vace_model.py` - Wrapper that adds VACE to any CausalWanModel
-- `src/scope/core/pipelines/wan2_1/vace/models/attention_blocks.py` - Hint generation and injection
-- `src/scope/core/pipelines/wan2_1/vace/blocks/vace_encoding.py` - Encoding block (refs-only mode, no dummy frames)
-- `src/scope/core/pipelines/wan2_1/vace/utils/encoding.py` - Encoding utilities (refs+conditioning concatenation)
-- `src/scope/core/pipelines/wan2_1/blocks/prepare_latents.py` - Noise generation (video frames only)
-- `src/scope/core/pipelines/wan2_1/blocks/decode.py` - Decode block (no frame stripping)
+- `vace/models/causal_vace_model.py` - Wrapper adding VACE to CausalWanModel; `forward_vace()` generates hints
+- `vace/models/attention_blocks.py` - VACE block factories; hint injection via residual addition
+- `vace/blocks/vace_encoding.py` - Encoding block with mode routing (R2V, FFLF, conditioning, inpainting)
+- `vace/utils/encoding.py` - `vace_encode_frames()`, `vace_encode_masks()`, `vace_latent()` utilities
+- `blocks/prepare_latents.py` - Noise generation for video frames only
+- `blocks/decode.py` - VAE decode without frame stripping
 
 Original VACE reference:
 
-- `notes/VACE/vace/models/wan/wan_vace.py` - Original pipeline (refs in latent space, frame stripping)
-- `notes/VACE/vace/models/wan/modules/model.py` - Original model architecture (hint injection pattern)
+- [`wan_vace.py`](https://github.com/ali-vilab/VACE/blob/main/vace/models/wan/wan_vace.py) - `vace_encode_frames()`, `decode_latent()` with frame stripping
+- [`model.py`](https://github.com/ali-vilab/VACE/blob/main/vace/models/wan/modules/model.py) - `forward_vace()`, hint injection pattern
+- [`frameref.py`](https://github.com/ali-vilab/VACE/blob/main/vace/annotators/frameref.py) - `FrameRefExpandAnnotator` for extension modes
 
 ---
 

@@ -10,12 +10,19 @@ Child classes can override field defaults with type-annotated assignments:
     height: int = 320
     width: int = 576
     denoising_steps: list[int] = [1000, 750, 500, 250]
+
+For pipelines that support controller input (WASD/mouse), include a ctrl_input field:
+    ctrl_input: CtrlInput | None = None
 """
 
+from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
+
+# Re-export CtrlInput for convenient import by pipeline schemas
+from scope.core.pipelines.controller import CtrlInput as CtrlInput  # noqa: PLC0414
 
 if TYPE_CHECKING:
     from .artifacts import Artifact
@@ -87,6 +94,12 @@ def vace_context_scale_field(default: float = 1.0) -> FieldInfo:
 
 # Type alias for input modes
 InputMode = Literal["text", "video"]
+
+
+class UsageType(str, Enum):
+    """Usage types for pipelines."""
+
+    PREPROCESSOR = "preprocessor"
 
 
 class ModeDefaults(BaseModel):
@@ -178,6 +191,11 @@ class BasePipelineConfig(BaseModel):
     supports_randomize_seed: ClassVar[bool] = False
     # Whether this pipeline supports configurable number of frames
     supports_num_frames: ClassVar[bool] = False
+    # Usage types: list of usage types indicating how this pipeline can be used.
+    # Pipelines are always available in the pipeline select dropdown.
+    # Only preprocessors need to explicitly define usage = [UsageType.PREPROCESSOR]
+    # to appear in the preprocessor dropdown.
+    usage: ClassVar[list[UsageType]] = []
 
     # Mode configuration - keys are mode names, values are ModeDefaults with field overrides
     # Use default=True to mark the default mode. Only include fields that differ from base.
@@ -307,6 +325,7 @@ class BasePipelineConfig(BaseModel):
         metadata["modified"] = cls.modified
         metadata["supports_randomize_seed"] = cls.supports_randomize_seed
         metadata["supports_num_frames"] = cls.supports_num_frames
+        metadata["usage"] = cls.usage
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults (excluding None values and the "default" flag)

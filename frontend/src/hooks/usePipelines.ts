@@ -36,6 +36,14 @@ export function usePipelines() {
             }
           }
 
+          // Check if pipeline supports controller input (has ctrl_input field in schema)
+          const supportsControllerInput =
+            schema.config_schema?.properties?.ctrl_input !== undefined;
+
+          // Check if pipeline supports images input (has images field in schema)
+          const supportsImages =
+            schema.config_schema?.properties?.images !== undefined;
+
           transformed[id] = {
             name: schema.name,
             about: schema.description,
@@ -51,6 +59,7 @@ export function usePipelines() {
             requiresModels: schema.requires_models,
             supportsLoRA: schema.supports_lora,
             supportsVACE: schema.supports_vace,
+            usage: schema.usage,
             supportsCacheManagement: schema.supports_cache_management,
             supportsKvCacheBias: schema.supports_kv_cache_bias,
             supportsQuantization: schema.supports_quantization,
@@ -65,6 +74,8 @@ export function usePipelines() {
               (schema.config_schema?.properties?.num_frames?.default as
                 | number
                 | undefined) ?? undefined,
+            supportsControllerInput,
+            supportsImages,
           };
         }
 

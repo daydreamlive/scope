@@ -19,6 +19,8 @@ import {
   ChevronUp,
   ChevronDown,
   Trash2,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 
 import type { PromptItem } from "../lib/api";
@@ -159,6 +161,8 @@ interface PromptTimelineProps {
   onScrollToTime?: (scrollFn: (time: number) => void) => void;
   isStreaming?: boolean;
   isLoading?: boolean;
+  videoScaleMode?: "fit" | "native";
+  onVideoScaleModeToggle?: () => void;
 }
 
 export function PromptTimeline({
@@ -185,6 +189,8 @@ export function PromptTimeline({
   onScrollToTime,
   isStreaming = false,
   isLoading = false,
+  videoScaleMode = "fit",
+  onVideoScaleModeToggle,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -671,6 +677,25 @@ export function PromptTimeline({
             </Button>
           </div>
           <div className="flex items-center gap-2">
+            {onVideoScaleModeToggle && (
+              <Button
+                onClick={onVideoScaleModeToggle}
+                size="sm"
+                variant="outline"
+                disabled={!isStreaming}
+                title={
+                  videoScaleMode === "fit"
+                    ? "Switch to native resolution"
+                    : "Switch to fit to window"
+                }
+              >
+                {videoScaleMode === "fit" ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+              </Button>
+            )}
             <Button
               onClick={handleExport}
               disabled={disabled || isLoading}

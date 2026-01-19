@@ -99,6 +99,9 @@ interface SettingsPanelProps {
   onVaeTypeChange?: (vaeType: VaeType) => void;
   // Available VAE types from backend registry
   vaeTypes?: string[];
+  // Preprocessors
+  preprocessorIds?: string[];
+  onPreprocessorIdsChange?: (ids: string[]) => void;
 }
 
 export function SettingsPanel({
@@ -147,6 +150,8 @@ export function SettingsPanel({
   vaeType = "wan",
   onVaeTypeChange,
   vaeTypes,
+  preprocessorIds = [],
+  onPreprocessorIdsChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -315,7 +320,7 @@ export function SettingsPanel({
             </SelectTrigger>
             <SelectContent>
               {pipelines &&
-                Object.keys(pipelines).map(id => (
+                Object.entries(pipelines).map(([id]) => (
                   <SelectItem key={id} value={id}>
                     {id}
                   </SelectItem>
@@ -418,6 +423,17 @@ export function SettingsPanel({
               </Toggle>
             </div>
 
+            {/* Warning when VACE is enabled and quantization is set */}
+            {vaceEnabled && quantization !== null && (
+              <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
+                <p className="text-xs text-amber-600 dark:text-amber-500">
+                  VACE is incompatible with FP8 quantization. Please disable
+                  quantization to use VACE.
+                </p>
+              </div>
+            )}
+
             {vaceEnabled && (
               <div className="rounded-lg border bg-card p-3 space-y-3">
                 <div className="flex items-center justify-between gap-2">
@@ -471,6 +487,55 @@ export function SettingsPanel({
               isStreaming={isStreaming}
               loraMergeStrategy={loraMergeStrategy}
             />
+          </div>
+        )}
+
+        {/* Preprocessor Selector - shown for pipelines that support VACE */}
+        {currentPipeline?.supportsVACE && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.preprocessor.label}
+                tooltip={PARAMETER_METADATA.preprocessor.tooltip}
+                className="text-sm text-foreground"
+              />
+              <Select
+                value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
+                onValueChange={value => {
+                  if (value === "none") {
+                    onPreprocessorIdsChange?.([]);
+                  } else {
+                    onPreprocessorIdsChange?.([value]);
+                  }
+                }}
+                disabled={isStreaming || isLoading}
+              >
+                <SelectTrigger className="w-[140px] h-7">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {Object.entries(pipelines || {})
+                    .filter(([, info]) => {
+                      const isPreprocessor =
+                        info.usage?.includes("preprocessor") ?? false;
+                      if (!isPreprocessor) return false;
+                      // Filter by input mode: only show preprocessors that support the current input mode
+                      if (inputMode) {
+                        return (
+                          info.supportedModes?.includes(inputMode) ?? false
+                        );
+                      }
+                      return true;
+                    })
+                    .map(([pid]) => (
+                      <SelectItem key={pid} value={pid}>
+                        {pid}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
 
@@ -882,7 +947,7 @@ export function SettingsPanel({
                         value === "none" ? null : (value as "fp8_e4m3fn")
                       );
                     }}
-                    disabled={isStreaming}
+                    disabled={isStreaming || vaceEnabled}
                   >
                     <SelectTrigger className="w-[140px] h-7">
                       <SelectValue />
@@ -895,6 +960,13 @@ export function SettingsPanel({
                     </SelectContent>
                   </Select>
                 </div>
+                {/* Note when quantization is disabled due to VACE */}
+                {vaceEnabled && (
+                  <p className="text-xs text-muted-foreground">
+                    Disabled because VACE is enabled. Disable VACE to use FP8
+                    quantization.
+                  </p>
+                )}
               </div>
             </div>
           </div>

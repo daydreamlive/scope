@@ -97,4 +97,8 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
   },
+  preprocessor: {
+    label: "Preprocessor:",
+    tooltip: "Select a preprocessor to apply before the main pipeline.",
+  },
 };

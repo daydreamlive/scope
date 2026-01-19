@@ -154,6 +154,11 @@ def _register_pipelines():
             ".video_depth_anything.pipeline",
             "VideoDepthAnythingPipeline",
         ),
+        (
+            "controller-viz",
+            ".controller_viz.pipeline",
+            "ControllerVisualizerPipeline",
+        ),
     ]
 
     # Try to import and register each pipeline
