@@ -350,7 +350,6 @@ class PipelineManager:
 
             # Unload pipelines that need to be unloaded
             for pipeline_id_to_unload in pipelines_to_unload:
-                logger.info(f"Unloading pipeline {pipeline_id_to_unload}")
                 self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
 
         # Load all pipelines
