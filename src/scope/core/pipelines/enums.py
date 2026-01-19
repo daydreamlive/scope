@@ -12,6 +12,7 @@ class Quantization(str, Enum):
     """Quantization method enumeration."""
 
     FP8_E4M3FN = "fp8_e4m3fn"
+    NVFP4 = "nvfp4"  # NVFP4 E2M1 for Blackwell GPUs (SM >= 10.0)
 
 
 class VaeType(str, Enum):

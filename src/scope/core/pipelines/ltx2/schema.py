@@ -2,8 +2,11 @@
 
 from typing import ClassVar
 
+from pydantic import Field
+
 from ..base_schema import BasePipelineConfig, ModeDefaults, height_field, width_field
 from ..artifacts import HuggingfaceRepoArtifact
+from ..enums import Quantization
 
 
 class LTX2Config(BasePipelineConfig):
@@ -87,10 +90,27 @@ class LTX2Config(BasePipelineConfig):
     # Frame rate for video generation
     frame_rate: float = 24.0
 
-    # Memory optimization: Use FP8 quantization for transformer
-    # According to official LTX-2 docs, this significantly reduces VRAM usage
+    # Memory optimization: Quantization for transformer weights
+    # - fp8_e4m3fn: ~2x memory reduction (requires SM >= 8.9 Ada)
+    # - nvfp4: ~4x memory reduction (requires SM >= 10.0 Blackwell)
+    # - None: Full precision BF16
     # Requires PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-    use_fp8: bool = True
+    quantization: Quantization | None = Field(
+        default=Quantization.FP8_E4M3FN,
+        description=(
+            "Quantization method for transformer weights. "
+            "fp8_e4m3fn reduces memory ~2x (requires Ada GPU SM >= 8.9). "
+            "nvfp4 reduces memory ~4x (requires Blackwell GPU SM >= 10.0). "
+            "None uses full precision BF16."
+        ),
+    )
+
+    # Deprecated: Use 'quantization' field instead
+    # Kept for backwards compatibility
+    use_fp8: bool | None = Field(
+        default=None,
+        description="Deprecated: Use 'quantization' field instead.",
+    )
 
     # Randomize seed on every generation
     # LTX2 is bidirectional (not autoregressive), so each chunk is independent.

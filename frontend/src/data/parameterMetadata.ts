@@ -65,7 +65,7 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   quantization: {
     label: "Quantization:",
     tooltip:
-      "Quantization method for the diffusion model. fp8_e4m3fn (Dynamic) reduces memory usage, but might affect performance and quality. None uses full precision and uses more memory, but does not affect performance and quality.",
+      "Quantization method for transformer weights. FP8 reduces memory ~2x (requires Ada GPU SM >= 8.9). NVFP4 reduces memory ~4x (requires Blackwell GPU SM >= 10.0). None uses full precision BF16.",
   },
   kvCacheAttentionBias: {
     label: "Cache Bias:",

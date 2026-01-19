@@ -1,4 +1,6 @@
+import logging
 from dataclasses import replace
+from enum import Enum
 
 import torch
 
@@ -35,6 +37,16 @@ from ltx_core.text_encoders.gemma import (
     AVGemmaTextEncoderModelConfigurator,
     module_ops_from_gemma_root,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class QuantizationType(str, Enum):
+    """Quantization type for transformer weights."""
+
+    NONE = "none"
+    FP8 = "fp8"
+    NVFP4 = "nvfp4"
 
 
 class ModelLedger:
@@ -93,6 +105,7 @@ class ModelLedger:
         loras: LoraPathStrengthAndSDOps | None = None,
         registry: Registry | None = None,
         fp8transformer: bool = False,
+        quantization: str | None = None,
     ):
         self.dtype = dtype
         self.device = device
@@ -101,7 +114,18 @@ class ModelLedger:
         self.spatial_upsampler_path = spatial_upsampler_path
         self.loras = loras or ()
         self.registry = registry or DummyRegistry()
-        self.fp8transformer = fp8transformer
+
+        # Resolve quantization type from new parameter or legacy fp8transformer flag
+        if quantization is not None:
+            self.quantization = QuantizationType(quantization)
+        elif fp8transformer:
+            self.quantization = QuantizationType.FP8
+        else:
+            self.quantization = QuantizationType.NONE
+
+        # Keep fp8transformer for backwards compatibility
+        self.fp8transformer = fp8transformer or (self.quantization == QuantizationType.FP8)
+
         self.build_model_builders()
 
     def build_model_builders(self) -> None:
@@ -173,7 +197,7 @@ class ModelLedger:
             spatial_upsampler_path=self.spatial_upsampler_path,
             loras=(*self.loras, *loras),
             registry=self.registry,
-            fp8transformer=self.fp8transformer,
+            quantization=self.quantization.value,
         )
 
     def transformer(self) -> X0Model:
@@ -181,14 +205,43 @@ class ModelLedger:
             raise ValueError(
                 "Transformer not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
-        if self.fp8transformer:
+
+        if self.quantization == QuantizationType.FP8:
+            # FP8 quantization: downcast weights to FP8 and upcast during inference
             fp8_builder = replace(
                 self.transformer_builder,
                 module_ops=(UPCAST_DURING_INFERENCE,),
                 model_sd_ops=LTXV_MODEL_COMFY_RENAMING_WITH_TRANSFORMER_LINEAR_DOWNCAST_MAP,
             )
             return X0Model(fp8_builder.build(device=self._target_device())).to(self.device).eval()
+
+        elif self.quantization == QuantizationType.NVFP4:
+            # NVFP4 quantization: build in BF16 first, then quantize to NVFP4
+            from ltx_core.loader.nvfp4_quantize import (
+                check_nvfp4_support,
+                quantize_model_nvfp4,
+                transformer_block_filter,
+            )
+
+            supported, reason = check_nvfp4_support()
+            if not supported:
+                raise RuntimeError(f"NVFP4 quantization not supported: {reason}")
+
+            logger.info("Building transformer with NVFP4 quantization...")
+
+            # Build model in BF16 first
+            model = X0Model(
+                self.transformer_builder.build(device=self._target_device(), dtype=self.dtype)
+            ).to(self.device)
+
+            # Quantize transformer blocks to NVFP4
+            logger.info("Quantizing transformer blocks to NVFP4...")
+            quantize_model_nvfp4(model, layer_filter=transformer_block_filter)
+
+            return model.eval()
+
         else:
+            # No quantization (full precision BF16)
             return (
                 X0Model(self.transformer_builder.build(device=self._target_device(), dtype=self.dtype))
                 .to(self.device)

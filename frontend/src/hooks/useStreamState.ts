@@ -39,7 +39,7 @@ function getFallbackDefaults(mode?: InputMode) {
     defaultTemporalInterpolationSteps: undefined as number | undefined,
     inputMode: effectiveMode,
     seed: BASE_FALLBACK.seed,
-    quantization: undefined as "fp8_e4m3fn" | undefined,
+    quantization: undefined as "fp8_e4m3fn" | "nvfp4" | undefined,
   };
 }
 
@@ -108,7 +108,7 @@ export function useStreamState() {
           defaultTemporalInterpolationSteps,
           inputMode: effectiveMode,
           seed: (props.base_seed?.default as number) ?? 42,
-          quantization: undefined as "fp8_e4m3fn" | undefined,
+          quantization: undefined as "fp8_e4m3fn" | "nvfp4" | undefined,
         };
       }
       // Fallback to derived defaults if schemas not loaded

@@ -28,49 +28,40 @@ class LTX2Pipeline(Pipeline):
     This implementation is optimized for maximum inference speed by keeping all models
     in VRAM:
 
-    1. **FP8 Quantization for Weights Only**: Enabled by default (use_fp8=True) to
-       reduce transformer weights from ~45GB to ~25GB. However, **activations during
-       inference remain in BF16** and are the main memory bottleneck.
+    1. **Quantization Options for Weights**:
+       - **FP8** (default): ~2x reduction, transformer weights ~25GB (requires Ada SM >= 8.9)
+       - **NVFP4**: ~4x reduction, transformer weights ~12GB (requires Blackwell SM >= 10.0)
+       - **None**: Full precision BF16, transformer weights ~45GB
+       Note: **Activations during inference remain in BF16** regardless of weight quantization.
 
-    2. **All Models Cached in VRAM**: Text encoder (~20GB), transformer (~25GB), and
+    2. **All Models Cached in VRAM**: Text encoder (~20GB), transformer, and
        video decoder (~3GB) are loaded once during initialization and kept in VRAM.
-       This eliminates all model loading overhead between generations, providing
-       maximum inference speed at the cost of higher baseline VRAM usage.
+       This eliminates all model loading overhead between generations.
 
     3. **PYTORCH_CUDA_ALLOC_CONF**: Set to "expandable_segments:True" in app.py to
-       prevent memory fragmentation with FP8 quantization.
+       prevent memory fragmentation with quantization.
 
     4. **VAE Tiling**: Uses TilingConfig for decoder to reduce peak memory during
        video decoding.
 
-    5. **No Unnecessary Models**: Video encoder is only loaded for i2v conditioning.
-
-    6. **Minimal Defaults**: 33 frames at 512x768 to fit in 96GB VRAM.
+    5. **Minimal Defaults**: 33 frames at 512x768 to fit in 96GB VRAM.
        **Activations are the bottleneck**: ~1.5GB per frame at 512x768.
 
     CRITICAL LIMITATION:
     --------------------
-    Unlike other pipelines that use torchao FP8 quantization for both weights AND
-    activations, LTX2's custom FP8 only quantizes weights. This means the transformer's
-    intermediate activations during denoising consume 60-80GB at higher resolutions.
+    Quantization only affects weights, not activations. The transformer's intermediate
+    activations during denoising consume 60-80GB at higher resolutions regardless of
+    weight quantization method.
 
-    Memory Breakdown (96GB GPU):
-    ----------------------------
+    Memory Breakdown (96GB GPU with FP8):
+    -------------------------------------
     - Text encoder (cached): ~20GB
-    - Transformer weights FP8 (cached): ~25GB
+    - Transformer weights (cached): ~25GB (FP8) / ~12GB (NVFP4) / ~45GB (BF16)
     - Video decoder (cached): ~3GB
     - **Activations during denoising**:
-      * 33 frames @ 512x768: ~50GB ✅ Fits (total ~98GB)
-      * 61 frames @ 768x1024: ~90GB ❌ OOM (total ~138GB)
-      * 121 frames @ 1024x1536: ~150GB ❌ OOM (total ~198GB)
-
-    Baseline VRAM = Text Encoder (20GB) + Transformer (25GB) + Decoder (3GB) = 48GB
-    Peak VRAM = Baseline (48GB) + Activations (resolution × frames dependent)
-
-    For higher quality, you need:
-    - A GPU with 141GB+ VRAM (H100)
-    - OR the two-stage pipeline (low-res generation + upsampling)
-    - OR generate shorter/lower-res videos
+      * 33 frames @ 512x768: ~50GB ✅ Fits
+      * 61 frames @ 768x1024: ~90GB ❌ OOM
+      * 121 frames @ 1024x1536: ~150GB ❌ OOM
 
     Reference:
     ----------
@@ -136,9 +127,20 @@ class LTX2Pipeline(Pipeline):
         logger.info(f"Loading LTX2 checkpoint from: {checkpoint_path}")
         logger.info(f"Loading Gemma text encoder from: {gemma_root}")
 
-        # Enable FP8 quantization by default to reduce VRAM usage
-        # According to official LTX-2 docs, this significantly reduces memory footprint
-        fp8_enabled = getattr(config, "use_fp8", True)
+        # Resolve quantization setting
+        # Support both new 'quantization' field and legacy 'use_fp8' field
+        from ..enums import Quantization
+
+        quantization_value = None
+        if config.quantization is not None:
+            # Map enum value to ModelLedger format
+            if config.quantization == Quantization.FP8_E4M3FN:
+                quantization_value = "fp8"
+            elif config.quantization == Quantization.NVFP4:
+                quantization_value = "nvfp4"
+        elif config.use_fp8 is True:
+            # Legacy backwards compatibility
+            quantization_value = "fp8"
 
         try:
             self.model_ledger = ModelLedger(
@@ -149,13 +151,16 @@ class LTX2Pipeline(Pipeline):
                 spatial_upsampler_path=None,  # We'll add upsampler support later
                 loras=[],
                 # Use default DummyRegistry - don't cache state dicts in RAM
-                fp8transformer=fp8_enabled,  # FP8 significantly reduces VRAM usage
+                quantization=quantization_value,
             )
         except Exception as e:
             logger.error(f"Failed to initialize ModelLedger: {e}")
             logger.error(f"Make sure model checkpoint is at: {checkpoint_path}")
             logger.error(f"Make sure Gemma text encoder is at: {gemma_root}")
             raise
+
+        # Store resolved quantization for logging
+        self._quantization = quantization_value
 
         self.pipeline_components = PipelineComponents(
             dtype=self.dtype,
@@ -181,14 +186,26 @@ class LTX2Pipeline(Pipeline):
         logger.info("All models cached successfully in VRAM")
 
         logger.info(f"LTX2 models loaded in {time.time() - start:.2f}s")
-        logger.info(f"FP8 quantization: {'enabled' if fp8_enabled else 'disabled'}")
-        if fp8_enabled:
+
+        # Log quantization status
+        if self._quantization == "nvfp4":
+            logger.info("NVFP4 quantization: enabled (Blackwell GPU SM >= 10.0)")
+            logger.info(
+                "NVFP4 provides ~4x memory reduction for transformer weights (~12GB). "
+                "Activations during inference are still in BF16 and are the main memory bottleneck. "
+                f"At {self.config.height}x{self.config.width} with {self.config.num_frames} frames, "
+                "expect ~50-60GB for activations during denoising."
+            )
+        elif self._quantization == "fp8":
+            logger.info("FP8 quantization: enabled")
             logger.warning(
                 "FP8 quantization only reduces weight size (~25GB). "
                 "Activations during inference are still in BF16 and are the main memory bottleneck. "
                 f"At {self.config.height}x{self.config.width} with {self.config.num_frames} frames, "
                 "expect ~50-60GB for activations during denoising."
             )
+        else:
+            logger.info("Quantization: disabled (full precision BF16)")
 
         # NOTE: This is currently a single-stage pipeline implementation.
         # For even lower VRAM usage, consider implementing a two-stage pipeline:

@@ -70,8 +70,8 @@ interface SettingsPanelProps {
   onNoiseControllerChange?: (enabled: boolean) => void;
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
-  quantization?: "fp8_e4m3fn" | null;
-  onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
+  quantization?: "fp8_e4m3fn" | "nvfp4" | null;
+  onQuantizationChange?: (quantization: "fp8_e4m3fn" | "nvfp4" | null) => void;
   kvCacheAttentionBias?: number;
   onKvCacheAttentionBiasChange?: (bias: number) => void;
   onResetCache?: () => void;
@@ -944,7 +944,9 @@ export function SettingsPanel({
                     value={quantization || "none"}
                     onValueChange={value => {
                       onQuantizationChange?.(
-                        value === "none" ? null : (value as "fp8_e4m3fn")
+                        value === "none"
+                          ? null
+                          : (value as "fp8_e4m3fn" | "nvfp4")
                       );
                     }}
                     disabled={isStreaming || vaceEnabled}
@@ -954,16 +956,15 @@ export function SettingsPanel({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="fp8_e4m3fn">
-                        fp8_e4m3fn (Dynamic)
-                      </SelectItem>
+                      <SelectItem value="fp8_e4m3fn">FP8 (Ada+)</SelectItem>
+                      <SelectItem value="nvfp4">NVFP4 (Blackwell)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 {/* Note when quantization is disabled due to VACE */}
                 {vaceEnabled && (
                   <p className="text-xs text-muted-foreground">
-                    Disabled because VACE is enabled. Disable VACE to use FP8
+                    Disabled because VACE is enabled. Disable VACE to use
                     quantization.
                   </p>
                 )}
