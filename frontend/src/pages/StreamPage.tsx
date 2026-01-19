@@ -980,6 +980,7 @@ export function StreamPage() {
         pipeline_ids?: string[];
         first_frame_image?: string;
         last_frame_image?: string;
+        images?: string[];
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1009,24 +1010,28 @@ export function StreamPage() {
       // Pipeline chain: preprocessors + main pipeline (already built above)
       initialParameters.pipeline_ids = pipelineIds;
 
-      // VACE-specific parameters - backend will ignore if not supported
-      const vaceParams = getVaceParams(
-        settings.refImages,
-        settings.vaceContextScale
-      );
-      if ("vace_ref_images" in vaceParams) {
-        initialParameters.vace_ref_images = vaceParams.vace_ref_images;
-        initialParameters.vace_context_scale = vaceParams.vace_context_scale;
-      }
-      // Add vace_use_input_video parameter
-      if (currentMode === "video") {
-        initialParameters.vace_use_input_video =
-          settings.vaceUseInputVideo ?? false;
-      }
-
-      // Explicitly pass vace_enabled state
+      // VACE-specific parameters
       if (currentPipeline?.supportsVACE) {
+        const vaceParams = getVaceParams(
+          settings.refImages,
+          settings.vaceContextScale
+        );
+        if ("vace_ref_images" in vaceParams) {
+          initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+          initialParameters.vace_context_scale = vaceParams.vace_context_scale;
+        }
+        // Add vace_use_input_video parameter
+        if (currentMode === "video") {
+          initialParameters.vace_use_input_video =
+            settings.vaceUseInputVideo ?? false;
+        }
         initialParameters.vace_enabled = vaceEnabled;
+      } else if (
+        currentPipeline?.supportsImages &&
+        settings.refImages?.length
+      ) {
+        // Non-VACE pipelines that support images
+        initialParameters.images = settings.refImages;
       }
 
       // Add FFLF (first-frame-last-frame) parameters if set
