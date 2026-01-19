@@ -145,6 +145,10 @@ class Parameters(BaseModel):
         default=None,
         description="Path to last frame reference image for extension mode. When provided alone, enables 'lastframe' mode (generate lead-up, reference at end). When provided with first_frame_image, enables 'firstlastframe' mode (references at both ends). Images should be located in the assets directory.",
     )
+    images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for non-VACE visual conditioning",
+    )
 
 
 class SpoutConfig(BaseModel):
