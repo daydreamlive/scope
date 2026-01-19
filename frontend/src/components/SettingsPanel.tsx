@@ -505,9 +505,9 @@ export function SettingsPanel({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <LabelWithTooltip
-              label="Postprocessor"
-              tooltip="Select a postprocessor to apply after the main pipeline."
-              className="text-sm font-medium"
+              label={PARAMETER_METADATA.postprocessor.label}
+              tooltip={PARAMETER_METADATA.postprocessor.tooltip}
+              className="text-sm text-foreground"
             />
             <Select
               value={postprocessorIds.length > 0 ? postprocessorIds[0] : "none"}
@@ -520,7 +520,7 @@ export function SettingsPanel({
               }}
               disabled={isStreaming || isLoading}
             >
-              <SelectTrigger className="h-8 flex-1">
+              <SelectTrigger className="w-[140px] h-7">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

@@ -91,4 +91,8 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     label: "Preprocessor:",
     tooltip: "Select a preprocessor to apply before the main pipeline.",
   },
+  postprocessor: {
+    label: "Postprocessor:",
+    tooltip: "Select a postprocessor to apply after the main pipeline.",
+  },
 };
