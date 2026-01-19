@@ -19,6 +19,7 @@ from aiortc.sdp import candidate_from_sdp
 
 from .credentials import get_turn_credentials
 from .pipeline_manager import PipelineManager
+from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
 from .tracks import VideoProcessingTrack
 
@@ -48,12 +49,14 @@ class Session:
         video_track: MediaStreamTrack | None = None,
         data_channel: RTCDataChannel | None = None,
         relay: MediaRelay | None = None,
+        recording_manager: RecordingManager | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
         self.data_channel = data_channel
         self.relay = relay
+        self.recording_manager = recording_manager
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -181,14 +184,36 @@ class WebRTCManager:
             relay = MediaRelay()
             relayed_track = relay.subscribe(video_track)
 
-            # Set the relay on the video track so it can create a recording track
-            video_track.recording_manager.set_relay(relay)
+            # Create RecordingManager and store it in the session
+            # Pass the original video_track - RecordingManager will subscribe to relay itself
+            recording_manager = RecordingManager(
+                video_track=video_track, is_paused=lambda: video_track._paused
+            )
+            session.recording_manager = recording_manager
+
+            # Set the relay on the recording manager so it can create a recording track
+            recording_manager.set_relay(relay)
 
             # Add the relayed track to WebRTC connection
             pc.addTrack(relayed_track)
 
             # Store relay for cleanup
             session.relay = relay
+
+            # Start recording when ready (RecordingManager will check pause state internally)
+            # We start it in a background task to avoid blocking the offer/answer flow
+            async def start_recording_when_ready():
+                """Start recording when frames start flowing and not paused."""
+                try:
+                    # Wait a bit for the connection to establish and frames to start flowing
+                    await asyncio.sleep(0.1)
+                    # Try to start recording (will check pause state internally)
+                    if not video_track._paused:
+                        await recording_manager.start_recording()
+                except Exception as e:
+                    logger.debug(f"Could not start recording yet: {e}")
+
+            asyncio.create_task(start_recording_when_ready())
 
             logger.info(f"Created new session: {session}")
 
@@ -245,7 +270,13 @@ class WebRTCManager:
 
                         # Check for paused parameter and call pause() method on video track
                         if "paused" in data and session.video_track:
+                            was_paused = session.video_track._paused
                             session.video_track.pause(data["paused"])
+                            # Handle recording segmentation when pause state changes
+                            if session.recording_manager:
+                                session.recording_manager.handle_pause_state_change(
+                                    data["paused"], was_paused
+                                )
 
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(
@@ -289,8 +320,8 @@ class WebRTCManager:
             logger.info(f"Removing session: {session}")
 
             # Delete recording file when session ends
-            if session.video_track:
-                await session.video_track.recording_manager.delete_recording()
+            if session.recording_manager:
+                await session.recording_manager.delete_recording()
 
             await session.close()
         else:
