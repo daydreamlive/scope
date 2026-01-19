@@ -331,15 +331,24 @@ class PipelineManager:
         with self._lock:
             self._load_params = load_params
 
-            # Identify pipelines that need to be unloaded (currently loaded but not in new list)
+            # Identify pipelines that need to be unloaded:
+            # 1. Currently loaded but not in new list
+            # 2. In new list but with different load_params (e.g., different resolution)
             currently_loaded = set(self._pipelines.keys())
             # Also check main pipeline if it exists
             if self._pipeline_id and self._pipeline_id not in currently_loaded:
                 currently_loaded.add(self._pipeline_id)
 
-            pipelines_to_unload = currently_loaded - set(pipeline_ids)
+            new_params = load_params or {}
+            pipelines_to_unload = set()
 
-            # Unload pipelines that are not in the new list
+            for loaded_id in currently_loaded:
+                # Unload if pipeline not in new list or if load_params changed
+                current_params = self._pipeline_load_params.get(loaded_id, {})
+                if loaded_id not in pipeline_ids or current_params != new_params:
+                    pipelines_to_unload.add(loaded_id)
+
+            # Unload pipelines that need to be unloaded
             for pipeline_id_to_unload in pipelines_to_unload:
                 logger.info(f"Unloading pipeline {pipeline_id_to_unload}")
                 self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
