@@ -48,7 +48,6 @@ from .pipeline_manager import PipelineManager
 from .recording import (
     cleanup_recording_files,
     cleanup_temp_file,
-    get_recording_for_download,
 )
 from .schema import (
     AssetFileInfo,
@@ -493,16 +492,35 @@ async def add_ice_candidate(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/api/v1/recording/download")
+@app.get("/api/v1/recordings/{session_id}")
 async def download_recording(
+    session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
 ):
-    """Download the recording file for the active session.
+    """Download the recording file for the specified session.
     This will finalize the current recording and create a copy for download,
     then continue recording with a new file."""
     try:
-        download_file = await get_recording_for_download(webrtc_manager)
+        # Get the session by ID
+        session = webrtc_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found",
+            )
+
+        # Check if session has a video track with recording manager
+        if not session.video_track or not hasattr(
+            session.video_track, "recording_manager"
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Recording not available for session {session_id}",
+            )
+
+        # Finalize the recording and get the download file
+        download_file = await session.video_track.recording_manager.finalize_and_get_recording()
         if not download_file or not Path(download_file).exists():
             raise HTTPException(
                 status_code=404,

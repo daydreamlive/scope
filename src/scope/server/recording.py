@@ -726,28 +726,3 @@ def cleanup_temp_file(file_path: str):
     if os.path.exists(file_path):
         RecordingManager._safe_remove_file(file_path)
         logger.info(f"Cleaned up temporary download file: {file_path}")
-
-
-async def get_recording_for_download(webrtc_manager):
-    """
-    Get the recording file for the active session.
-    This will finalize the current recording and create a copy for download,
-    then continue recording with a new file.
-
-    Assumes there is exactly one active session.
-
-    Returns:
-        str: download_file_path
-    """
-    sessions = webrtc_manager.list_sessions()
-    active_sessions = [
-        s
-        for s in sessions.values()
-        if s.pc.connectionState not in ["closed", "failed"] and s.video_track
-    ]
-
-    if not active_sessions:
-        return None
-
-    session = active_sessions[0]
-    return await session.video_track.recording_manager.finalize_and_get_recording()

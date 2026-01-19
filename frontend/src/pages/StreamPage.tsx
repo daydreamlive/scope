@@ -171,6 +171,7 @@ export function StreamPage() {
     stopStream,
     updateVideoTrack,
     sendParameterUpdate,
+    sessionId,
   } = useWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
@@ -1064,7 +1065,14 @@ export function StreamPage() {
 
   const handleSaveGeneration = async () => {
     try {
-      await downloadRecording();
+      if (!sessionId) {
+        toast.error("No active session", {
+          description: "Please start a stream before downloading the recording",
+          duration: 5000,
+        });
+        return;
+      }
+      await downloadRecording(sessionId);
     } catch (error) {
       console.error("Error downloading recording:", error);
       toast.error("Error downloading recording", {

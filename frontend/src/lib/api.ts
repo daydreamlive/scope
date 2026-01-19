@@ -433,8 +433,12 @@ export const getPipelineSchemas =
     return result;
   };
 
-export const downloadRecording = async (): Promise<void> => {
-  const response = await fetch("/api/v1/recording/download", {
+export const downloadRecording = async (sessionId: string): Promise<void> => {
+  if (!sessionId) {
+    throw new Error("Session ID is required to download recording");
+  }
+
+  const response = await fetch(`/api/v1/recordings/${sessionId}`, {
     method: "GET",
   });
 
