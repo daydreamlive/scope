@@ -658,7 +658,7 @@ export function PromptTimeline({
           <div className="flex items-center gap-2">
             <Button
               onClick={onPlayPause}
-              disabled={disabled || isLoading}
+              disabled={disabled || isLoading || isDownloading}
               size="sm"
               variant="outline"
             >
@@ -670,7 +670,7 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onReset}
-              disabled={disabled || isLoading}
+              disabled={disabled || isLoading || isDownloading}
               size="sm"
               variant="outline"
               title="Reset timeline"
@@ -679,7 +679,7 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onClear}
-              disabled={disabled || isPlaying || isStreaming || isLoading}
+              disabled={disabled || isPlaying || isStreaming || isLoading || isDownloading}
               size="sm"
               variant="outline"
               title="Clear timeline"
@@ -709,7 +709,7 @@ export function PromptTimeline({
             )}
             <Button
               onClick={handleExport}
-              disabled={disabled || isLoading}
+              disabled={disabled || isLoading || isDownloading}
               size="sm"
               variant="outline"
             >
@@ -732,12 +732,12 @@ export function PromptTimeline({
                 accept=".json"
                 onChange={handleImport}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={disabled || isStreaming || isLoading}
+                disabled={disabled || isStreaming || isLoading || isDownloading}
               />
               <Button
                 size="sm"
                 variant="outline"
-                disabled={disabled || isStreaming || isLoading}
+                disabled={disabled || isStreaming || isLoading || isDownloading}
               >
                 <Download className="h-4 w-4 mr-1" />
                 Import
@@ -747,7 +747,7 @@ export function PromptTimeline({
               onClick={() => onCollapseToggle?.(!isCollapsed)}
               size="sm"
               variant="outline"
-              disabled={isLoading}
+              disabled={isLoading || isDownloading}
               title={isCollapsed ? "Expand timeline" : "Collapse timeline"}
             >
               {isCollapsed ? (

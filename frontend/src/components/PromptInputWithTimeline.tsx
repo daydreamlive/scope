@@ -46,6 +46,7 @@ interface PromptInputWithTimelineProps {
   temporalInterpolationMethod?: "linear" | "slerp";
   videoScaleMode?: "fit" | "native";
   onVideoScaleModeToggle?: () => void;
+  isDownloading?: boolean;
   onSaveGeneration?: () => void;
 }
 
@@ -82,6 +83,7 @@ export function PromptInputWithTimeline({
   temporalInterpolationMethod,
   videoScaleMode,
   onVideoScaleModeToggle,
+  isDownloading = false,
   onSaveGeneration,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
