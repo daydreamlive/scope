@@ -6,6 +6,30 @@ from einops import rearrange
 logger = logging.getLogger(__name__)
 
 
+def _resize_tchw(frame: torch.Tensor, target_h: int, target_w: int) -> torch.Tensor:
+    """Resize a TCHW tensor using bilinear interpolation."""
+    return torch.nn.functional.interpolate(
+        frame,
+        size=(target_h, target_w),
+        mode="bilinear",
+        align_corners=False,
+    )
+
+
+def _needs_resize(h: int, w: int, target_h: int, target_w: int) -> bool:
+    """Check if dimensions differ from target."""
+    return h != target_h or w != target_w
+
+
+def _resize_thwc(
+    frame: torch.Tensor, target_h: int, target_w: int, output_dtype: torch.dtype
+) -> torch.Tensor:
+    """Resize a THWC tensor, returning result in the same format."""
+    frame_tchw = frame.permute(0, 3, 1, 2).float()
+    frame_resized = _resize_tchw(frame_tchw, target_h, target_w)
+    return frame_resized.permute(0, 2, 3, 1).to(output_dtype)
+
+
 def normalize_frame_sizes(frames: list[torch.Tensor]) -> list[torch.Tensor]:
     """Normalize all frames to match the first frame's dimensions.
 
@@ -22,27 +46,16 @@ def normalize_frame_sizes(frames: list[torch.Tensor]) -> list[torch.Tensor]:
     if not frames:
         return frames
 
-    # Use first frame's shape as target
     target_h, target_w = frames[0].shape[1], frames[0].shape[2]
-    normalized = []
 
+    normalized = []
     for i, frame in enumerate(frames):
         h, w = frame.shape[1], frame.shape[2]
-        if h == target_h and w == target_w:
+        if not _needs_resize(h, w, target_h, target_w):
             normalized.append(frame)
-            continue
-
-        # Resize frame: THWC -> TCHW for interpolate, then back to THWC
-        frame_tchw = frame.permute(0, 3, 1, 2).float()
-        frame_resized = torch.nn.functional.interpolate(
-            frame_tchw,
-            size=(target_h, target_w),
-            mode="bilinear",
-            align_corners=False,
-        )
-        frame_thwc = frame_resized.permute(0, 2, 3, 1).to(frame.dtype)
-        logger.debug(f"Resized frame {i} from {w}x{h} to {target_w}x{target_h}")
-        normalized.append(frame_thwc)
+        else:
+            logger.debug(f"Resized frame {i} from {w}x{h} to {target_w}x{target_h}")
+            normalized.append(_resize_thwc(frame, target_h, target_w, frame.dtype))
 
     return normalized
 
@@ -61,28 +74,13 @@ def preprocess_chunk(
         frame = frame.to(device=device).to(dtype=dtype)
         frame = rearrange(frame, "T H W C -> T C H W")
 
-        _, _, H, W = frame.shape
+        if height is not None and width is not None:
+            _, _, h, w = frame.shape
+            if _needs_resize(h, w, height, width):
+                logger.debug(f"Resized frame from {w}x{h} to {width}x{height}")
+                frame = _resize_tchw(frame, height, width)
 
-        # If no height and width requested no resizing needed
-        if height is None or width is None:
-            frames.append(frame)
-            continue
-
-        # If we have a height and width match no resizing needed
-        if H == height and W == width:
-            frames.append(frame)
-            continue
-
-        frame_resized = torch.nn.functional.interpolate(
-            frame,
-            size=(height, width),
-            mode="bilinear",
-            align_corners=False,
-        )
-
-        logger.debug(f"Resized frame from {W}x{H} to {width}x{height}")
-
-        frames.append(frame_resized)
+        frames.append(frame)
 
     # stack and rearrange to get a BCTHW tensor
     chunk = rearrange(torch.stack(frames, dim=1), "B T C H W -> B C T H W")

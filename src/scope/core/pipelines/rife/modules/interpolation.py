@@ -3,7 +3,8 @@
 This module provides frame interpolation functionality using RIFE HDv3 to double
 the frame rate of video output from the pipeline.
 
-The RIFE HDv3 model code is integrated into this pipeline's modules directory.
+Modified from https://github.com/hzwer/Practical-RIFE
+The original repo is: https://github.com/hzwer/Practical-RIFE
 """
 
 import logging
