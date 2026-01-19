@@ -452,54 +452,50 @@ export function SettingsPanel({
           </div>
         )}
 
-        {/* Preprocessor Selector - shown for pipelines that support VACE */}
-        {currentPipeline?.supportsVACE && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.preprocessor.label}
-                tooltip={PARAMETER_METADATA.preprocessor.tooltip}
-                className="text-sm text-foreground"
-              />
-              <Select
-                value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
-                onValueChange={value => {
-                  if (value === "none") {
-                    onPreprocessorIdsChange?.([]);
-                  } else {
-                    onPreprocessorIdsChange?.([value]);
-                  }
-                }}
-                disabled={isStreaming || isLoading}
-              >
-                <SelectTrigger className="w-[140px] h-7">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {Object.entries(pipelines || {})
-                    .filter(([, info]) => {
-                      const isPreprocessor =
-                        info.usage?.includes("preprocessor") ?? false;
-                      if (!isPreprocessor) return false;
-                      // Filter by input mode: only show preprocessors that support the current input mode
-                      if (inputMode) {
-                        return (
-                          info.supportedModes?.includes(inputMode) ?? false
-                        );
-                      }
-                      return true;
-                    })
-                    .map(([pid]) => (
-                      <SelectItem key={pid} value={pid}>
-                        {pid}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
+        {/* Preprocessor Selector */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label={PARAMETER_METADATA.preprocessor.label}
+              tooltip={PARAMETER_METADATA.preprocessor.tooltip}
+              className="text-sm text-foreground"
+            />
+            <Select
+              value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
+              onValueChange={value => {
+                if (value === "none") {
+                  onPreprocessorIdsChange?.([]);
+                } else {
+                  onPreprocessorIdsChange?.([value]);
+                }
+              }}
+              disabled={isStreaming || isLoading}
+            >
+              <SelectTrigger className="w-[140px] h-7">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {Object.entries(pipelines || {})
+                  .filter(([, info]) => {
+                    const isPreprocessor =
+                      info.usage?.includes("preprocessor") ?? false;
+                    if (!isPreprocessor) return false;
+                    // Filter by input mode: only show preprocessors that support the current input mode
+                    if (inputMode) {
+                      return info.supportedModes?.includes(inputMode) ?? false;
+                    }
+                    return true;
+                  })
+                  .map(([pid]) => (
+                    <SelectItem key={pid} value={pid}>
+                      {pid}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </div>
-        )}
+        </div>
 
         {/* Postprocessor Selector */}
         <div className="space-y-2">
