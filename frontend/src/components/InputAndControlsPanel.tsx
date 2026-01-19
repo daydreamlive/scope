@@ -320,6 +320,8 @@ export function InputAndControlsPanel({
               images={refImages}
               onImagesChange={onRefImagesChange || (() => {})}
               disabled={isDownloading}
+              maxImages={1}
+              singleColumn={false}
               label={
                 vaceEnabled && pipeline?.supportsVACE
                   ? "Reference Images"
