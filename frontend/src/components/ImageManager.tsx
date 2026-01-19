@@ -16,6 +16,8 @@ interface ImageManagerProps {
   tooltip?: string;
   /** Hide the label */
   hideLabel?: boolean;
+  /** Use single column layout (full width). Defaults to true when maxImages=1, false otherwise. */
+  singleColumn?: boolean;
 }
 
 export function ImageManager({
@@ -26,6 +28,7 @@ export function ImageManager({
   label = "Reference Images",
   tooltip = "Select reference images for VACE conditioning. Images will guide the video generation style and content.",
   hideLabel = false,
+  singleColumn,
 }: ImageManagerProps) {
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
 
@@ -56,7 +59,9 @@ export function ImageManager({
 
       <div
         className={
-          maxImages === 1 ? "grid grid-cols-1" : "grid grid-cols-2 gap-2"
+          (singleColumn ?? maxImages === 1)
+            ? "grid grid-cols-1"
+            : "grid grid-cols-2 gap-2"
         }
       >
         {images.length === 0 && (
