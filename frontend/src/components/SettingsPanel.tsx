@@ -554,7 +554,7 @@ export function SettingsPanel({
                 onValueChange={value => {
                   onVaeTypeChange?.(value as VaeType);
                 }}
-                disabled={isStreaming}
+                disabled={isStreaming || isLoading}
               >
                 <SelectTrigger className="w-[140px] h-7">
                   <SelectValue />
