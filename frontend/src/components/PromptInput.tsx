@@ -32,6 +32,8 @@ interface PromptInputProps {
   transitionSteps?: number;
   onTransitionStepsChange?: (steps: number) => void;
   timelinePrompts?: TimelinePrompt[];
+  defaultTemporalInterpolationMethod?: "linear" | "slerp" | null;
+  defaultSpatialInterpolationMethod?: "linear" | "slerp" | null;
 }
 
 export function PromptInput({
@@ -51,7 +53,14 @@ export function PromptInput({
   transitionSteps = 4,
   onTransitionStepsChange,
   timelinePrompts = [],
+  defaultTemporalInterpolationMethod,
+  defaultSpatialInterpolationMethod,
 }: PromptInputProps) {
+  // Derive support from null check - null means feature not supported
+  const supportsTemporalInterpolation =
+    defaultTemporalInterpolationMethod !== null;
+  const supportsSpatialInterpolation =
+    defaultSpatialInterpolationMethod !== null;
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
@@ -161,20 +170,26 @@ export function PromptInput({
         </div>
 
         <div className="space-y-2">
-          <TemporalTransitionControls
-            transitionSteps={transitionSteps}
-            onTransitionStepsChange={steps => onTransitionStepsChange?.(steps)}
-            temporalInterpolationMethod={temporalInterpolationMethod}
-            onTemporalInterpolationMethodChange={method =>
-              onTemporalInterpolationMethodChange?.(method)
-            }
-            disabled={disabled || !isStreaming || timelinePrompts.length === 0}
-            className="space-y-2"
-          />
+          {supportsTemporalInterpolation && (
+            <TemporalTransitionControls
+              transitionSteps={transitionSteps}
+              onTransitionStepsChange={steps =>
+                onTransitionStepsChange?.(steps)
+              }
+              temporalInterpolationMethod={temporalInterpolationMethod}
+              onTemporalInterpolationMethodChange={method =>
+                onTemporalInterpolationMethodChange?.(method)
+              }
+              disabled={
+                disabled || !isStreaming || timelinePrompts.length === 0
+              }
+              className="space-y-2"
+            />
+          )}
 
           {/* Add/Submit buttons - Bottom row */}
           <div className="flex items-center justify-end gap-2">
-            {managedPrompts.length < 4 && (
+            {supportsSpatialInterpolation && managedPrompts.length < 4 && (
               <Button
                 onMouseDown={e => {
                   e.preventDefault();
@@ -242,7 +257,7 @@ export function PromptInput({
 
       <div className="space-y-2">
         {/* Spatial Blend - only for multiple prompts */}
-        {managedPrompts.length >= 2 && (
+        {supportsSpatialInterpolation && managedPrompts.length >= 2 && (
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">
               Spatial Blend:
@@ -267,20 +282,22 @@ export function PromptInput({
           </div>
         )}
 
-        <TemporalTransitionControls
-          transitionSteps={transitionSteps}
-          onTransitionStepsChange={steps => onTransitionStepsChange?.(steps)}
-          temporalInterpolationMethod={temporalInterpolationMethod}
-          onTemporalInterpolationMethodChange={method =>
-            onTemporalInterpolationMethodChange?.(method)
-          }
-          disabled={disabled || !isStreaming || timelinePrompts.length === 0}
-          className="space-y-2"
-        />
+        {supportsTemporalInterpolation && (
+          <TemporalTransitionControls
+            transitionSteps={transitionSteps}
+            onTransitionStepsChange={steps => onTransitionStepsChange?.(steps)}
+            temporalInterpolationMethod={temporalInterpolationMethod}
+            onTemporalInterpolationMethodChange={method =>
+              onTemporalInterpolationMethodChange?.(method)
+            }
+            disabled={disabled || !isStreaming || timelinePrompts.length === 0}
+            className="space-y-2"
+          />
+        )}
 
         {/* Add/Submit buttons - Bottom row */}
         <div className="flex items-center justify-end gap-2">
-          {managedPrompts.length < 4 && (
+          {supportsSpatialInterpolation && managedPrompts.length < 4 && (
             <Button
               onMouseDown={e => {
                 e.preventDefault();

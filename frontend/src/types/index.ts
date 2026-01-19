@@ -102,8 +102,9 @@ export interface PipelineInfo {
   estimatedVram?: number;
   requiresModels?: boolean;
   supportsPrompts?: boolean;
-  defaultTemporalInterpolationMethod?: "linear" | "slerp";
-  defaultTemporalInterpolationSteps?: number;
+  defaultTemporalInterpolationMethod?: "linear" | "slerp" | null;
+  defaultTemporalInterpolationSteps?: number | null;
+  defaultSpatialInterpolationMethod?: "linear" | "slerp" | null;
   supportsLoRA?: boolean;
   supportsVACE?: boolean;
   usage?: string[];
