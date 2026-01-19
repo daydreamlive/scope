@@ -128,6 +128,12 @@ class PipelineManager:
             current_params = self._pipeline_load_params.get(pipeline_id, {})
             new_params = load_params or {}
 
+            # Debug: Log parameter comparison
+            if current_params != new_params:
+                logger.info(f"Pipeline {pipeline_id} params changed:")
+                logger.info(f"  Current: {current_params}")
+                logger.info(f"  New: {new_params}")
+
             # Check if pipeline is already loaded (either in _pipelines or as main pipeline)
             is_loaded = False
             if pipeline_id in self._pipelines:
@@ -326,6 +332,7 @@ class PipelineManager:
             return False
 
         logger.info(f"Loading {len(pipeline_ids)} pipeline(s): {pipeline_ids}")
+        logger.info(f"Load params: {load_params}")
 
         # Store load_params for use by frame processor
         with self._lock:
@@ -346,6 +353,7 @@ class PipelineManager:
                 # Unload if pipeline not in new list or if load_params changed
                 current_params = self._pipeline_load_params.get(loaded_id, {})
                 if loaded_id not in pipeline_ids or current_params != new_params:
+                    logger.info(f"Will unload {loaded_id}: params changed from {current_params} to {new_params}")
                     pipelines_to_unload.add(loaded_id)
 
             # Unload pipelines that need to be unloaded
@@ -906,7 +914,14 @@ class PipelineManager:
                 config["frame_rate"] = load_params.get("frame_rate", 24.0)
                 config["randomize_seed"] = load_params.get("randomize_seed", False)
                 # Quantization: fp8_e4m3fn (default), nvfp4 (Blackwell), or None
-                config["quantization"] = load_params.get("quantization", "fp8_e4m3fn")
+                # Handle both Quantization enum and string values
+                quant_value = load_params.get("quantization")
+                if quant_value is not None:
+                    # Convert enum to string value if needed
+                    config["quantization"] = quant_value.value if hasattr(quant_value, "value") else quant_value
+                else:
+                    config["quantization"] = "fp8_e4m3fn"  # Default to FP8
+                logger.info(f"LTX2 quantization config: {config['quantization']}")
             else:
                 config["num_frames"] = 33
                 config["frame_rate"] = 24.0

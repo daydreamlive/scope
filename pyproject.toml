@@ -51,6 +51,7 @@ dependencies = [
     "peft>=0.17.1",
     "torchao==0.15.0",
     "kernels>=0.10.4",
+    "comfy-kitchen[cublas]>=0.1.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "triton==3.5.1; sys_platform == 'linux'",
     "triton-windows==3.5.1.post24; sys_platform == 'win32'",
     "SpoutGL>=0.1.1; sys_platform == 'win32'",

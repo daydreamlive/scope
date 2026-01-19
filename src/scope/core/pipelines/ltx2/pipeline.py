@@ -155,6 +155,7 @@ class LTX2Pipeline(Pipeline):
             if use_fp8 is True:
                 quantization_value = "fp8"
 
+        logger.info(f"Creating ModelLedger with quantization={quantization_value}")
         try:
             self.model_ledger = ModelLedger(
                 dtype=self.dtype,
@@ -202,9 +203,10 @@ class LTX2Pipeline(Pipeline):
 
         # Log quantization status
         if self._quantization == "nvfp4":
-            logger.info("NVFP4 quantization: enabled (Blackwell GPU SM >= 10.0)")
+            logger.info("NVFP4 quantization: enabled (Blackwell GPU SM >= 10.0, comfy-kitchen)")
             logger.info(
                 "NVFP4 provides ~4x memory reduction for transformer weights (~12GB). "
+                "Using comfy-kitchen for hardware-accelerated matmul. "
                 "Activations during inference are still in BF16 and are the main memory bottleneck. "
                 f"At {self.config.height}x{self.config.width} with {self.config.num_frames} frames, "
                 "expect ~50-60GB for activations during denoising."

@@ -471,6 +471,15 @@ class LTX2LoadParams(PipelineLoadParams):
         default=False,
         description="Randomize seed on every generation. Useful for non-autoregressive models like LTX2 to get varied outputs between chunks.",
     )
+    quantization: Quantization | None = Field(
+        default=Quantization.FP8_E4M3FN,
+        description=(
+            "Quantization method for transformer weights. "
+            "fp8_e4m3fn reduces memory ~2x (requires Ada GPU SM >= 8.9). "
+            "nvfp4 reduces memory ~4x (requires Blackwell GPU SM >= 10.0). "
+            "None uses full precision BF16."
+        ),
+    )
 
 
 class PipelineLoadRequest(BaseModel):

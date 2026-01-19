@@ -38,7 +38,8 @@ from ltx_core.text_encoders.gemma import (
     module_ops_from_gemma_root,
 )
 
-logger = logging.getLogger(__name__)
+# Use scope logger namespace to ensure logs appear in the main application log
+logger = logging.getLogger("scope.core.pipelines.ltx2.model_ledger")
 
 
 class QuantizationType(str, Enum):
@@ -118,10 +119,13 @@ class ModelLedger:
         # Resolve quantization type from new parameter or legacy fp8transformer flag
         if quantization is not None:
             self.quantization = QuantizationType(quantization)
+            logger.info(f"ModelLedger quantization set to: {self.quantization} (from '{quantization}')")
         elif fp8transformer:
             self.quantization = QuantizationType.FP8
+            logger.info("ModelLedger quantization set to: FP8 (from fp8transformer=True)")
         else:
             self.quantization = QuantizationType.NONE
+            logger.info("ModelLedger quantization set to: NONE")
 
         # Keep fp8transformer for backwards compatibility
         self.fp8transformer = fp8transformer or (self.quantization == QuantizationType.FP8)
@@ -206,6 +210,8 @@ class ModelLedger:
                 "Transformer not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
 
+        logger.info(f"Building transformer with quantization: {self.quantization}")
+
         if self.quantization == QuantizationType.FP8:
             # FP8 quantization: downcast weights to FP8 and upcast during inference
             fp8_builder = replace(
@@ -217,11 +223,17 @@ class ModelLedger:
 
         elif self.quantization == QuantizationType.NVFP4:
             # NVFP4 quantization: build in BF16 first, then quantize to NVFP4
-            from ltx_core.loader.nvfp4_quantize import (
-                check_nvfp4_support,
-                quantize_model_nvfp4,
-                transformer_block_filter,
-            )
+            import traceback
+            try:
+                from ltx_core.loader.nvfp4_quantize import (
+                    check_nvfp4_support,
+                    quantize_model_nvfp4,
+                    transformer_block_filter,
+                )
+            except Exception as e:
+                logger.error(f"Failed to import nvfp4_quantize: {e}")
+                logger.error(traceback.format_exc())
+                raise
 
             supported, reason = check_nvfp4_support()
             if not supported:
@@ -236,7 +248,12 @@ class ModelLedger:
 
             # Quantize transformer blocks to NVFP4
             logger.info("Quantizing transformer blocks to NVFP4...")
-            quantize_model_nvfp4(model, layer_filter=transformer_block_filter)
+            try:
+                quantize_model_nvfp4(model, layer_filter=transformer_block_filter)
+            except Exception as e:
+                logger.error(f"Failed to quantize model to NVFP4: {e}")
+                logger.error(traceback.format_exc())
+                raise
 
             return model.eval()
 
