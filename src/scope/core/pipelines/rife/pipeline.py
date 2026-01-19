@@ -1,7 +1,7 @@
 """RIFE (Real-Time Intermediate Flow Estimation) frame interpolation pipeline.
 
-Based on RIFE HDv3:
-https://github.com/hzwer/ECCV2022-RIFE
+Based on Practical-RIFE:
+https://github.com/hzwer/Practical-RIFE
 """
 
 import logging

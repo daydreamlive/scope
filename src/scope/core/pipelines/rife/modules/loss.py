@@ -1,3 +1,6 @@
+# Modified from https://github.com/hzwer/Practical-RIFE
+# The original repo is: https://github.com/hzwer/Practical-RIFE
+
 import torch
 import numpy as np
 import torch.nn as nn
