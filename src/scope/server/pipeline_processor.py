@@ -10,6 +10,7 @@ from typing import Any
 import torch
 
 from scope.core.pipelines.controller import parse_ctrl_input
+from scope.core.pipelines.interface import PipelineOutput
 
 from .pipeline_manager import PipelineNotAvailableException
 
@@ -35,6 +36,7 @@ class PipelineProcessor:
         pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
+        audio_callback: callable = None,
     ):
         """Initialize a pipeline processor.
 
@@ -42,9 +44,11 @@ class PipelineProcessor:
             pipeline: Pipeline instance to process frames with
             pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
+            audio_callback: Optional callback for audio output (audio_tensor, sample_rate)
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
+        self.audio_callback = audio_callback
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
@@ -395,6 +399,17 @@ class PipelineProcessor:
 
             output = self.pipeline(**call_params)
 
+            # Handle PipelineOutput (with audio) or legacy tensor output
+            audio_output = None
+            audio_sample_rate = None
+            if isinstance(output, PipelineOutput):
+                video_output = output.video
+                audio_output = output.audio
+                audio_sample_rate = output.audio_sample_rate
+            else:
+                # Legacy: output is just a video tensor
+                video_output = output
+
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates
             one_shot_params = [
@@ -420,20 +435,29 @@ class PipelineProcessor:
                     self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
-            num_frames = output.shape[0]
+            num_frames = video_output.shape[0]
             logger.debug(
                 f"Pipeline {self.pipeline_id} processed in {processing_time:.4f}s, {num_frames} frames"
             )
 
-            # Normalize to [0, 255] and convert to uint8
-            output = (
-                (output * 255.0)
+            # Normalize video to [0, 255] and convert to uint8
+            video_output = (
+                (video_output * 255.0)
                 .clamp(0, 255)
                 .to(dtype=torch.uint8)
                 .contiguous()
                 .detach()
                 .cpu()
             )
+
+            # Pass audio to callback if available
+            if audio_output is not None and audio_sample_rate is not None and self.audio_callback:
+                try:
+                    # Move audio to CPU and keep as float for WebRTC encoding
+                    audio_cpu = audio_output.detach().cpu()
+                    self.audio_callback(audio_cpu, audio_sample_rate)
+                except Exception as e:
+                    logger.error(f"Error in audio callback: {e}")
 
             # Resize output queue to meet target max size
             target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
@@ -443,7 +467,7 @@ class PipelineProcessor:
             # For intermediate pipelines, output goes to next pipeline's input
             # For last pipeline, output goes to frame_processor's output_queue
             # Output frames are [H, W, C], convert to [1, H, W, C] for consistency
-            for frame in output:
+            for frame in video_output:
                 frame = frame.unsqueeze(0)
                 try:
                     self.output_queue.put_nowait(frame)

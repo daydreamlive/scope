@@ -591,15 +591,21 @@ class FrameProcessor:
             return
 
         # Create pipeline processors (each creates its own queues)
-        for pipeline_id in self.pipeline_ids:
+        for i, pipeline_id in enumerate(self.pipeline_ids):
             # Get pipeline instance from manager
             pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+
+            # Only the last processor in the chain gets the audio callback
+            # (intermediate processors pass video to the next processor)
+            is_last_processor = (i == len(self.pipeline_ids) - 1)
+            audio_callback = self._handle_audio_output if is_last_processor else None
 
             # Create processor with its own queues
             processor = PipelineProcessor(
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
+                audio_callback=audio_callback,
             )
 
             self.pipeline_processors.append(processor)
@@ -616,6 +622,23 @@ class FrameProcessor:
         logger.info(
             f"Created pipeline chain with {len(self.pipeline_processors)} processors"
         )
+
+    def _handle_audio_output(self, audio_tensor: torch.Tensor, sample_rate: int):
+        """Handle audio output from pipeline processor.
+
+        Args:
+            audio_tensor: Audio tensor in (channels, samples) format
+            sample_rate: Sample rate in Hz
+        """
+        try:
+            self.audio_queue.put_nowait((audio_tensor, sample_rate))
+            if self.audio_sample_rate is None:
+                self.audio_sample_rate = sample_rate
+            logger.debug(
+                f"Queued audio: shape={audio_tensor.shape}, sample_rate={sample_rate}"
+            )
+        except queue.Full:
+            logger.warning("Audio queue full, dropping audio chunk")
 
     def __enter__(self):
         self.start()
