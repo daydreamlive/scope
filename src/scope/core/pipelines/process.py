@@ -65,12 +65,10 @@ def normalize_frame_sizes(
         # Move to target device if specified (before resizing for efficiency)
         if device is not None:
             frame = frame.to(device=device)
+        frame = frame.to(dtype=output_dtype)
 
         h, w = frame.shape[1], frame.shape[2]
         if not _needs_resize(h, w, target_h, target_w):
-            # No resize needed, just convert dtype if specified
-            if dtype is not None:
-                frame = frame.to(dtype=dtype)
             normalized.append(frame)
         else:
             logger.debug(f"Resized frame {i} from {w}x{h} to {target_w}x{target_h}")
