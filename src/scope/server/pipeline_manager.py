@@ -905,10 +905,13 @@ class PipelineManager:
                 config["num_frames"] = load_params.get("num_frames", 33)
                 config["frame_rate"] = load_params.get("frame_rate", 24.0)
                 config["randomize_seed"] = load_params.get("randomize_seed", False)
+                # Quantization: fp8_e4m3fn (default), nvfp4 (Blackwell), or None
+                config["quantization"] = load_params.get("quantization", "fp8_e4m3fn")
             else:
                 config["num_frames"] = 33
                 config["frame_rate"] = 24.0
                 config["randomize_seed"] = False
+                config["quantization"] = "fp8_e4m3fn"
 
             pipeline = LTX2Pipeline(
                 config,

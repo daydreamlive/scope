@@ -128,19 +128,32 @@ class LTX2Pipeline(Pipeline):
         logger.info(f"Loading Gemma text encoder from: {gemma_root}")
 
         # Resolve quantization setting
-        # Support both new 'quantization' field and legacy 'use_fp8' field
+        # Support: Quantization enum, string values, and legacy 'use_fp8' field
         from ..enums import Quantization
 
         quantization_value = None
-        if config.quantization is not None:
-            # Map enum value to ModelLedger format
-            if config.quantization == Quantization.FP8_E4M3FN:
+        quantization_config = getattr(config, "quantization", None)
+
+        if quantization_config is not None:
+            # Handle Quantization enum
+            if isinstance(quantization_config, Quantization):
+                if quantization_config == Quantization.FP8_E4M3FN:
+                    quantization_value = "fp8"
+                elif quantization_config == Quantization.NVFP4:
+                    quantization_value = "nvfp4"
+            # Handle string values (from OmegaConf/dict config)
+            elif isinstance(quantization_config, str):
+                if quantization_config in ("fp8_e4m3fn", "fp8"):
+                    quantization_value = "fp8"
+                elif quantization_config == "nvfp4":
+                    quantization_value = "nvfp4"
+                # None or empty string means no quantization
+
+        # Legacy backwards compatibility with use_fp8 field
+        if quantization_value is None:
+            use_fp8 = getattr(config, "use_fp8", None)
+            if use_fp8 is True:
                 quantization_value = "fp8"
-            elif config.quantization == Quantization.NVFP4:
-                quantization_value = "nvfp4"
-        elif config.use_fp8 is True:
-            # Legacy backwards compatibility
-            quantization_value = "fp8"
 
         try:
             self.model_ledger = ModelLedger(
