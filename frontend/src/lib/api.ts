@@ -398,8 +398,9 @@ export interface PipelineSchemaInfo {
   default_mode: "text" | "video";
   // Prompt and temporal interpolation support
   supports_prompts: boolean;
-  default_temporal_interpolation_method: "linear" | "slerp";
-  default_temporal_interpolation_steps: number;
+  default_temporal_interpolation_method: "linear" | "slerp" | null;
+  default_temporal_interpolation_steps: number | null;
+  default_spatial_interpolation_method: "linear" | "slerp" | null;
   // Mode-specific default overrides (optional)
   mode_defaults?: Record<"text" | "video", ModeDefaults>;
   // UI capabilities

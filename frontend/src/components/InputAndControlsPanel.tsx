@@ -483,6 +483,12 @@ export function InputAndControlsPanel({
                     promptIndex={_timelinePrompts.findIndex(
                       p => p.id === selectedTimelinePrompt.id
                     )}
+                    defaultTemporalInterpolationMethod={
+                      pipeline?.defaultTemporalInterpolationMethod
+                    }
+                    defaultSpatialInterpolationMethod={
+                      pipeline?.defaultSpatialInterpolationMethod
+                    }
                   />
                 ) : (
                   <PromptInput
@@ -511,6 +517,12 @@ export function InputAndControlsPanel({
                     transitionSteps={transitionSteps}
                     onTransitionStepsChange={onTransitionStepsChange}
                     timelinePrompts={_timelinePrompts}
+                    defaultTemporalInterpolationMethod={
+                      pipeline?.defaultTemporalInterpolationMethod
+                    }
+                    defaultSpatialInterpolationMethod={
+                      pipeline?.defaultSpatialInterpolationMethod
+                    }
                   />
                 )}
               </div>

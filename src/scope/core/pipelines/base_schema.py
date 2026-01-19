@@ -200,10 +200,13 @@ class BasePipelineConfig(BaseModel):
 
     # Prompt and temporal interpolation support
     supports_prompts: ClassVar[bool] = True
-    default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
-        "slerp"
-    )
-    default_temporal_interpolation_steps: ClassVar[int] = 0
+    default_temporal_interpolation_method: ClassVar[
+        Literal["linear", "slerp"] | None
+    ] = "slerp"
+    default_temporal_interpolation_steps: ClassVar[int | None] = 0
+    default_spatial_interpolation_method: ClassVar[
+        Literal["linear", "slerp"] | None
+    ] = "linear"
 
     # Resolution settings - use field templates for consistency
     height: int = height_field()
@@ -305,6 +308,9 @@ class BasePipelineConfig(BaseModel):
         )
         metadata["default_temporal_interpolation_steps"] = (
             cls.default_temporal_interpolation_steps
+        )
+        metadata["default_spatial_interpolation_method"] = (
+            cls.default_spatial_interpolation_method
         )
         metadata["docs_url"] = cls.docs_url
         metadata["estimated_vram_gb"] = cls.estimated_vram_gb
