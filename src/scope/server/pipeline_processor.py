@@ -52,7 +52,9 @@ class PipelineProcessor:
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
-        self.output_queue = queue.Queue(maxsize=8)
+        # Start with a larger output queue to handle bidirectional pipelines that
+        # generate many frames at once (e.g., LTX2 generates 33+ frames per batch)
+        self.output_queue = queue.Queue(maxsize=120)
         # Lock to protect input_queue assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
@@ -72,6 +74,10 @@ class PipelineProcessor:
         # Start with a higher initial FPS to prevent initial queue buildup
         self.current_output_fps = MAX_FPS
         self.output_fps_lock = threading.Lock()
+
+        # Fixed FPS for bidirectional (non-autoregressive) pipelines
+        # When set, this overrides the dynamic FPS calculation
+        self._fixed_fps: float | None = None
 
         self.paused = False
         # Input mode is signaled by the frontend at stream start
@@ -459,7 +465,15 @@ class PipelineProcessor:
                 except Exception as e:
                     logger.error(f"Error in audio callback: {e}")
 
-            # Resize output queue to meet target max size
+            # Honor requested frame rate (for non-autoregressive/bidirectional pipelines like LTX2)
+            # These pipelines generate complete videos at a fixed frame rate
+            frame_rate = call_params.get("frame_rate")
+            if frame_rate is None and hasattr(self.pipeline, "config"):
+                frame_rate = getattr(self.pipeline.config, "frame_rate", None)
+            if frame_rate:
+                self._fixed_fps = float(frame_rate)
+
+            # Resize output queue BEFORE putting frames to prevent drops
             target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
             self._resize_output_queue(target_output_queue_max_size)
 
@@ -514,11 +528,18 @@ class PipelineProcessor:
                     self.current_output_fps = estimated_fps
 
     def get_fps(self) -> float:
-        """Get the current dynamically calculated pipeline FPS.
+        """Get the current pipeline FPS.
 
-        Returns the FPS based on how fast frames are produced into the output queue,
-        adjusted for queue fill level to prevent buildup.
+        For bidirectional/non-autoregressive pipelines (like LTX2), returns the
+        fixed frame_rate from the pipeline config.
+
+        For autoregressive pipelines, returns the FPS based on how fast frames
+        are produced into the output queue.
         """
+        # Use fixed FPS for bidirectional pipelines
+        if self._fixed_fps is not None:
+            return self._fixed_fps
+
         with self.output_fps_lock:
             output_fps = self.current_output_fps
         return min(MAX_FPS, output_fps)
