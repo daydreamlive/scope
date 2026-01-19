@@ -641,6 +641,9 @@ class WanVAE_(nn.Module):
             )
             out = torch.cat([out, out_], 2)
         else:
+            # Ensure encoder cache exists (may be missing if decode ran first)
+            if not hasattr(self, "_enc_feat_map"):
+                self.clear_cache_encode()
             out = []
             for i in range(t // 4):
                 self._enc_conv_idx = [0]
@@ -712,6 +715,9 @@ class WanVAE_(nn.Module):
             )
             out = torch.cat([out, out_], 2)
         else:
+            # Ensure decoder cache exists (may be missing if encode ran first)
+            if not hasattr(self, "_feat_map"):
+                self.clear_cache_decode()
             out = []
             for i in range(t):
                 self._conv_idx = [0]
@@ -758,7 +764,9 @@ class WanVAE_(nn.Module):
         self._enc_feat_map = [None] * self._enc_conv_num
 
 
-def _video_vae(pretrained_path=None, z_dim=None, device="cpu", pruning_rate=0.0, **kwargs):
+def _video_vae(
+    pretrained_path=None, z_dim=None, device="cpu", pruning_rate=0.0, **kwargs
+):
     """
     Autoencoder3d adapted from Stable Diffusion 1.x, 2.x and XL.
 
