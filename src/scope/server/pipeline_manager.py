@@ -527,6 +527,7 @@ class PipelineManager:
             "video-depth-anything",
             "controller-viz",
             "rife",
+            "optical-flow",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -949,6 +950,33 @@ class PipelineManager:
             )
             logger.info("RIFE pipeline initialized")
             return pipeline
+
+        elif pipeline_id == "optical-flow":
+            from scope.core.pipelines import OpticalFlowPipeline
+            from scope.core.pipelines.optical_flow.schema import OpticalFlowConfig
+
+            # Create config with schema defaults, overridden by load_params
+            params = load_params or {}
+            config = OmegaConf.create(
+                {
+                    "model_size": params.get(
+                        "model_size",
+                        OpticalFlowConfig.model_fields["model_size"].default,
+                    ),
+                    "use_tensorrt": params.get(
+                        "use_tensorrt",
+                        OpticalFlowConfig.model_fields["use_tensorrt"].default,
+                    ),
+                }
+            )
+
+            pipeline = OpticalFlowPipeline(
+                config,
+                device=get_device(),
+            )
+            logger.info("OpticalFlow pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 

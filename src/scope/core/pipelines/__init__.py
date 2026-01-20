@@ -40,6 +40,10 @@ def __getattr__(name):
         from .rife.pipeline import RIFEPipeline
 
         return RIFEPipeline
+    elif name == "OpticalFlowPipeline":
+        from .optical_flow.pipeline import OpticalFlowPipeline
+
+        return OpticalFlowPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -91,6 +95,7 @@ __all__ = [
     "VideoDepthAnythingPipeline",
     "ControllerVisualizerPipeline",
     "RIFEPipeline",
+    "OpticalFlowPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
