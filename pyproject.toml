@@ -30,10 +30,6 @@ classifiers = [
 dependencies = [
     "aiortc>=1.13.0",
     "fastapi>=0.116.1",
-    # Note: ffmpeg-python requires a system-wide FFmpeg installation.
-    # The package is a Python wrapper and does not include the FFmpeg binary.
-    # Users must install FFmpeg separately (e.g., apt install ffmpeg, brew install ffmpeg).
-    "ffmpeg-python>=0.2.0",
     "httpx>=0.28.1",
     "twilio>=9.8.0",
     "uvicorn>=0.35.0",

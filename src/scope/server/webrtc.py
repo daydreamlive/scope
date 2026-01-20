@@ -186,9 +186,7 @@ class WebRTCManager:
 
             # Create RecordingManager and store it in the session
             # Pass the original video_track - RecordingManager will subscribe to relay itself
-            recording_manager = RecordingManager(
-                video_track=video_track, is_paused=lambda: video_track._paused
-            )
+            recording_manager = RecordingManager(video_track=video_track)
             session.recording_manager = recording_manager
 
             # Set the relay on the recording manager so it can create a recording track
@@ -200,16 +198,15 @@ class WebRTCManager:
             # Store relay for cleanup
             session.relay = relay
 
-            # Start recording when ready (RecordingManager will check pause state internally)
+            # Start recording when ready
             # We start it in a background task to avoid blocking the offer/answer flow
             async def start_recording_when_ready():
-                """Start recording when frames start flowing and not paused."""
+                """Start recording when frames start flowing."""
                 try:
                     # Wait a bit for the connection to establish and frames to start flowing
                     await asyncio.sleep(0.1)
-                    # Try to start recording (will check pause state internally)
-                    if not video_track._paused:
-                        await recording_manager.start_recording()
+                    # Try to start recording
+                    await recording_manager.start_recording()
                 except Exception as e:
                     logger.debug(f"Could not start recording yet: {e}")
 
@@ -270,13 +267,7 @@ class WebRTCManager:
 
                         # Check for paused parameter and call pause() method on video track
                         if "paused" in data and session.video_track:
-                            was_paused = session.video_track._paused
                             session.video_track.pause(data["paused"])
-                            # Handle recording segmentation when pause state changes
-                            if session.recording_manager:
-                                session.recording_manager.handle_pause_state_change(
-                                    data["paused"], was_paused
-                                )
 
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(
