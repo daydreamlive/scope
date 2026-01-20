@@ -605,7 +605,7 @@ class RecordingManager:
             await self._run_ffmpeg_concat(concat_list_file, download_file)
             logger.info(f"Concatenated {len(segments)} segments into {download_file}")
             return download_file
-        except (asyncio.TimeoutError, ffmpeg.Error) as e:
+        except (TimeoutError, ffmpeg.Error) as e:
             logger.error(f"ffmpeg concatenation failed: {e}")
             return None
         except Exception as e:

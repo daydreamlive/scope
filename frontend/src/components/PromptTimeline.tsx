@@ -679,7 +679,13 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onClear}
-              disabled={disabled || isPlaying || isStreaming || isLoading || isDownloading}
+              disabled={
+                disabled ||
+                isPlaying ||
+                isStreaming ||
+                isLoading ||
+                isDownloading
+              }
               size="sm"
               variant="outline"
               title="Clear timeline"
