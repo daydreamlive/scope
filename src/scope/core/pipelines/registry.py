@@ -143,6 +143,7 @@ def _register_pipelines():
             "ControllerVisualizerPipeline",
         ),
         ("rife", ".rife.pipeline", "RIFEPipeline"),
+        ("scribble", ".scribble.pipeline", "ScribblePipeline"),
     ]
 
     # Try to import and register each pipeline

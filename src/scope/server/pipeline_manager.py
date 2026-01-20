@@ -527,6 +527,7 @@ class PipelineManager:
             "video-depth-anything",
             "controller-viz",
             "rife",
+            "scribble",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -949,6 +950,28 @@ class PipelineManager:
             )
             logger.info("RIFE pipeline initialized")
             return pipeline
+
+        elif pipeline_id == "scribble":
+            from scope.core.pipelines import ScribblePipeline
+
+            config = OmegaConf.create({})
+
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
+            pipeline = ScribblePipeline(
+                config,
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("Scribble pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 
