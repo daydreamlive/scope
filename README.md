@@ -34,6 +34,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
   - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
   - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
   - [MemFlow](./src/scope/core/pipelines/memflow/docs/usage.md) (text-to-video, video-to-video)
+  - Additional models including [Waypoint-1](https://github.com/daydreamlive/scope-overworld) via plugins (preview)
 - [LoRAs](./docs/lora.md) to customize concepts and styles used with autoregressive video diffusion models
 - [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide autoregressive video diffusion models
 - [API](./docs/server.md) with WebRTC real-time streaming
