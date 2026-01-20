@@ -22,7 +22,7 @@ SLEEP_TIME = 0.01
 
 # FPS calculation constants
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
-MAX_FPS = 30.0  # Maximum FPS cap
+MAX_FPS = 60.0  # Maximum FPS cap
 OUTPUT_FPS_SAMPLE_SIZE = 30
 OUTPUT_FPS_MIN_SAMPLES = 2
 
