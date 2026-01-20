@@ -32,11 +32,10 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
       if (statusResponse.status === "error") {
         const errorMessage = statusResponse.error || "Unknown pipeline error";
-        const fullMessage = `${errorMessage}. If this error persists, consider removing the models directory and re-downloading models.`;
         // Show toast if we haven't shown this error yet
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
-            description: fullMessage,
+            description: errorMessage,
             duration: 8000,
           });
           shownErrorRef.current = errorMessage;
@@ -88,11 +87,10 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
         if (statusResponse.status === "error") {
           const errorMessage = statusResponse.error || "Unknown pipeline error";
-          const fullMessage = `${errorMessage}. If this error persists, consider removing the models directory and re-downloading models.`;
           // Show toast if we haven't shown this error yet
           if (shownErrorRef.current !== errorMessage) {
             toast.error("Pipeline Error", {
-              description: fullMessage,
+              description: errorMessage,
               duration: 8000,
             });
             shownErrorRef.current = errorMessage;
@@ -185,11 +183,10 @@ export function usePipeline(options: UsePipelineOptions = {}) {
                 resolve(true);
               } else if (currentStatus.status === "error") {
                 const errorMsg = currentStatus.error || "Pipeline load failed";
-                const fullMessage = `${errorMsg}. If this error persists, consider removing the models directory and re-downloading models.`;
                 // Show toast for load completion errors
                 if (shownErrorRef.current !== errorMsg) {
                   toast.error("Pipeline Error", {
-                    description: fullMessage,
+                    description: errorMsg,
                     duration: 8000,
                   });
                   shownErrorRef.current = errorMsg;
@@ -220,12 +217,11 @@ export function usePipeline(options: UsePipelineOptions = {}) {
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to load pipeline";
-        const fullMessage = `${errorMessage}. If this error persists, consider removing the models directory and re-downloading models.`;
-        console.error("Pipeline load error:", fullMessage);
+        console.error("Pipeline load error:", errorMessage);
         // Show toast for load errors
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
-            description: fullMessage,
+            description: errorMessage,
             duration: 8000,
           });
           shownErrorRef.current = errorMessage;
