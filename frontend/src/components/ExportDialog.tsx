@@ -39,7 +39,7 @@ export function ExportDialog({
               onClose();
             }}
             variant="outline"
-            className="w-full justify-start gap-2"
+            className="w-full justify-start gap-3 px-4 py-6"
           >
             <Download className="h-4 w-4" />
             <div className="flex flex-col items-start">
@@ -56,7 +56,7 @@ export function ExportDialog({
               onClose();
             }}
             variant="outline"
-            className="w-full justify-start gap-2"
+            className="w-full justify-start gap-3 px-4 py-6"
           >
             <Download className="h-4 w-4" />
             <div className="flex flex-col items-start">
