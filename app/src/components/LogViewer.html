@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';">
+    <title>Server Logs</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        background-color: #0f0f0f;
+        color: #e0e0e0;
+        padding: 16px;
+        overflow: auto;
+      }
+      .header {
+        position: sticky;
+        top: -16px;
+        background: #0f0f0f;
+        padding: 12px 0;
+        margin-bottom: 12px;
+        border-bottom: 1px solid #333;
+      }
+      .header h1 {
+        font-size: 18px;
+        font-weight: 600;
+        color: #fff;
+      }
+      .log-path {
+        font-size: 11px;
+        color: #888;
+        margin-bottom: 16px;
+      }
+      pre {
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+      .info { color: #4fc3f7; }
+      .error { color: #ef5350; }
+      .warn { color: #ffb74d; }
+      .server { color: #81c784; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Server Logs</h1>
+    </div>
+    <div class="log-path" id="logPath"></div>
+    <pre id="logs"></pre>
+    <script src="./LogViewer.js"></script>
+  </body>
+</html>

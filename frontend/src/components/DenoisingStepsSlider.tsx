@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
-import { Plus, Minus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 interface DenoisingStepsSliderProps {
   className?: string;
@@ -189,7 +189,7 @@ export function DenoisingStepsSlider({
                   onClick={() => removeSlider(index)}
                   disabled={disabled}
                 >
-                  <Minus className="h-3.5 w-3.5" />
+                  <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               ) : null
             }

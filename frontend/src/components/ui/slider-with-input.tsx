@@ -48,7 +48,10 @@ export function SliderWithInput({
   labelClassName = "text-sm text-foreground w-16",
   debounceMs = 100,
   valueFormatter = v => v,
-  inputParser = v => parseFloat(v) || min,
+  inputParser = v => {
+    const parsed = parseFloat(v);
+    return isNaN(parsed) ? min : parsed;
+  },
   renderExtraButton,
 }: SliderWithInputProps) {
   const handleIncrement = () => {

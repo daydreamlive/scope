@@ -55,7 +55,7 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   quantization: {
     label: "Quantization:",
     tooltip:
-      "Quantization method for the diffusion model. fp8_e4m3fn reduces memory usage and improves performance, but might affect quality. None uses full precision and uses more meory, but does not affect quality.",
+      "Quantization method for the diffusion model. fp8_e4m3fn (Dynamic) reduces memory usage, but might affect performance and quality. None uses full precision and uses more memory, but does not affect performance and quality.",
   },
   kvCacheAttentionBias: {
     label: "Cache Bias:",
@@ -66,5 +66,33 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     label: "LoRA Strategy:",
     tooltip:
       "LoRA merge strategy affects performance and update capabilities. Permanent Merge: Maximum performance, no runtime updates. Runtime PEFT: Lower performance, instant runtime updates.",
+  },
+  loraScale: {
+    label: "Scale:",
+    tooltip:
+      "Adjust LoRA strength. Updates automatically when you release the slider or use +/- buttons. Typical values: 0.0 = no effect, 1.0 = full strength. Full range -10.0 to 10.0 available depending on LoRA specifications.",
+  },
+  loraScaleDisabledDuringStream: {
+    label: "Scale:",
+    tooltip:
+      "Runtime adjustment is disabled with Permanent Merge strategy. LoRA scales are fixed at load time. Typical values: 0.0 = no effect, 1.0 = full strength. Full range -10.0 to 10.0 available depending on LoRA specifications.",
+  },
+  spoutSender: {
+    label: "Spout Sender:",
+    tooltip:
+      "The configuration of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS.",
+  },
+  vaeType: {
+    label: "VAE:",
+    tooltip:
+      "VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
+  },
+  preprocessor: {
+    label: "Preprocessor:",
+    tooltip: "Select a preprocessor to apply before the main pipeline.",
+  },
+  postprocessor: {
+    label: "Postprocessor:",
+    tooltip: "Select a postprocessor to apply after the main pipeline.",
   },
 };

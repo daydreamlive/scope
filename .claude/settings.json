@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(cat:*)",
+      "WebSearch",
+      "Bash(uv sync:*)",
+      "Bash(uv run pre-commit:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run build:*)",
+      "Bash(uv run daydream-scope:*)",
+      "Bash(uv run download_models:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python .claude/hooks/format.py"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -9,7 +9,7 @@ interface UsePipelineOptions {
 }
 
 export function usePipeline(options: UsePipelineOptions = {}) {
-  const { pollInterval = 2000, maxTimeout = 45000 } = options;
+  const { pollInterval = 2000, maxTimeout = 600000 } = options;
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
@@ -32,11 +32,12 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
       if (statusResponse.status === "error") {
         const errorMessage = statusResponse.error || "Unknown pipeline error";
+        const fullMessage = `${errorMessage}. If this error persists, consider removing the models directory and re-downloading models.`;
         // Show toast if we haven't shown this error yet
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
-            description: errorMessage,
-            duration: 5000,
+            description: fullMessage,
+            duration: 8000,
           });
           shownErrorRef.current = errorMessage;
         }
@@ -87,11 +88,12 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
         if (statusResponse.status === "error") {
           const errorMessage = statusResponse.error || "Unknown pipeline error";
+          const fullMessage = `${errorMessage}. If this error persists, consider removing the models directory and re-downloading models.`;
           // Show toast if we haven't shown this error yet
           if (shownErrorRef.current !== errorMessage) {
             toast.error("Pipeline Error", {
-              description: errorMessage,
-              duration: 5000,
+              description: fullMessage,
+              duration: 8000,
             });
             shownErrorRef.current = errorMessage;
           }
@@ -136,11 +138,16 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   // Load pipeline
   const triggerLoad = useCallback(
     async (
-      pipelineId?: string,
+      pipelineIds?: string[],
       loadParams?: PipelineLoadParams
     ): Promise<boolean> => {
       if (isLoading) {
         console.log("Pipeline already loading");
+        return false;
+      }
+
+      if (!pipelineIds || pipelineIds.length === 0) {
+        console.error("No pipeline IDs provided");
         return false;
       }
 
@@ -151,7 +158,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
         // Start the load request
         await loadPipeline({
-          pipeline_id: pipelineId,
+          pipeline_ids: pipelineIds,
           load_params: loadParams,
         });
 
@@ -178,11 +185,12 @@ export function usePipeline(options: UsePipelineOptions = {}) {
                 resolve(true);
               } else if (currentStatus.status === "error") {
                 const errorMsg = currentStatus.error || "Pipeline load failed";
+                const fullMessage = `${errorMsg}. If this error persists, consider removing the models directory and re-downloading models.`;
                 // Show toast for load completion errors
                 if (shownErrorRef.current !== errorMsg) {
                   toast.error("Pipeline Error", {
-                    description: errorMsg,
-                    duration: 5000,
+                    description: fullMessage,
+                    duration: 8000,
                   });
                   shownErrorRef.current = errorMsg;
                 }
@@ -212,12 +220,13 @@ export function usePipeline(options: UsePipelineOptions = {}) {
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to load pipeline";
-        console.error("Pipeline load error:", errorMessage);
+        const fullMessage = `${errorMessage}. If this error persists, consider removing the models directory and re-downloading models.`;
+        console.error("Pipeline load error:", fullMessage);
         // Show toast for load errors
         if (shownErrorRef.current !== errorMessage) {
           toast.error("Pipeline Error", {
-            description: errorMessage,
-            duration: 5000,
+            description: fullMessage,
+            duration: 8000,
           });
           shownErrorRef.current = errorMessage;
         }
@@ -242,11 +251,11 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   // Load pipeline with proper state management
   const loadPipelineAsync = useCallback(
     async (
-      pipelineId?: string,
+      pipelineIds?: string[],
       loadParams?: PipelineLoadParams
     ): Promise<boolean> => {
       // Always trigger load - let the backend decide if reload is needed
-      return await triggerLoad(pipelineId, loadParams);
+      return await triggerLoad(pipelineIds, loadParams);
     },
     [triggerLoad]
   );

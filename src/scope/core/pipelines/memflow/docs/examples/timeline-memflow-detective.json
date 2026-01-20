@@ -1,0 +1,50 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 4.697899999976158,
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp",
+      "prompts": [
+        {
+          "text": "A female detective in her 40s, with sharp, intelligent eyes and her brown hair cut in a practical, no-nonsense bob, is standing in her dimly lit office late at night. She is wearing a dark charcoal grey blazer over a simple cream silk blouse. She stares at a large corkboard on the wall, which is covered with a complex web of photos, notes, and newspaper clippings connected by pieces of red string. A single desk lamp casts long shadows across the room, illuminating her thoughtful, determined expression.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 4.697899999976158,
+      "endTime": 11.167,
+      "prompts": [
+        {
+          "text": "A female detective in her 40s, with sharp, intelligent eyes and her brown hair cut in a practical, no-nonsense bob, wearing a dark charcoal grey blazer over a simple cream silk blouse, is studying the case board. Her partner, a younger male detective in his early 30s with a slightly disheveled look, five o'clock shadow, and wearing a slightly rumpled white dress shirt with a loosened dark tie, enters the office. He is holding two steaming Styrofoam cups of coffee and a file folder. He has a tired but resolute look on his face, ready for another long night.",
+          "weight": 100
+        }
+      ],
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp"
+    }
+  ],
+  "settings": {
+    "pipelineId": "memflow",
+    "inputMode": "text",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750,
+      500,
+      250
+    ],
+    "manageCache": true,
+    "quantization": null,
+    "kvCacheAttentionBias": 0.3,
+    "loras": [],
+    "loraMergeStrategy": "permanent_merge"
+  },
+  "version": "2.1",
+  "exportedAt": "2025-12-30T20:41:32.411Z"
+}

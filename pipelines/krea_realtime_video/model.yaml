@@ -1,9 +1,0 @@
-base_model_name: Wan2.1-T2V-14B
-base_model_kwargs:
-  timestep_shift: 5.0
-num_frame_per_block: 3
-kv_cache_num_frames: 3
-local_attn_size: 6
-vae_spatial_downsample_factor: 8
-patch_embedding_spatial_downsample_factor: 2
-max_rope_freq_table_seq_len: 1024

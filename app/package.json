@@ -1,0 +1,65 @@
+{
+  "name": "daydream-scope-desktop",
+  "productName": "Daydream Scope",
+  "version": "0.1.0-beta.3",
+  "description": "A tool for running and customizing real-time, interactive generative AI pipelines and models",
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build:main": "vite build --config vite.main.config.ts",
+    "build:preload": "vite build --config vite.preload.config.ts",
+    "build:renderer": "vite build --config vite.renderer.config.ts",
+    "compile": "npm run build:main && npm run build:preload && npm run build:renderer",
+    "watch": "concurrently \"npm run build:main -- --watch\" \"npm run build:preload -- --watch\" \"npm run build:renderer -- --watch\"",
+    "dist:win": "npm run compile && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --win --publish never",
+    "dist:mac": "npm run compile && npx electron-builder --mac --publish never",
+    "dist:linux": "npm run compile && npx electron-builder --linux --publish never",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "postinstall": "npx electron-builder install-app-deps"
+  },
+  "keywords": [
+    "ai",
+    "video",
+    "streaming",
+    "webrtc",
+    "diffusion",
+    "real-time"
+  ],
+  "author": {
+    "name": "Daydream"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/daydreamlive/scope",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daydreamlive/scope.git"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.0",
+    "@vitest/ui": "^2.1.8",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.1.0",
+    "cross-env": "^10.1.0",
+    "electron": "^32.2.1",
+    "electron-builder": "^25.1.8",
+    "fs-extra": "^11.2.0",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.5.6",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.2",
+    "vite-plugin-electron": "^0.28.8",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "electron-log": "^5.2.4",
+    "electron-updater": "^6.3.9",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}

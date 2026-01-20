@@ -1,0 +1,107 @@
+name: Build Electron App
+
+on:
+  # Trigger on version tags (e.g., v0.1.0, v1.2.3)
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build Windows
+    runs-on: windows-latest
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for electron-builder to generate proper version info
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: 'npm'
+          cache-dependency-path: |
+            app/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Security audit - Frontend
+        working-directory: ./frontend
+        run: npm audit --audit-level=moderate
+        continue-on-error: true  # Don't fail build on audit issues, but report them
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Install app dependencies
+        working-directory: ./app
+        run: npm ci
+
+      - name: Security audit - Electron App
+        working-directory: ./app
+        run: npm audit --audit-level=moderate
+        continue-on-error: true  # Don't fail build on audit issues, but report them
+
+      - name: Build application
+        working-directory: ./app
+        run: npm run compile
+
+      - name: Build Electron app (Windows)
+        working-directory: ./app
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Sign files with Azure Trusted Signing
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\app\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Update latest.yml with signed exe checksum
+        if: env.AZURE_CLIENT_ID != ''
+        working-directory: ./app
+        run: node build/update-latest-yml.js
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && env.AZURE_CLIENT_ID != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            app/dist/*.exe
+            app/dist/latest.yml
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            app/dist/**/*
+          retention-days: 30
+          if-no-files-found: error

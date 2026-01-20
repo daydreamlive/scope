@@ -6,15 +6,38 @@
 
 Scope is a tool for running and customizing real-time, interactive generative AI pipelines and models.
 
-🚧 Here be dragons! This project is currently in **alpha**. 🚧
+🚧 This project is currently in **beta**. 🚧
+
+## Table of Contents
+
+- [Table of Contents](#table-of-contents)
+- [Features](#features)
+- [System Requirements](#system-requirements)
+- [Quick Start](#quick-start)
+- [Install](#install)
+  - [Manual Installation](#manual-installation)
+    - [Clone](#clone)
+    - [Build](#build)
+    - [Run](#run)
+  - [Runpod](#runpod)
+- [First Generation](#first-generation)
+- [Firewalls](#firewalls)
+- [Contributing](#contributing)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ## Features
 
-- Autoregressive video diffusion models
-  - [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md) (video-to-video)
-  - [LongLive](./pipelines/longlive/docs/usage.md) (text-to-video)
-  - [Krea Realtime Video](./pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
-- WebRTC real-time streaming
+- Autoregressive video diffusion models with configurable [VAEs](./docs/vae.md)
+  - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md) (text-to-video, video-to-video)
+  - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video, video-to-video)
+  - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
+  - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
+  - [MemFlow](./src/scope/core/pipelines/memflow/docs/usage.md) (text-to-video, video-to-video)
+- [LoRAs](./docs/lora.md) to customize concepts and styles used with autoregressive video diffusion models
+- [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide autoregressive video diffusion models
+- [API](./docs/server.md) with WebRTC real-time streaming
+- [Spout](./docs/spout.md) (Windows only) real-time video sharing with local applications
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
 
@@ -33,18 +56,30 @@ The following models currently have more restrictive requirements:
 
 **Krea Realtime Video**
 
-- Requires a Nvidia GPU with >= 32 GB VRAM
-- Requires Linux for usable performance and Windows support is limited without any guarantees
-- At the default resolution of 320x576, a 32 GB VRAM GPU (eg RTX 5090) can run the model with fp8 quantization
-- If you want to use a higher resolution like 480x832, we suggest using a > 40GB VRAM GPU (eg H100, RTX 6000 Pro)
+- Requires a Nvidia GPU with >= 32 GB VRAM and we recommend > 40GB VRAM GPU in order to get better results
+- At the default resolution of 576x320, a 32 GB VRAM GPU (eg RTX 5090) can run the model with fp8 quantization
+- If you want to use a higher resolution like 832x480, we suggest using a > 40GB VRAM GPU (eg H100, RTX 6000 Pro)
 
 If you do not have access to a GPU with these specs then we recommend installing on [Runpod](#runpod).
+
+## Quick Start
+
+The easiest way to get started with Scope is to download the latest version of the desktop app.
+
+> [!IMPORTANT]
+> The desktop app is only available on Windows right now. See the [Install](#install) section for manual and cloud based install options.
+
+1. Download the `.exe` file under "Assets" from the [releases](https://github.com/daydreamlive/scope/releases) page.
+2. Double click the `.exe` file which runs the installer that will walk you through the installation process.
 
 ## Install
 
 ### Manual Installation
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is needed to run the server and [Node.js](https://nodejs.org/en/download) which is needed to build the frontend.
+
+> [!IMPORTANT]
+> If you are using Windows, install [Microsoft Visual C++ Redistributable (vcredist)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
 
 #### Clone
 
@@ -105,15 +140,30 @@ Use our RunPod template to quickly set up Scope in the cloud. This is the easies
 
 The template will configure everything needed and the frontend will present a dialog for downloading model weights for pipelines when running them (by pressing play with the pipeline selected) for the first time.
 
+> [!IMPORTANT]
+> The template will store model files under `/workspace/models` because RunPod mounts a volume disk at `/workspace` allowing any files there to be retained across pod restarts.
+
+> [!NOTE]
+> If you want to use the version from the main branch, you need to use the `daydreamlive/scope:main` docker image. You can configure this in the RunPod template by editing the Docker image setting.
+
 ## First Generation
 
 The easiest way to get started is to replay an example generation and then modify prompts in the timeline to steer the generation in a different direction.
 
 Examples with importable timeline files can be found here:
 
-- [StreamDiffusionV2](./pipelines/streamdiffusionv2/docs/usage.md)
-- [LongLive](./pipelines/longlive/docs/usage.md)
-- [Krea Realtime Video](./pipelines/krea_realtime_video/docs/usage.md)
+- [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md)
+- [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md)
+- [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md)
+- [MemFlow](./src/scope/core/pipelines/memflow/docs/usage.md)
+- [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md)
+
+After your first generation you can:
+
+- Use [LoRAs](./docs/lora.md) to customize the concepts and styles used in your generations.
+- Use [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide generations.
+- Use [Spout](./docs/spout.md) (Windows only) to share real-time video between Scope and other local applications.
+- Use the [API](./docs/server.md) to programatically control Scope.
 
 ## Firewalls
 

@@ -1,0 +1,19 @@
+base_model_name: Wan2.1-T2V-1.3B
+base_model_kwargs:
+  timestep_shift: 5.0
+  sink_size: 3
+generator_model_name: "generator"
+num_frame_per_block: 3
+local_attn_size: 12
+global_sink: true
+vae_spatial_downsample_factor: 8
+vae_temporal_downsample_factor: 4
+patch_embedding_spatial_downsample_factor: 2
+max_rope_freq_table_seq_len: 1024
+adapter:
+  type: "lora"
+  rank: 256                   # LoRA rank (typical values: 8, 16, 32, 64)
+  alpha: 256                  # LoRA alpha (typically same as rank, but can be different)
+  dropout: 0.0                # LoRA dropout rate
+  dtype: "bfloat16"           # Data type for LoRA parameters: "bfloat16", "float16", "float32"
+  verbose: false              # Whether to print all target module names

@@ -1,0 +1,7 @@
+# Development auto-update configuration
+# Place this file next to your built app for testing auto-updates locally
+
+owner: daydreamlive
+repo: scope
+provider: github
+updaterCacheDirName: daydream-scope-updater

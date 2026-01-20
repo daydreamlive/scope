@@ -1,0 +1,50 @@
+{
+  "prompts": [
+    {
+      "startTime": 0,
+      "endTime": 4.697899999976158,
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp",
+      "prompts": [
+        {
+          "text": "A beekeeper in her 40s, with a calm and gentle demeanor, is working in a sunny meadow filled with wildflowers. She is wearing a full protective white bee suit with a mesh hood, which obscures her face. She is holding a wooden frame covered with a teeming, buzzing mass of honeybees, examining the health of the hive. The air is filled with the low, constant hum of the bees and the sweet, waxy smell of honey. Her movements are slow and deliberate, a peaceful dance with thousands of tiny creatures.",
+          "weight": 100
+        }
+      ]
+    },
+    {
+      "startTime": 4.697899999976158,
+      "endTime": 11.167,
+      "prompts": [
+        {
+          "text": "A beekeeper in her 40s, with a calm demeanor and wearing a full protective white bee suit with a mesh hood, is inspecting a hive. A young boy, about 8 years old, wearing a full protective white bee suit with a mesh hood, which obscures his face, is standing at a safe distance. He is clearly terrified of the buzzing insects. He is the beekeeper's son, and today is his first, very reluctant, lesson in the family business.",
+          "weight": 100
+        }
+      ],
+      "transitionSteps": 0,
+      "temporalInterpolationMethod": "slerp"
+    }
+  ],
+  "settings": {
+    "pipelineId": "memflow",
+    "inputMode": "text",
+    "resolution": {
+      "height": 480,
+      "width": 832
+    },
+    "seed": 42,
+    "denoisingSteps": [
+      1000,
+      750,
+      500,
+      250
+    ],
+    "manageCache": true,
+    "quantization": null,
+    "kvCacheAttentionBias": 0.3,
+    "loras": [],
+    "loraMergeStrategy": "permanent_merge"
+  },
+  "version": "2.1",
+  "exportedAt": "2025-12-30T20:41:32.411Z"
+}

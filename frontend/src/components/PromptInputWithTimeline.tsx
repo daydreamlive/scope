@@ -41,9 +41,11 @@ interface PromptInputWithTimelineProps {
   onTimelinePromptsChange?: (prompts: TimelinePrompt[]) => void;
   onTimelineCurrentTimeChange?: (currentTime: number) => void;
   onTimelinePlayingChange?: (isPlaying: boolean) => void;
-  isDownloading?: boolean;
+  isLoading?: boolean;
   transitionSteps?: number;
   temporalInterpolationMethod?: "linear" | "slerp";
+  videoScaleMode?: "fit" | "native";
+  onVideoScaleModeToggle?: () => void;
 }
 
 export function PromptInputWithTimeline({
@@ -74,9 +76,11 @@ export function PromptInputWithTimeline({
   onTimelinePromptsChange,
   onTimelineCurrentTimeChange,
   onTimelinePlayingChange,
-  isDownloading = false,
+  isLoading = false,
   transitionSteps,
   temporalInterpolationMethod,
+  videoScaleMode,
+  onVideoScaleModeToggle,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -566,7 +570,9 @@ export function PromptInputWithTimeline({
         onSettingsImport={onSettingsImport}
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
         isStreaming={isStreaming}
-        isDownloading={isDownloading}
+        isLoading={isLoading}
+        videoScaleMode={videoScaleMode}
+        onVideoScaleModeToggle={onVideoScaleModeToggle}
       />
     </div>
   );
