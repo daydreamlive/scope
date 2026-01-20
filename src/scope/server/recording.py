@@ -26,6 +26,8 @@ RECORDING_STARTUP_CLEANUP_ENABLED = (
     os.getenv("RECORDING_STARTUP_CLEANUP_ENABLED", "true").lower() == "true"
 )
 
+RECORDING_MAX_FPS = 30.0  # Must match MediaRecorder's hardcoded rate=30
+
 
 def _parse_time_duration(duration_str: str) -> float:
     """
@@ -57,6 +59,58 @@ def _parse_time_duration(duration_str: str) -> float:
 
 
 RECORDING_MAX_LENGTH_SECONDS = _parse_time_duration(RECORDING_MAX_LENGTH_STR)
+
+
+class TimestampNormalizingTrack(MediaStreamTrack):
+    """Wraps a track and normalizes frame timestamps to start from 0.
+
+    This is needed because when starting a new recording, the source track's
+    frames have PTS values that continue from the previous recording. Without
+    normalization, the MP4 encoder interprets these high PTS values as
+    indicating the frame should appear later in the video, causing black
+    frames at the start.
+
+    Important: We must create a copy of the frame rather than modifying it
+    in place, because the relay shares frame objects across all subscribers.
+    Modifying in place would affect the WebRTC sender and cause encoding errors.
+    """
+
+    def __init__(self, source_track: MediaStreamTrack):
+        super().__init__()
+        self.kind = source_track.kind
+        self._source = source_track
+        self._base_pts = None  # Will be set on first frame
+        self._last_frame_time: float | None = None
+        self._min_frame_interval = 1.0 / RECORDING_MAX_FPS
+
+    async def recv(self):
+        import av
+
+        while True:
+            frame = await self._source.recv()
+
+            # Frame rate limiting - skip frames arriving faster than MAX_RECORDING_FPS
+            current_time = time.monotonic()
+            if self._last_frame_time is not None:
+                elapsed = current_time - self._last_frame_time
+                if elapsed < self._min_frame_interval:
+                    continue  # Skip this frame
+            self._last_frame_time = current_time
+
+            # Capture the first frame's PTS as our base
+            if self._base_pts is None:
+                self._base_pts = frame.pts
+
+            # Create a new frame with normalized timestamp
+            arr = frame.to_ndarray(format="rgb24")
+            new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
+            new_frame.pts = frame.pts - self._base_pts
+            new_frame.time_base = frame.time_base
+            return new_frame
+
+    def stop(self):
+        self._source.stop()
+        super().stop()
 
 
 class RecordingManager:
@@ -96,21 +150,26 @@ class RecordingManager:
         return file_path
 
     @staticmethod
-    async def _stop_track_safe(track: MediaStreamTrack | None) -> None:
+    def _stop_track_safe(track: MediaStreamTrack | None) -> None:
         """Safely stop a recording track, ignoring errors."""
         if track:
             try:
-                await track.stop()
+                track.stop()
             except Exception as e:
                 logger.warning(f"Error stopping recording track: {e}")
 
     def _create_recording_track(self) -> MediaStreamTrack:
-        """Create a recording track from the video track."""
+        """Create a recording track from the video track.
+
+        The track is wrapped in TimestampNormalizingTrack to ensure frame
+        timestamps start from 0 for each new recording.
+        """
         if self.relay:
-            return self.relay.subscribe(self.video_track)
+            relay_track = self.relay.subscribe(self.video_track)
+            return TimestampNormalizingTrack(relay_track)
         else:
             logger.warning("No relay available for recording, using track directly")
-            return self.video_track
+            return TimestampNormalizingTrack(self.video_track)
 
     def _create_media_recorder(self, file_path: str) -> MediaRecorder:
         """Create a MediaRecorder instance with standard settings."""
@@ -219,7 +278,7 @@ class RecordingManager:
                 await media_recorder.stop()
             except Exception as e:
                 logger.warning(f"Error stopping media recorder: {e}")
-        await self._stop_track_safe(recording_track)
+        self._stop_track_safe(recording_track)
         if recording_file and os.path.exists(recording_file):
             try:
                 os.remove(recording_file)
@@ -253,7 +312,7 @@ class RecordingManager:
                 return
 
             await media_recorder.stop()
-            await self._stop_track_safe(recording_track)
+            self._stop_track_safe(recording_track)
             logger.info(f"Stopped recording, saved to {recording_file}")
         except Exception as e:
             logger.error(f"Error stopping recording: {e}")
@@ -278,7 +337,7 @@ class RecordingManager:
                 await media_recorder.stop()
                 logger.info(f"Finalized recording: {recording_file}")
 
-            await self._stop_track_safe(recording_track)
+            self._stop_track_safe(recording_track)
 
             if recording_file and os.path.exists(recording_file):
                 # Create a copy for download
