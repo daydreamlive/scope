@@ -527,6 +527,7 @@ class PipelineManager:
             "video-depth-anything",
             "controller-viz",
             "rife",
+            "gray",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -949,6 +950,16 @@ class PipelineManager:
             )
             logger.info("RIFE pipeline initialized")
             return pipeline
+
+        elif pipeline_id == "gray":
+            from scope.core.pipelines import GrayPipeline
+
+            pipeline = GrayPipeline(
+                device=get_device(),
+            )
+            logger.info("Gray pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 
