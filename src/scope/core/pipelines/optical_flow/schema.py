@@ -31,4 +31,4 @@ class OpticalFlowConfig(BasePipelineConfig):
 
     # User-configurable settings
     model_size: Literal["small", "large"] = "small"
-    use_tensorrt: bool = True
+    use_tensorrt: bool = False
