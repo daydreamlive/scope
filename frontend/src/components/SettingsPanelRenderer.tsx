@@ -742,7 +742,10 @@ export function SettingsPanelRenderer({
           const configValue = configValues[fieldName];
           // If configValue has an onChange handler, use it; otherwise use generic handler
           if (configValue.onChange) {
-            return configValue;
+            return {
+              value: configValue.value,
+              onChange: configValue.onChange,
+            };
           }
           // If only value is provided, use generic handler
           if (onConfigValueChange) {
@@ -751,7 +754,10 @@ export function SettingsPanelRenderer({
               onChange: (val: unknown) => onConfigValueChange(fieldName, val),
             };
           }
-          return configValue;
+          return {
+            value: configValue.value,
+            onChange: undefined,
+          };
         }
         // For dynamic fields not in configValues, use schema default and generic handler
         if (onConfigValueChange) {

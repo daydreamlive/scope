@@ -23,8 +23,9 @@ import type {
   PipelineInfo,
   VaeType,
 } from "../types";
-import { SettingsPanelRenderer } from "./SettingsPanelRenderer";
+import { DynamicSettingsPanel } from "./DynamicSettingsPanel";
 import type { PipelineSchemaInfo } from "../lib/api";
+import { useMemo } from "react";
 
 interface SettingsPanelProps {
   className?: string;
@@ -113,7 +114,6 @@ export function SettingsPanel({
   onSeedChange,
   denoisingSteps = [700, 500],
   onDenoisingStepsChange,
-  defaultDenoisingSteps,
   noiseScale = 0.7,
   onNoiseScaleChange,
   noiseController = true,
@@ -124,25 +124,24 @@ export function SettingsPanel({
   onQuantizationChange,
   kvCacheAttentionBias = 0.3,
   onKvCacheAttentionBiasChange,
-  onResetCache,
-  loras = [],
-  onLorasChange,
-  loraMergeStrategy = "permanent_merge",
   inputMode,
-  spoutSender,
-  onSpoutSenderChange,
-  spoutAvailable = false,
+  vaceContextScale = 1.0,
+  onVaceContextScaleChange,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
   onVaceUseInputVideoChange,
-  vaceContextScale = 1.0,
-  onVaceContextScaleChange,
-  vaeType = "wan",
-  onVaeTypeChange,
-  vaeTypes,
+  loras = [],
+  onLorasChange,
+  loraMergeStrategy = "permanent_merge",
   preprocessorIds = [],
   onPreprocessorIdsChange,
+  onResetCache,
+  spoutAvailable = false,
+  spoutSender,
+  onSpoutSenderChange,
+  vaeType = "wan",
+  onVaeTypeChange,
   configValues,
   onConfigValueChange,
 }: SettingsPanelProps) {
@@ -154,12 +153,95 @@ export function SettingsPanel({
 
   const currentPipeline = pipelines?.[pipelineId];
 
-  // Get settings panel configuration from schema
-  // Use mode-specific settings_panel if available, otherwise use base settings_panel
-  const settingsPanelConfig =
-    schema?.mode_defaults?.[inputMode || "text"]?.settings_panel ||
-    schema?.settings_panel ||
-    [];
+  // Build field values object from props for DynamicSettingsPanel
+  const fieldValues = useMemo(
+    () => ({
+      height: resolution.height,
+      width: resolution.width,
+      base_seed: seed,
+      denoising_steps: denoisingSteps,
+      noise_scale: noiseScale,
+      noise_controller: noiseController,
+      manage_cache: manageCache,
+      quantization: quantization,
+      kv_cache_attention_bias: kvCacheAttentionBias,
+      vae_type: vaeType,
+      vace_context_scale: vaceContextScale,
+      vace_enabled: vaceEnabled, // Needed for conditional visibility
+      vace_use_input_video: vaceUseInputVideo, // Needed for conditional visibility
+      input_mode: inputMode,
+      ...configValues,
+    }),
+    [
+      resolution,
+      seed,
+      denoisingSteps,
+      noiseScale,
+      noiseController,
+      manageCache,
+      quantization,
+      kvCacheAttentionBias,
+      vaeType,
+      vaceContextScale,
+      vaceEnabled,
+      vaceUseInputVideo,
+      inputMode,
+      configValues,
+    ]
+  );
+
+  // Unified onChange handler that routes to appropriate prop handlers
+  const handleFieldChange = (fieldName: string, value: unknown) => {
+    switch (fieldName) {
+      case "height":
+        onResolutionChange?.({ ...resolution, height: value as number });
+        break;
+      case "width":
+        onResolutionChange?.({ ...resolution, width: value as number });
+        break;
+      case "base_seed":
+        onSeedChange?.(value as number);
+        break;
+      case "denoising_steps":
+        onDenoisingStepsChange?.(value as number[]);
+        break;
+      case "noise_scale":
+        onNoiseScaleChange?.(value as number);
+        break;
+      case "noise_controller":
+        onNoiseControllerChange?.(value as boolean);
+        break;
+      case "manage_cache":
+        onManageCacheChange?.(value as boolean);
+        break;
+      case "quantization":
+        onQuantizationChange?.(value as "fp8_e4m3fn" | null);
+        break;
+      case "kv_cache_attention_bias":
+        onKvCacheAttentionBiasChange?.(value as number);
+        break;
+      case "vae_type":
+        onVaeTypeChange?.(value as VaeType);
+        break;
+      case "vace_context_scale":
+        onVaceContextScaleChange?.(value as number);
+        break;
+      case "vace_enabled":
+        onVaceEnabledChange?.(value as boolean);
+        break;
+      case "vace_use_input_video":
+        onVaceUseInputVideoChange?.(value as boolean);
+        break;
+      default:
+        // Use generic handler for unknown fields
+        onConfigValueChange?.(fieldName, value);
+        // Also check configValues for custom handlers
+        if (configValues?.[fieldName]?.onChange) {
+          configValues[fieldName].onChange?.(value);
+        }
+        break;
+    }
+  };
 
   // If no schema is provided, show a message (fallback for backwards compatibility)
   if (!schema) {
@@ -297,53 +379,25 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {/* Render settings controls using SettingsPanelRenderer */}
-        {settingsPanelConfig.length > 0 && (
-          <SettingsPanelRenderer
-            settingsPanel={settingsPanelConfig}
+        {/* Render settings controls using DynamicSettingsPanel */}
+        {schema && (
+          <DynamicSettingsPanel
             schema={schema}
+            fieldValues={fieldValues}
+            inputMode={inputMode}
+            onFieldChange={handleFieldChange}
+            disabled={isStreaming || isLoading}
             pipelines={pipelines}
             pipelineId={pipelineId}
-            isStreaming={isStreaming}
-            isLoading={isLoading}
-            inputMode={inputMode}
-            vaceEnabled={vaceEnabled}
-            onVaceEnabledChange={onVaceEnabledChange}
-            vaceUseInputVideo={vaceUseInputVideo}
-            onVaceUseInputVideoChange={onVaceUseInputVideoChange}
-            vaceContextScale={vaceContextScale}
-            onVaceContextScaleChange={onVaceContextScaleChange}
             loras={loras}
             onLorasChange={onLorasChange}
             loraMergeStrategy={loraMergeStrategy}
             preprocessorIds={preprocessorIds}
             onPreprocessorIdsChange={onPreprocessorIdsChange}
-            manageCache={manageCache}
-            onManageCacheChange={onManageCacheChange}
             onResetCache={onResetCache}
-            kvCacheAttentionBias={kvCacheAttentionBias}
-            onKvCacheAttentionBiasChange={onKvCacheAttentionBiasChange}
-            denoisingSteps={denoisingSteps}
-            onDenoisingStepsChange={onDenoisingStepsChange}
-            defaultDenoisingSteps={defaultDenoisingSteps}
-            noiseController={noiseController}
-            onNoiseControllerChange={onNoiseControllerChange}
-            noiseScale={noiseScale}
-            onNoiseScaleChange={onNoiseScaleChange}
             spoutAvailable={spoutAvailable}
             spoutSender={spoutSender}
             onSpoutSenderChange={onSpoutSenderChange}
-            resolution={resolution}
-            onResolutionChange={onResolutionChange}
-            seed={seed}
-            onSeedChange={onSeedChange}
-            vaeType={vaeType}
-            onVaeTypeChange={onVaeTypeChange}
-            vaeTypes={vaeTypes}
-            quantization={quantization}
-            onQuantizationChange={onQuantizationChange}
-            configValues={configValues}
-            onConfigValueChange={onConfigValueChange}
           />
         )}
       </CardContent>

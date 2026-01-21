@@ -1,7 +1,7 @@
 from pydantic import Field
 
 from ..artifacts import HuggingfaceRepoArtifact
-from ..base_schema import BasePipelineConfig, ModeDefaults, SettingsControlType
+from ..base_schema import BasePipelineConfig, ModeDefaults
 from ..common_artifacts import (
     LIGHTTAE_ARTIFACT,
     LIGHTVAE_ARTIFACT,
@@ -49,31 +49,44 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     default_temporal_interpolation_method = "linear"
     default_temporal_interpolation_steps = 4
 
-    height: int = 320
-    width: int = 576
-    denoising_steps: list[int] = [1000, 750, 500, 250]
+    height: int = Field(
+        default=320,
+        json_schema_extra={
+            "ui:category": "resolution",
+            "ui:order": 1,
+            "ui:label": "Height",
+        },
+    )
+    width: int = Field(
+        default=576,
+        json_schema_extra={
+            "ui:category": "resolution",
+            "ui:order": 2,
+            "ui:label": "Width",
+        },
+    )
+    denoising_steps: list[int] = Field(
+        default=[1000, 750, 500, 250],
+        json_schema_extra={
+            "ui:category": "generation",
+            "ui:order": 1,
+            "ui:widget": "denoisingSteps",
+            "ui:label": "Denoising Steps",
+        },
+    )
     vae_type: VaeType = Field(
         default=VaeType.WAN,
         description="VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
+        json_schema_extra={
+            "ui:category": "generation",
+            "ui:order": 2,
+            "ui:label": "VAE Type",
+        },
     )
 
     modes = {
         "text": ModeDefaults(
             default=True,
-            # Settings panel for text mode (no noise controls)
-            settings_panel=[
-                SettingsControlType.VACE,
-                SettingsControlType.LORA,
-                SettingsControlType.PREPROCESSOR,
-                "vae_type",
-                "height",
-                "width",
-                "base_seed",
-                SettingsControlType.CACHE_MANAGEMENT,
-                "kv_cache_attention_bias",
-                SettingsControlType.DENOISING_STEPS,
-                "quantization",
-            ],
         ),
         "video": ModeDefaults(
             height=256,
@@ -82,20 +95,5 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
             noise_controller=True,
             denoising_steps=[1000, 750],
             default_temporal_interpolation_steps=0,
-            # Video mode includes noise controls
-            settings_panel=[
-                SettingsControlType.VACE,
-                SettingsControlType.LORA,
-                SettingsControlType.PREPROCESSOR,
-                "vae_type",
-                "height",
-                "width",
-                "base_seed",
-                SettingsControlType.CACHE_MANAGEMENT,
-                "kv_cache_attention_bias",
-                SettingsControlType.DENOISING_STEPS,
-                SettingsControlType.NOISE_CONTROLS,
-                "quantization",
-            ],
         ),
     }

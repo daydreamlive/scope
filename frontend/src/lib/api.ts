@@ -356,10 +356,15 @@ export interface PipelineSchemaProperty {
   // JSON Schema fields
   minimum?: number;
   maximum?: number;
+  maxLength?: number | null;
   items?: unknown;
   anyOf?: unknown[];
   enum?: unknown[];
   $ref?: string;
+  // UI metadata from json_schema_extra (Pydantic will include this in schema)
+  // Note: Pydantic v2 includes json_schema_extra in the schema under a custom key
+  // We'll use "x-ui" as the key (following OpenAPI convention for extensions)
+  "x-ui"?: import("../types").UIMetadata;
 }
 
 export interface PipelineConfigSchema {
@@ -392,8 +397,15 @@ export interface ModeDefaults {
   noise_scale?: number | null;
   noise_controller?: boolean | null;
   default_temporal_interpolation_steps?: number;
-  // Settings panel configuration for this mode
-  settings_panel?: SettingsPanelItem[];
+}
+
+export interface CategoryConfig {
+  title: string;
+  icon?: string;
+  order: number;
+  collapsible?: boolean;
+  showIf?: unknown;
+  hideInModes?: ("text" | "video")[];
 }
 
 export interface PipelineSchemaInfo {
@@ -422,8 +434,8 @@ export interface PipelineSchemaInfo {
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
-  // Settings panel configuration (base, can be overridden per-mode in mode_defaults)
-  settings_panel?: SettingsPanelItem[];
+  // Category configuration for UI rendering
+  category_config?: Record<string, CategoryConfig>;
 }
 
 export interface PipelineSchemasResponse {

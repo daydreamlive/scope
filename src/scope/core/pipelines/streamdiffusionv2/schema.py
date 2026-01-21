@@ -1,7 +1,7 @@
 from pydantic import Field
 
 from ..artifacts import HuggingfaceRepoArtifact
-from ..base_schema import BasePipelineConfig, ModeDefaults, SettingsControlType
+from ..base_schema import BasePipelineConfig, ModeDefaults
 from ..common_artifacts import (
     LIGHTTAE_ARTIFACT,
     LIGHTVAE_ARTIFACT,
@@ -42,13 +42,47 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     modified = True
     supports_quantization = True
 
-    denoising_steps: list[int] = [750, 250]
-    noise_scale: float = 0.7
-    noise_controller: bool = True
-    input_size: int = 4
+    denoising_steps: list[int] = Field(
+        default=[750, 250],
+        json_schema_extra={
+            "ui:category": "generation",
+            "ui:order": 1,
+            "ui:widget": "denoisingSteps",
+            "ui:label": "Denoising Steps",
+        },
+    )
+    noise_scale: float = Field(
+        default=0.7,
+        json_schema_extra={
+            "ui:category": "noise",
+            "ui:order": 2,
+            "ui:label": "Noise Scale",
+            "ui:showIf": {"field": "input_mode", "eq": "video"},
+        },
+    )
+    noise_controller: bool = Field(
+        default=True,
+        json_schema_extra={
+            "ui:category": "noise",
+            "ui:order": 1,
+            "ui:label": "Noise Controller",
+            "ui:showIf": {"field": "input_mode", "eq": "video"},
+        },
+    )
+    input_size: int = Field(
+        default=4,
+        json_schema_extra={
+            "ui:hidden": True,  # Internal field, not user-facing
+        },
+    )
     vae_type: VaeType = Field(
         default=VaeType.WAN,
         description="VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
+        json_schema_extra={
+            "ui:category": "generation",
+            "ui:order": 2,
+            "ui:label": "VAE Type",
+        },
     )
 
     modes = {
@@ -56,37 +90,10 @@ class StreamDiffusionV2Config(BasePipelineConfig):
             height=512,
             width=512,
             denoising_steps=[1000, 750],
-            # Settings panel for text mode (no noise controls)
-            settings_panel=[
-                SettingsControlType.VACE,
-                SettingsControlType.LORA,
-                SettingsControlType.PREPROCESSOR,
-                "vae_type",
-                "height",
-                "width",
-                "base_seed",
-                SettingsControlType.CACHE_MANAGEMENT,
-                SettingsControlType.DENOISING_STEPS,
-                "quantization",
-            ],
         ),
         "video": ModeDefaults(
             default=True,
             noise_scale=0.7,
             noise_controller=True,
-            # Video mode includes noise controls
-            settings_panel=[
-                SettingsControlType.VACE,
-                SettingsControlType.LORA,
-                SettingsControlType.PREPROCESSOR,
-                "vae_type",
-                "height",
-                "width",
-                "base_seed",
-                SettingsControlType.CACHE_MANAGEMENT,
-                SettingsControlType.DENOISING_STEPS,
-                SettingsControlType.NOISE_CONTROLS,
-                "quantization",
-            ],
         ),
     }

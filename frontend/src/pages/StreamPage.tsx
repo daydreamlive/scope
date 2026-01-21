@@ -1039,20 +1039,21 @@ export function StreamPage() {
         ];
       }
 
-      // Check if items are in settings_panel for current mode
+      // Check if fields exist in schema (replaces settings_panel checks)
       const currentSchema = pipelineSchemas?.pipelines[pipelineIdToUse];
-      const modeSettingsPanel =
-        currentSchema?.mode_defaults?.[currentMode]?.settings_panel ||
-        currentSchema?.settings_panel ||
-        [];
 
-      // Cache management for pipelines that support it (check settings_panel)
-      if (modeSettingsPanel.includes("cache_management")) {
+      // Cache management for pipelines that support it (check if field exists)
+      if (
+        currentSchema?.config_schema?.properties?.manage_cache !== undefined
+      ) {
         initialParameters.manage_cache = settings.manageCache ?? true;
       }
 
-      // KV cache bias for pipelines that support it (check settings_panel)
-      if (modeSettingsPanel.includes("kv_cache_attention_bias")) {
+      // KV cache bias for pipelines that support it (check if field exists)
+      if (
+        currentSchema?.config_schema?.properties
+          ?.kv_cache_attention_bias !== undefined
+      ) {
         initialParameters.kv_cache_attention_bias =
           settings.kvCacheAttentionBias ?? 1.0;
       }

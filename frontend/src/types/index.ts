@@ -115,11 +115,6 @@ export interface PipelineInfo {
   supportsControllerInput?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
-  // Settings panel configuration - defines order and which controls to show
-  // Can be overridden per mode via modeSettingsPanels
-  settingsPanel?: string[];
-  // Mode-specific settings panel overrides
-  modeSettingsPanels?: Record<InputMode, string[]>;
 }
 
 export interface DownloadProgress {
@@ -131,4 +126,66 @@ export interface DownloadProgress {
 export interface ModelStatusResponse {
   downloaded: boolean;
   progress: DownloadProgress | null;
+}
+
+// UI metadata types for dynamic parameter controls
+// These match the json_schema_extra structure from Pydantic
+
+/**
+ * Condition expression for field visibility.
+ * Supports simple comparisons, compound logic (allOf/anyOf), and negation.
+ */
+export type ConditionExpression =
+  | {
+      field: string;
+      eq?: unknown;
+      ne?: unknown;
+      gt?: number;
+      gte?: number;
+      lt?: number;
+      lte?: number;
+      in?: unknown[];
+      nin?: unknown[];
+    }
+  | { allOf: ConditionExpression[] }
+  | { anyOf: ConditionExpression[] }
+  | { not: ConditionExpression };
+
+/**
+ * UI metadata that can be attached to schema properties via json_schema_extra.
+ */
+export interface UIMetadata {
+  /** Category name for grouping fields into sections */
+  "ui:category"?: string;
+  /** Display order within category (lower numbers appear first) */
+  "ui:order"?: number;
+  /** Custom label override (defaults to field name converted to Title Case) */
+  "ui:label"?: string;
+  /** Condition expression for conditional visibility */
+  "ui:showIf"?: ConditionExpression;
+  /** Modes in which this field should be hidden */
+  "ui:hideInModes"?: InputMode[];
+  /** Custom widget type override (e.g., "loraManager", "denoisingSteps") */
+  "ui:widget"?: string;
+  /** Whether to hide this field from the UI entirely */
+  "ui:hidden"?: boolean;
+  /** Whether this field is read-only (displayed but not editable) */
+  readOnly?: boolean;
+}
+
+/**
+ * Extended schema property with UI metadata.
+ */
+export interface SchemaPropertyWithUI {
+  type?: string;
+  default?: unknown;
+  description?: string;
+  minimum?: number;
+  maximum?: number;
+  items?: unknown;
+  anyOf?: unknown[];
+  enum?: unknown[];
+  $ref?: string;
+  /** UI metadata from json_schema_extra */
+  "x-ui"?: UIMetadata;
 }

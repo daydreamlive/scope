@@ -44,40 +44,6 @@ export function usePipelines() {
           const supportsImages =
             schema.config_schema?.properties?.images !== undefined;
 
-          // Extract settings panel configuration
-          const settingsPanel = schema.settings_panel;
-
-          // Extract mode-specific settings panels
-          const modeSettingsPanels: Record<InputMode, string[]> | undefined =
-            schema.mode_defaults
-              ? Object.entries(schema.mode_defaults).reduce(
-                  (acc, [mode, defaults]) => {
-                    if (defaults.settings_panel) {
-                      acc[mode as InputMode] = defaults.settings_panel;
-                    }
-                    return acc;
-                  },
-                  {} as Record<InputMode, string[]>
-                )
-              : undefined;
-
-          // Helper to check if item exists in any settings_panel (base or mode-specific)
-          const hasItemInSettingsPanel = (item: string): boolean => {
-            // Check base settings_panel
-            if (settingsPanel?.includes(item)) {
-              return true;
-            }
-            // Check mode-specific settings_panels
-            if (modeSettingsPanels) {
-              for (const panel of Object.values(modeSettingsPanels)) {
-                if (panel.includes(item)) {
-                  return true;
-                }
-              }
-            }
-            return false;
-          };
-
           transformed[id] = {
             name: schema.name,
             about: schema.description,
@@ -94,11 +60,15 @@ export function usePipelines() {
             supportsLoRA: schema.supports_lora,
             supportsVACE: schema.supports_vace,
             usage: schema.usage,
-            supportsCacheManagement: hasItemInSettingsPanel("cache_management"),
-            supportsKvCacheBias: hasItemInSettingsPanel(
-              "kv_cache_attention_bias"
-            ),
-            supportsQuantization: hasItemInSettingsPanel("quantization"),
+            // Check schema capabilities - these should be in schema metadata
+            // For now, check if fields exist in schema
+            supportsCacheManagement:
+              schema.config_schema?.properties?.manage_cache !== undefined,
+            supportsKvCacheBias:
+              schema.config_schema?.properties?.kv_cache_attention_bias !==
+              undefined,
+            supportsQuantization:
+              schema.config_schema?.properties?.quantization !== undefined,
             minDimension: schema.min_dimension,
             recommendedQuantizationVramThreshold:
               schema.recommended_quantization_vram_threshold ?? undefined,
@@ -106,11 +76,6 @@ export function usePipelines() {
             vaeTypes,
             supportsControllerInput,
             supportsImages,
-            settingsPanel,
-            modeSettingsPanels:
-              modeSettingsPanels && Object.keys(modeSettingsPanels).length > 0
-                ? modeSettingsPanels
-                : undefined,
           };
         }
 

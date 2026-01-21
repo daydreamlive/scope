@@ -16,6 +16,8 @@ export type ControlType =
   | "toggle"
   | "select"
   | "text"
+  | "textarea"
+  | "denoisingSteps"
   | "unknown";
 
 /**
@@ -23,23 +25,86 @@ export type ControlType =
  */
 export interface ResolvedSchemaProperty extends PipelineSchemaProperty {
   resolvedEnum?: string[];
+  /** UI metadata from json_schema_extra */
+  uiMetadata?: import("../types").UIMetadata;
 }
 
 /**
  * Infers the appropriate control type from a JSON Schema property.
  *
- * Mapping rules:
+ * Priority order:
+ * 1. ui:widget override (if specified in UI metadata)
+ * 2. Field name pattern matching (e.g., denoising_steps → denoisingSteps)
+ * 3. Type inference based on JSON Schema
+ *
+ * Type inference rules:
  * - `$ref` to enum definition → select dropdown
  * - `type: "boolean"` → toggle
- * - `type: "number"` or `"integer"` with `minimum` AND `maximum` → slider
- * - `type: "number"` or `"integer"` (no bounds or partial bounds) → number input
+ * - `type: "number"` or `"integer"` with `minimum` AND `maximum` AND range ≤ 10 → slider
+ * - `type: "number"` or `"integer"` (no bounds or large range) → number input (stepper)
+ * - `type: "string"` with maxLength > 200 → textarea
  * - `type: "string"` → text input
+ * - `type: "array"` with items.type: "integer" → denoisingSteps (if field name matches pattern)
  * - Unknown → fallback (logs warning)
  */
 export function inferControlType(
-  property: ResolvedSchemaProperty
+  property: ResolvedSchemaProperty,
+  fieldName?: string
 ): ControlType {
-  // Check for enum reference first (highest priority)
+  // Priority 1: Check for ui:widget override
+  if (property.uiMetadata?.["ui:widget"]) {
+    const widget = property.uiMetadata["ui:widget"];
+    // Map widget names to control types
+    switch (widget) {
+      case "slider":
+      case "Slider":
+        return "slider";
+      case "number":
+      case "stepper":
+      case "Number":
+        return "number";
+      case "toggle":
+      case "switch":
+      case "Toggle":
+        return "toggle";
+      case "select":
+      case "dropdown":
+      case "Select":
+        return "select";
+      case "text":
+      case "input":
+      case "Text":
+        return "text";
+      case "textarea":
+      case "Textarea":
+        return "textarea";
+      case "denoisingSteps":
+      case "denoising_steps":
+        return "denoisingSteps";
+      default:
+        // Custom widget types (like "loraManager") will be handled by the renderer
+        return "unknown";
+    }
+  }
+
+  // Priority 2: Field name pattern matching
+  if (fieldName) {
+    // Check for denoising_steps pattern
+    if (
+      fieldName === "denoising_steps" &&
+      property.type === "array" &&
+      property.items &&
+      typeof property.items === "object" &&
+      "type" in property.items &&
+      property.items.type === "integer"
+    ) {
+      return "denoisingSteps";
+    }
+  }
+
+  // Priority 3: Type inference
+
+  // Check for enum reference first
   if (property.$ref || property.resolvedEnum) {
     return "select";
   }
@@ -63,14 +128,37 @@ export function inferControlType(
       if (nonNullType.type === "boolean") return "toggle";
       if (nonNullType.type === "number" || nonNullType.type === "integer") {
         // Check for bounds in the anyOf type or the parent property
-        const hasMin =
-          nonNullType.minimum !== undefined || property.minimum !== undefined;
-        const hasMax =
-          nonNullType.maximum !== undefined || property.maximum !== undefined;
-        if (hasMin && hasMax) return "slider";
+        const min =
+          nonNullType.minimum !== undefined
+            ? nonNullType.minimum
+            : property.minimum;
+        const max =
+          nonNullType.maximum !== undefined
+            ? nonNullType.maximum
+            : property.maximum;
+        // Use slider if both bounds exist and range ≤ 10
+        if (
+          min !== undefined &&
+          max !== undefined &&
+          max - min <= 10
+        ) {
+          return "slider";
+        }
         return "number";
       }
-      if (nonNullType.type === "string") return "text";
+      if (nonNullType.type === "string") {
+        // Check for textarea (long strings)
+        const maxLength =
+          "maxLength" in nonNullType && typeof nonNullType.maxLength === "number"
+            ? nonNullType.maxLength
+            : property.maxLength !== undefined && property.maxLength !== null
+              ? property.maxLength
+              : undefined;
+        if (maxLength !== undefined && typeof maxLength === "number" && maxLength > 200) {
+          return "textarea";
+        }
+        return "text";
+      }
     }
   }
 
@@ -80,15 +168,43 @@ export function inferControlType(
   }
 
   if (property.type === "number" || property.type === "integer") {
-    // Slider requires both min and max bounds
-    if (property.minimum !== undefined && property.maximum !== undefined) {
+    // Slider requires both min and max bounds AND range ≤ 10
+    if (
+      property.minimum !== undefined &&
+      property.maximum !== undefined &&
+      property.maximum - property.minimum <= 10
+    ) {
       return "slider";
     }
     return "number";
   }
 
   if (property.type === "string") {
+    // Check for textarea (long strings)
+    const maxLength = property.maxLength;
+    if (
+      maxLength !== undefined &&
+      typeof maxLength === "number" &&
+      maxLength > 200
+    ) {
+      return "textarea";
+    }
     return "text";
+  }
+
+  if (property.type === "array") {
+    // Check if it's an array of integers (could be denoising steps)
+    if (
+      property.items &&
+      typeof property.items === "object" &&
+      "type" in property.items &&
+      property.items.type === "integer"
+    ) {
+      // If field name wasn't checked earlier, check it now
+      if (fieldName === "denoising_steps") {
+        return "denoisingSteps";
+      }
+    }
   }
 
   // Unknown type - will use fallback renderer
@@ -117,7 +233,7 @@ export function resolveEnumFromRef(
 }
 
 /**
- * Resolves a schema property, extracting enum values from $defs if needed.
+ * Resolves a schema property, extracting enum values from $defs and UI metadata if needed.
  */
 export function resolveSchemaProperty(
   property: PipelineSchemaProperty,
@@ -127,6 +243,13 @@ export function resolveSchemaProperty(
 
   if (property.$ref) {
     resolved.resolvedEnum = resolveEnumFromRef(property.$ref, defs);
+  }
+
+  // Extract UI metadata from "x-ui" key (Pydantic json_schema_extra convention)
+  // TypeScript doesn't recognize "x-ui" as a valid key, so we need to access it via bracket notation
+  const xui = (property as Record<string, unknown>)["x-ui"];
+  if (xui && typeof xui === "object") {
+    resolved.uiMetadata = xui as import("../types").UIMetadata;
   }
 
   return resolved;
@@ -143,11 +266,11 @@ const EXCLUDED_PARAMETERS = new Set([
   "pipeline_description",
   "pipeline_version",
   // Complex types that need custom handling
-  "denoising_steps", // Handled by DenoisingStepsSlider
   "ref_images", // Handled by file picker
   "loras", // Handled by LoRAManager
   // Fields that are handled elsewhere in the UI
   "modes",
+  // Note: denoising_steps is now handled via ui:widget="denoisingSteps" in UI metadata
 ]);
 
 /**
@@ -159,17 +282,23 @@ export function shouldRenderParameter(paramName: string): boolean {
 
 /**
  * Gets display metadata for a parameter from the schema.
+ * Uses UI metadata if available, otherwise falls back to defaults.
  */
 export function getParameterDisplayInfo(
   paramName: string,
-  property: PipelineSchemaProperty
+  property: PipelineSchemaProperty | ResolvedSchemaProperty
 ): { label: string; tooltip?: string } {
-  // Convert snake_case to Title Case for label
+  // Check for UI metadata override
+  const uiMetadata =
+    "uiMetadata" in property ? property.uiMetadata : undefined;
+
+  // Use ui:label if provided, otherwise convert snake_case to Title Case
   const label =
+    uiMetadata?.["ui:label"] ||
     paramName
       .split("_")
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ") + ":";
+      .join(" ");
 
   return {
     label,
@@ -204,7 +333,13 @@ export function extractRenderableParameters(
     }
 
     const resolved = resolveSchemaProperty(property, schema.$defs);
-    const controlType = inferControlType(resolved);
+
+    // Check if field is hidden via UI metadata
+    if (resolved.uiMetadata?.["ui:hidden"] === true) {
+      continue;
+    }
+
+    const controlType = inferControlType(resolved, name);
 
     // Skip unknown types for now (they would need custom handling)
     if (controlType === "unknown") {
@@ -215,7 +350,7 @@ export function extractRenderableParameters(
       continue;
     }
 
-    const displayInfo = getParameterDisplayInfo(name, property);
+    const displayInfo = getParameterDisplayInfo(name, resolved);
 
     parameters.push({
       name,

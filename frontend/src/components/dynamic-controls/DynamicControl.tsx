@@ -18,6 +18,7 @@ import { NumberControl } from "./NumberControl";
 import { ToggleControl } from "./ToggleControl";
 import { SelectControl } from "./SelectControl";
 import { TextControl } from "./TextControl";
+import { DenoisingStepsSlider } from "../DenoisingStepsSlider";
 
 export interface DynamicControlRendererProps {
   /** The parameter metadata including name, schema, and inferred control type */
@@ -104,6 +105,31 @@ export function DynamicControl({
     }
 
     case "text":
+      return (
+        <TextControl
+          paramName={name}
+          schema={property}
+          value={(value as string) ?? property.default ?? ""}
+          onChange={handleChange as (value: string) => void}
+          label={label}
+          tooltip={tooltip}
+          disabled={disabled}
+        />
+      );
+
+    case "denoisingSteps":
+      return (
+        <DenoisingStepsSlider
+          value={(value as number[]) ?? (property.default as number[]) ?? []}
+          onChange={handleChange as (value: number[]) => void}
+          disabled={disabled}
+          tooltip={tooltip}
+          label={label}
+        />
+      );
+
+    case "textarea":
+      // For now, use TextControl for textarea (can be enhanced later)
       return (
         <TextControl
           paramName={name}

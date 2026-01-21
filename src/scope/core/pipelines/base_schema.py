@@ -30,21 +30,31 @@ if TYPE_CHECKING:
 
 
 # Field templates - use these to override defaults while keeping constraints/descriptions
-def height_field(default: int = 512) -> FieldInfo:
+def height_field(
+    default: int = 512,
+    json_schema_extra: dict[str, Any] | None = None,
+) -> FieldInfo:
     """Height field with standard constraints."""
+    extra = json_schema_extra or {}
     return Field(
         default=default,
         ge=1,
         description="Output video height in pixels. Higher values produce more detailed vertical resolution but reduces speed.",
+        json_schema_extra=extra,
     )
 
 
-def width_field(default: int = 512) -> FieldInfo:
+def width_field(
+    default: int = 512,
+    json_schema_extra: dict[str, Any] | None = None,
+) -> FieldInfo:
     """Width field with standard constraints."""
+    extra = json_schema_extra or {}
     return Field(
         default=default,
         ge=1,
         description="Output video width in pixels. Higher values produce more detailed horizontal resolution but reduces speed.",
+        json_schema_extra=extra,
     )
 
 
@@ -177,10 +187,6 @@ class ModeDefaults(BaseModel):
     # Temporal interpolation
     default_temporal_interpolation_steps: int | None = None
 
-    # Settings panel configuration for this mode (overrides base settings_panel)
-    # If not set, uses the pipeline's base settings_panel
-    settings_panel: list[SettingsControlType | str] | None = None
-
 
 class BasePipelineConfig(BaseModel):
     """Base configuration for all pipelines.
@@ -237,14 +243,6 @@ class BasePipelineConfig(BaseModel):
     # Use default=True to mark the default mode. Only include fields that differ from base.
     modes: ClassVar[dict[str, ModeDefaults]] = {"text": ModeDefaults(default=True)}
 
-    # Settings panel configuration - defines order and which controls to show
-    # Items can be:
-    #   - SettingsControlType enum values for special controls (VACE, LORA, etc.)
-    #   - Field name strings for dynamic controls (e.g., "vae_type", "height")
-    # If not set, frontend uses legacy hardcoded logic.
-    # Can be overridden per-mode in ModeDefaults.settings_panel
-    settings_panel: ClassVar[list[SettingsControlType | str] | None] = None
-
     # Prompt and temporal interpolation support
     supports_prompts: ClassVar[bool] = True
     default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
@@ -253,39 +251,154 @@ class BasePipelineConfig(BaseModel):
     default_temporal_interpolation_steps: ClassVar[int] = 0
 
     # Resolution settings - use field templates for consistency
-    height: int = height_field()
-    width: int = width_field()
+    height: int = Field(
+        default=512,
+        ge=1,
+        description="Output video height in pixels. Higher values produce more detailed vertical resolution but reduces speed.",
+        json_schema_extra={
+            "ui:category": "resolution",
+            "ui:order": 1,
+            "ui:label": "Height",
+        },
+    )
+    width: int = Field(
+        default=512,
+        ge=1,
+        description="Output video width in pixels. Higher values produce more detailed horizontal resolution but reduces speed.",
+        json_schema_extra={
+            "ui:category": "resolution",
+            "ui:order": 2,
+            "ui:label": "Width",
+        },
+    )
 
     # Core parameters
     manage_cache: bool = Field(
         default=True,
         description="Enable automatic cache management for performance optimization",
+        json_schema_extra={
+            "ui:category": "cache",
+            "ui:order": 1,
+            "ui:label": "Manage Cache",
+        },
     )
     base_seed: Annotated[int, Field(ge=0)] = Field(
         default=42,
         description="Random seed for reproducible generation. Using the same seed with the same settings will produce similar results.",
+        json_schema_extra={
+            "ui:category": "generation",
+            "ui:order": 3,
+            "ui:label": "Seed",
+        },
     )
-    denoising_steps: list[int] | None = denoising_steps_field()
+    denoising_steps: list[int] | None = Field(
+        default=None,
+        description="Denoising step schedule for progressive generation",
+        json_schema_extra={
+            "ui:category": "generation",
+            "ui:order": 1,
+            "ui:widget": "denoisingSteps",
+            "ui:label": "Denoising Steps",
+        },
+    )
 
     # Video mode parameters (None means not applicable/text mode)
-    noise_scale: Annotated[float, Field(ge=0.0, le=5.0)] | None = noise_scale_field()
-    noise_controller: bool | None = noise_controller_field()
-    input_size: int | None = input_size_field()
+    noise_scale: Annotated[float, Field(ge=0.0, le=5.0)] | None = Field(
+        default=None,
+        ge=0.0,
+        le=5.0,
+        description="Amount of noise to add during video generation (video mode only)",
+        json_schema_extra={
+            "ui:category": "noise",
+            "ui:order": 2,
+            "ui:label": "Noise Scale",
+            "ui:showIf": {"field": "input_mode", "eq": "video"},
+        },
+    )
+    noise_controller: bool | None = Field(
+        default=None,
+        description="Enable dynamic noise control during generation (video mode only)",
+        json_schema_extra={
+            "ui:category": "noise",
+            "ui:order": 1,
+            "ui:label": "Noise Controller",
+            "ui:showIf": {"field": "input_mode", "eq": "video"},
+        },
+    )
+    input_size: int | None = Field(
+        default=1,
+        ge=1,
+        description="Expected input video frame count (video mode only)",
+        json_schema_extra={
+            "ui:hidden": True,  # Internal field, not user-facing
+        },
+    )
 
     # VACE (optional reference image conditioning)
-    ref_images: list[str] | None = ref_images_field()
-    vace_context_scale: float = vace_context_scale_field()
+    vace_enabled: bool = Field(
+        default=False,
+        description="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance.",
+        json_schema_extra={
+            "ui:category": "vace",
+            "ui:order": 1,
+            "ui:label": "VACE",
+        },
+    )
+    vace_use_input_video: bool = Field(
+        default=True,
+        description="When enabled in Video input mode, the input video is used for VACE conditioning.",
+        json_schema_extra={
+            "ui:category": "vace",
+            "ui:order": 2,
+            "ui:label": "Use Input Video",
+            "ui:showIf": {
+                "allOf": [
+                    {"field": "vace_enabled", "eq": True},
+                    {"field": "input_mode", "eq": "video"},
+                ]
+            },
+        },
+    )
+    ref_images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for VACE conditioning",
+        json_schema_extra={
+            "ui:hidden": True,  # Internal field, not user-facing
+        },
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
+        json_schema_extra={
+            "ui:category": "vace",
+            "ui:order": 3,
+            "ui:label": "Context Scale",
+            "ui:showIf": {"field": "vace_enabled", "eq": True},
+        },
+    )
 
     # Quantization (optional, only used if supports_quantization is True)
     quantization: Quantization | None = Field(
         default=None,
         description="Quantization method for the diffusion model. fp8_e4m3fn (Dynamic) reduces memory usage, but might affect performance and quality. None uses full precision and uses more memory, but does not affect performance and quality.",
+        json_schema_extra={
+            "ui:category": "advanced",
+            "ui:order": 1,
+            "ui:label": "Quantization",
+        },
     )
 
     # KV cache attention bias (optional, only used if supports_kv_cache_bias is True)
     kv_cache_attention_bias: Annotated[float, Field(ge=0.01, le=1.0)] | None = Field(
         default=None,
         description="Controls how much to rely on past frames in the cache during generation. A lower value can help mitigate error accumulation and prevent repetitive motion. Uses log scale: 1.0 = full reliance on past frames, smaller values = less reliance on past frames. Typical values: 0.3-0.7 for moderate effect, 0.1-0.2 for strong effect.",
+        json_schema_extra={
+            "ui:category": "cache",
+            "ui:order": 2,
+            "ui:label": "KV Cache Attention Bias",
+        },
     )
 
     @classmethod
@@ -347,6 +460,105 @@ class BasePipelineConfig(BaseModel):
         return defaults
 
     @classmethod
+    def _process_schema_for_ui_metadata(cls, schema: dict[str, Any]) -> dict[str, Any]:
+        """Process JSON schema to extract UI metadata from json_schema_extra.
+
+        Pydantic v2 includes json_schema_extra keys directly in the property schema.
+        We move UI-related keys (ui:*) to a nested "x-ui" object for cleaner structure.
+
+        Args:
+            schema: The JSON schema dict from model_json_schema()
+
+        Returns:
+            Processed schema with UI metadata under "x-ui" key
+        """
+        if "properties" not in schema:
+            return schema
+
+        processed = schema.copy()
+        processed["properties"] = {}
+
+        ui_keys = {
+            "ui:category",
+            "ui:order",
+            "ui:label",
+            "ui:showIf",
+            "ui:hideInModes",
+            "ui:widget",
+            "ui:hidden",
+            "readOnly",
+        }
+
+        for prop_name, prop_schema in schema["properties"].items():
+            if not isinstance(prop_schema, dict):
+                processed["properties"][prop_name] = prop_schema
+                continue
+
+            prop_copy = prop_schema.copy()
+            ui_metadata: dict[str, Any] = {}
+
+            # Extract UI metadata keys
+            for key in list(prop_copy.keys()):
+                if key in ui_keys:
+                    ui_metadata[key] = prop_copy.pop(key)
+
+            # If we found any UI metadata, nest it under "x-ui"
+            if ui_metadata:
+                prop_copy["x-ui"] = ui_metadata
+
+            processed["properties"][prop_name] = prop_copy
+
+        return processed
+
+    @classmethod
+    def get_category_config(cls) -> dict[str, dict[str, Any]]:
+        """Return category configuration for UI rendering.
+
+        Defines section titles, order, and section-level visibility conditions.
+        This is shared across all pipelines (not per-pipeline).
+
+        Returns:
+            Dict mapping category names to their configuration
+        """
+        return {
+            "resolution": {
+                "title": "Resolution",
+                "icon": "ruler",
+                "order": 1,
+            },
+            "generation": {
+                "title": "Generation",
+                "order": 2,
+            },
+            "noise": {
+                "title": "Noise Control",
+                "order": 3,
+            },
+            "vace": {
+                "title": "VACE",
+                "order": 4,
+                "collapsible": True,
+            },
+            "lora": {
+                "title": "LoRA",
+                "order": 5,
+            },
+            "cache": {
+                "title": "Cache",
+                "order": 6,
+            },
+            "advanced": {
+                "title": "Advanced",
+                "order": 7,
+                "collapsible": True,
+            },
+            "output": {
+                "title": "Output",
+                "order": 8,
+            },
+        }
+
+    @classmethod
     def get_schema_with_metadata(cls) -> dict[str, Any]:
         """Return complete schema with pipeline metadata and JSON schema.
 
@@ -377,29 +589,17 @@ class BasePipelineConfig(BaseModel):
         )
         metadata["modified"] = cls.modified
         metadata["usage"] = cls.usage
-        metadata["config_schema"] = cls.model_json_schema()
+        metadata["category_config"] = cls.get_category_config()
 
-        # Include base settings_panel if defined
-        if cls.settings_panel is not None:
-            # Convert enum values to their string representation
-            metadata["settings_panel"] = [
-                item.value if isinstance(item, SettingsControlType) else item
-                for item in cls.settings_panel
-            ]
+        # Generate schema and process UI metadata
+        raw_schema = cls.model_json_schema()
+        processed_schema = cls._process_schema_for_ui_metadata(raw_schema)
+        metadata["config_schema"] = processed_schema
 
         # Include mode-specific defaults (excluding None values and the "default" flag)
         mode_defaults = {}
         for mode_name, mode_config in cls.modes.items():
             overrides = mode_config.model_dump(exclude={"default"}, exclude_none=True)
-            # Convert settings_panel enum values to strings if present
-            if (
-                "settings_panel" in overrides
-                and overrides["settings_panel"] is not None
-            ):
-                overrides["settings_panel"] = [
-                    item.value if isinstance(item, SettingsControlType) else item
-                    for item in overrides["settings_panel"]
-                ]
             if overrides:
                 mode_defaults[mode_name] = overrides
         if mode_defaults:

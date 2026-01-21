@@ -11,6 +11,7 @@ interface DenoisingStepsSliderProps {
   disabled?: boolean;
   defaultValues?: number[];
   tooltip?: string;
+  label?: string;
 }
 
 const MIN_SLIDERS = 1;
@@ -26,6 +27,7 @@ export function DenoisingStepsSlider({
   disabled = false,
   defaultValues = DEFAULT_VALUES,
   tooltip,
+  label = "Denoising Steps",
 }: DenoisingStepsSliderProps) {
   const [localValue, setLocalValue] = useState<number[]>(
     value.length > 0 ? value : defaultValues
@@ -134,7 +136,7 @@ export function DenoisingStepsSlider({
     <div className={`space-y-2 ${className}`}>
       <div className="flex items-center justify-between">
         <LabelWithTooltip
-          label="Denoising Step List"
+          label={label}
           tooltip={tooltip}
           className="text-sm text-foreground"
         />
