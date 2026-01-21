@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 class Requirements(BaseModel):
     """Requirements for pipeline configuration."""
 
-    input_size: int
+    input_size: int | None = None
 
 
 class Pipeline(ABC):

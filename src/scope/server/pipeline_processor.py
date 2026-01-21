@@ -10,6 +10,7 @@ from typing import Any
 import torch
 
 from scope.core.pipelines.controller import parse_ctrl_input
+from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
 from .pipeline_manager import PipelineNotAvailableException
 
@@ -84,6 +85,9 @@ class PipelineProcessor:
             "vace_use_input_video", True
         )
 
+        # Cache VACE support check to avoid isinstance on every chunk
+        self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -123,12 +127,15 @@ class PipelineProcessor:
         self.next_processor = next_processor
 
         # Calculate output queue size based on next processor's requirements
+        # Also pass chunk size to this processor so preprocessors can use it
         next_pipeline = next_processor.pipeline
         if hasattr(next_pipeline, "prepare"):
             requirements = next_pipeline.prepare(video=True)
             input_size = requirements.input_size
             target_size = max(8, input_size * OUTPUT_QUEUE_MAX_SIZE_FACTOR)
             self._resize_output_queue(target_size)
+            # Store downstream chunk size for preprocessors to use via prepare()
+            self.parameters["input_size"] = input_size
 
         # Update next processor's input_queue to point to this output_queue
         # Use lock to ensure thread-safe reference swapping
@@ -339,6 +346,8 @@ class PipelineProcessor:
         video_input = None
         if requirements is not None:
             current_chunk_size = requirements.input_size
+            if current_chunk_size is None:
+                return
 
             # Capture a local reference to input_queue while holding the lock
             # This ensures thread-safe access even if input_queue is reassigned
@@ -375,25 +384,28 @@ class PipelineProcessor:
                 self.parameters["ctrl_input"]["mouse"] = [0.0, 0.0]
 
             # Route video input based on VACE status
-            # We do not support combining latent initialization and VACE conditioning
-            if video_input is not None:
-                # Check if pipeline actually supports VACE before routing to vace_input_frames
-                from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
-
-                pipeline_supports_vace = isinstance(self.pipeline, VACEEnabledPipeline)
-
+            # Don't overwrite if preprocessor already provided vace_input_frames
+            if video_input is not None and "vace_input_frames" not in call_params:
                 if (
-                    pipeline_supports_vace
+                    self._pipeline_supports_vace
                     and self.vace_enabled
                     and self.vace_use_input_video
                 ):
-                    # VACE conditioning: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
                 else:
-                    # Latent initialization: route to video
                     call_params["video"] = video_input
 
             output = self.pipeline(**call_params)
+
+            # Handle dict returns from preprocessors (dual-output pattern)
+            # Preprocessors return {"video": frames, ...extra_params}
+            if isinstance(output, dict):
+                extra_params = {k: v for k, v in output.items() if k != "video"}
+                if extra_params and self.next_processor is not None:
+                    self.next_processor.parameters.update(extra_params)
+                output = output.get("video")
+                if output is None:
+                    return
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates
