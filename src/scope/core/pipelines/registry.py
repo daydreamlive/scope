@@ -143,6 +143,16 @@ def _register_pipelines():
             "ControllerVisualizerPipeline",
         ),
         ("rife", ".rife.pipeline", "RIFEPipeline"),
+        (
+            "optical_flow",
+            ".optical_flow.pipeline",
+            "OpticalFlowPipeline",
+        ),
+        (
+            "sam3",
+            ".sam3.pipeline",
+            "SAM3Pipeline",
+        ),
     ]
 
     # Try to import and register each pipeline
