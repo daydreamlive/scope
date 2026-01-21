@@ -84,6 +84,12 @@ class PipelineProcessor:
             "vace_use_input_video", True
         )
 
+        # Prompt enhancement - async processor with cache
+        self._last_prompts_hash: int | None = None
+        self._enhanced_prompts: list | None = None
+        self._prompt_enhancer = None  # EventProcessor from plugin registry
+        self._enhancement_lock = threading.Lock()  # Protects enhanced prompts cache
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -188,6 +194,56 @@ class PipelineProcessor:
                 f"Parameter queue full for {self.pipeline_id}, dropping parameter update"
             )
             return False
+
+    def _get_prompt_enhancer(self):
+        """Get the prompt enhancer from the plugin registry."""
+        if self._prompt_enhancer is None:
+            from scope.core.plugins import get_event_processor
+
+            self._prompt_enhancer = get_event_processor("prompt_enhancer")
+        return self._prompt_enhancer
+
+    def _trigger_async_enhancement(self, prompts: list, prompts_hash: int) -> None:
+        """Trigger async prompt enhancement without blocking.
+
+        Args:
+            prompts: List of prompt items to enhance.
+            prompts_hash: Hash of prompts for cache validation.
+        """
+        enhancer = self._get_prompt_enhancer()
+        if enhancer is None:
+            logger.debug(
+                "[ENHANCE] No prompt enhancer registered, using original prompts"
+            )
+            return
+
+        # Create request as dict (plugin accepts dict or its own request type)
+        request = {
+            "prompts": prompts,
+            "prompts_hash": prompts_hash,
+            "context": {
+                "pipeline_id": self.pipeline_id,
+                "mode": "video" if self._video_mode else "text",
+            },
+        }
+
+        def on_complete(result):
+            """Callback when enhancement finishes."""
+            if result.success and result.output:
+                with self._enhancement_lock:
+                    # Only update if this result matches current prompts
+                    if result.output.prompts_hash == self._last_prompts_hash:
+                        self._enhanced_prompts = result.output.enhanced_prompts
+                        logger.info(
+                            f"[ENHANCE] Prompts enhanced for {self.pipeline_id}"
+                        )
+            elif result.cancelled:
+                logger.debug("[ENHANCE] Enhancement cancelled")
+            else:
+                logger.warning(f"[ENHANCE] Enhancement failed: {result.error}")
+
+        enhancer.submit(request, callback=on_complete)
+        logger.info(f"[ENHANCE] Submitted enhancement for {self.pipeline_id}")
 
     def worker_loop(self):
         """Main worker loop that processes frames."""
@@ -357,6 +413,26 @@ class PipelineProcessor:
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
+
+            # Trigger async prompt enhancement when prompts change
+            if "prompts" in call_params and call_params["prompts"]:
+                prompts_hash = hash(str(call_params["prompts"]))
+
+                if prompts_hash != self._last_prompts_hash:
+                    # Prompts changed - trigger async enhancement
+                    logger.info(
+                        f"[ENHANCE] Prompts changed (old_hash={self._last_prompts_hash}, new_hash={prompts_hash})"
+                    )
+                    self._trigger_async_enhancement(
+                        call_params["prompts"], prompts_hash
+                    )
+                    # Update hash to prevent re-triggering
+                    self._last_prompts_hash = prompts_hash
+
+                # Use cached enhanced prompts if available, otherwise use original
+                with self._enhancement_lock:
+                    if self._enhanced_prompts is not None:
+                        call_params["prompts"] = self._enhanced_prompts
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared
