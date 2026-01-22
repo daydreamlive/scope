@@ -393,7 +393,10 @@ class PipelineProcessor:
                     # Latent initialization: route to video
                     call_params["video"] = video_input
 
-            output = self.pipeline(**call_params)
+            output_dict = self.pipeline(**call_params)
+
+            # Extract video from the returned dictionary
+            output = output_dict["video"]
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates

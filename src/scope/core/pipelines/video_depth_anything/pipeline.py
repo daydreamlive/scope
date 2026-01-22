@@ -77,7 +77,7 @@ class VideoDepthAnythingPipeline(Pipeline):
     def prepare(self, **kwargs) -> Requirements:
         return Requirements(input_size=4)
 
-    def __call__(self, **kwargs) -> torch.Tensor:
+    def __call__(self, **kwargs) -> dict:
         """Process video frames and return depth maps.
 
         Args:
@@ -152,4 +152,6 @@ class VideoDepthAnythingPipeline(Pipeline):
             if d_max > d_min
             else torch.zeros_like(depths)
         )
-        return depths.unsqueeze(-1).repeat(1, 1, 1, 3)  # THWC with 3 channels
+        return {
+            "video": depths.unsqueeze(-1).repeat(1, 1, 1, 3)
+        }  # THWC with 3 channels
