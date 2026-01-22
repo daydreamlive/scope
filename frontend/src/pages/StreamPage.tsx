@@ -274,16 +274,8 @@ export function StreamPage() {
         return;
       }
 
-      const prompts = params.prompts || params.transition?.target_prompts || undefined;
-
-      // Convert local params format to Daydream API format
-      const streamParams = convertToStreamParams(
-        prompts,
-        'denoising_step_list' in params && Array.isArray(params.denoising_step_list) ? params.denoising_step_list : undefined,
-      );
-
       updateCloudStream(activeStream.id, {
-        params: streamParams as StreamParams,
+        params: params,
       });
 
     } else {
@@ -977,56 +969,6 @@ export function StreamPage() {
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
-      // Cloud mode via WHIP
-      if (settings.cloudMode) {
-        const resolution = settings.resolution || videoResolution;
-
-        // Convert prompts and denoising steps to StreamParams format
-        const streamParams = convertToStreamParams(
-          promptItems,
-          settings.denoisingSteps,
-          resolution?.height,
-          resolution?.width,
-          settings.seed ?? 42
-        );
-
-        let params: StreamParams = {
-          model_id: PIPELINES[pipelineIdToUse]?.cloudModelId as StreamParams["model_id"],
-          ...streamParams,
-        };
-
-        setIsConnectingCloud(true);
-        isStartingCloudRef.current = true;
-        const created = await createCloudStream({
-          pipeline: 'streamdiffusion',
-          params: params,
-        });
-
-        const needsVideoInput =
-          PIPELINES[pipelineIdToUse]?.category === "video-input";
-        if (needsVideoInput && !localStream) {
-          console.error("Video input required but no local stream available");
-          setIsConnectingCloud(false);
-          return false;
-        }
-
-        console.log("[StreamPage] created:", created.stream_key);
-        const endpoint = created.whip_url;
-        // const endpoint = "https://ai.livepeer.monster/aiWebrtc/foo3-out/whip";
-        if (!endpoint) {
-          console.error("Create stream response missing whip_url");
-          setIsConnectingCloud(false);
-          return false;
-        }
-
-        // Store the full stream response for access to all fields
-        setActiveStream(created);
-
-        updateSettings({ paused: false });
-        // Keep connecting state true until RTCPeerConnection reports connected
-        return true;
-      }
-
       // Build pipeline chain: preprocessors + main pipeline + postprocessors
       const pipelineIds: string[] = [];
       if (settings.preprocessorIds && settings.preprocessorIds.length > 0) {
@@ -1042,7 +984,7 @@ export function StreamPage() {
       const missingPipelines: string[] = [];
       for (const pipelineId of pipelineIds) {
         const pipelineInfo = pipelines?.[pipelineId];
-        if (pipelineInfo?.requiresModels) {
+        if (pipelineInfo?.requiresModels && !settings.cloudMode) {
           try {
             const status = await checkModelStatus(pipelineId);
             if (!status.downloaded) {
@@ -1138,13 +1080,15 @@ export function StreamPage() {
         );
       }
 
-      const loadSuccess = await loadPipeline(
-        pipelineIds,
-        loadParams || undefined
-      );
-      if (!loadSuccess) {
-        console.error("Failed to load pipeline, cannot start stream");
-        return false;
+      if (!settings.cloudMode) {
+        const loadSuccess = await loadPipeline(
+          pipelineIds,
+          loadParams || undefined
+        );
+        if (!loadSuccess) {
+          console.error("Failed to load pipeline, cannot start stream");
+          return false;
+        }
       }
 
       // Check video requirements based on input mode
@@ -1257,11 +1201,43 @@ export function StreamPage() {
 
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
+      
+      // Cloud mode via WHIP
+      if (settings.cloudMode) {
+        setIsConnectingCloud(true);
+        isStartingCloudRef.current = true;
+        const created = await createCloudStream({
+          pipeline: 'scope',
+          params: initialParameters,
+        });
 
-      // Pipeline is loaded, now start WebRTC stream
-      startStream(initialParameters, streamToSend);
+        const needsVideoInput =
+          pipelines?.[pipelineIdToUse]?.supportedModes?.includes("video") ?? false;
+        if (needsVideoInput && !localStream) {
+          console.error("Video input required but no local stream available");
+          setIsConnectingCloud(false);
+          return false;
+        }
 
-      return true; // Stream started successfully
+        console.log("[StreamPage] created:", created.stream_key);
+        const endpoint = created.whip_url;
+        // const endpoint = "https://ai.livepeer.monster/aiWebrtc/foo3-out/whip";
+        if (!endpoint) {
+          console.error("Create stream response missing whip_url");
+          setIsConnectingCloud(false);
+          return false;
+        }
+
+        // Store the full stream response for access to all fields
+        setActiveStream(created);
+
+        return true;
+      } else {
+        // Pipeline is loaded, now start WebRTC stream
+        startStream(initialParameters, streamToSend);
+
+        return true; // Stream started successfully
+      }
     } catch (error) {
       console.error("Error during stream start:", error);
       return false;

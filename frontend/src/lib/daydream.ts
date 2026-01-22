@@ -1,7 +1,7 @@
 import { getDaydreamAPIKey } from "./auth";
 
 const DAYDREAM_API_BASE =
-  (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.live";
+  (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.monster";
 
 /**
  * Prompt can be a single string or weighted list of (prompt, weight) tuples

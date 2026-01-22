@@ -1,5 +1,5 @@
-const DAYDREAM_AUTH_URL = "https://app.livepeer.monster/sign-in/local?port=5173";
-const DAYDREAM_API_BASE = (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.live";
+const DAYDREAM_AUTH_URL = "https://app.livepeer.monster/sign-in/local?port=8000";
+const DAYDREAM_API_BASE = (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.monster";
 const API_KEY_STORAGE_KEY = "daydream_api_key";
 
 /**

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { StreamPage } from "./pages/StreamPage";
-import { Toaster } from "./components/ui/sonner";
+// import { Toaster } from "./components/ui/sonner";
 import { handleOAuthCallback } from "./lib/auth";
 import { toast } from "sonner";
 import "./index.css";

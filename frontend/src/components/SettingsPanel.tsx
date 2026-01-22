@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -170,27 +170,6 @@ export function SettingsPanel({
   const [widthError, setWidthError] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
 
-  // Get filtered pipeline IDs based on cloudMode
-  const filteredPipelineIds = useMemo(() => {
-    return Object.keys(PIPELINES).filter(id => {
-      const pipeline = PIPELINES[id];
-      const compatibility = pipeline.pipelineCompatibility || "local";
-
-      if (cloudMode) {
-        return compatibility === "cloud" || compatibility === "both";
-      } else {
-        return compatibility === "local" || compatibility === "both";
-      }
-    });
-  }, [cloudMode]);
-
-  // Auto-select first available pipeline if current selection is no longer available
-  useEffect(() => {
-    if (filteredPipelineIds.length > 0 && !filteredPipelineIds.includes(pipelineId)) {
-      onPipelineIdChange?.(filteredPipelineIds[0] as PipelineId);
-    }
-  }, [cloudMode, filteredPipelineIds, pipelineId, onPipelineIdChange]);
-
   // Check if resolution needs adjustment
   const scaleFactor = getResolutionScaleFactor(pipelineId);
   const resolutionWarning =
@@ -324,7 +303,6 @@ export function SettingsPanel({
         <CardTitle className="text-base font-medium">Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
-        {(import.meta as any).env?.VITE_DAYDREAM_API_KEY && (
           <div className="space-y-2">
             <h3 className="text-sm font-medium">Cloud mode</h3>
             <div className="flex items-center justify-between gap-2">
@@ -341,7 +319,6 @@ export function SettingsPanel({
               </Toggle>
             </div>
           </div>
-        )}
 
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Pipeline ID</h3>
