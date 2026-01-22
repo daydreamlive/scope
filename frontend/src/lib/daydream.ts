@@ -296,3 +296,47 @@ export async function sendDaydreamWebRTCOffer(
   const result = await response.json();
   return result;
 }
+
+export interface StreamStatus {
+  id: string;
+  status: string;
+  created_at: string;
+  updated_at?: string;
+  // Add other fields as needed based on actual API response
+  [key: string]: unknown;
+}
+
+/**
+ * Fetches the current status of a stream
+ *
+ * @param streamId - ID of the stream to check
+ * @returns Stream status information
+ */
+export async function getStreamStatus(
+  streamId: string
+): Promise<StreamStatus> {
+  const apiKey = getDaydreamAPIKey();
+  if (!apiKey) {
+    throw new Error("Not authenticated. Please sign in to use Daydream API.");
+  }
+
+  const response = await fetch(
+    `${DAYDREAM_API_BASE}/v1/streams/${encodeURIComponent(streamId)}/status`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Daydream get stream status failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = (await response.json()) as StreamStatus;
+  return result;
+}

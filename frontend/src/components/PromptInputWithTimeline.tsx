@@ -297,14 +297,12 @@ export function PromptInputWithTimeline({
       // Only create a new live prompt if there are no prompts at all in the timeline
       if (prompts.length === 0) {
         console.log("[PromptInputWithTimeline] Creating new live prompt ", prompts);
-        const streamStartedAgain = await initializeStream();
-        if (streamStartedAgain) {
-          const livePrompt = buildLivePromptFromCurrent(
-            currentTime,
-            currentTime
-          );
-          setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
-        }
+        // Stream is already started from initializeStream() call above, just create the prompt
+        const livePrompt = buildLivePromptFromCurrent(
+          currentTime,
+          currentTime
+        );
+        setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
       }
     }
 

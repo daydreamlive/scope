@@ -7,6 +7,7 @@ import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
+import { StreamStatus } from "../components/StreamStatus";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
@@ -308,6 +309,7 @@ export function StreamPage() {
 
   // Video source for preview (camera or video)
   // Enable based on input mode, not pipeline category
+  // In cloud mode, always enable to create dummy stream even though UI shows text mode
   const {
     localStream,
     isInitializing,
@@ -320,7 +322,7 @@ export function StreamPage() {
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
-    enabled: settings.inputMode === "video",
+    enabled: settings.cloudMode || settings.inputMode === "video",
     // Sync output resolution when user uploads a custom video
     // Store the custom resolution so it persists across mode/pipeline changes
     onCustomVideoResolution: resolution => {
@@ -963,6 +965,8 @@ export function StreamPage() {
       if (isConnectingCloud || isStartingCloudRef.current) {
         return false;
       }
+      // Set flag immediately to prevent race conditions
+      isStartingCloudRef.current = true;
     }
 
     // Use override pipeline ID if provided, otherwise use current settings
@@ -1205,7 +1209,6 @@ export function StreamPage() {
       // Cloud mode via WHIP
       if (settings.cloudMode) {
         setIsConnectingCloud(true);
-        isStartingCloudRef.current = true;
         const created = await createCloudStream({
           pipeline: 'scope',
           params: initialParameters,
@@ -1219,7 +1222,7 @@ export function StreamPage() {
           return false;
         }
 
-        console.log("[StreamPage] created:", created.stream_key);
+        console.log("[StreamPage] created. stream id:", created.id, "stream key:", created.stream_key);
         const endpoint = created.whip_url;
         // const endpoint = "https://ai.livepeer.monster/aiWebrtc/foo3-out/whip";
         if (!endpoint) {
@@ -1243,7 +1246,10 @@ export function StreamPage() {
       return false;
     }
     finally {
-      isStartingCloudRef.current = false;
+      // Only reset flag in cloud mode since that's where we set it
+      if (settings.cloudMode) {
+        isStartingCloudRef.current = false;
+      }
     }
   };
 
@@ -1300,7 +1306,9 @@ export function StreamPage() {
             spoutReceiverName={settings.spoutReceiver?.name ?? ""}
             onSpoutReceiverChange={handleSpoutReceiverChange}
             inputMode={
-              settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
+              settings.cloudMode
+                ? "text"
+                : settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
             }
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
@@ -1586,6 +1594,11 @@ export function StreamPage() {
           onRetryLimitExceeded={onWhipRetryLimitExceeded}
         />
       ) : null}
+      {/* Stream Status Monitor (cloud mode) */}
+      <StreamStatus
+        streamId={activeStream?.id ?? null}
+        isActive={Boolean(settings.cloudMode && activeStream)}
+      />
     </div>
   );
 }

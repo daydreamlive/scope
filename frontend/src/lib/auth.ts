@@ -1,4 +1,20 @@
-const DAYDREAM_AUTH_URL = "https://app.livepeer.monster/sign-in/local?port=8000";
+/**
+ * Get the current port from the address bar, or default based on protocol
+ */
+function getCurrentPort(): string {
+  if (typeof window !== "undefined") {
+    // If port is explicitly set in URL, use it
+    if (window.location.port) {
+      return window.location.port;
+    }
+    // Otherwise use default ports based on protocol
+    return window.location.protocol === "https:" ? "443" : "80";
+  }
+  // Fallback for SSR or non-browser environments
+  return "8000";
+}
+
+const DAYDREAM_AUTH_URL = `https://app.livepeer.monster/sign-in/local?port=${getCurrentPort()}`;
 const DAYDREAM_API_BASE = (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.monster";
 const API_KEY_STORAGE_KEY = "daydream_api_key";
 

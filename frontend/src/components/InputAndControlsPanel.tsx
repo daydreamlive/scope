@@ -181,8 +181,8 @@ export function InputAndControlsPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
-        {/* Input Mode selector - only show for multi-mode pipelines */}
-        {isMultiMode && (
+        {/* Input Mode selector - only show for multi-mode pipelines and not in cloud mode */}
+        {isMultiMode && !cloudMode && (
           <div>
             <h3 className="text-sm font-medium mb-2">Input Mode</h3>
             <Select
@@ -205,9 +205,9 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* Video Source toggle - only show when in video input mode */}
+        {/* Video Source toggle - only show when in video input mode and not in cloud mode */}
         {inputMode === "video" && (
-          <div>
+          <div className={cloudMode ? "hidden" : ""}>
             <h3 className="text-sm font-medium mb-2">Video Source</h3>
             <ToggleGroup
               type="single"
@@ -234,9 +234,9 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* Video preview - only show when in video input mode */}
+        {/* Video preview - keep rendered for localStream but hide in cloud mode */}
         {inputMode === "video" && (
-          <div>
+          <div className={cloudMode ? "hidden" : ""}>
             <h3 className="text-sm font-medium mb-2">Input</h3>
             {mode === "spout" ? (
               /* Spout Receiver Configuration */
