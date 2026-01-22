@@ -55,7 +55,7 @@ Then:
 
 ```
 # Run from scope directory
-uv run -m score.core.pipelines.streamdiffusionv2.test
+uv run -m scope.core.pipelines.streamdiffusionv2.test
 ```
 
 This will create an `output.mp4` file in the `streamdiffusionv2` directory.

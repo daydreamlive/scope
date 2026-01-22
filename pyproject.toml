@@ -117,6 +117,11 @@ dev = [
     "pytest>=8.4.2",
     "freezegun>=1.5.5",
 ]
+benchmark = [
+    "psutil>=6.1.0",
+    "nvidia-ml-py>=12.560.30",
+    "py-cpuinfo>=9.0.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

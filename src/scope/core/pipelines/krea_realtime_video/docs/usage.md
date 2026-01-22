@@ -92,7 +92,7 @@ Then:
 
 ```
 # Run from scope directory
-uv run -m score.core.pipelines.krea_realtime_video.test
+uv run -m scope.core.pipelines.krea_realtime_video.test
 ```
 
 This will create an `output.mp4` file in the `krea_realtime_video` directory.
