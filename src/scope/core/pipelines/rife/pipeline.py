@@ -60,7 +60,7 @@ class RIFEPipeline(Pipeline):
     def __call__(
         self,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict:
         input = kwargs.get("video")
 
         if input is None:
@@ -89,4 +89,4 @@ class RIFEPipeline(Pipeline):
         interpolated_float = interpolated.float() / 255.0
 
         # Return THWC [0, 1] float format (same as postprocess_chunk output)
-        return interpolated_float
+        return {"video": interpolated_float}

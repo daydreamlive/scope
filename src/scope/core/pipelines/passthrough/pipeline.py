@@ -41,7 +41,7 @@ class PassthroughPipeline(Pipeline):
     def __call__(
         self,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict:
         input = kwargs.get("video")
 
         if input is None:
@@ -53,4 +53,4 @@ class PassthroughPipeline(Pipeline):
 
         input = rearrange(input, "B C T H W -> B T C H W")
 
-        return postprocess_chunk(input)
+        return {"video": postprocess_chunk(input)}

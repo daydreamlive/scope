@@ -40,7 +40,8 @@ def main():
 
     # Process all frames at once
     start = time.time()
-    output = pipeline(video=video_list)
+    output_dict = pipeline(video=video_list)
+    output = output_dict["video"]
     latency = time.time() - start
 
     num_output_frames = output.shape[0]
