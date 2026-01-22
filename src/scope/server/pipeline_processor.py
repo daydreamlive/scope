@@ -426,13 +426,13 @@ class PipelineProcessor:
             )
 
             # Normalize to [0, 255] and convert to uint8
+            # Keep frames on GPU - frame_processor handles CPU transfer for streaming
             output = (
                 (output * 255.0)
                 .clamp(0, 255)
                 .to(dtype=torch.uint8)
                 .contiguous()
                 .detach()
-                .cpu()
             )
 
             # Resize output queue to meet target max size

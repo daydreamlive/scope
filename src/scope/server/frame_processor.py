@@ -197,7 +197,8 @@ class FrameProcessor:
         try:
             frame = last_processor.output_queue.get_nowait()
             # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
-            frame = frame.squeeze(0)
+            # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
+            frame = frame.squeeze(0).cpu()
 
             # Enqueue frame for async Spout sending (non-blocking)
             if self.spout_sender_enabled and self.spout_sender is not None:
