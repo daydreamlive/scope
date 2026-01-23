@@ -207,15 +207,38 @@ export function useStreamState() {
 
         if (hardwareResult.status === "fulfilled") {
           setHardwareInfo(hardwareResult.value);
+
+          // Auto-enable cloud mode when no GPU is detected (e.g., on macOS)
+          if (hardwareResult.value.vram_gb === null) {
+            console.log(
+              "useStreamState: No GPU detected, auto-enabling cloud mode"
+            );
+            setSettings(prev => ({
+              ...prev,
+              cloudMode: true,
+            }));
+          }
         } else {
           console.error(
             "useStreamState: Failed to fetch hardware info:",
             hardwareResult.reason
           );
+          // If hardware info fetch fails, assume no GPU and enable cloud mode
+          console.log(
+            "useStreamState: Hardware info fetch failed, auto-enabling cloud mode"
+          );
+          setSettings(prev => ({
+            ...prev,
+            cloudMode: true,
+          }));
         }
       } catch (error) {
-        // TODO disable local gpu mode if this fails and only allow cloud?
         console.error("useStreamState: Failed to fetch initial data:", error);
+        // On error, enable cloud mode as fallback
+        setSettings(prev => ({
+          ...prev,
+          cloudMode: true,
+        }));
       }
     };
 
