@@ -3,6 +3,7 @@ import contextlib
 import io
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -1138,6 +1139,20 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre, for
             sys.exit(1)
 
     # Proceed with actual install
+    # Set environment variables to help packages skip CUDA builds if nvcc is not available
+    # (packages can still build CUDA extensions if CUDA toolkit is properly installed)
+    env = {**os.environ}
+    # Only skip CUDA build if nvcc is not available
+
+    nvcc_path = shutil.which("nvcc") or os.path.join(
+        os.environ.get("CUDA_HOME", "/usr/local/cuda"), "bin", "nvcc"
+    )
+    if not os.path.exists(nvcc_path):
+        env["BLOCK_SPARSE_ATTN_SKIP_CUDA_BUILD"] = "TRUE"
+    # Ensure CUDA_HOME is set if CUDA is available
+    if "CUDA_HOME" not in env and os.path.exists("/usr/local/cuda"):
+        env["CUDA_HOME"] = "/usr/local/cuda"
+
     args = ["uv", "pip", "install", "--torch-backend", "cu128"]
     if upgrade:
         args.append("--upgrade")
@@ -1151,7 +1166,7 @@ def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre, for
         args.append("--pre")
     args += list(packages)
 
-    result = subprocess.run(args, capture_output=False)
+    result = subprocess.run(args, capture_output=False, env=env)
 
     if result.returncode != 0:
         sys.exit(result.returncode)

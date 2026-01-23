@@ -59,7 +59,16 @@ class DependencyValidator:
             # Run uv pip compile with pyproject.toml + plugin requirements
             # This respects [tool.uv.sources] from pyproject.toml
             # Set PYTHONUTF8=1 in subprocess env for proper Unicode handling
-            env = {**os.environ, "PYTHONUTF8": "1"}
+            # Set build-time flags to skip CUDA compilation during dependency resolution
+            # (packages can still build CUDA extensions during actual installation)
+            # Temporarily unset CUDA_HOME to prevent setup.py from trying to find nvcc
+            env = {
+                **os.environ,
+                "PYTHONUTF8": "1",
+                "BLOCK_SPARSE_ATTN_SKIP_CUDA_BUILD": "TRUE",
+            }
+            # Remove CUDA_HOME if set to prevent setup.py from trying to use nvcc
+            env.pop("CUDA_HOME", None)
             result = subprocess.run(
                 [
                     "uv",
