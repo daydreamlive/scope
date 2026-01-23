@@ -10,7 +10,7 @@ from ..common_artifacts import (
     VACE_ARTIFACT,
     WAN_1_3B_ARTIFACT,
 )
-from ..utils import VaeType
+from ..enums import VaeType
 
 
 class LongLiveConfig(BasePipelineConfig):

@@ -119,66 +119,134 @@ def _register_pipelines():
     else:
         logger.info("No GPU detected")
 
-    # Define pipeline imports with their module paths and class names
+    # Define pipeline imports with their module paths, class names, and schema paths
+    # Schema paths are used on macOS (cloud mode) where torch isn't available
     pipeline_configs = [
         (
             "streamdiffusionv2",
             ".streamdiffusionv2.pipeline",
             "StreamDiffusionV2Pipeline",
+            ".streamdiffusionv2.schema",
+            "StreamDiffusionV2Config",
         ),
-        ("longlive", ".longlive.pipeline", "LongLivePipeline"),
+        (
+            "longlive",
+            ".longlive.pipeline",
+            "LongLivePipeline",
+            ".longlive.schema",
+            "LongLiveConfig",
+        ),
         (
             "krea_realtime_video",
             ".krea_realtime_video.pipeline",
             "KreaRealtimeVideoPipeline",
+            ".krea_realtime_video.schema",
+            "KreaRealtimeVideoConfig",
         ),
         (
             "reward_forcing",
             ".reward_forcing.pipeline",
             "RewardForcingPipeline",
+            ".reward_forcing.schema",
+            "RewardForcingConfig",
         ),
-        ("memflow", ".memflow.pipeline", "MemFlowPipeline"),
-        ("passthrough", ".passthrough.pipeline", "PassthroughPipeline"),
+        (
+            "memflow",
+            ".memflow.pipeline",
+            "MemFlowPipeline",
+            ".memflow.schema",
+            "MemFlowConfig",
+        ),
+        (
+            "passthrough",
+            ".passthrough.pipeline",
+            "PassthroughPipeline",
+            ".passthrough.schema",
+            "PassthroughConfig",
+        ),
         (
             "video_depth_anything",
             ".video_depth_anything.pipeline",
             "VideoDepthAnythingPipeline",
+            ".video_depth_anything.schema",
+            "VideoDepthAnythingConfig",
         ),
         (
             "controller-viz",
             ".controller_viz.pipeline",
             "ControllerVisualizerPipeline",
+            ".controller_viz.schema",
+            "ControllerVisualizerConfig",
         ),
-        ("rife", ".rife.pipeline", "RIFEPipeline"),
+        (
+            "rife",
+            ".rife.pipeline",
+            "RIFEPipeline",
+            ".rife.schema",
+            "RIFEConfig",
+        ),
     ]
 
+    # On macOS (cloud mode), register pipelines using schema-only imports
+    # since torch isn't available. The actual pipeline code runs on remote servers.
+    is_cloud_mode_only = sys.platform == "darwin"
+
     # Try to import and register each pipeline
-    for pipeline_name, module_path, class_name in pipeline_configs:
-        # Try to import the pipeline first to get its config
+    for (
+        pipeline_name,
+        module_path,
+        class_name,
+        schema_path,
+        config_name,
+    ) in pipeline_configs:
         try:
-            module = importlib.import_module(module_path, package=__package__)
-            pipeline_class = getattr(module, class_name)
-
-            # Get the config class to check VRAM requirements
-            config_class = pipeline_class.get_config_class()
-            estimated_vram_gb = config_class.estimated_vram_gb
-
-            # Check if pipeline meets GPU requirements
-            should_register = _should_register_pipeline(estimated_vram_gb, vram_gb)
-            if not should_register:
-                logger.debug(
-                    f"Skipping {pipeline_name} pipeline - "
-                    f"does not meet GPU requirements "
-                    f"(required: {estimated_vram_gb} GB, "
-                    f"available: {vram_gb} GB)"
+            if is_cloud_mode_only:
+                # On macOS, import just the schema (no torch dependency)
+                schema_module = importlib.import_module(
+                    schema_path, package=__package__
                 )
-                continue
+                config_class = getattr(schema_module, config_name)
 
-            # Register the pipeline
-            PipelineRegistry.register(config_class.pipeline_id, pipeline_class)
-            logger.debug(
-                f"Registered {pipeline_name} pipeline (ID: {config_class.pipeline_id})"
-            )
+                # Create a stub pipeline class for cloud mode
+                class CloudModePipeline:
+                    """Stub pipeline for cloud mode - actual processing happens on remote servers."""
+
+                    _config_class = config_class
+
+                    @classmethod
+                    def get_config_class(cls):
+                        return cls._config_class
+
+                # Register the stub pipeline
+                PipelineRegistry.register(config_class.pipeline_id, CloudModePipeline)
+                logger.debug(
+                    f"Registered {pipeline_name} pipeline for cloud mode (ID: {config_class.pipeline_id})"
+                )
+            else:
+                # On Linux/Windows, import the full pipeline module
+                module = importlib.import_module(module_path, package=__package__)
+                pipeline_class = getattr(module, class_name)
+
+                # Get the config class to check VRAM requirements
+                config_class = pipeline_class.get_config_class()
+                estimated_vram_gb = config_class.estimated_vram_gb
+
+                # Check if pipeline meets GPU requirements
+                should_register = _should_register_pipeline(estimated_vram_gb, vram_gb)
+                if not should_register:
+                    logger.debug(
+                        f"Skipping {pipeline_name} pipeline - "
+                        f"does not meet GPU requirements "
+                        f"(required: {estimated_vram_gb} GB, "
+                        f"available: {vram_gb} GB)"
+                    )
+                    continue
+
+                # Register the pipeline
+                PipelineRegistry.register(config_class.pipeline_id, pipeline_class)
+                logger.debug(
+                    f"Registered {pipeline_name} pipeline (ID: {config_class.pipeline_id})"
+                )
         except ImportError as e:
             logger.warning(
                 f"Could not import {pipeline_name} pipeline: {e}. "

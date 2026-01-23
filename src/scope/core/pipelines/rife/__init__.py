@@ -1,3 +1,9 @@
-from .pipeline import RIFEPipeline
+import sys
 
-__all__ = ["RIFEPipeline"]
+# Pipeline class requires torch which isn't available on macOS (cloud mode only)
+if sys.platform != "darwin":
+    from .pipeline import RIFEPipeline
+
+    __all__ = ["RIFEPipeline"]
+else:
+    __all__ = []

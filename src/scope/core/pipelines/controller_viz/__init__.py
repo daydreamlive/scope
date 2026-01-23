@@ -1,6 +1,13 @@
 """Controller Visualizer pipeline for testing WASD and mouse input."""
 
-from .pipeline import ControllerVisualizerPipeline
+import sys
+
 from .schema import ControllerVisualizerConfig
 
-__all__ = ["ControllerVisualizerPipeline", "ControllerVisualizerConfig"]
+# Pipeline class requires torch which isn't available on macOS (cloud mode only)
+if sys.platform != "darwin":
+    from .pipeline import ControllerVisualizerPipeline
+
+    __all__ = ["ControllerVisualizerPipeline", "ControllerVisualizerConfig"]
+else:
+    __all__ = ["ControllerVisualizerConfig"]
