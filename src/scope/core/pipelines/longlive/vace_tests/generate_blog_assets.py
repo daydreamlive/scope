@@ -60,11 +60,12 @@ CONFIG = {
     "fps": 16,
     "frames_per_chunk": 12,
     "input_video": "controlnet_test/businesslady.mp4",
+    "lora_input_video": "controlnet_test/pexels_woman_basketball.mp4",
     # === Chunk counts for each demo ===
     "i2v_num_chunks": 10,
     "depth_num_chunks": 10,
     "scribble_num_chunks": 10,
-    "inpainting_num_chunks": 10,
+    "inpainting_num_chunks": 9,
     "layout_num_chunks": 12,
     # === VACE Context Scale for each demo ===
     "i2v_vace_scale": 1.0,
@@ -76,7 +77,7 @@ CONFIG = {
     "lora_vace_scale": 0.70,
     # === LoRA Paths ===
     "highresfix_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
-    "toy_soldier_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/ggg-3000-adapter-toy-soldier.safetensors",
+    "toy_soldier_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/Studio_Ghibli_LORA_1_3B.safetensors",# "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/ggg-3000-adapter-toy-soldier.safetensors",
     "scribble_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/Studio_Ghibli_LORA_1_3B.safetensors",
     # === Enable Highresfix LoRA per test ===
     "i2v_use_highresfix": True,
@@ -91,7 +92,7 @@ CONFIG = {
     "depth_prompt": "a samurai with a hooded cloak reading a book, standing in front of a castle, cinematic lighting",
     "scribble_prompt": "a woman looking at her phone, studio ghibli style illustration",
     "inpainting_prompt": "a panda with floppy ears holding a cellphone, looking at it",
-    "inpainting_lora_prompt": "toy soldier figurine, plastic, painted",
+    "inpainting_lora_prompt": "an anime style woman holding a basketball, sexy studio ghibli style",
 }
 
 
@@ -816,8 +817,14 @@ def run_i2v_test(images: dict, output_dir: Path):
     test_vace.main()
 
 
-def run_inpainting_lora_test(preprocessed: dict, output_dir: Path):
-    """Run inpainting with LoRA."""
+def run_inpainting_lora_test(preprocessed: dict, output_dir: Path, video_name: str = "businesslady"):
+    """Run inpainting with LoRA.
+
+    Args:
+        preprocessed: Dict with input_video and person_masks
+        output_dir: Base output directory
+        video_name: Name identifier for the input video (for output naming)
+    """
     import time
 
     print("\n" + "=" * 60)
@@ -1010,7 +1017,63 @@ def main():
 
     # Inpainting with LoRA
     if args.only is None or args.only == "lora":
-        run_inpainting_lora_test(preprocessed, OUTPUT_DIR)
+        # Check if we need to use a different input video for lora
+        if CONFIG["lora_input_video"] != CONFIG["input_video"]:
+            print("\n[INFO] Regional LoRA test using different input video...")
+            lora_video_path = project_root / CONFIG["lora_input_video"]
+            if not lora_video_path.exists():
+                raise FileNotFoundError(f"LoRA input video not found: {lora_video_path}")
+
+            # Check if preprocessing exists for lora video
+            lora_preprocessing_dir = OUTPUT_DIR / "preprocessing_lora"
+            lora_preprocessing_complete = all(
+                (lora_preprocessing_dir / f).exists()
+                for f in ["input_video_resized.mp4", "person_masks.mp4"]
+            )
+
+            if lora_preprocessing_complete:
+                print("[SKIP] LoRA preprocessing already complete, loading existing data...")
+                lora_input_video = load_video(
+                    lora_preprocessing_dir / "input_video_resized.mp4",
+                    CONFIG["height"],
+                    CONFIG["width"],
+                )
+                lora_mask_video = load_video(
+                    lora_preprocessing_dir / "person_masks.mp4",
+                    CONFIG["height"],
+                    CONFIG["width"],
+                )
+                lora_person_masks = np.mean(lora_mask_video, axis=-1) / 255.0
+                lora_person_masks = (lora_person_masks > 0.5).astype(np.float32)
+
+                lora_preprocessed = {
+                    "input_video": lora_input_video,
+                    "person_masks": lora_person_masks,
+                }
+            else:
+                print("Preprocessing LoRA input video...")
+                lora_preprocessing_dir.mkdir(parents=True, exist_ok=True)
+
+                # Load and resize
+                lora_video = load_video(lora_video_path, CONFIG["height"], CONFIG["width"])
+                resized_path = lora_preprocessing_dir / "input_video_resized.mp4"
+                save_video(lora_video, resized_path, fps=CONFIG["fps"])
+
+                # Generate person masks
+                lora_masks = generate_person_masks(lora_video, device)
+                mask_path = lora_preprocessing_dir / "person_masks.mp4"
+                mask_vis = np.stack([lora_masks] * 3, axis=-1)
+                save_video(mask_vis, mask_path, fps=CONFIG["fps"])
+
+                lora_preprocessed = {
+                    "input_video": lora_video,
+                    "person_masks": lora_masks,
+                }
+
+            video_name = Path(CONFIG["lora_input_video"]).stem
+            run_inpainting_lora_test(lora_preprocessed, OUTPUT_DIR, video_name)
+        else:
+            run_inpainting_lora_test(preprocessed, OUTPUT_DIR)
 
     # 4. Post-processing: Create comparison videos
     print("\n" + "=" * 80)
@@ -1145,23 +1208,47 @@ def main():
 
     # Inpainting + LoRA comparison
     lora_output = OUTPUT_DIR / "inpainting" / "regional_lora.mp4"
-    if lora_output.exists() and inpaint_original.exists():
+    if lora_output.exists():
         print("\n  Creating: Inpainting + LoRA comparison...")
-        original_vid = load_video(inpaint_original, h, w)
         output_vid = load_video(lora_output, h, w)
-        min_frames = min(original_vid.shape[0], output_vid.shape[0])
-        panels = [
-            {"frames": original_vid[:min_frames], "label": "Input"},
-        ]
-        if inpaint_mask.exists():
-            mask_vid = load_video(inpaint_mask, h, w)
-            panels.append({"frames": mask_vid[:min_frames], "label": "Mask"})
-        panels.append({"frames": output_vid[:min_frames], "label": "Output"})
-        create_comparison_video(
-            panels=panels,
-            output_path=OUTPUT_DIR / "inpainting" / "lora_comparison.mp4",
-            fps=fps,
-        )
+
+        # Use lora-specific input if different video was used
+        if CONFIG["lora_input_video"] != CONFIG["input_video"]:
+            lora_preprocessing_dir = OUTPUT_DIR / "preprocessing_lora"
+            lora_input_resized = lora_preprocessing_dir / "input_video_resized.mp4"
+            lora_mask_path = lora_preprocessing_dir / "person_masks.mp4"
+
+            if lora_input_resized.exists():
+                original_vid = load_video(lora_input_resized, h, w)
+                min_frames = min(original_vid.shape[0], output_vid.shape[0])
+                panels = [{"frames": original_vid[:min_frames], "label": "Input"}]
+
+                if lora_mask_path.exists():
+                    mask_vid = load_video(lora_mask_path, h, w)
+                    panels.append({"frames": mask_vid[:min_frames], "label": "Mask"})
+
+                panels.append({"frames": output_vid[:min_frames], "label": "Output"})
+                create_comparison_video(
+                    panels=panels,
+                    output_path=OUTPUT_DIR / "inpainting" / "lora_comparison.mp4",
+                    fps=fps,
+                )
+        elif inpaint_original.exists():
+            # Use regular inpainting input
+            original_vid = load_video(inpaint_original, h, w)
+            min_frames = min(original_vid.shape[0], output_vid.shape[0])
+            panels = [{"frames": original_vid[:min_frames], "label": "Input"}]
+
+            if inpaint_mask.exists():
+                mask_vid = load_video(inpaint_mask, h, w)
+                panels.append({"frames": mask_vid[:min_frames], "label": "Mask"})
+
+            panels.append({"frames": output_vid[:min_frames], "label": "Output"})
+            create_comparison_video(
+                panels=panels,
+                output_path=OUTPUT_DIR / "inpainting" / "lora_comparison.mp4",
+                fps=fps,
+            )
 
     # Layout Control comparison
     layout_output = OUTPUT_DIR / "layout_control" / "output_nod.mp4"
