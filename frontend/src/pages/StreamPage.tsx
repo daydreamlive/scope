@@ -28,8 +28,14 @@ import type {
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { checkModelStatus, downloadPipelineModels } from "../lib/api";
-import { createCloudStream, updateCloudStream, type CreateStreamResponse, type StreamParams } from "../lib/daydream";
+import {
+  createCloudStream,
+  updateCloudStream,
+  type CreateStreamResponse,
+  type StreamParams,
+} from "../lib/daydream";
 import { WhipConnection } from "../components/WhipConnection";
+import { toast } from "sonner";
 import { usePlaybackUrl } from "@/hooks/usePlaybackUrl";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import type { WhepClient } from "@/lib/WhepClient";
@@ -118,7 +124,9 @@ export function StreamPage() {
   // Cloud mode state (WHIP)
   const [isConnectingCloud, setIsConnectingCloud] = useState(false);
   const [isStreamingCloud, setIsStreamingCloud] = useState(false);
-  const [activeStream, setActiveStream] = useState<CreateStreamResponse | null>(null);
+  const [activeStream, setActiveStream] = useState<CreateStreamResponse | null>(
+    null
+  );
   const isStartingCloudRef = useRef(false);
   const { setPlaybackUrl } = usePlaybackUrl();
   const whepClientRef = useRef<WhepClient | null>(null);
@@ -132,20 +140,27 @@ export function StreamPage() {
   }, [setPlaybackUrl]);
 
   // Stable callbacks for WHIP to avoid effect churn in WhipConnection
-  const onWhipConnectionStateChange = useCallback((state: RTCPeerConnectionState) => {
-    if (state === "connected") {
-      console.log("[StreamPage] WHIP connected");
-      setIsStreamingCloud(true);
-      setIsConnectingCloud(false);
-    } else if (state === "connecting" || state === "new") {
-      console.log("[StreamPage] WHIP connecting");
-      setIsConnectingCloud(true);
-    } else if (state === "failed" || state === "disconnected" || state === "closed") {
-      setIsStreamingCloud(false);
-      setIsConnectingCloud(false);
-      console.log("[StreamPage] WHIP disconnected");
-    }
-  }, [setIsStreamingCloud, setIsConnectingCloud]);
+  const onWhipConnectionStateChange = useCallback(
+    (state: RTCPeerConnectionState) => {
+      if (state === "connected") {
+        console.log("[StreamPage] WHIP connected");
+        setIsStreamingCloud(true);
+        setIsConnectingCloud(false);
+      } else if (state === "connecting" || state === "new") {
+        console.log("[StreamPage] WHIP connecting");
+        setIsConnectingCloud(true);
+      } else if (
+        state === "failed" ||
+        state === "disconnected" ||
+        state === "closed"
+      ) {
+        setIsStreamingCloud(false);
+        setIsConnectingCloud(false);
+        console.log("[StreamPage] WHIP disconnected");
+      }
+    },
+    [setIsStreamingCloud, setIsConnectingCloud]
+  );
 
   const onWhipRetryLimitExceeded = useCallback(() => {
     disconnectCloudStream();
@@ -210,79 +225,98 @@ export function StreamPage() {
   } = useWebRTC();
 
   // Convert local params to Daydream API StreamParams format
-  const convertToStreamParams = useCallback((
-    prompts?: PromptItem[] | string | string[] | Array<[string, number]>,
-    denoisingSteps?: number[],
-    height?: number,
-    width?: number,
-    seed?: number
-  ): Partial<StreamParams> => {
-    const streamParams: Partial<StreamParams> = {};
+  const convertToStreamParams = useCallback(
+    (
+      prompts?: PromptItem[] | string | string[] | Array<[string, number]>,
+      denoisingSteps?: number[],
+      height?: number,
+      width?: number,
+      seed?: number
+    ): Partial<StreamParams> => {
+      const streamParams: Partial<StreamParams> = {};
 
-    // Convert denoising_step_list to t_index_list
-    // Scale from 0-1000 range to 0-50 range
-    if (denoisingSteps && Array.isArray(denoisingSteps)) {
-      streamParams.t_index_list = [...denoisingSteps]
-        .reverse()
-        .map(step => Math.round(step * (50 / 1000)));
-    }
-
-    // Map prompts - convert PromptItem[] to [string, number][]
-    if (prompts) {
-      if (Array.isArray(prompts) && prompts.length > 0) {
-        // Handle PromptItem[] format (most common case)
-        if (typeof prompts[0] === 'object' && prompts[0] !== null && 'text' in prompts[0]) {
-          const converted = (prompts as PromptItem[])
-            .map(item => [item.text, item.weight] as [string, number])
-            .filter(([text]) => text.trim() !== '');
-          if (converted.length > 0) {
-            streamParams.prompt = converted;
-          }
-        } else if (Array.isArray(prompts[0])) {
-          // Already in tuple format [string, number][]
-          const filtered = (prompts as Array<[string, number]>).filter(([text]) => text.trim() !== '');
-          if (filtered.length > 0) {
-            streamParams.prompt = filtered;
-          }
-        } else if (typeof prompts[0] === 'string' && prompts[0].trim() !== '') {
-          // string[] - use first non-empty string
-          streamParams.prompt = prompts[0];
-        }
-      } else if (typeof prompts === 'string' && prompts.trim() !== '') {
-        streamParams.prompt = prompts;
+      // Convert denoising_step_list to t_index_list
+      // Scale from 0-1000 range to 0-50 range
+      if (denoisingSteps && Array.isArray(denoisingSteps)) {
+        streamParams.t_index_list = [...denoisingSteps]
+          .reverse()
+          .map(step => Math.round(step * (50 / 1000)));
       }
-    }
 
-    // Include height, width, and seed if provided
-    if (height !== undefined) {
-      streamParams.height = height;
-    }
-    if (width !== undefined) {
-      streamParams.width = width;
-    }
-    if (seed !== undefined) {
-      streamParams.seed = seed;
-    }
+      // Map prompts - convert PromptItem[] to [string, number][]
+      if (prompts) {
+        if (Array.isArray(prompts) && prompts.length > 0) {
+          // Handle PromptItem[] format (most common case)
+          if (
+            typeof prompts[0] === "object" &&
+            prompts[0] !== null &&
+            "text" in prompts[0]
+          ) {
+            const converted = (prompts as PromptItem[])
+              .map(item => [item.text, item.weight] as [string, number])
+              .filter(([text]) => text.trim() !== "");
+            if (converted.length > 0) {
+              streamParams.prompt = converted;
+            }
+          } else if (Array.isArray(prompts[0])) {
+            // Already in tuple format [string, number][]
+            const filtered = (prompts as Array<[string, number]>).filter(
+              ([text]) => text.trim() !== ""
+            );
+            if (filtered.length > 0) {
+              streamParams.prompt = filtered;
+            }
+          } else if (
+            typeof prompts[0] === "string" &&
+            prompts[0].trim() !== ""
+          ) {
+            // string[] - use first non-empty string
+            streamParams.prompt = prompts[0];
+          }
+        } else if (typeof prompts === "string" && prompts.trim() !== "") {
+          streamParams.prompt = prompts;
+        }
+      }
 
-    return streamParams;
-  }, []);
+      // Include height, width, and seed if provided
+      if (height !== undefined) {
+        streamParams.height = height;
+      }
+      if (width !== undefined) {
+        streamParams.width = width;
+      }
+      if (seed !== undefined) {
+        streamParams.seed = seed;
+      }
+
+      return streamParams;
+    },
+    []
+  );
 
   // Handle parameter updates - cloud mode vs local mode
-  const handleParameterUpdate = useCallback((params: Parameters<typeof sendParameterUpdate>[0]) => {
-    console.trace("[StreamPage] handleParameterUpdate", params);
-    if (settings.cloudMode) {
-      if (!activeStream?.id) {
-        return;
+  const handleParameterUpdate = useCallback(
+    (params: Parameters<typeof sendParameterUpdate>[0]) => {
+      console.trace("[StreamPage] handleParameterUpdate", params);
+      if (settings.cloudMode) {
+        if (!activeStream?.id) {
+          return;
+        }
+
+        updateCloudStream(activeStream.id, {
+          params: params,
+        });
+      } else {
+        sendParameterUpdate(params);
       }
-
-      updateCloudStream(activeStream.id, {
-        params: params,
-      });
-
-    } else {
-      sendParameterUpdate(params);
-    }
-  }, [settings.cloudMode, sendParameterUpdate, activeStream, convertToStreamParams]);
+    },
+    [
+      settings.cloudMode,
+      sendParameterUpdate,
+      activeStream,
+      convertToStreamParams,
+    ]
+  );
   // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
   const isLoading = isDownloading || isPipelineLoading || isConnecting;
 
@@ -1205,24 +1239,30 @@ export function StreamPage() {
 
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
-      
+
       // Cloud mode via WHIP
       if (settings.cloudMode) {
         setIsConnectingCloud(true);
         const created = await createCloudStream({
-          pipeline: 'scope',
+          pipeline: "scope",
           params: initialParameters,
         });
 
         const needsVideoInput =
-          pipelines?.[pipelineIdToUse]?.supportedModes?.includes("video") ?? false;
+          pipelines?.[pipelineIdToUse]?.supportedModes?.includes("video") ??
+          false;
         if (needsVideoInput && !localStream) {
           console.error("Video input required but no local stream available");
           setIsConnectingCloud(false);
           return false;
         }
 
-        console.log("[StreamPage] created. stream id:", created.id, "stream key:", created.stream_key);
+        console.log(
+          "[StreamPage] created. stream id:",
+          created.id,
+          "stream key:",
+          created.stream_key
+        );
         const endpoint = created.whip_url;
         // const endpoint = "https://ai.livepeer.monster/aiWebrtc/foo3-out/whip";
         if (!endpoint) {
@@ -1243,9 +1283,38 @@ export function StreamPage() {
       }
     } catch (error) {
       console.error("Error during stream start:", error);
+
+      // Show user-friendly error toast
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      if (
+        errorMessage.includes("Not authenticated") ||
+        errorMessage.includes("sign in")
+      ) {
+        toast.error("Cloud Mode Authentication Required", {
+          description:
+            "Please sign in to use cloud mode. Click the user icon in the header to sign in.",
+          duration: 8000,
+        });
+      } else if (settings.cloudMode) {
+        toast.error("Cloud Stream Failed", {
+          description: errorMessage,
+          duration: 5000,
+        });
+      } else {
+        toast.error("Stream Failed", {
+          description: errorMessage,
+          duration: 5000,
+        });
+      }
+
+      // Reset cloud connecting state on error
+      if (settings.cloudMode) {
+        setIsConnectingCloud(false);
+      }
+
       return false;
-    }
-    finally {
+    } finally {
       // Only reset flag in cloud mode since that's where we set it
       if (settings.cloudMode) {
         isStartingCloudRef.current = false;
@@ -1308,7 +1377,8 @@ export function StreamPage() {
             inputMode={
               settings.cloudMode
                 ? "text"
-                : settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
+                : settings.inputMode ||
+                  getPipelineDefaultMode(settings.pipelineId)
             }
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
@@ -1339,10 +1409,10 @@ export function StreamPage() {
             <VideoOutput
               className="h-full"
               remoteStream={remoteStream}
-              isPipelineLoading={
-                settings.cloudMode ? false : isPipelineLoading
+              isPipelineLoading={settings.cloudMode ? false : isPipelineLoading}
+              isConnecting={
+                settings.cloudMode ? isConnectingCloud : isConnecting
               }
-              isConnecting={settings.cloudMode ? isConnectingCloud : isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
               isDownloading={isDownloading}
@@ -1434,7 +1504,10 @@ export function StreamPage() {
                 }
 
                 // Send to backend - use transition if streaming (local or cloud) and transition steps > 0
-                if ((isStreaming || isStreamingCloud) && effectiveTransitionSteps > 0) {
+                if (
+                  (isStreaming || isStreamingCloud) &&
+                  effectiveTransitionSteps > 0
+                ) {
                   handleParameterUpdate({
                     transition: {
                       target_prompts: prompts,
@@ -1498,9 +1571,9 @@ export function StreamPage() {
                 if (isStreaming) {
                   stopStream();
                 }
-              if (isStreamingCloud) {
-                disconnectCloudStream();
-              }
+                if (isStreamingCloud) {
+                  disconnectCloudStream();
+                }
               })();
               updateSettings({ cloudMode: enabled });
             }}
