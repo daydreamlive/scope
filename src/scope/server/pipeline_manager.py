@@ -1,20 +1,36 @@
 """Pipeline Manager for lazy loading and managing ML pipelines."""
 
+from __future__ import annotations
+
 import asyncio
 import gc
 import logging
+import sys
 import threading
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import torch
 from omegaconf import OmegaConf
+
+# torch is not available on macOS (cloud mode only)
+if sys.platform != "darwin":
+    import torch
+else:
+    torch = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 
 
-def get_device() -> torch.device:
-    """Get the appropriate device (CUDA if available, CPU otherwise)."""
+def get_device() -> torch.device | None:
+    """Get the appropriate device (CUDA if available, CPU otherwise).
+
+    Returns None on macOS where torch is not available.
+    """
+    if torch is None:
+        return None
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -499,7 +515,7 @@ class PipelineManager:
 
         # Cleanup resources
         gc.collect()
-        if torch.cuda.is_available():
+        if torch is not None and torch.cuda.is_available():
             try:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()

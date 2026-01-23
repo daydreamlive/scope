@@ -1,13 +1,23 @@
 """Pipeline processor for running a single pipeline in a thread."""
 
+from __future__ import annotations
+
 import logging
 import queue
+import sys
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import torch
+# torch is not available on macOS (cloud mode only)
+if sys.platform != "darwin":
+    import torch
+else:
+    torch = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    import torch
 
 from scope.core.pipelines.controller import parse_ctrl_input
 
@@ -114,7 +124,7 @@ class PipelineProcessor:
                 with self.next_processor.input_queue_lock:
                     self.next_processor.input_queue = self.output_queue
 
-    def set_next_processor(self, next_processor: "PipelineProcessor"):
+    def set_next_processor(self, next_processor: PipelineProcessor):
         """Set the next processor in the chain and update output queue size accordingly.
 
         Args:

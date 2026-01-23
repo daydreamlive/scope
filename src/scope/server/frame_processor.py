@@ -1,11 +1,22 @@
+from __future__ import annotations
+
 import logging
 import queue
+import sys
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import torch
 from aiortc.mediastreams import VideoFrame
+
+# torch is not available on macOS (cloud mode only)
+if sys.platform != "darwin":
+    import torch
+else:
+    torch = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    import torch
 
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
