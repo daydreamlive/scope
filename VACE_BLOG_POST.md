@@ -2,7 +2,7 @@
 
 Autoregressive video generation models can stream video in real-time, but they lack the control capabilities that batch models have: reference guidance, structural conditioning, selective editing. Building these from scratch would require extensive retraining. What if you could adapt existing control mechanisms instead?
 
-This post describes an adaptation of [VACE](https://ali-vilab.github.io/VACE-Page/) (Video All-in-one Creation and Editing, Alibaba, ICCV 2025) for real-time autoregressive video generation. The adaptation enables reference-guided generation, structural conditioning, inpainting, and temporal extension in streaming contexts—using existing pretrained VACE weights without additional training.
+This post describes an adaptation of [VACE](https://ali-vilab.github.io/VACE-Page/) (Video All-in-one Creation and Editing, Alibaba, ICCV 2025) for real-time autoregressive video generation. The adaptation enables reference-guided generation, structural conditioning, inpainting, and temporal extension in streaming contexts - using existing pretrained VACE weights without additional training.
 
 <video src="src/blog_assets/depth/depth_comparison.mp4" controls></video>
 
@@ -54,7 +54,7 @@ Original:  latent = [refs | video]  →  denoise  →  strip refs  →  output
 Adapted:   latent = [video]  +  hints_from(refs)  →  denoise  →  output
 ```
 
-Reference frames are processed by separate transformer blocks (Context Blocks) that generate "hints"—additive signals injected into the main video pathway via scaled residuals.
+Reference frames are processed by separate transformer blocks (Context Blocks) that generate "hints" - additive signals injected into the main video pathway via scaled residuals.
 
 This preserves fixed chunk sizes: video latents maintain consistent dimensions (typically 3 latent frames → 12 output frames, depending on the base pipeline), regardless of how many references are provided.
 
@@ -88,14 +88,14 @@ VACE uses zero-initialized linear projections for hint injection. At initializat
 
 ## How Reference Processing Works
 
-All VACE modes—temporal extension, structural control, inpainting, and R2V—share a common reference processing pipeline:
+All VACE modes - temporal extension, structural control, inpainting, and R2V - share a common reference processing pipeline:
 
 1. **Separate encoding:** References are VAE-encoded into a parallel `vace_context` tensor, kept separate from video latents
 2. **Context Block processing:** Parallel transformer blocks process references and generate "hints"
 3. **Hint injection:** Hints are added to the main video pathway via scaled residuals (`x = x + hint * scale`)
 4. **Strength control:** `context_scale` (0.0–2.0) controls influence strength across all modes
 
-This unified architecture means the same hint injection mechanism drives depth-guided generation, first-frame extension, inpainting, and style transfer. The only difference between modes is what gets encoded as the reference.
+The same mechanism drives depth-guided generation, first-frame extension, inpainting, and style transfer. The only difference between modes is what gets encoded as the reference.
 
 ---
 
@@ -141,12 +141,9 @@ Control frames are processed per-chunk using existing VACE control encoder weigh
 Generate video connecting to provided keyframes. Reference frames appear in the output.
 
 **Modes:**
-- `firstframe` — reference is first frame, generate continuation (useful for animating a static image)
-- `lastframe` — reference is last frame, generate lead-in (useful for creating an intro to a specific endpoint)
-- `firstlastframe` — two references, generate interpolation (useful for animating between storyboard keyframes)
-
-**Clip-based variants:**
-- `firstclip` / `lastclip` / `firstlastclip` — video segments as anchors instead of single frames
+- `firstframe` - reference is first frame, generate continuation (useful for animating a static image)
+- `lastframe` - reference is last frame, generate lead-in (useful for creating an intro to a specific endpoint)
+- `firstlastframe` - two references, generate interpolation (useful for animating between storyboard keyframes)
 
 Reference frames are encoded and placed at temporal boundaries. The model generates frames to fill the gap while maintaining coherence with anchors.
 
@@ -161,14 +158,14 @@ Reference frames are encoded and placed at temporal boundaries. The model genera
 Selective region generation with masked areas regenerated while preserving the rest.
 
 **Inpainting:**
-- Static masks — same region masked every frame (e.g., fixed bounding box)
-- Dynamic tracking — mask follows a subject across frames using SAM2 segmentation, bounding box tracking, or label/caption-based detection
+- Static masks - same region masked every frame (e.g., fixed bounding box)
+- Dynamic masks - mask varies per frame; real-time segmentation systems like SAM2 integrate well
 
 **Outpainting:**
 - Extend canvas in any direction (left, right, up, down, or combinations)
 - Configurable expansion ratio
 
-Dual-stream encoding separates reactive (to be generated) and inactive (to be preserved) regions via VACE's "concept decoupling" mechanism. Preserved regions maintain full quality without blending artifacts at mask boundaries.
+Dual-stream encoding separates reactive (to be generated) and inactive (to be preserved) regions. Each stream uses its own VAE encoder cache to prevent temporal contamination. Preserved regions maintain full quality without blending artifacts at mask boundaries.
 
 **Character Transformation:**
 
@@ -186,11 +183,11 @@ Dual-stream encoding separates reactive (to be generated) and inactive (to be pr
 
 ### Reference-to-Video (R2V) - Experimental
 
-Reference images (1-3) guide style, subject, or character appearance. References influence generation but do not appear in output frames—think style transfer rather than keyframe interpolation.
+Reference images (1-3) guide style, subject, or character appearance. References influence generation but do not appear in output frames - think style transfer rather than keyframe interpolation.
 
 R2V uses the same hint injection pipeline described above, but with a key difference: references provide persistent stylistic guidance across all chunks rather than anchoring specific frames.
 
-**Note:** R2V is significantly more experimental than other capabilities. Detail preservation and reference fidelity are noticeably reduced compared to batch VACE due to causal attention constraints. The causal attention pattern and per-chunk processing fundamentally limit how well references can guide generation—R2V currently works better as coarse style guidance rather than precise subject/character transfer.
+**Note:** R2V is significantly more experimental than other capabilities. Detail preservation and reference fidelity are noticeably reduced compared to batch VACE due to causal attention constraints. The causal attention pattern and per-chunk processing fundamentally limit how well references can guide generation - R2V currently works better as coarse style guidance rather than precise subject/character transfer.
 
 ---
 
@@ -245,7 +242,7 @@ No explicit mode parameter required.
 | Decision | Rationale |
 |----------|-----------|
 | Composition over inheritance | Pipeline-agnostic: adapts to LongLive, Krea, StreamDiffusion, etc. |
-| Factory-generated block classes | Dynamically wraps attention blocks with hint injection |
+| Factory-generated block classes | Dynamically creates subclasses with hint injection support |
 | Separate VAE encoder caches | Dual-stream encoding without temporal contamination |
 | Zero-initialized hint projections | Safe composition with LoRA, quantization |
 | Implicit mode detection | API infers mode from inputs |
@@ -254,12 +251,15 @@ No explicit mode parameter required.
 
 ### Pipeline Compatibility
 
+All autoregressive pipelines in the codebase support VACE via the `VACEEnabledPipeline` mixin:
+
 | Base Pipeline | Status |
 |--------------|--------|
 | LongLive | Full support |
-| FramePack | Full support |
-| StreamDiffusion V2 | In progress |
-| MemFlow | Experimental |
+| StreamDiffusion V2 | Full support |
+| MemFlow | Full support |
+| Krea Realtime Video | Full support |
+| Reward Forcing | Full support |
 
 ---
 
@@ -291,7 +291,7 @@ No explicit mode parameter required.
 
 The primary alternative for real-time controlled video generation is **MotionStream**, a fully distilled model with built-in trajectory control. MotionStream is purpose-built for a single control modality and achieves higher quality for that specific use case. However, it requires full model retraining for each control type.
 
-This VACE adaptation trades some quality for versatility: a single set of pretrained weights enables depth control, scribble guidance, inpainting, layout control, and arbitrary combinations—without retraining. The approach is more extensible to new control types as the community develops them for batch VACE.
+This VACE adaptation trades some quality for versatility: a single set of pretrained weights enables depth control, scribble guidance, inpainting, layout control, and arbitrary combinations - without retraining. The approach is more extensible to new control types as the community develops them for batch VACE.
 
 ---
 
@@ -314,31 +314,21 @@ This VACE adaptation trades some quality for versatility: a single set of pretra
 
 ### Coverage Gaps
 
-The batch VACE ecosystem has accumulated extensive community-driven examples and techniques over months of use—various control signal combinations, preprocessing pipelines, and creative workflows. This adaptation reproduces core capabilities (like layout control via point trajectories) but many community techniques remain unexplored in the streaming context. The architecture supports these extensions; validation is ongoing.
+The batch VACE ecosystem has accumulated extensive community-driven examples and techniques over months of use—various control signal combinations, preprocessing pipelines, and creative workflows. Many remain unexplored in the streaming context.
 
 ---
 
 
 ## Summary
 
-This work demonstrates that control mechanisms from batch video diffusion can be adapted for real-time streaming generation without retraining. By moving VACE's reference frames from the diffusion latent space into a parallel conditioning pathway, the adaptation preserves the fixed chunk sizes and KV caching that autoregressive models require.
+By moving reference frames from the diffusion latent space into a parallel conditioning pathway, this adaptation preserves the fixed chunk sizes and KV caching that autoregressive models require—while reusing existing VACE weights directly.
 
 **Key contributions:**
 
-1. **Zero-shot weight transfer:** Existing VACE weights work directly in streaming contexts due to the Context Adapter architecture
-2. **Maintained capabilities:** Structural control (depth, pose, scribble, layout), masked generation (inpainting/outpainting), and temporal extension all function in real-time
-3. **Pipeline agnostic:** The composition-based design adapts to different autoregressive base models (LongLive, FramePack, etc.)
-4. **Practical performance:** 20+ fps generation with control on consumer hardware (RTX 5090, 1.3B model)
-
-**Trade-offs:**
-
-The adaptation prioritizes versatility over per-control-type quality. Purpose-built models like MotionStream achieve better results for specific controls, but require full retraining per modality. This approach enables multiple control types and arbitrary combinations from a single set of pretrained weights.
-
-The most significant limitation is R2V (reference-guided generation), which degrades substantially in streaming contexts. Other control modes (structural guidance, masking, extension) maintain practical quality for real-time applications.
-
-**Future directions:**
-
-The batch VACE community has developed extensive techniques beyond what's shown here. Porting these workflows to streaming contexts is ongoing. The architecture is designed to support these extensions as they're validated for real-time use.
+1. **Zero-shot weight transfer:** Existing VACE weights work directly in streaming contexts
+2. **Maintained capabilities:** Structural control, masked generation, and temporal extension all function in real-time
+3. **Pipeline agnostic:** The composition-based design adapts to different autoregressive base models
+4. **Practical performance:** 20+ fps generation with control on consumer hardware
 
 <video src="src/blog_assets/scribble/scribble_comparison.mp4" controls></video>
 
