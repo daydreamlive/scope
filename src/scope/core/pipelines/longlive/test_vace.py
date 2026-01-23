@@ -30,6 +30,7 @@ Usage:
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 import torch
 from diffusers.utils import export_to_video
@@ -38,6 +39,50 @@ from omegaconf import OmegaConf
 from scope.core.config import get_model_file_path, get_models_dir
 
 from ..video import load_video
+
+
+def add_fps_overlay(
+    frames: np.ndarray,
+    fps: float,
+    chunk_idx: int,
+    total_chunks: int,
+) -> np.ndarray:
+    """
+    Add FPS overlay to frames with semi-transparent background.
+
+    Format: "XX.X FPS | Chunk N/M"
+    """
+    frames = frames.copy()
+    text = f"{fps:.1f} FPS | Chunk {chunk_idx + 1}/{total_chunks}"
+
+    font = cv2.FONT_HERSHEY_DUPLEX
+    font_scale = 0.6
+    thickness = 1
+    color = (255, 255, 255)
+
+    (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    padding = 8
+    x, y = padding, text_h + padding + 2
+
+    for i in range(len(frames)):
+        frame = frames[i]
+        overlay = frame.copy()
+        cv2.rectangle(
+            overlay,
+            (padding - 4, padding - 2),
+            (x + text_w + 4, y + baseline + 4),
+            (0, 0, 0),
+            -1,
+        )
+        frame = cv2.addWeighted(overlay, 0.7, frame, 0.3, 0)
+        cv2.putText(
+            frame, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA
+        )
+        frames[i] = frame
+
+    return frames
+
+
 from .pipeline import LongLivePipeline
 
 # ============================= CONFIGURATION =============================
@@ -216,6 +261,8 @@ def create_mask_from_video(
     mask_video_path: Path,
     num_frames: int,
     threshold: float,
+    target_height: int,
+    target_width: int,
 ) -> np.ndarray:
     """
     Create binary mask from video frames.
@@ -224,17 +271,19 @@ def create_mask_from_video(
         mask_video_path: Path to mask video file
         num_frames: Number of frames needed
         threshold: Threshold for binarization (0-1)
+        target_height: Target height for resizing
+        target_width: Target width for resizing
 
     Returns:
         Binary mask array of shape [F, H, W] with values in {0, 1}
     """
     print(f"create_mask_from_video: Loading {mask_video_path}")
 
-    # Load mask video (will be resized by load_video_frames)
+    # Load mask video with proper dimensions
     mask_frames = load_video_frames(
         mask_video_path,
-        target_height=512,  # Will be properly resized later
-        target_width=512,
+        target_height=target_height,
+        target_width=target_width,
         max_frames=None,
     )
 
@@ -494,6 +543,13 @@ def main():
         get_model_file_path("Wan2.1-VACE-1.3B/diffusion_pytorch_model.safetensors")
     )
 
+    # Build LoRA list from config
+    loras = []
+    if "loras" in config and config["loras"]:
+        for lora_path in config["loras"]:
+            if lora_path:
+                loras.append({"path": lora_path, "scale": 1.0})
+
     pipeline_config = OmegaConf.create(
         {
             "model_dir": str(get_models_dir()),
@@ -501,6 +557,7 @@ def main():
                 get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
             ),
             "lora_path": str(get_model_file_path("LongLive-1.3B/models/lora.pt")),
+            "loras": loras if loras else [],
             "vace_path": vace_path
             if (use_r2v or use_depth or use_inpainting or use_extension)
             else None,
@@ -630,6 +687,8 @@ def main():
             mask_video_path,
             total_frames,
             config["mask_threshold"],
+            config["height"],
+            config["width"],
         )
 
         # Create masked video
@@ -782,9 +841,14 @@ def main():
 
         latency_measures.append(latency)
         fps_measures.append(fps)
-        outputs.append(output.detach().cpu())
 
-    # Concatenate outputs
+        # Convert to numpy uint8 and apply FPS overlay
+        output_np = output.detach().cpu().numpy()
+        output_np = np.clip(output_np * 255, 0, 255).astype(np.uint8)
+        output_np = add_fps_overlay(output_np, fps, chunk_index, config["num_chunks"])
+        outputs.append(output_np)
+
+    # Concatenate outputs (now numpy arrays with FPS overlay)
     if use_inpainting and overlap_frames > 0:
         output_chunks = []
         for chunk_idx, output_chunk in enumerate(outputs):
@@ -792,9 +856,9 @@ def main():
                 output_chunks.append(output_chunk)
             else:
                 output_chunks.append(output_chunk[overlap_frames:])
-        output_video = torch.concat(output_chunks)
+        output_video = np.concatenate(output_chunks, axis=0)
     else:
-        output_video = torch.concat(outputs)
+        output_video = np.concatenate(outputs, axis=0)
 
     print(f"\nFinal output shape: {output_video.shape}")
 
@@ -804,18 +868,21 @@ def main():
         extension_mode = config["extension_mode"]
         print(f"Extension mode: {extension_mode}")
 
+        # output_video is now uint8 numpy array [0, 255]
+        output_video_float = output_video.astype(np.float32) / 255.0
+
         if extension_mode == "firstframe" or extension_mode == "firstlastframe":
             print(
-                f"First frame value range: [{output_video[0].min():.3f}, {output_video[0].max():.3f}]"
+                f"First frame value range: [{output_video_float[0].min():.3f}, {output_video_float[0].max():.3f}]"
             )
-            print(f"First frame mean: {output_video[0].mean():.3f}")
+            print(f"First frame mean: {output_video_float[0].mean():.3f}")
 
         if extension_mode == "lastframe" or extension_mode == "firstlastframe":
             last_frame_idx = output_video.shape[0] - 1
             print(
-                f"Last frame (index {last_frame_idx}) value range: [{output_video[last_frame_idx].min():.3f}, {output_video[last_frame_idx].max():.3f}]"
+                f"Last frame (index {last_frame_idx}) value range: [{output_video_float[last_frame_idx].min():.3f}, {output_video_float[last_frame_idx].max():.3f}]"
             )
-            print(f"Last frame mean: {output_video[last_frame_idx].mean():.3f}")
+            print(f"Last frame mean: {output_video_float[last_frame_idx].mean():.3f}")
 
         # Compare with reference image if available
         if extension_mode == "lastframe" and last_frame_image:
@@ -831,7 +898,7 @@ def main():
             print(f"Reference image mean: {ref_np.mean():.3f}")
 
             # Compare last frame with reference
-            last_frame_np = output_video[last_frame_idx].numpy()
+            last_frame_np = output_video_float[last_frame_idx]
             diff = np.abs(last_frame_np - ref_np)
             print("Absolute difference between last frame and reference:")
             print(f"  Mean: {diff.mean():.3f}")
@@ -839,9 +906,8 @@ def main():
             print(f"  Min: {diff.min():.3f}")
         print()
 
-    # Save output video
-    output_video_np = output_video.contiguous().numpy()
-    output_video_np = np.clip(output_video_np, 0.0, 1.0)
+    # Save output video (already numpy uint8 with FPS overlay)
+    output_video_np = output_video.astype(np.float32) / 255.0
 
     mode_suffix = []
     if use_r2v:

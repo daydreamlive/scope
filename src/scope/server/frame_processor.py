@@ -524,16 +524,32 @@ class FrameProcessor:
             logger.error("No pipeline IDs provided")
             return
 
+        # Get the last (main) pipeline's load parameters for resolution info
+        status_info = self.pipeline_manager.get_status_info()
+        load_params = status_info.get("load_params", {})
+
+        # Extract height and width from the main pipeline's load params
+        main_height = load_params.get("height")
+        main_width = load_params.get("width")
+
         # Create pipeline processors (each creates its own queues)
-        for pipeline_id in self.pipeline_ids:
+        for i, pipeline_id in enumerate(self.pipeline_ids):
             # Get pipeline instance from manager
             pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+
+            # Copy parameters and add resolution info for preprocessors
+            params = self.parameters.copy()
+
+            # For all pipelines except the last one (preprocessors), add the main pipeline's resolution
+            if i < len(self.pipeline_ids) - 1 and main_height is not None and main_width is not None:
+                params["height"] = main_height
+                params["width"] = main_width
 
             # Create processor with its own queues
             processor = PipelineProcessor(
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
-                initial_parameters=self.parameters.copy(),
+                initial_parameters=params,
             )
 
             self.pipeline_processors.append(processor)
