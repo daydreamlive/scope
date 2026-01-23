@@ -71,8 +71,12 @@ export function StreamStatus({ streamId, isActive }: StreamStatusProps) {
             <>
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Status:</span>
-                  <span className="font-mono font-medium">{status.status}</span>
+                  <span className="text-muted-foreground">Inference Status:</span>
+                  <span className="font-mono font-medium">{(status as any)?.data?.state ?? ""}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">WHIP Connection:</span>
+                  <span className="font-mono font-medium">{(status as any)?.data?.gateway_status?.ingest_metrics?.stats?.conn_quality ?? ""}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Stream ID:</span>

@@ -32,7 +32,6 @@ interface PromptInputProps {
   transitionSteps?: number;
   onTransitionStepsChange?: (steps: number) => void;
   timelinePrompts?: TimelinePrompt[];
-  cloudMode?: boolean;
   defaultTemporalInterpolationMethod?: "linear" | "slerp" | null;
   defaultSpatialInterpolationMethod?: "linear" | "slerp" | null;
 }
@@ -54,7 +53,6 @@ export function PromptInput({
   transitionSteps = 4,
   onTransitionStepsChange,
   timelinePrompts = [],
-  cloudMode = false,
   defaultTemporalInterpolationMethod,
   defaultSpatialInterpolationMethod,
 }: PromptInputProps) {
@@ -172,7 +170,7 @@ export function PromptInput({
         </div>
 
         <div className="space-y-2">
-          {!cloudMode && supportsTemporalInterpolation && (
+          {supportsTemporalInterpolation && (
             <TemporalTransitionControls
               transitionSteps={transitionSteps}
               onTransitionStepsChange={steps =>
@@ -205,18 +203,6 @@ export function PromptInput({
                 <Plus className="h-4 w-4" />
               </Button>
             )}
-            <Button
-              onMouseDown={e => {
-                e.preventDefault();
-                handleAddPrompt();
-              }}
-              disabled={disabled}
-              size="sm"
-              variant="ghost"
-              className="rounded-full w-8 h-8 p-0"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
           <Button
             onMouseDown={e => {
               e.preventDefault();

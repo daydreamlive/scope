@@ -332,7 +332,11 @@ export function SettingsPanel({
             </SelectTrigger>
             <SelectContent>
               {pipelines &&
-                Object.entries(pipelines).map(([id]) => (
+                Object.entries(pipelines).filter(([, info]) => {
+                  // In cloud mode, only show longlive
+                  if (cloudMode && info.name !== "LongLive") return false;
+                  return true;
+                }).map(([id]) => (
                   <SelectItem key={id} value={id}>
                     {id}
                   </SelectItem>
@@ -415,7 +419,7 @@ export function SettingsPanel({
         )}
 
         {/* VACE Toggle */}
-        {currentPipeline?.supportsVACE && (
+        {currentPipeline?.supportsVACE && !cloudMode && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
@@ -503,13 +507,14 @@ export function SettingsPanel({
         )}
 
         {/* Preprocessor Selector */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <LabelWithTooltip
-              label={PARAMETER_METADATA.preprocessor.label}
-              tooltip={PARAMETER_METADATA.preprocessor.tooltip}
-              className="text-sm text-foreground"
-            />
+        {!cloudMode && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.preprocessor.label}
+                tooltip={PARAMETER_METADATA.preprocessor.tooltip}
+                className="text-sm text-foreground"
+              />
             <Select
               value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
               onValueChange={value => {
@@ -546,9 +551,11 @@ export function SettingsPanel({
             </Select>
           </div>
         </div>
+        )}
 
         {/* Postprocessor Selector */}
-        <div className="space-y-2">
+        {!cloudMode && (
+          <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <LabelWithTooltip
               label={PARAMETER_METADATA.postprocessor.label}
@@ -589,6 +596,7 @@ export function SettingsPanel({
             </Select>
           </div>
         </div>
+        )}
 
         {/* VAE Type Selection */}
         {vaeTypes && vaeTypes.length > 0 && (

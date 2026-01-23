@@ -519,7 +519,6 @@ export function InputAndControlsPanel({
                     transitionSteps={transitionSteps}
                     onTransitionStepsChange={onTransitionStepsChange}
                     timelinePrompts={_timelinePrompts}
-                    cloudMode={cloudMode}
                     defaultTemporalInterpolationMethod={
                       pipeline?.defaultTemporalInterpolationMethod
                     }

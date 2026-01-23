@@ -1383,9 +1383,10 @@ export function StreamPage() {
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
             vaceEnabled={
-              settings.vaceEnabled ??
-              (pipelines?.[settings.pipelineId]?.supportsVACE &&
-                settings.inputMode !== "video")
+              !settings.cloudMode &&
+              (settings.vaceEnabled ??
+                (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                  settings.inputMode !== "video"))
             }
             refImages={settings.refImages || []}
             onRefImagesChange={handleRefImagesChange}
@@ -1622,9 +1623,10 @@ export function StreamPage() {
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}
             vaceEnabled={
-              settings.vaceEnabled ??
-              (pipelines?.[settings.pipelineId]?.supportsVACE &&
-                settings.inputMode !== "video")
+              !settings.cloudMode &&
+              (settings.vaceEnabled ??
+                (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                  settings.inputMode !== "video"))
             }
             onVaceEnabledChange={handleVaceEnabledChange}
             vaceUseInputVideo={settings.vaceUseInputVideo ?? false}
