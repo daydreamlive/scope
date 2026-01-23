@@ -86,6 +86,19 @@ VACE uses zero-initialized linear projections for hint injection. At initializat
 
 ---
 
+## How Reference Processing Works
+
+All VACE modes—temporal extension, structural control, inpainting, and R2V—share a common reference processing pipeline:
+
+1. **Separate encoding:** References are VAE-encoded into a parallel `vace_context` tensor, kept separate from video latents
+2. **Context Block processing:** Parallel transformer blocks process references and generate "hints"
+3. **Hint injection:** Hints are added to the main video pathway via scaled residuals (`x = x + hint * scale`)
+4. **Strength control:** `context_scale` (0.0–2.0) controls influence strength across all modes
+
+This unified architecture means the same hint injection mechanism drives depth-guided generation, first-frame extension, inpainting, and style transfer. The only difference between modes is what gets encoded as the reference.
+
+---
+
 ## Capabilities
 
 ### Video-to-Video with Control Signals
@@ -175,12 +188,9 @@ Dual-stream encoding separates reactive (to be generated) and inactive (to be pr
 
 Reference images (1-3) guide style, subject, or character appearance. References influence generation but do not appear in output frames—think style transfer rather than keyframe interpolation.
 
-- References are VAE-encoded separately from video latents
-- Context Blocks process references and generate persistent hints
-- Hints influence all chunks via scaled residual injection
-- `context_scale` (0.0–2.0) controls influence strength
+R2V uses the same hint injection pipeline described above, but with a key difference: references provide persistent stylistic guidance across all chunks rather than anchoring specific frames.
 
-**Note:** R2V is significantly more experimental than other capabilities. Detail preservation and reference fidelity are noticeably reduced compared to batch VACE due to causal attention constraints. The utility of R2V in streaming contexts is currently limited and requires further exploration.
+**Note:** R2V is significantly more experimental than other capabilities. Detail preservation and reference fidelity are noticeably reduced compared to batch VACE due to causal attention constraints. The causal attention pattern and per-chunk processing fundamentally limit how well references can guide generation—R2V currently works better as coarse style guidance rather than precise subject/character transfer.
 
 ---
 
@@ -289,9 +299,9 @@ This VACE adaptation trades some quality for versatility: a single set of pretra
 
 ### Quality Considerations
 
-- **Temporal coherence:** Can degrade over extended generations (100+ frames) without re-anchoring or keyframe injection - this is largely a consequence of autoregression in genera
+- **Temporal coherence:** Can degrade over extended generations (100+ frames) without re-anchoring or keyframe injection - this is largely a consequence of autoregression in general
 - **Control signal variance:** Some signals (depth, scribble, layout) work reliably, while others need more tuning
-- **First+last frame extension in combination:** Reduced utility when compared to batch paradign due to small chunk sizes in streaming contexts
+- **First+last frame extension in combination:** Reduced utility when compared to batch paradigm due to small chunk sizes in streaming contexts
 
 ### Known Failure Cases
 

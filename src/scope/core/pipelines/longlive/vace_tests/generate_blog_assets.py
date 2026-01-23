@@ -65,7 +65,8 @@ CONFIG = {
     "i2v_num_chunks": 10,
     "depth_num_chunks": 10,
     "scribble_num_chunks": 10,
-    "inpainting_num_chunks": 9,
+    "inpainting_num_chunks": 10,
+    "lora_num_chunks": 9,
     "layout_num_chunks": 12,
     # === VACE Context Scale for each demo ===
     "i2v_vace_scale": 1.0,
@@ -77,7 +78,7 @@ CONFIG = {
     "lora_vace_scale": 0.70,
     # === LoRA Paths ===
     "highresfix_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
-    "toy_soldier_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/Studio_Ghibli_LORA_1_3B.safetensors",# "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/ggg-3000-adapter-toy-soldier.safetensors",
+    "toy_soldier_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/Studio_Ghibli_LORA_1_3B.safetensors",  # "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/ggg-3000-adapter-toy-soldier.safetensors",
     "scribble_lora_path": "C:/Users/ryanf/.daydream-scope/models/lora/lora/wan1.3b/Studio_Ghibli_LORA_1_3B.safetensors",
     # === Enable Highresfix LoRA per test ===
     "i2v_use_highresfix": True,
@@ -86,12 +87,15 @@ CONFIG = {
     "inpainting_use_highresfix": True,
     "layout_use_highresfix": False,
     "lora_use_highresfix": True,
+    # === Inpainting Options ===
+    "inpainting_invert_mask": True,
     # === Prompts ===
     "i2v_image_prompt": "A  a waterfall in a lush forest",
     "i2v_video_prompt": "A  a waterfall in a lush forest, the water is flowing fast and bubbling",
     "depth_prompt": "a samurai with a hooded cloak reading a book, standing in front of a castle, cinematic lighting",
     "scribble_prompt": "a woman looking at her phone, studio ghibli style illustration",
     "inpainting_prompt": "a panda with floppy ears holding a cellphone, looking at it",
+    "inpainting_background_prompt": "a beautiful woman standing in a lush garden, bathed in brilliant golden hour sunlight, bright warm lighting, sun rays streaming through leaves, radiant amber glow, vibrant colors, high key lighting",
     "inpainting_lora_prompt": "an anime style woman holding a basketball, sexy studio ghibli style",
 }
 
@@ -751,8 +755,9 @@ def run_scribble_test(
 
 def run_inpainting_test(preprocessed: dict, output_dir: Path):
     """Run inpainting test using test_vace.py."""
+    mode = "Background" if CONFIG["inpainting_invert_mask"] else "Character"
     print("\n" + "=" * 60)
-    print("  ASSET: Inpainting - Character Transformation")
+    print(f"  ASSET: Inpainting - {mode} Transformation")
     print("=" * 60)
 
     from .. import test_vace
@@ -762,6 +767,20 @@ def run_inpainting_test(preprocessed: dict, output_dir: Path):
     if CONFIG["inpainting_use_highresfix"]:
         loras.append(CONFIG["highresfix_lora_path"])
 
+    # Handle mask inversion if requested
+    mask_video_path = preprocessed["person_masks_path"]
+    prompt = CONFIG["inpainting_prompt"]
+    if CONFIG["inpainting_invert_mask"]:
+        print("  Inverting mask for background inpainting...")
+        inverted_mask_path = OUTPUT_DIR / "preprocessing" / "person_masks_inverted.mp4"
+        if not inverted_mask_path.exists():
+            masks = preprocessed["person_masks"]
+            inverted_masks = 1.0 - masks
+            mask_vis = np.stack([inverted_masks] * 3, axis=-1)
+            save_video(mask_vis, inverted_mask_path, fps=CONFIG["fps"])
+        mask_video_path = inverted_mask_path
+        prompt = CONFIG["inpainting_background_prompt"]
+
     test_vace.CONFIG.update(
         {
             "use_r2v": False,
@@ -769,8 +788,8 @@ def run_inpainting_test(preprocessed: dict, output_dir: Path):
             "use_inpainting": True,
             "use_extension": False,
             "input_video": str(preprocessed["input_video_path"]),
-            "mask_video": str(preprocessed["person_masks_path"]),
-            "prompt": CONFIG["inpainting_prompt"],
+            "mask_video": str(mask_video_path),
+            "prompt": prompt,
             "num_chunks": CONFIG["inpainting_num_chunks"],
             "height": CONFIG["height"],
             "width": CONFIG["width"],
@@ -817,7 +836,9 @@ def run_i2v_test(images: dict, output_dir: Path):
     test_vace.main()
 
 
-def run_inpainting_lora_test(preprocessed: dict, output_dir: Path, video_name: str = "businesslady"):
+def run_inpainting_lora_test(
+    preprocessed: dict, output_dir: Path, video_name: str = "businesslady"
+):
     """Run inpainting with LoRA.
 
     Args:
@@ -848,7 +869,7 @@ def run_inpainting_lora_test(preprocessed: dict, output_dir: Path, video_name: s
     video = preprocessed["input_video"]
     masks = preprocessed["person_masks"]
 
-    num_chunks = CONFIG["inpainting_num_chunks"]
+    num_chunks = CONFIG["lora_num_chunks"]
     frames_per_chunk = CONFIG["frames_per_chunk"]
 
     # Prepare VACE tensors
@@ -917,7 +938,15 @@ def main():
     parser.add_argument(
         "--only",
         type=str,
-        choices=["layout", "depth", "scribble", "scribble2", "inpainting", "i2v", "lora"],
+        choices=[
+            "layout",
+            "depth",
+            "scribble",
+            "scribble2",
+            "inpainting",
+            "i2v",
+            "lora",
+        ],
         help="Generate only a specific asset type",
     )
     args = parser.parse_args()
@@ -1022,7 +1051,9 @@ def main():
             print("\n[INFO] Regional LoRA test using different input video...")
             lora_video_path = project_root / CONFIG["lora_input_video"]
             if not lora_video_path.exists():
-                raise FileNotFoundError(f"LoRA input video not found: {lora_video_path}")
+                raise FileNotFoundError(
+                    f"LoRA input video not found: {lora_video_path}"
+                )
 
             # Check if preprocessing exists for lora video
             lora_preprocessing_dir = OUTPUT_DIR / "preprocessing_lora"
@@ -1032,7 +1063,9 @@ def main():
             )
 
             if lora_preprocessing_complete:
-                print("[SKIP] LoRA preprocessing already complete, loading existing data...")
+                print(
+                    "[SKIP] LoRA preprocessing already complete, loading existing data..."
+                )
                 lora_input_video = load_video(
                     lora_preprocessing_dir / "input_video_resized.mp4",
                     CONFIG["height"],
@@ -1055,7 +1088,9 @@ def main():
                 lora_preprocessing_dir.mkdir(parents=True, exist_ok=True)
 
                 # Load and resize
-                lora_video = load_video(lora_video_path, CONFIG["height"], CONFIG["width"])
+                lora_video = load_video(
+                    lora_video_path, CONFIG["height"], CONFIG["width"]
+                )
                 resized_path = lora_preprocessing_dir / "input_video_resized.mp4"
                 save_video(lora_video, resized_path, fps=CONFIG["fps"])
 
