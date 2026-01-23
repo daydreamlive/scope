@@ -49,8 +49,15 @@ Scope currently supports the following operating systems:
 
 - Linux
 - Windows
+- macOS (cloud mode only)
 
-Scope currently requires a Nvidia GPU with >= 24GB VRAM. As a baseline, we recommend a driver that supports CUDA >= 12.8 and a RTX 3090/4090/5090 (newer generations will support higher FPS throughput and lower latency).
+**Local GPU Processing (Linux/Windows)**
+
+Scope requires a Nvidia GPU with >= 24GB VRAM. As a baseline, we recommend a driver that supports CUDA >= 12.8 and a RTX 3090/4090/5090 (newer generations will support higher FPS throughput and lower latency).
+
+**Cloud Mode (macOS/Linux/Windows)**
+
+In cloud mode, video streams are sent to remote GPU servers for processing. This allows Macs and machines without compatible GPUs to use Scope.
 
 The following models currently have more restrictive requirements:
 
@@ -81,6 +88,9 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is n
 > [!IMPORTANT]
 > If you are using Windows, install [Microsoft Visual C++ Redistributable (vcredist)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
 
+> [!NOTE]
+> **macOS**: Installation works the same way. GPU dependencies are automatically skipped on Mac. You can use cloud mode to stream to remote GPU servers for processing.
+
 #### Clone
 
 ```
@@ -109,7 +119,9 @@ uv run daydream-scope
 
 After the server starts up, the frontend will be available at `http://localhost:8000`.
 
-The frontend will present a dialog for downloading model weights for pipelines before running them (by pressing play with the pipeline selected) for the first time. The default directory where model weights are stored is `~/.daydream-scope/models`.
+**Local mode (Linux/Windows with GPU)**: The frontend will present a dialog for downloading model weights for pipelines before running them (by pressing play with the pipeline selected) for the first time. The default directory where model weights are stored is `~/.daydream-scope/models`.
+
+**Cloud mode (macOS or no GPU)**: Enable cloud mode in the UI to stream video to remote GPU servers for processing. No local model downloads required.
 
 ### Runpod
 
