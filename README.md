@@ -83,7 +83,7 @@ The easiest way to get started with Scope is to download the latest version of t
 
 ### Manual Installation
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is needed to run the server and [Node.js](https://nodejs.org/en/download) which is needed to build the frontend.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is needed to run the server and [Node.js](https://nodejs.org/en/download) (v20.19+ or v22.12+) which is needed to build the frontend.
 
 > [!IMPORTANT]
 > If you are using Windows, install [Microsoft Visual C++ Redistributable (vcredist)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
@@ -199,6 +199,14 @@ uv run daydream-scope
 Read the [contribution guide](./docs/contributing.md).
 
 ## Troubleshooting
+
+**npm EACCES permission denied**
+
+If you encounter permission errors when running `uv run build` related to the npm cache (e.g., `EACCES: permission denied, mkdir '/Users/.../.npm/_cacache/...'`), fix your npm cache permissions:
+
+```bash
+sudo chown -R $(whoami) ~/.npm
+```
 
 **Python.h: No such file or directory**
 
