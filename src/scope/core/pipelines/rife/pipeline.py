@@ -55,7 +55,7 @@ class RIFEPipeline(Pipeline):
         logger.info("RIFE HDv3 model loaded successfully")
 
     def prepare(self, **kwargs) -> Requirements:
-        return Requirements(input_size=12)
+        return Requirements(input_size=kwargs.get("prev_output_size", 12))
 
     def __call__(
         self,

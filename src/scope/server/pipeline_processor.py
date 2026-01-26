@@ -84,6 +84,8 @@ class PipelineProcessor:
             "vace_use_input_video", True
         )
 
+        self.output_size = None
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -129,6 +131,8 @@ class PipelineProcessor:
             input_size = requirements.input_size
             target_size = max(8, input_size * OUTPUT_QUEUE_MAX_SIZE_FACTOR)
             self._resize_output_queue(target_size)
+            # Store downstream chunk size for preprocessors to use via prepare()
+            self.parameters["next_input_size"] = input_size
 
         # Update next processor's input_queue to point to this output_queue
         # Use lock to ensure thread-safe reference swapping
@@ -398,6 +402,12 @@ class PipelineProcessor:
             # Extract video from the returned dictionary
             output = output_dict["video"]
 
+            # Update prev_output_size parameter
+            num_frames = output.shape[0]
+            if self.output_size != num_frames and self.next_processor is not None:
+                self.output_size = num_frames
+                self.next_processor.update_parameters({"prev_output_size": num_frames})
+
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates
             one_shot_params = [
@@ -423,7 +433,6 @@ class PipelineProcessor:
                     self.parameters.pop("transition", None)
 
             processing_time = time.time() - start_time
-            num_frames = output.shape[0]
             logger.debug(
                 f"Pipeline {self.pipeline_id} processed in {processing_time:.4f}s, {num_frames} frames"
             )
