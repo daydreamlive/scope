@@ -386,14 +386,30 @@ class RecordingManager:
     async def delete_recording(self):
         """Delete all recording files."""
         files_to_delete = []
+        media_recorder = None
+        recording_track = None
+
         try:
-            with self.recording_lock:
-                if self.recording_file:
-                    files_to_delete.append(self.recording_file)
-                self.recording_file = None
+            # Extract recording state and stop the recorder before deleting
+            recording_file, media_recorder, recording_track = (
+                self._extract_recording_state()
+            )
+            if recording_file:
+                files_to_delete.append(recording_file)
         except Exception as e:
             logger.error(f"Error getting recording file paths: {e}")
 
+        # Stop the media recorder first to close the file handle
+        if media_recorder:
+            try:
+                await media_recorder.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping media recorder during delete: {e}")
+
+        # Stop the recording track
+        self._stop_track_safe(recording_track)
+
+        # Now delete the file(s) - the file handle should be closed
         for file_path in files_to_delete:
             if file_path and os.path.exists(file_path):
                 self._safe_remove_file(file_path)
