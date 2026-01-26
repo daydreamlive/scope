@@ -83,8 +83,22 @@ class TimestampNormalizingTrack(MediaStreamTrack):
         self._last_frame_time: float | None = None
         self._min_frame_interval = 1.0 / RECORDING_MAX_FPS
 
-    async def recv(self):
+    @staticmethod
+    def _copy_frame_with_new_pts(frame, base_pts):
+        """Copy frame data and create new frame with normalized PTS (CPU-bound).
+
+        This runs in a thread pool to avoid blocking the event loop.
+        """
         import av
+
+        arr = frame.to_ndarray(format="rgb24")
+        new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
+        new_frame.pts = frame.pts - base_pts
+        new_frame.time_base = frame.time_base
+        return new_frame
+
+    async def recv(self):
+        import asyncio
 
         while True:
             frame = await self._source.recv()
@@ -101,12 +115,10 @@ class TimestampNormalizingTrack(MediaStreamTrack):
             if self._base_pts is None:
                 self._base_pts = frame.pts
 
-            # Create a new frame with normalized timestamp
-            arr = frame.to_ndarray(format="rgb24")
-            new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
-            new_frame.pts = frame.pts - self._base_pts
-            new_frame.time_base = frame.time_base
-            return new_frame
+            # Offload CPU-bound frame copy to thread pool to avoid blocking event loop
+            return await asyncio.to_thread(
+                self._copy_frame_with_new_pts, frame, self._base_pts
+            )
 
     def stop(self):
         self._source.stop()
@@ -142,12 +154,21 @@ class RecordingManager:
         self.relay = relay
 
     @staticmethod
-    def _create_temp_file(suffix: str, prefix: str) -> str:
-        """Create a temporary file and return its path."""
+    def _create_temp_file_sync(suffix: str, prefix: str) -> str:
+        """Create a temporary file and return its path (synchronous)."""
         temp_dir = tempfile.gettempdir()
         fd, file_path = tempfile.mkstemp(suffix=suffix, prefix=prefix, dir=temp_dir)
         os.close(fd)
         return file_path
+
+    @staticmethod
+    async def _create_temp_file(suffix: str, prefix: str) -> str:
+        """Create a temporary file and return its path (async, non-blocking)."""
+        import asyncio
+
+        return await asyncio.to_thread(
+            RecordingManager._create_temp_file_sync, suffix, prefix
+        )
 
     @staticmethod
     def _stop_track_safe(track: MediaStreamTrack | None) -> None:
@@ -199,7 +220,7 @@ class RecordingManager:
         recording_track = None
 
         try:
-            recording_file = self._create_temp_file(
+            recording_file = await self._create_temp_file(
                 ".mp4", TEMP_FILE_PREFIXES["recording"]
             )
             media_recorder = self._create_media_recorder(recording_file)
@@ -340,8 +361,8 @@ class RecordingManager:
             self._stop_track_safe(recording_track)
 
             if recording_file and os.path.exists(recording_file):
-                # Create a copy for download
-                download_file = self._copy_single_segment(recording_file)
+                # Create a copy for download (async to avoid blocking event loop)
+                download_file = await self._copy_single_segment(recording_file)
 
                 # Continue recording if max length not reached
                 if not self.max_length_reached:
@@ -368,10 +389,19 @@ class RecordingManager:
         except Exception as e:
             logger.error(f"Error restarting recording: {e}", exc_info=True)
 
-    def _copy_single_segment(self, segment_path: str) -> str:
-        """Copy a recording file to a download file."""
-        download_file = self._create_temp_file(".mp4", TEMP_FILE_PREFIXES["download"])
-        shutil.copy2(segment_path, download_file)
+    @staticmethod
+    def _copy_file_sync(src: str, dst: str) -> None:
+        """Copy a file synchronously."""
+        shutil.copy2(src, dst)
+
+    async def _copy_single_segment(self, segment_path: str) -> str:
+        """Copy a recording file to a download file (async, non-blocking)."""
+        import asyncio
+
+        download_file = await self._create_temp_file(
+            ".mp4", TEMP_FILE_PREFIXES["download"]
+        )
+        await asyncio.to_thread(self._copy_file_sync, segment_path, download_file)
         logger.info(f"Created download copy: {download_file}")
         return download_file
 
