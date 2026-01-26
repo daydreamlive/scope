@@ -12,6 +12,7 @@ import torch
 from scope.core.pipelines.controller import parse_ctrl_input
 
 from .pipeline_manager import PipelineNotAvailableException
+from .pipeline_throttler import PipelineThrottler
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,11 @@ class PipelineProcessor:
             "vace_use_input_video", True
         )
 
+        # Throttler for controlling processing rate in chained pipelines
+        # Throttling is applied when this pipeline produces frames faster than
+        # the next pipeline in the chain can consume them
+        self.throttler = PipelineThrottler()
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -121,6 +127,9 @@ class PipelineProcessor:
             next_processor: The next pipeline processor in the chain
         """
         self.next_processor = next_processor
+
+        # Set throttler's reference to next processor for throttling decisions
+        self.throttler.set_next_processor(next_processor)
 
         # Calculate output queue size based on next processor's requirements
         next_pipeline = next_processor.pipeline
@@ -337,6 +346,7 @@ class PipelineProcessor:
             requirements = self.pipeline.prepare(**prepare_params)
 
         video_input = None
+        input_frame_count = 0
         if requirements is not None:
             current_chunk_size = requirements.input_size
 
@@ -353,6 +363,7 @@ class PipelineProcessor:
 
             # Use prepare_chunk to uniformly sample frames from the queue
             video_input = self.prepare_chunk(input_queue_ref, current_chunk_size)
+            input_frame_count = len(video_input) if video_input else 0
 
         try:
             # Pass parameters (excluding prepare-only parameters)
@@ -428,6 +439,12 @@ class PipelineProcessor:
                 f"Pipeline {self.pipeline_id} processed in {processing_time:.4f}s, {num_frames} frames"
             )
 
+            # Record batch timing for throttling calculations
+            if input_frame_count > 0:
+                self.throttler.record_input_batch(input_frame_count, processing_time)
+            if num_frames > 0:
+                self.throttler.record_output_batch(num_frames, processing_time)
+
             # Normalize to [0, 255] and convert to uint8
             # Keep frames on GPU - frame_processor handles CPU transfer for streaming
             output = (
@@ -457,6 +474,12 @@ class PipelineProcessor:
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
                     continue
+
+            # Apply throttling if this pipeline is producing faster than next can consume
+            # Only throttle if: (1) has video input, (2) has next processor
+            if video_input is not None and self.next_processor is not None:
+                self.throttler.throttle()
+
         except Exception as e:
             if self._is_recoverable(e):
                 logger.error(
