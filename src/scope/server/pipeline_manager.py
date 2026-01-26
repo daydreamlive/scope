@@ -530,10 +530,17 @@ class PipelineManager:
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
-            # Plugin pipeline - instantiate generically with load_params
+            # Plugin pipeline - use schema defaults merged with load_params
             logger.info(f"Loading plugin pipeline: {pipeline_id}")
-            load_params = load_params or {}
-            return pipeline_class(**load_params)
+            config_class = pipeline_class.get_config_class()
+            # Get defaults from schema fields
+            schema_defaults = {}
+            for name, field in config_class.model_fields.items():
+                if field.default is not None:
+                    schema_defaults[name] = field.default
+            # Merge: load_params override schema defaults
+            merged_params = {**schema_defaults, **(load_params or {})}
+            return pipeline_class(**merged_params)
 
         # Fall through to built-in pipeline initialization
         if pipeline_id == "streamdiffusionv2":
