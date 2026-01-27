@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
-from torchvision.models.optical_flow import Raft_Small_Weights
 from torchvision.utils import flow_to_image
 
 from ..interface import Pipeline, Requirements
@@ -92,7 +91,6 @@ class OpticalFlowPipeline(Pipeline):
 
         self._trt_engine = None
         self._pytorch_model = None
-        self._raft_weights = None  # Cached weights for transforms
         self._is_cuda_available = torch.cuda.is_available()
 
         # Previous frame tracking for flow computation
@@ -206,7 +204,7 @@ class OpticalFlowPipeline(Pipeline):
         logger.info(f"Loading PyTorch RAFT {model_size} model...")
         start = time.time()
 
-        self._pytorch_model, self._raft_weights = load_raft_model(
+        self._pytorch_model, _ = load_raft_model(
             self._use_large_model, device=str(self.device)
         )
 
@@ -215,23 +213,19 @@ class OpticalFlowPipeline(Pipeline):
         )
         return self._pytorch_model
 
-    def _get_raft_weights(self):
-        """Get the appropriate RAFT weights based on model size.
+    @staticmethod
+    def _pad_to_8(tensor: torch.Tensor) -> tuple[torch.Tensor, int, int]:
+        """Pad NCHW tensor so H and W are multiples of 8 (RAFT requirement).
 
-        Returns cached weights if available, otherwise loads them.
+        Returns:
+            Tuple of (padded tensor, original height, original width)
         """
-        if self._raft_weights is not None:
-            return self._raft_weights
-
-        # Load weights on demand (for TensorRT path where model isn't loaded)
-        from torchvision.models.optical_flow import Raft_Large_Weights
-
-        self._raft_weights = (
-            Raft_Large_Weights.DEFAULT
-            if self._use_large_model
-            else Raft_Small_Weights.DEFAULT
-        )
-        return self._raft_weights
+        _, _, h, w = tensor.shape
+        pad_h = (8 - h % 8) % 8
+        pad_w = (8 - w % 8) % 8
+        if pad_h > 0 or pad_w > 0:
+            tensor = F.pad(tensor, [0, pad_w, 0, pad_h])
+        return tensor, h, w
 
     def _compute_optical_flow_tensorrt(
         self, frame1: torch.Tensor, frame2: torch.Tensor
@@ -245,19 +239,15 @@ class OpticalFlowPipeline(Pipeline):
         Returns:
             Optical flow tensor (2HW format)
         """
-        from .engine import apply_raft_transforms
-
         engine = self._ensure_tensorrt_engine()
 
-        # Prepare inputs for TensorRT
-        frame1_batch = frame1.unsqueeze(0)
-        frame2_batch = frame2.unsqueeze(0)
+        # Convert to [0, 255] float and add batch dim (matching VACE reference)
+        frame1_batch = (frame1 * 255.0).unsqueeze(0)
+        frame2_batch = (frame2 * 255.0).unsqueeze(0)
 
-        # Apply RAFT preprocessing transforms
-        weights = self._get_raft_weights()
-        frame1_batch, frame2_batch = apply_raft_transforms(
-            weights, frame1_batch, frame2_batch
-        )
+        # Pad to multiple of 8
+        frame1_batch, h, w = self._pad_to_8(frame1_batch)
+        frame2_batch, _, _ = self._pad_to_8(frame2_batch)
 
         # Run TensorRT inference
         feed_dict = {"frame1": frame1_batch, "frame2": frame2_batch}
@@ -265,6 +255,9 @@ class OpticalFlowPipeline(Pipeline):
         cuda_stream = torch.cuda.current_stream().cuda_stream
         result = engine.infer(feed_dict, cuda_stream)
         flow = result["flow"][0]  # Remove batch dimension
+
+        # Remove padding
+        flow = flow[:, :h, :w]
 
         return flow
 
@@ -280,26 +273,23 @@ class OpticalFlowPipeline(Pipeline):
         Returns:
             Optical flow tensor (2HW format)
         """
-        from .engine import apply_raft_transforms
-
         model = self._ensure_pytorch_model()
 
-        # Prepare inputs
-        frame1_batch = frame1.unsqueeze(0)
-        frame2_batch = frame2.unsqueeze(0)
+        # Convert to [0, 255] float and add batch dim (matching VACE reference)
+        frame1_batch = (frame1 * 255.0).unsqueeze(0)
+        frame2_batch = (frame2 * 255.0).unsqueeze(0)
 
-        # Apply RAFT preprocessing transforms
-        weights = self._get_raft_weights()
-        frame1_batch, frame2_batch = apply_raft_transforms(
-            weights, frame1_batch, frame2_batch
-        )
+        # Pad to multiple of 8 (RAFT requirement)
+        frame1_batch, h, w = self._pad_to_8(frame1_batch)
+        frame2_batch, _, _ = self._pad_to_8(frame2_batch)
 
         # Run PyTorch inference
         with torch.no_grad():
-            # RAFT returns a list of flow predictions at different iterations
-            # We take the last (most refined) prediction
             flow_predictions = model(frame1_batch, frame2_batch)
             flow = flow_predictions[-1][0]  # Last prediction, remove batch dim
+
+        # Remove padding
+        flow = flow[:, :h, :w]
 
         return flow
 
