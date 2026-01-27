@@ -488,10 +488,6 @@ export function StreamPage() {
     updateSettings({ resolution });
   };
 
-  const handleSeedChange = (seed: number) => {
-    updateSettings({ seed });
-  };
-
   const handleDenoisingStepsChange = (denoisingSteps: number[]) => {
     updateSettings({ denoisingSteps });
     // Send denoising steps update to backend
@@ -526,11 +522,6 @@ export function StreamPage() {
 
   const handleQuantizationChange = (quantization: "fp8_e4m3fn" | null) => {
     updateSettings({ quantization });
-    // Note: This setting requires pipeline reload, so we don't send parameter update here
-  };
-
-  const handleVaeTypeChange = (vaeType: VaeType) => {
-    updateSettings({ vaeType });
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
 
@@ -939,6 +930,14 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...vaceParams };
         }
 
+        // Merge schema-driven primitive fields (e.g. new_param) so backend receives them
+        if (
+          settings.schemaFieldOverrides &&
+          Object.keys(settings.schemaFieldOverrides).length > 0
+        ) {
+          loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
+        }
+
         console.log(
           `Loading ${pipelineIds.length} pipeline(s) (${pipelineIds.join(", ")}) with resolution ${resolution.width}x${resolution.height}`,
           loadParams
@@ -1170,6 +1169,23 @@ export function StreamPage() {
             extensionMode={settings.extensionMode || "firstframe"}
             onExtensionModeChange={handleExtensionModeChange}
             onSendExtensionFrames={handleSendExtensionFrames}
+            configSchema={
+              pipelines?.[settings.pipelineId]?.configSchema as
+                | import("../lib/schemaSettings").ConfigSchemaLike
+                | undefined
+            }
+            schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
+            onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
+              updateSettings({
+                schemaFieldOverrides: {
+                  ...(settings.schemaFieldOverrides ?? {}),
+                  [key]: value,
+                },
+              });
+              if (isRuntimeParam && isStreaming) {
+                sendParameterUpdate({ [key]: value });
+              }
+            }}
           />
         </div>
 
@@ -1338,8 +1354,6 @@ export function StreamPage() {
               }
             }
             onResolutionChange={handleResolutionChange}
-            seed={settings.seed ?? 42}
-            onSeedChange={handleSeedChange}
             denoisingSteps={
               settings.denoisingSteps ||
               getDefaults(settings.pipelineId, settings.inputMode)
@@ -1383,13 +1397,28 @@ export function StreamPage() {
             onVaceUseInputVideoChange={handleVaceUseInputVideoChange}
             vaceContextScale={settings.vaceContextScale ?? 1.0}
             onVaceContextScaleChange={handleVaceContextScaleChange}
-            vaeType={settings.vaeType ?? "wan"}
-            onVaeTypeChange={handleVaeTypeChange}
-            vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
             preprocessorIds={settings.preprocessorIds ?? []}
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
+            schemaFieldOverrides={{
+              ...(settings.schemaFieldOverrides ?? {}),
+              base_seed: settings.seed ?? 42,
+              vae_type: settings.vaeType ?? "wan",
+            }}
+            onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
+              updateSettings({
+                ...(key === "base_seed" ? { seed: value as number } : {}),
+                ...(key === "vae_type" ? { vaeType: value as VaeType } : {}),
+                schemaFieldOverrides: {
+                  ...(settings.schemaFieldOverrides ?? {}),
+                  [key]: value,
+                },
+              });
+              if (isRuntimeParam && isStreaming) {
+                sendParameterUpdate({ [key]: value });
+              }
+            }}
           />
         </div>
       </div>

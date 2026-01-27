@@ -68,6 +68,7 @@ export function usePipelines() {
           vaeTypes,
           supportsControllerInput,
           supportsImages,
+          configSchema: schema.config_schema,
         };
       }
 

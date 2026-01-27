@@ -90,6 +90,8 @@ export interface SettingsState {
   preprocessorIds?: string[];
   // Postprocessors
   postprocessorIds?: string[];
+  // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
+  schemaFieldOverrides?: Record<string, unknown>;
 }
 
 export interface PipelineInfo {
@@ -125,6 +127,8 @@ export interface PipelineInfo {
   supportsControllerInput?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
+  // Raw config schema for dynamic settings UI (properties with ui.category === "configuration")
+  configSchema?: import("../lib/api").PipelineConfigSchema;
 }
 
 export interface DownloadProgress {
