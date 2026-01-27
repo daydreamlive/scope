@@ -20,6 +20,13 @@ import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 import { ImageManager } from "./ImageManager";
 import { Button } from "./ui/button";
+import {
+  type ConfigSchemaLike,
+  type PrimitiveFieldType,
+  COMPLEX_COMPONENTS,
+  parseInputFields,
+} from "../lib/schemaSettings";
+import { SchemaPrimitiveField } from "./PrimitiveFields";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -79,6 +86,14 @@ interface InputAndControlsPanelProps {
   extensionMode?: ExtensionMode;
   onExtensionModeChange?: (mode: ExtensionMode) => void;
   onSendExtensionFrames?: () => void;
+  // Schema-driven input fields (category "input"), shown below Prompts
+  configSchema?: ConfigSchemaLike;
+  schemaFieldOverrides?: Record<string, unknown>;
+  onSchemaFieldOverrideChange?: (
+    key: string,
+    value: unknown,
+    isRuntimeParam?: boolean
+  ) => void;
 }
 
 export function InputAndControlsPanel({
@@ -133,6 +148,9 @@ export function InputAndControlsPanel({
   extensionMode = "firstframe",
   onExtensionModeChange,
   onSendExtensionFrames,
+  configSchema,
+  schemaFieldOverrides,
+  onSchemaFieldOverrideChange,
 }: InputAndControlsPanelProps) {
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -529,6 +547,91 @@ export function InputAndControlsPanel({
             );
           })()}
         </div>
+
+        {/* Schema-driven input fields (category "input"), below app-defined sections */}
+        {configSchema &&
+          (() => {
+            const parsedInputFields = parseInputFields(configSchema, inputMode);
+            if (parsedInputFields.length === 0) return null;
+            const enumValuesByRef: Record<string, string[]> = {};
+            if (configSchema?.$defs) {
+              for (const [defName, def] of Object.entries(
+                configSchema.$defs as Record<string, { enum?: unknown[] }>
+              )) {
+                if (def?.enum && Array.isArray(def.enum)) {
+                  enumValuesByRef[defName] = def.enum as string[];
+                }
+              }
+            }
+            return (
+              <div className="space-y-2">
+                {parsedInputFields.map(({ key, prop, ui, fieldType }) => {
+                  const comp = ui.component;
+                  const isRuntimeParam = ui.is_load_param === false;
+                  const disabled =
+                    (isStreaming && !isRuntimeParam) || _isPipelineLoading;
+                  const value = schemaFieldOverrides?.[key] ?? prop.default;
+                  const setValue = (v: unknown) =>
+                    onSchemaFieldOverrideChange?.(key, v, isRuntimeParam);
+                  if (comp === "image") {
+                    const path = value == null ? null : String(value);
+                    return (
+                      <div key={key} className="space-y-1">
+                        {ui.label != null && (
+                          <span className="text-xs text-muted-foreground">
+                            {ui.label}
+                          </span>
+                        )}
+                        <ImageManager
+                          images={path ? [path] : []}
+                          onImagesChange={images =>
+                            onSchemaFieldOverrideChange?.(
+                              key,
+                              images[0] ?? null,
+                              isRuntimeParam
+                            )
+                          }
+                          disabled={disabled}
+                          maxImages={1}
+                          hideLabel
+                        />
+                      </div>
+                    );
+                  }
+                  if (
+                    comp &&
+                    (COMPLEX_COMPONENTS as readonly string[]).includes(comp)
+                  ) {
+                    return null;
+                  }
+                  const enumValues =
+                    fieldType === "enum" && typeof prop.$ref === "string"
+                      ? enumValuesByRef[prop.$ref.split("/").pop() ?? ""]
+                      : undefined;
+                  const primitiveType: PrimitiveFieldType | undefined =
+                    typeof fieldType === "string" &&
+                    !(COMPLEX_COMPONENTS as readonly string[]).includes(
+                      fieldType
+                    )
+                      ? (fieldType as PrimitiveFieldType)
+                      : undefined;
+                  return (
+                    <SchemaPrimitiveField
+                      key={key}
+                      fieldKey={key}
+                      prop={prop}
+                      value={value}
+                      onChange={setValue}
+                      disabled={disabled}
+                      label={ui.label}
+                      fieldType={primitiveType}
+                      enumValues={enumValues}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })()}
       </CardContent>
     </Card>
   );
