@@ -348,6 +348,16 @@ export const getAssetUrl = (assetPath: string): string => {
   return `/api/v1/assets/${encodeURIComponent(filename)}`;
 };
 
+// UI metadata from pipeline schema (json_schema_extra on fields)
+export interface SchemaFieldUI {
+  category?: string;
+  order?: number;
+  component?: string;
+  modes?: ("text" | "video")[];
+  /** If true, field is a load param (disabled when streaming); if false, runtime param (editable when streaming). Omit = treated as load param. */
+  is_load_param?: boolean;
+}
+
 // Pipeline schema types - matches output of get_schema_with_metadata()
 export interface PipelineSchemaProperty {
   type?: string;
@@ -360,6 +370,8 @@ export interface PipelineSchemaProperty {
   anyOf?: unknown[];
   enum?: unknown[];
   $ref?: string;
+  /** UI hints from backend (Field json_schema_extra); only render when ui.category === "configuration" */
+  ui?: SchemaFieldUI;
 }
 
 export interface PipelineConfigSchema {
