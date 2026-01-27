@@ -1083,91 +1083,200 @@ This section provides verification steps for each phase. Complete all tests for 
 
 **Prerequisites:** None (first phase)
 
-#### Unit Tests
+**Files Created:**
+- `src/scope/server/fal_client.py` - Main FalClient class
+- `tests/server/__init__.py` - Test package
+- `tests/server/test_fal_client.py` - Unit tests
 
-Create `tests/server/test_fal_client.py`:
+**Dependencies Added to `pyproject.toml`:**
+- `aiohttp>=3.9.0`
+- `websockets>=12.0`
+- `pytest-asyncio>=0.24.0` (dev)
 
-```python
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+---
 
-@pytest.mark.asyncio
-async def test_get_temporary_token_success():
-    """Test successful token acquisition from fal API."""
-    from scope.server.fal_client import FalClient
+#### Automatic Tests (Unit Tests)
 
-    client = FalClient(app_id="owner/app-name/webrtc", api_key="test-key")
+**Location:** `tests/server/test_fal_client.py`
 
-    with patch("aiohttp.ClientSession") as mock_session:
-        mock_response = AsyncMock()
-        mock_response.ok = True
-        mock_response.json = AsyncMock(return_value={"detail": "test-token"})
-        mock_session.return_value.__aenter__.return_value.post.return_value.__aenter__.return_value = mock_response
+**Test List (9 tests):**
 
-        token = await client._get_temporary_token()
-        assert token == "test-token"
+| Test Name | What It Tests |
+|-----------|---------------|
+| `test_get_temporary_token_success` | Token acquisition returns token from `{"detail": "..."}` response |
+| `test_get_temporary_token_string_response` | Token acquisition handles plain string response |
+| `test_get_temporary_token_failure` | Token acquisition raises `RuntimeError` on HTTP error |
+| `test_get_temporary_token_extracts_alias` | Alias extracted correctly from app_id (e.g., `owner/my-app/webrtc` → `my-app`) |
+| `test_build_ws_url` | WebSocket URL constructed correctly |
+| `test_build_ws_url_strips_slashes` | Leading/trailing slashes stripped from app_id |
+| `test_fal_client_initialization` | Client initializes with correct default state |
+| `test_fal_client_with_callback` | Client accepts and stores frame callback |
+| `test_disconnect_when_not_connected` | Disconnect works cleanly when not connected |
 
-@pytest.mark.asyncio
-async def test_get_temporary_token_failure():
-    """Test token acquisition failure handling."""
-    from scope.server.fal_client import FalClient
-
-    client = FalClient(app_id="owner/app-name/webrtc", api_key="bad-key")
-
-    with patch("aiohttp.ClientSession") as mock_session:
-        mock_response = AsyncMock()
-        mock_response.ok = False
-        mock_response.status = 401
-        mock_response.text = AsyncMock(return_value="Unauthorized")
-        mock_session.return_value.__aenter__.return_value.post.return_value.__aenter__.return_value = mock_response
-
-        with pytest.raises(RuntimeError, match="Token request failed"):
-            await client._get_temporary_token()
-
-def test_build_ws_url():
-    """Test WebSocket URL construction."""
-    from scope.server.fal_client import FalClient
-
-    client = FalClient(app_id="owner/app-name/webrtc", api_key="test-key")
-    url = client._build_ws_url("my-token")
-    assert url == "wss://fal.run/owner/app-name/webrtc?fal_jwt_token=my-token"
-
-def test_build_ws_url_strips_slashes():
-    """Test URL construction handles leading/trailing slashes."""
-    from scope.server.fal_client import FalClient
-
-    client = FalClient(app_id="/owner/app-name/webrtc/", api_key="test-key")
-    url = client._build_ws_url("my-token")
-    assert url == "wss://fal.run/owner/app-name/webrtc?fal_jwt_token=my-token"
-```
-
-Run with:
+**Run All Phase 1 Tests:**
 ```bash
 uv run pytest tests/server/test_fal_client.py -v
 ```
 
+**Expected Output:**
+```
+tests/server/test_fal_client.py::test_get_temporary_token_success PASSED
+tests/server/test_fal_client.py::test_get_temporary_token_string_response PASSED
+tests/server/test_fal_client.py::test_get_temporary_token_failure PASSED
+tests/server/test_fal_client.py::test_get_temporary_token_extracts_alias PASSED
+tests/server/test_fal_client.py::test_build_ws_url PASSED
+tests/server/test_fal_client.py::test_build_ws_url_strips_slashes PASSED
+tests/server/test_fal_client.py::test_fal_client_initialization PASSED
+tests/server/test_fal_client.py::test_fal_client_with_callback PASSED
+tests/server/test_fal_client.py::test_disconnect_when_not_connected PASSED
+
+============================== 9 passed ===============================
+```
+
+**Run All Tests (ensure no regressions):**
+```bash
+uv run pytest tests/ -v
+```
+
+---
+
 #### Manual Tests
 
-1. **Token API Test** (requires real fal API key):
-   ```bash
-   # Test token endpoint directly
-   curl -X POST https://rest.alpha.fal.ai/tokens/ \
-     -H "Authorization: Key $FAL_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"allowed_apps": ["scope-fal"], "token_expiration": 120}'
-   ```
-   Expected: Returns a JWT token string
+##### 1. Module Import Test
 
-2. **Import Test**:
-   ```bash
-   uv run python -c "from scope.server.fal_client import FalClient; print('FalClient imported successfully')"
-   ```
-   Expected: No import errors
+**Purpose:** Verify the module can be imported without errors
 
-#### Phase 1 Completion Criteria
-- [ ] All unit tests pass
-- [ ] Token API returns valid token with real API key
-- [ ] FalClient module imports without errors
+```bash
+uv run python -c "from scope.server.fal_client import FalClient; print('FalClient imported successfully')"
+```
+
+**Expected Output:**
+```
+FalClient imported successfully
+```
+
+**What to check if it fails:**
+- Missing dependencies: Run `uv sync --group dev`
+- Import errors: Check that `aiohttp` and `websockets` are installed
+
+---
+
+##### 2. Server Startup Test
+
+**Purpose:** Verify the server starts without import errors from the new module
+
+```bash
+timeout 5 uv run daydream-scope 2>&1 || true
+```
+
+**Expected Output:**
+```
+<timestamp> - scope.core.pipelines.registry - INFO - GPU detected with X.X GB VRAM
+```
+
+**What to check if it fails:**
+- Import errors in fal_client.py
+- Missing dependencies
+
+---
+
+##### 3. Token API Test (requires FAL_API_KEY)
+
+**Purpose:** Verify real token acquisition from fal.ai API
+
+**Step 1:** Set your API key
+```bash
+export FAL_API_KEY="your-fal-api-key-here"
+```
+
+**Step 2:** Test token endpoint directly with curl
+```bash
+curl -X POST https://rest.alpha.fal.ai/tokens/ \
+  -H "Authorization: Key $FAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"allowed_apps": ["scope-fal"], "token_expiration": 120}'
+```
+
+**Expected Output:**
+```json
+{"detail": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."}
+```
+
+**Step 3:** Test via Python (optional)
+```bash
+uv run python -c "
+import asyncio
+from scope.server.fal_client import FalClient
+import os
+
+async def test():
+    client = FalClient(
+        app_id='your-username/scope-fal/webrtc',
+        api_key=os.environ.get('FAL_API_KEY', '')
+    )
+    try:
+        token = await client._get_temporary_token()
+        print(f'Token acquired: {token[:50]}...')
+    except Exception as e:
+        print(f'Error: {e}')
+
+asyncio.run(test())
+"
+```
+
+**What to check if it fails:**
+- Invalid API key: Verify FAL_API_KEY is set correctly
+- Network issues: Check internet connectivity
+- App alias mismatch: The `allowed_apps` must match your fal app name
+
+---
+
+##### 4. FalClient Instantiation Test
+
+**Purpose:** Verify FalClient can be created with different configurations
+
+```bash
+uv run python -c "
+from scope.server.fal_client import FalClient
+
+# Test basic initialization
+client1 = FalClient(app_id='owner/app/webrtc', api_key='test-key')
+print(f'Client 1: app_id={client1.app_id}, has_callback={client1.on_frame_received is not None}')
+
+# Test with callback
+client2 = FalClient(
+    app_id='owner/app/webrtc',
+    api_key='test-key',
+    on_frame_received=lambda f: print('Frame received')
+)
+print(f'Client 2: app_id={client2.app_id}, has_callback={client2.on_frame_received is not None}')
+
+# Test URL building
+url = client1._build_ws_url('test-token')
+print(f'WebSocket URL: {url}')
+"
+```
+
+**Expected Output:**
+```
+Client 1: app_id=owner/app/webrtc, has_callback=False
+Client 2: app_id=owner/app/webrtc, has_callback=True
+WebSocket URL: wss://fal.run/owner/app/webrtc?fal_jwt_token=test-token
+```
+
+---
+
+#### Phase 1 Completion Checklist
+
+| Test | Type | Status |
+|------|------|--------|
+| All 9 unit tests pass | Automatic | ⬜ |
+| Module imports without errors | Manual | ⬜ |
+| Server starts without errors | Manual | ⬜ |
+| Token API works with real key | Manual (optional) | ⬜ |
+| FalClient instantiation works | Manual | ⬜ |
+
+**To mark Phase 1 complete, all "Automatic" and "Manual" tests must pass. The "Manual (optional)" test requires a real fal API key.**
 
 ---
 
