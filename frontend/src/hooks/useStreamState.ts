@@ -8,11 +8,12 @@ import type {
   InputMode,
 } from "../types";
 import {
-  getHardwareInfo,
-  getPipelineSchemas,
+  getHardwareInfo as getHardwareInfoApi,
+  getPipelineSchemas as getPipelineSchemasApi,
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
+import { useFalContext } from "../lib/falContext";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
@@ -44,6 +45,23 @@ function getFallbackDefaults(mode?: InputMode) {
 }
 
 export function useStreamState() {
+  const { adapter, isFalMode, isReady } = useFalContext();
+
+  // Helper functions that use fal adapter when available
+  const getPipelineSchemas = useCallback(async (): Promise<PipelineSchemasResponse> => {
+    if (isFalMode && adapter) {
+      return adapter.api.getPipelineSchemas();
+    }
+    return getPipelineSchemasApi();
+  }, [adapter, isFalMode]);
+
+  const getHardwareInfo = useCallback(async (): Promise<HardwareInfoResponse> => {
+    if (isFalMode && adapter) {
+      return adapter.api.getHardwareInfo();
+    }
+    return getHardwareInfoApi();
+  }, [adapter, isFalMode]);
+
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
     gpu: 0,
@@ -169,6 +187,11 @@ export function useStreamState() {
 
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
+    // In fal mode, wait until adapter is ready
+    if (isFalMode && !isReady) {
+      return;
+    }
+
     const fetchInitialData = async () => {
       try {
         const [schemasResult, hardwareResult] = await Promise.allSettled([
@@ -218,7 +241,7 @@ export function useStreamState() {
     };
 
     fetchInitialData();
-  }, []);
+  }, [isFalMode, isReady, getPipelineSchemas, getHardwareInfo]);
 
   // Update inputMode when schemas load or pipeline changes
   // This sets the correct default mode for the pipeline
