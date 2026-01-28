@@ -82,7 +82,11 @@ class FalClient:
                 return token
 
     def _build_ws_url(self, token: str) -> str:
-        """Build WebSocket URL with JWT token (mirrors frontend pattern)."""
+        """Build WebSocket URL with JWT token.
+
+        The app_id should be the full path including the WebSocket endpoint,
+        e.g., 'username/app-name/ws' or 'username/app-name/webrtc'.
+        """
         app_id = self.app_id.strip("/")
         return f"wss://fal.run/{app_id}?fal_jwt_token={token}"
 
@@ -92,13 +96,35 @@ class FalClient:
         token = await self._get_temporary_token()
         ws_url = self._build_ws_url(token)
 
-        logger.info(f"Connecting to fal WebSocket: {ws_url[:50]}...")
-        self.ws = await websockets.connect(ws_url)
+        # Log URL without token for debugging
+        ws_url_without_token = ws_url.split("?")[0]
+        logger.info(f"Connecting to fal WebSocket: {ws_url_without_token}")
+        try:
+            self.ws = await asyncio.wait_for(
+                websockets.connect(ws_url),
+                timeout=10.0,
+            )
+        except TimeoutError:
+            raise RuntimeError(
+                f"Timeout connecting to fal WebSocket. Check that app_id '{self.app_id}' "
+                "is correct (format: 'username/app-name' or full path like 'username/app-name/ws')"
+            ) from None
+        except Exception as e:
+            raise RuntimeError(f"Failed to connect to fal WebSocket: {e}") from e
 
-        # Wait for "ready" message from server
-        ready_msg = await self.ws.recv()
+        # Wait for "ready" message from server (with timeout)
+        try:
+            ready_msg = await asyncio.wait_for(self.ws.recv(), timeout=10.0)
+        except TimeoutError:
+            await self.ws.close()
+            raise RuntimeError(
+                f"Timeout waiting for 'ready' message from fal server. "
+                f"The fal app at '{self.app_id}' may not be running or may not be a WebRTC app."
+            ) from None
+
         ready_data = json.loads(ready_msg)
         if ready_data.get("type") != "ready":
+            await self.ws.close()
             raise RuntimeError(f"Expected 'ready' message, got: {ready_data}")
         logger.info("fal server ready")
 

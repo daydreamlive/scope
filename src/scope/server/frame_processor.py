@@ -90,6 +90,8 @@ class FrameProcessor:
         self.fal_client: FalClient | None = None
         self.fal_enabled = False
         self._fal_received_frames: queue.Queue[VideoFrame] = queue.Queue(maxsize=30)
+        # Pending fal connection info (set in start() if cloud mode params are present)
+        self._pending_fal_connection: dict | None = None
 
     def start(self):
         if self.running:
@@ -105,6 +107,17 @@ class FrameProcessor:
         if "spout_receiver" in self.parameters:
             spout_config = self.parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
+
+        # Check if we should use fal cloud (from frontend initial params)
+        # Store pending connection info for async connect later
+        fal_cloud_enabled = self.parameters.get("fal_cloud_enabled", False)
+        if fal_cloud_enabled:
+            app_id = self.parameters.get("fal_app_id")
+            api_key = self.parameters.get("fal_api_key")
+            if app_id and api_key:
+                self._pending_fal_connection = {"app_id": app_id, "api_key": api_key}
+                logger.info("Cloud mode enabled, skipping local pipeline setup")
+                return  # Don't set up local pipelines - fal connection will happen later
 
         if not self.pipeline_ids:
             logger.error("No pipeline IDs provided, cannot start")

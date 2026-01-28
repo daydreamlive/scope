@@ -14,6 +14,8 @@ class TestFalApiEndpoints:
         """Create a mock WebRTC manager."""
         manager = MagicMock()
         manager.sessions = {}
+        # Explicitly set get_fal_config to return None (no pending fal config)
+        manager.get_fal_config.return_value = None
         return manager
 
     @pytest.fixture

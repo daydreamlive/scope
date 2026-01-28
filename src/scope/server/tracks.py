@@ -92,7 +92,7 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         return self.timestamp, VIDEO_TIME_BASE
 
-    def initialize_output_processing(self):
+    async def initialize_output_processing(self):
         if not self.frame_processor:
             self.frame_processor = FrameProcessor(
                 pipeline_manager=self.pipeline_manager,
@@ -101,6 +101,18 @@ class VideoProcessingTrack(MediaStreamTrack):
             )
             self.frame_processor.start()
 
+            # Connect to fal cloud if pending connection info exists
+            if (
+                hasattr(self.frame_processor, "_pending_fal_connection")
+                and self.frame_processor._pending_fal_connection
+            ):
+                conn_info = self.frame_processor._pending_fal_connection
+                await self.frame_processor.connect_to_fal(
+                    app_id=conn_info["app_id"],
+                    api_key=conn_info["api_key"],
+                )
+                self.frame_processor._pending_fal_connection = None
+
     def initialize_input_processing(self, track: MediaStreamTrack):
         self.track = track
         self.input_task_running = True
@@ -108,8 +120,8 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     async def recv(self) -> VideoFrame:
         """Return the next available processed frame"""
-        # Lazy initialization on first call
-        self.initialize_output_processing()
+        # Lazy initialization on first call (now async)
+        await self.initialize_output_processing()
 
         # Keep running while either WebRTC input is active OR Spout input is enabled
         while self.input_task_running or self._spout_receiver_enabled:
