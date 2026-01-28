@@ -152,7 +152,9 @@ class DenoiseBlock(ModularPipelineBlocks):
         num_frames = noise.shape[1]
         denoising_step_list = block_state.current_denoising_step_list.clone()
 
-        conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
+        # Clone conditioning_embeds for CUDAGraphs compatibility - must be done
+        # OUTSIDE the compiled scope to prevent tensor aliasing across runs
+        conditional_dict = {"prompt_embeds": block_state.conditioning_embeds.clone()}
 
         start_frame = block_state.current_start_frame
         if block_state.start_frame is not None:

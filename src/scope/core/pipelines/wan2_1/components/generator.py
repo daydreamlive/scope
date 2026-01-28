@@ -134,6 +134,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         )  # [1, 21, 16, 60, 104]
         self.post_init()
 
+    @torch._dynamo.disable
     def _convert_flow_pred_to_x0(
         self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor
     ) -> torch.Tensor:
@@ -147,6 +148,9 @@ class WanDiffusionWrapper(torch.nn.Module):
         x_t = (1-sigma_t) * x0 + sigma_t * noise
         we have x0 = x_t - sigma_t * pred
         see derivations https://chatgpt.com/share/67bf8589-3d04-8008-bc6e-4cf1a24e2d0e
+
+        Note: Decorated with @torch._dynamo.disable because scheduler tensors
+        (sigmas, timesteps) may be on CPU and .to() is incompatible with CUDAGraphs.
         """
         # use higher precision for calculations
         original_dtype = flow_pred.dtype
@@ -230,7 +234,9 @@ class WanDiffusionWrapper(torch.nn.Module):
         vace_context_scale: float = 1.0,
         sink_recache_after_switch: bool = False,
     ) -> torch.Tensor:
-        prompt_embeds = conditional_dict["prompt_embeds"]
+        # Clone prompt_embeds for CUDAGraphs compatibility - prevents tensor aliasing
+        # across subsequent runs when the same tensor reference is reused
+        prompt_embeds = conditional_dict["prompt_embeds"].clone()
 
         # [B, F] -> [B]
         if self.uniform_timestep:

@@ -3,6 +3,7 @@ import time
 from typing import TYPE_CHECKING
 
 import torch
+import torch._inductor.config
 from diffusers.modular_pipelines import PipelineState
 
 from ..blending import EmbeddingBlender
@@ -26,6 +27,10 @@ from .schema import LongLiveConfig
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
+
+# Disable C++ codegen for inductor - not needed for CUDA-only execution
+# and avoids requiring MSVC on Windows
+torch._inductor.config.disable_cpp_codegen = True
 
 logger = logging.getLogger(__name__)
 
@@ -106,31 +111,67 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
             ModuleTargetedLoRAStrategy._load_lora_checkpoint(generator.model, lora_path)
             print(f"Loaded diffusion LoRA in {time.time() - start:.3f}s")
 
+            # For FP8 quantization + torch.compile compatibility, merge LoRA weights
+            # into base model and unload PEFT wrapper. This eliminates the PEFT
+            # forward pass overhead and resolves FakeTensor tracing issues.
+            if quantization == Quantization.FP8_E4M3FN:
+                start = time.time()
+                generator.model = generator.model.merge_and_unload()
+                print(f"Merged LoRA weights in {time.time() - start:.3f}s")
+
         # Initialize any additional, user-configured LoRA adapters via shared manager.
         # This is additive and does not replace the original LongLive performance LoRA.
+        # Note: When FP8 is enabled, the built-in LoRA is already merged above,
+        # so this only adds additional user-configured adapters if any.
         generator.model = self._init_loras(config, generator.model)
 
         if quantization == Quantization.FP8_E4M3FN:
             # Cast before optional quantization
-            generator = generator.to(dtype=dtype)
+            generator = generator.to(device=device, dtype=dtype)
 
             start = time.time()
 
-            from torchao.quantization.quant_api import (
-                Float8DynamicActivationFloat8WeightConfig,
-                PerTensor,
-                quantize_,
-            )
+            from torchao.float8 import Float8LinearConfig, convert_to_float8_training
 
-            # Move to target device during quantization
-            # Defaults to using fp8_e4m3fn for both weights and activations
-            quantize_(
+            def fp8_filter_fn(module: torch.nn.Module, fqn: str) -> bool:
+                """Filter function to select modules for FP8 conversion.
+
+                Only converts Linear layers that haven't been converted yet.
+                """
+                # Skip if not a Linear layer
+                if not isinstance(module, torch.nn.Linear):
+                    return False
+                # Skip if already converted to Float8Linear
+                if "Float8Linear" in type(module).__name__:
+                    return False
+                return True
+
+            # Use Float8Linear from torchao's training API for torch.compile compatibility.
+            # Float8Linear uses dynamic scaling for both activations and weights, and is
+            # designed to work seamlessly with torch.compile unlike the inference-only
+            # Float8DynamicActivationFloat8WeightConfig which has FakeTensor guard issues.
+            fp8_config = Float8LinearConfig()
+            convert_to_float8_training(
                 generator,
-                Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
-                device=device,
+                config=fp8_config,
+                module_filter_fn=fp8_filter_fn,
             )
 
             print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
+
+            # fix graph break:
+            torch._dynamo.config.capture_scalar_outputs = True
+
+            start = time.time()
+            # Note: CUDAGraphs (max-autotune mode) is incompatible with current architecture
+            # because _compute_cache_indices has @torch._dynamo.disable, causing graph breaks.
+            # The context tensor crosses these graph breaks, which CUDAGraphs doesn't support.
+            # Using max-autotune-no-cudagraphs for now until cache architecture is refactored.
+            # fullgraph=False allows graph breaks at FP8 quantization boundaries.
+            generator = torch.compile(
+                generator, mode="max-autotune-no-cudagraphs", fullgraph=False
+            )
+            print(f"Compiled generator in {time.time() - start:.3f}s")
         else:
             generator = generator.to(device=device, dtype=dtype)
 
@@ -146,7 +187,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         text_encoder = text_encoder.to(device=device)
 
         # Load VAE using create_vae factory (supports multiple VAE types)
-        vae_type = getattr(config, "vae_type", "wan")
+        vae_type = getattr(config, "vae_type", "lighttae")
         start = time.time()
         vae = create_vae(
             model_dir=model_dir, model_name=base_model_name, vae_type=vae_type
@@ -188,6 +229,25 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
+
+        # Warmup runs to trigger torch.compile compilation
+        if quantization == Quantization.FP8_E4M3FN:
+            self._warmup(num_runs=3)
+
+    def _warmup(self, num_runs: int = 3):
+        """Run warmup iterations to trigger torch.compile compilation."""
+        print(f"Running {num_runs} warmup iterations...")
+        start = time.time()
+
+        warmup_prompt = [{"text": "warmup", "weight": 100}]
+        for i in range(num_runs):
+            _ = self(prompts=warmup_prompt, init_cache=(i == 0))
+
+        # Reset state after warmup
+        self.first_call = True
+        self.last_mode = None
+
+        print(f"Warmup completed in {time.time() - start:.2f}s")
 
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""

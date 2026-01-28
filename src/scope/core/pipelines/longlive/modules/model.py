@@ -20,8 +20,15 @@ def sinusoidal_embedding_1d(dim, position):
     position = position.type(torch.float64)
 
     # calculation
+    # Create arange directly on the same device as position for CUDAGraphs compatibility
     sinusoid = torch.outer(
-        position, torch.pow(10000, -torch.arange(half).to(position).div(half))
+        position,
+        torch.pow(
+            10000,
+            -torch.arange(half, device=position.device, dtype=position.dtype).div(
+                half
+            ),
+        ),
     )
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x
@@ -163,6 +170,8 @@ class WanT2VCrossAttention(WanSelfAttention):
             context_lens(Tensor): Shape [B]
             crossattn_cache (List[dict], *optional*): Contains the cached key and value tensors for context embedding.
         """
+        # Clone context to avoid tensor aliasing issues with CUDAGraphs
+        context = context.clone()
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
         # compute query, key, value
@@ -173,11 +182,13 @@ class WanT2VCrossAttention(WanSelfAttention):
                 crossattn_cache["is_init"] = True
                 k = self.norm_k(self.k(context)).view(b, -1, n, d)
                 v = self.v(context).view(b, -1, n, d)
-                crossattn_cache["k"] = k
-                crossattn_cache["v"] = v
+                # Clone before storing to prevent CUDAGraphs tensor aliasing
+                crossattn_cache["k"] = k.clone()
+                crossattn_cache["v"] = v.clone()
             else:
-                k = crossattn_cache["k"]
-                v = crossattn_cache["v"]
+                # Clone cached tensors for CUDAGraphs compatibility
+                k = crossattn_cache["k"].clone()
+                v = crossattn_cache["v"].clone()
         else:
             k = self.norm_k(self.k(context)).view(b, -1, n, d)
             v = self.v(context).view(b, -1, n, d)
@@ -200,6 +211,8 @@ class WanGanCrossAttention(WanSelfAttention):
             context_lens(Tensor): Shape [B]
             crossattn_cache (List[dict], *optional*): Contains the cached key and value tensors for context embedding.
         """
+        # Clone context to avoid tensor aliasing issues with CUDAGraphs
+        context = context.clone()
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
         # compute query, key, value
@@ -233,6 +246,8 @@ class WanI2VCrossAttention(WanSelfAttention):
             context(Tensor): Shape [B, L2, C]
             context_lens(Tensor): Shape [B]
         """
+        # Clone context to avoid tensor aliasing issues with CUDAGraphs
+        context = context.clone()
         context_img = context[:, :257]
         context = context[:, 257:]
         b, n, d = x.size(0), self.num_heads, self.head_dim
