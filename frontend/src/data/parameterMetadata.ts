@@ -22,11 +22,6 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Output video width in pixels. Higher values produce more detailed horizontal resolution but reduces speed.",
   },
-  seed: {
-    label: "Seed:",
-    tooltip:
-      "Random seed for reproducible generation. Using the same seed with the same settings will produce similar results.",
-  },
   manageCache: {
     label: "Manage Cache:",
     tooltip:
@@ -81,11 +76,6 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     label: "Spout Sender:",
     tooltip:
       "The configuration of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS.",
-  },
-  vaeType: {
-    label: "VAE:",
-    tooltip:
-      "VAE type to use for encoding/decoding. 'wan' is the full VAE with best quality. 'lightvae' is 75% pruned for faster performance but lower quality. 'tae' is a tiny autoencoder for fast preview quality. 'lighttae' is LightTAE with WanVAE normalization for faster performance with consistent latent space.",
   },
   preprocessor: {
     label: "Preprocessor:",

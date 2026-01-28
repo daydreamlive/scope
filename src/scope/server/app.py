@@ -349,7 +349,7 @@ async def load_pipeline(
         # Convert pydantic model to dict for pipeline manager
         load_params_dict = None
         if request.load_params:
-            load_params_dict = request.load_params.model_dump()
+            load_params_dict = request.load_params
 
         # Get pipeline IDs to load
         pipeline_ids = request.pipeline_ids

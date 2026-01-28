@@ -80,7 +80,7 @@ export function TextField({
   );
 }
 
-/** Number input field (no slider). Matches seed/height/width stepper style. Uses integers in UI. */
+/** Number input field (no slider). */
 export function NumberField({
   fieldKey,
   prop,
