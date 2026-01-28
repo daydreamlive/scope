@@ -52,6 +52,8 @@ from .recording import (
 from .schema import (
     AssetFileInfo,
     AssetsResponse,
+    FalConnectRequest,
+    FalStatusResponse,
     HardwareInfoResponse,
     HealthResponse,
     IceCandidateRequest,
@@ -862,6 +864,99 @@ async def get_hardware_info():
         )
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# =============================================================================
+# fal.ai cloud integration endpoints
+# =============================================================================
+
+
+@app.post("/api/v1/fal/connect", response_model=FalStatusResponse)
+async def connect_to_fal(
+    request: FalConnectRequest,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Connect to fal.ai cloud for remote GPU inference.
+
+    This connects all active WebRTC sessions to the specified fal.ai app
+    for cloud-based inference instead of local GPU processing.
+    """
+
+    try:
+        # Connect all active sessions to fal
+        connected_count = 0
+        for session_id, session in webrtc_manager.sessions.items():
+            if session.video_track and session.video_track.frame_processor:
+                await session.video_track.frame_processor.connect_to_fal(
+                    app_id=request.app_id,
+                    api_key=request.api_key,
+                )
+                connected_count += 1
+                logger.info(
+                    f"Connected session {session_id} to fal app {request.app_id}"
+                )
+
+        if connected_count == 0:
+            logger.warning("No active sessions to connect to fal")
+
+        return FalStatusResponse(connected=True, app_id=request.app_id)
+    except Exception as e:
+        logger.error(f"Error connecting to fal: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/fal/disconnect", response_model=FalStatusResponse)
+async def disconnect_from_fal(
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Disconnect from fal.ai cloud.
+
+    This disconnects all active WebRTC sessions from fal.ai,
+    returning to local GPU processing (if available).
+    """
+
+    try:
+        # Disconnect all active sessions from fal
+        disconnected_count = 0
+        for session_id, session in webrtc_manager.sessions.items():
+            if session.video_track and session.video_track.frame_processor:
+                await session.video_track.frame_processor.disconnect_from_fal()
+                disconnected_count += 1
+                logger.info(f"Disconnected session {session_id} from fal")
+
+        if disconnected_count == 0:
+            logger.warning("No active sessions to disconnect from fal")
+
+        return FalStatusResponse(connected=False, app_id=None)
+    except Exception as e:
+        logger.error(f"Error disconnecting from fal: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/fal/status", response_model=FalStatusResponse)
+async def get_fal_status(
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Get current fal.ai cloud connection status.
+
+    Returns whether any active session is connected to fal.ai
+    and the app ID if connected.
+    """
+
+    try:
+        # Check if any session is connected to fal
+        for session in webrtc_manager.sessions.values():
+            if session.video_track and session.video_track.frame_processor:
+                fp = session.video_track.frame_processor
+                if fp.fal_enabled and fp.fal_client:
+                    # Return the app_id from the first connected session
+                    app_id = getattr(fp.fal_client, "app_id", None)
+                    return FalStatusResponse(connected=True, app_id=app_id)
+
+        return FalStatusResponse(connected=False, app_id=None)
+    except Exception as e:
+        logger.error(f"Error getting fal status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
