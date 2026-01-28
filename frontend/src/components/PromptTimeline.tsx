@@ -423,7 +423,6 @@ export function PromptTimeline({
             pipelineId: settings.pipelineId,
             inputMode: settings.inputMode,
             resolution: settings.resolution,
-            seed: settings.seed,
             denoisingSteps: settings.denoisingSteps,
             noiseScale: settings.noiseScale,
             noiseController: settings.noiseController,
@@ -432,6 +431,7 @@ export function PromptTimeline({
             kvCacheAttentionBias: settings.kvCacheAttentionBias,
             loras: settings.loras,
             loraMergeStrategy: settings.loraMergeStrategy,
+            schemaFieldOverrides: settings.schemaFieldOverrides,
             // Exclude paused state as it's runtime-specific
           }
         : undefined,

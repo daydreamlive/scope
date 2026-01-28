@@ -166,6 +166,7 @@ class PipelineManager:
 
         # Release lock during slow loading operation
         logger.info(f"Loading pipeline: {pipeline_id}")
+        logger.info("Initial load params: %s", load_params or {})
 
         try:
             # Load the pipeline synchronously
@@ -420,18 +421,18 @@ class PipelineManager:
         default_width: int,
         default_seed: int = 42,
     ) -> None:
-        """Extract and apply common load parameters (resolution, seed, LoRAs, VAE type) to config.
+        """Extract and apply common load parameters
 
         Args:
             config: Pipeline config dict to update
-            load_params: Load parameters dict (may contain height, width, seed, loras, lora_merge_mode, vae_type)
+            load_params: Load parameters dict (may contain height, width, base_seed, loras, lora_merge_mode, vae_type)
             default_height: Default height if not in load_params
             default_width: Default width if not in load_params
-            default_seed: Default seed if not in load_params
+            default_seed: Default base_seed if not in load_params
         """
         height = default_height
         width = default_width
-        seed = default_seed
+        base_seed = default_seed
         loras = None
         lora_merge_mode = "permanent_merge"
         vae_type = "wan"  # Default VAE type
@@ -439,14 +440,14 @@ class PipelineManager:
         if load_params:
             height = load_params.get("height", default_height)
             width = load_params.get("width", default_width)
-            seed = load_params.get("seed", default_seed)
+            base_seed = load_params.get("base_seed", default_seed)
             loras = load_params.get("loras", None)
             lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
             vae_type = load_params.get("vae_type", vae_type)
 
         config["height"] = height
         config["width"] = width
-        config["seed"] = seed
+        config["base_seed"] = base_seed
         config["vae_type"] = vae_type
         if loras:
             config["loras"] = loras
@@ -584,7 +585,6 @@ class PipelineManager:
             else:
                 logger.info("VACE disabled by load_params, skipping VACE configuration")
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
                 load_params,
@@ -675,7 +675,6 @@ class PipelineManager:
             else:
                 logger.info("VACE disabled by load_params, skipping VACE configuration")
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
                 load_params,
@@ -741,7 +740,6 @@ class PipelineManager:
             else:
                 logger.info("VACE disabled by load_params, skipping VACE configuration")
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
                 load_params,
@@ -805,7 +803,6 @@ class PipelineManager:
             else:
                 logger.info("VACE disabled by load_params, skipping VACE configuration")
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
                 load_params,
@@ -861,7 +858,6 @@ class PipelineManager:
             else:
                 logger.info("VACE disabled by load_params, skipping VACE configuration")
 
-            # Apply load parameters (resolution, seed, LoRAs) to config
             self._apply_load_params(
                 config,
                 load_params,
@@ -942,7 +938,6 @@ class PipelineManager:
             # Create minimal config - RIFE pipeline handles its own model paths via artifacts
             config = OmegaConf.create({})
 
-            # Apply load parameters (resolution, seed) to config for consistency
             # Note: RIFE doesn't use these parameters but we apply them for consistency
             self._apply_load_params(
                 config,

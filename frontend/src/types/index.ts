@@ -4,9 +4,6 @@ export type PipelineId = string;
 // Input mode for pipeline operation
 export type InputMode = "text" | "video";
 
-// VAE type for model selection (dynamic from backend registry)
-export type VaeType = string;
-
 // Extension mode for FFLF (First-Frame-Last-Frame) feature
 export type ExtensionMode = "firstframe" | "lastframe" | "firstlastframe";
 
@@ -54,7 +51,6 @@ export interface SettingsState {
     height: number;
     width: number;
   };
-  seed?: number;
   denoisingSteps?: number[];
   noiseScale?: number;
   noiseController?: boolean;
@@ -84,8 +80,6 @@ export interface SettingsState {
   firstFrameImage?: string;
   lastFrameImage?: string;
   extensionMode?: ExtensionMode;
-  // VAE type selection
-  vaeType?: VaeType;
   // Preprocessors
   preprocessorIds?: string[];
   // Postprocessors
@@ -121,13 +115,11 @@ export interface PipelineInfo {
   supportsQuantization?: boolean;
   minDimension?: number;
   recommendedQuantizationVramThreshold?: number | null;
-  // Available VAE types from config schema enum (derived from vae_type field presence)
-  vaeTypes?: string[];
   // Controller input support - presence of ctrl_input field in pipeline schema
   supportsControllerInput?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
-  // Raw config schema for dynamic settings UI (properties with ui.category === "configuration")
+  // Raw config schema for dynamic settings UI
   configSchema?: import("../lib/api").PipelineConfigSchema;
 }
 
