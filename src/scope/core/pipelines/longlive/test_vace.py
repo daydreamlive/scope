@@ -13,6 +13,10 @@ Supports multiple modes:
 Modes can be combined:
 - R2V + Depth
 - R2V + Inpainting
+- R2V + Extension
+- Extension + Inpainting (anchor frames + spatial inpainting)
+- Extension + Depth (anchor frames + depth guidance)
+- Extension + R2V + Inpainting (all three)
 - Depth only
 - Inpainting only
 - R2V only
@@ -44,9 +48,13 @@ from .pipeline import LongLivePipeline
 
 CONFIG = {
     # ===== MODE SELECTION =====
+    # Modes can be combined! Extension mode now supports combining with inpainting/depth/r2v.
+    # When extension + inpainting: anchor frames at first/last, inpaint masked regions in between
+    # When extension + depth: anchor frames at first/last, follow depth structure in between
+    # When extension + r2v: anchor frames + style conditioning from reference images
     "use_r2v": False,  # Reference-to-Video: condition on reference images
-    "use_depth": False,  # Depth guidance: structural control via depth maps
-    "use_inpainting": False,  # Inpainting: masked video-to-video generation
+    "use_depth": True,  # Depth guidance: structural control via depth maps
+    "use_inpainting": True,  # Inpainting: masked video-to-video generation
     "use_extension": True,  # Extension mode: temporal generation (firstframe/lastframe/firstlastframe)
     # ===== INPUT PATHS =====
     # R2V: List of reference image paths (condition entire video, don't appear in output)
@@ -54,21 +62,21 @@ CONFIG = {
         "frontend/public/assets/example.png",  # path/to/image.png
     ],
     # Depth: Path to depth map video (grayscale or RGB, will be converted)
-    "depth_video": "vace_tests/control_frames_depth.mp4",  # path/to/depth_video.mp4
+    "depth_video": "vace_tests/white_square_moving.mp4",  # path/to/depth_video.mp4
     # Inpainting: Input video and mask video paths
     "input_video": "frontend/public/assets/test.mp4",  # path/to/input_video.mp4
-    "mask_video": "vace_tests/circle_mask.mp4",  # path/to/mask_video.mp4
+    "mask_video": "vace_tests/static_mask_half_white_half_black.mp4",  # path/to/mask_video.mp4
     # Extension: Frame images (appear in output video as actual frames)
-    "first_frame_image": "frontend/public/assets/woman1.jpg",  # For firstframe or firstlastframe modes
+    "first_frame_image": "frontend/public/assets/example.png",  # For firstframe or firstlastframe modes
     "last_frame_image": "frontend/public/assets/woman2.jpg",  # For lastframe or firstlastframe modes
-    "extension_mode": "firstlastframe",  # "firstframe", "lastframe", or "firstlastframe"
+    "extension_mode": "firstframe",  # "firstframe", "lastframe", or "firstlastframe"
     # ===== GENERATION PARAMETERS =====
     "prompt": None,  # Set to override mode-specific prompts, or None to use defaults
     "prompt_r2v": "",  # Default prompt for R2V mode
     "prompt_depth": "a cat walking towards the camera",  # Default prompt for depth mode
     "prompt_inpainting": "a fireball",  # Default prompt for inpainting mode
     "prompt_extension": "",  # Default prompt for extension mode
-    "num_chunks": 2,  # Number of generation chunks
+    "num_chunks": 7,  # Number of generation chunks
     "frames_per_chunk": 12,  # Frames per chunk (12 = 3 latent * 4 temporal upsample)
     "height": 512,
     "width": 512,
@@ -434,15 +442,7 @@ def main():
     use_inpainting = config["use_inpainting"]
     use_extension = config["use_extension"]
 
-    # Validate mode selection
-    if use_depth and use_inpainting:
-        raise ValueError("Cannot use both depth and inpainting modes simultaneously")
-
-    if use_extension and (use_depth or use_inpainting):
-        raise ValueError(
-            "Extension mode cannot be combined with depth or inpainting modes"
-        )
-
+    # Validate mode selection - most combinations are now supported
     if not (use_r2v or use_depth or use_inpainting or use_extension):
         raise ValueError("At least one mode must be enabled")
 
@@ -453,6 +453,9 @@ def main():
     elif use_extension:
         # Extension mode
         prompt = config["prompt_extension"]
+    elif use_depth and use_inpainting:
+        # Combined depth + inpainting: use inpainting prompt (describes what to generate)
+        prompt = config["prompt_inpainting"]
     elif use_inpainting:
         # Inpainting takes priority
         prompt = config["prompt_inpainting"]
@@ -724,8 +727,59 @@ def main():
                     f"chunk={'first' if is_first_chunk else 'last' if is_last_chunk else 'middle'}"
                 )
 
-        # Add depth guidance
-        if use_depth:
+        # Add depth guidance and/or inpainting inputs
+        # These can be combined: depth provides structure for inpainted regions
+        if use_depth and use_inpainting:
+            # Combined mode: composite depth and inpainting
+            # Where mask=1 (inpaint): use depth maps for structural guidance
+            # Where mask=0 (preserve): use source video content
+            depth_frames_available = depth_video.shape[2]
+            depth_frames_needed = end_idx
+
+            if depth_frames_needed > depth_frames_available:
+                print(f"Chunk {chunk_index}: Not enough depth frames, stopping")
+                break
+
+            depth_chunk = extract_depth_chunk(
+                depth_video,
+                chunk_index,
+                frames_per_chunk,
+            )
+
+            total_frames_available = input_video_tensor.shape[2]
+            end_idx_clamped = min(end_idx, total_frames_available)
+
+            input_chunk = input_video_tensor[:, :, start_idx:end_idx_clamped, :, :]
+            mask_chunk = mask_tensor[:, :, start_idx:end_idx_clamped, :, :]
+
+            # Pad last chunk if needed
+            if input_chunk.shape[2] < frames_per_chunk:
+                padding = frames_per_chunk - input_chunk.shape[2]
+                input_pad = input_chunk[:, :, -1:, :, :].repeat(1, 1, padding, 1, 1)
+                mask_pad = mask_chunk[:, :, -1:, :, :].repeat(1, 1, padding, 1, 1)
+                input_chunk = torch.cat([input_chunk, input_pad], dim=2)
+                mask_chunk = torch.cat([mask_chunk, mask_pad], dim=2)
+
+            # Composite: depth where mask=1, source video where mask=0
+            # mask_chunk is [B, 1, F, H, W], expand to [B, 3, F, H, W] for broadcasting
+            mask_expanded = mask_chunk.expand_as(input_chunk)
+            composited_chunk = torch.where(
+                mask_expanded > 0.5,
+                depth_chunk,  # Use depth for inpainted regions
+                input_chunk,  # Use source video for preserved regions
+            )
+
+            kwargs["vace_input_frames"] = composited_chunk
+            kwargs["vace_input_masks"] = mask_chunk
+
+            print(
+                f"Chunk {chunk_index}: Depth+Inpainting combined, start={start_idx}, "
+                f"end={end_idx_clamped}, depth_shape={depth_chunk.shape}, "
+                f"input_shape={input_chunk.shape}"
+            )
+
+        elif use_depth:
+            # Depth only mode
             depth_frames_available = depth_video.shape[2]
             depth_frames_needed = end_idx
 
@@ -741,8 +795,8 @@ def main():
             kwargs["vace_input_frames"] = depth_chunk
             print(f"Chunk {chunk_index}: Depth chunk shape={depth_chunk.shape}")
 
-        # Add inpainting inputs
-        if use_inpainting:
+        elif use_inpainting:
+            # Inpainting only mode
             total_frames_available = input_video_tensor.shape[2]
             end_idx_clamped = min(end_idx, total_frames_available)
 
@@ -919,8 +973,7 @@ def main():
     print("\n" + "=" * 80)
     print("  Test Complete")
     print("=" * 80)
-    print(f"\nResults saved to: {output_dir}")
-    print(f"Main output: {output_filename}")
+    print(f"\nResult saved to {output_path}")
     if use_r2v and ref_images:
         print(f"Used {len(ref_images)} reference image(s) for R2V conditioning")
     if use_depth:
