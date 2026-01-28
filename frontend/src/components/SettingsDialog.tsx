@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { GeneralTab } from "./settings/GeneralTab";
 import { PluginsTab } from "./settings/PluginsTab";
 import { ReportBugDialog } from "./ReportBugDialog";
-import { MOCK_PLUGINS } from "@/types/settings";
+import { usePipelinesContext } from "@/contexts/PipelinesContext";
+import type { InstalledPlugin } from "@/types/settings";
+import { listPlugins, installPlugin, uninstallPlugin } from "@/lib/api";
+import { toast } from "sonner";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -12,12 +15,49 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
+  const { refetch: refetchPipelines } = usePipelinesContext();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
   );
   const [logsDirectory, setLogsDirectory] = useState("~/.daydream-scope/logs");
   const [reportBugOpen, setReportBugOpen] = useState(false);
   const [pluginInstallPath, setPluginInstallPath] = useState("");
+  const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
+  const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [activeTab, setActiveTab] = useState("general");
+
+  const fetchPlugins = useCallback(async () => {
+    setIsLoadingPlugins(true);
+    try {
+      const response = await listPlugins();
+      setPlugins(
+        response.plugins.map(p => ({
+          name: p.name,
+          version: p.version,
+          author: p.author,
+          description: p.description,
+          source: p.source,
+          editable: p.editable,
+          latest_version: p.latest_version,
+          update_available: p.update_available,
+          package_spec: p.package_spec,
+        }))
+      );
+    } catch (error) {
+      console.error("Failed to fetch plugins:", error);
+      toast.error("Failed to load plugins");
+    } finally {
+      setIsLoadingPlugins(false);
+    }
+  }, []);
+
+  // Fetch plugins when dialog opens or when switching to plugins tab
+  useEffect(() => {
+    if (open && activeTab === "plugins") {
+      fetchPlugins();
+    }
+  }, [open, activeTab, fetchPlugins]);
 
   const handleModelsDirectoryChange = (value: string) => {
     console.log("Models directory changed:", value);
@@ -34,17 +74,75 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     // TODO: Open file dialog via Electron IPC
   };
 
-  const handleInstallPlugin = (pluginUrl: string) => {
-    console.log("Install plugin:", pluginUrl);
-    setPluginInstallPath("");
+  const handleInstallPlugin = async (packageSpec: string) => {
+    setIsInstalling(true);
+    try {
+      const response = await installPlugin({ package: packageSpec });
+      if (response.success) {
+        const pluginName = response.plugin?.name || packageSpec;
+        toast.success(`Successfully installed ${pluginName}`);
+        setPluginInstallPath("");
+        await fetchPlugins();
+        await refetchPipelines();
+      } else {
+        toast.error(response.message);
+      }
+    } catch (error) {
+      console.error("Failed to install plugin:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to install plugin"
+      );
+    } finally {
+      setIsInstalling(false);
+    }
   };
 
-  const handleCheckUpdates = () => {
-    console.log("Check for updates clicked");
+  const handleUpdatePlugin = async (
+    pluginName: string,
+    packageSpec: string
+  ) => {
+    setIsInstalling(true);
+    try {
+      const response = await installPlugin({
+        package: packageSpec,
+        upgrade: true,
+      });
+      if (response.success) {
+        toast.success(`Successfully updated ${pluginName}`);
+        await fetchPlugins();
+        await refetchPipelines();
+      } else {
+        toast.error(response.message);
+      }
+    } catch (error) {
+      console.error("Failed to update plugin:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update plugin"
+      );
+    } finally {
+      setIsInstalling(false);
+    }
   };
 
-  const handleDeletePlugin = (pluginId: string) => {
-    console.log("Delete plugin:", pluginId);
+  const handleDeletePlugin = async (pluginName: string) => {
+    console.log("Uninstalling plugin:", pluginName);
+    try {
+      const response = await uninstallPlugin(pluginName);
+      console.log("Uninstall response:", response);
+      if (response.success) {
+        toast.success(response.message);
+        await fetchPlugins();
+        await refetchPipelines();
+      } else {
+        console.error("Uninstall failed:", response.message);
+        toast.error(response.message);
+      }
+    } catch (error) {
+      console.error("Failed to uninstall plugin:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to uninstall plugin"
+      );
+    }
   };
 
   return (
@@ -54,7 +152,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
         <Tabs
-          defaultValue="general"
+          value={activeTab}
+          onValueChange={setActiveTab}
           orientation="vertical"
           className="flex items-stretch"
         >
@@ -86,13 +185,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             </TabsContent>
             <TabsContent value="plugins" className="mt-0">
               <PluginsTab
-                plugins={MOCK_PLUGINS}
+                plugins={plugins}
                 installPath={pluginInstallPath}
                 onInstallPathChange={setPluginInstallPath}
                 onBrowse={handleBrowsePlugin}
                 onInstall={handleInstallPlugin}
-                onCheckUpdates={handleCheckUpdates}
+                onUpdate={handleUpdatePlugin}
                 onDelete={handleDeletePlugin}
+                isLoading={isLoadingPlugins}
+                isInstalling={isInstalling}
               />
             </TabsContent>
           </div>

@@ -489,3 +489,142 @@ class AssetsResponse(BaseModel):
     """Response containing all discoverable asset files."""
 
     assets: list[AssetFileInfo]
+
+
+# Plugin-related schemas
+
+
+class PluginSource(str, Enum):
+    """Source of plugin installation."""
+
+    PYPI = "pypi"
+    GIT = "git"
+    LOCAL = "local"
+
+
+class PluginPipelineInfo(BaseModel):
+    """Pipeline metadata within a plugin."""
+
+    pipeline_id: str = Field(..., description="Unique pipeline identifier")
+    pipeline_name: str = Field(..., description="Human-readable pipeline name")
+
+
+class PluginInfo(BaseModel):
+    """Complete plugin information."""
+
+    name: str = Field(..., description="Python package name")
+    version: str | None = Field(default=None, description="Package version")
+    author: str | None = Field(default=None, description="Package author")
+    description: str | None = Field(default=None, description="Package description")
+    source: PluginSource = Field(..., description="Installation source")
+    editable: bool = Field(
+        default=False, description="Whether installed in editable mode"
+    )
+    editable_path: str | None = Field(
+        default=None, description="Path if installed in editable mode"
+    )
+    pipelines: list[PluginPipelineInfo] = Field(
+        default_factory=list, description="Pipelines provided by this plugin"
+    )
+    latest_version: str | None = Field(
+        default=None,
+        description="Latest available version (null for local/editable plugins)",
+    )
+    update_available: bool | None = Field(
+        default=None,
+        description="Whether an update is available (null for local/editable plugins)",
+    )
+    package_spec: str | None = Field(
+        default=None,
+        description="Package specifier for upgrades (git URL for git packages, name for PyPI)",
+    )
+
+
+class PluginListResponse(BaseModel):
+    """Response containing list of all installed plugins."""
+
+    plugins: list[PluginInfo] = Field(..., description="List of installed plugins")
+    total: int = Field(..., description="Total number of plugins")
+
+
+class PluginInstallRequest(BaseModel):
+    """Request to install a plugin."""
+
+    package: str = Field(
+        ..., description="Package specifier (PyPI name, git URL, or local path)"
+    )
+    editable: bool = Field(default=False, description="Install in editable mode")
+    upgrade: bool = Field(
+        default=False, description="Upgrade if already installed from different source"
+    )
+    force: bool = Field(default=False, description="Skip dependency validation")
+    pre: bool = Field(
+        default=False, description="Include pre-release and development versions"
+    )
+
+
+class PluginInstallResponse(BaseModel):
+    """Response after installing a plugin."""
+
+    success: bool = Field(..., description="Whether installation succeeded")
+    message: str = Field(..., description="Status message")
+    plugin: PluginInfo | None = Field(
+        default=None, description="Installed plugin info (if successful)"
+    )
+
+
+class PluginUninstallResponse(BaseModel):
+    """Response after uninstalling a plugin."""
+
+    success: bool = Field(..., description="Whether uninstallation succeeded")
+    message: str = Field(..., description="Status message")
+    unloaded_pipelines: list[str] = Field(
+        default_factory=list, description="Pipeline IDs that were unloaded"
+    )
+
+
+class PluginReloadRequest(BaseModel):
+    """Request to reload an editable plugin."""
+
+    force: bool = Field(
+        default=False,
+        description="Force reload even if pipelines are loaded (will unload them)",
+    )
+
+
+class PluginReloadResponse(BaseModel):
+    """Response after reloading a plugin."""
+
+    success: bool = Field(..., description="Whether reload succeeded")
+    message: str = Field(..., description="Status message")
+    reloaded_pipelines: list[str] = Field(
+        default_factory=list, description="Pipeline IDs that were reloaded"
+    )
+    added_pipelines: list[str] = Field(
+        default_factory=list, description="New pipeline IDs added after reload"
+    )
+    removed_pipelines: list[str] = Field(
+        default_factory=list, description="Pipeline IDs removed after reload"
+    )
+
+
+class PluginUpdateInfo(BaseModel):
+    """Update information for a single plugin."""
+
+    name: str = Field(..., description="Plugin package name")
+    installed_version: str = Field(..., description="Currently installed version")
+    latest_version: str | None = Field(
+        default=None, description="Latest available version (null for local plugins)"
+    )
+    update_available: bool | None = Field(
+        default=None, description="Whether update is available (null for local plugins)"
+    )
+    source: PluginSource = Field(..., description="Installation source")
+
+
+class PluginUpdatesResponse(BaseModel):
+    """Response containing update information for all plugins."""
+
+    updates: list[PluginUpdateInfo] = Field(
+        ..., description="Update info for each plugin"
+    )

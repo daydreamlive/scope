@@ -1,24 +1,11 @@
 export interface InstalledPlugin {
-  id: string;
   name: string;
-  version: string;
-  author: string;
-  description: string;
+  version: string | null;
+  author: string | null;
+  description: string | null;
+  source?: "pypi" | "git" | "local";
+  editable?: boolean;
+  latest_version?: string | null;
+  update_available?: boolean | null;
+  package_spec?: string | null;
 }
-
-export const MOCK_PLUGINS: InstalledPlugin[] = [
-  {
-    id: "1",
-    name: "scope-overworld",
-    version: "0.1.0",
-    author: "daydreamlive",
-    description: "Overworld world models like Waypoint-1",
-  },
-  {
-    id: "2",
-    name: "scope-flashvsr2",
-    version: "0.1.0",
-    author: "daydreamlive",
-    description: "Real-time upscaling with flashvsr2",
-  },
-];
