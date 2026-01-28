@@ -9,20 +9,20 @@ class OpticalFlowConfig(BasePipelineConfig):
     """Configuration for Optical Flow pipeline.
 
     This pipeline computes optical flow between consecutive video frames using
-    RAFT (Recurrent All-Pairs Field Transforms). When TensorRT is available and
-    enabled, it uses TensorRT acceleration; otherwise falls back to PyTorch.
-    The flow is converted to RGB visualization for VACE/ControlNet conditioning.
+    RAFT (Recurrent All-Pairs Field Transforms). The flow is converted to RGB
+    visualization for VACE/ControlNet conditioning.
+
+    Uses torch.compile for optimized inference.
     """
 
     pipeline_id = "optical-flow"
     pipeline_name = "Optical Flow"
     pipeline_description = (
         "Optical flow computation using RAFT model. "
-        "Produces RGB flow visualizations for video conditioning. "
-        "Supports TensorRT acceleration when available."
+        "Produces RGB flow visualizations for video conditioning."
     )
     docs_url = "https://pytorch.org/vision/main/models/raft.html"
-    artifacts = []  # RAFT from torchvision, ONNX/TRT built locally
+    artifacts = []  # RAFT from torchvision
     supports_prompts = False
     modified = True
     usage = [UsageType.PREPROCESSOR]
@@ -31,4 +31,3 @@ class OpticalFlowConfig(BasePipelineConfig):
 
     # User-configurable settings
     model_size: Literal["small", "large"] = "small"
-    use_tensorrt: bool = False
