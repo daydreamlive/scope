@@ -67,12 +67,142 @@ Browser ──WebRTC──► fal.ai ──proxy──► Scope Backend ──�
 
 ## Proposed Architecture (Server-based fal)
 
+### What Runs Where
+
+| Component | Local Machine | fal.ai Cloud |
+|-----------|---------------|--------------|
+| **Scope Server** | ✅ Runs (with FalClient) | ✅ Runs (via fal_app.py subprocess) |
+| **WebRTC Role** | **Client** (creates offers) | **Server** (accepts offers) |
+| **Pipelines** | ❌ Not used in cloud mode | ✅ Used for GPU inference |
+| **Video Input** | Spout receiver, WebRTC from browser | WebRTC from local Scope |
+| **Video Output** | Spout sender, WebRTC to browser | WebRTC to local Scope |
+| **Parameter Source** | UI via browser WebRTC data channel | Forwarded from local Scope |
+
+### Key Insight: No Changes Needed on fal Side
+
+The existing `fal_app.py` already:
+1. Starts the **full Scope server** as a subprocess
+2. Acts as a WebSocket proxy for WebRTC signaling
+3. Scope server on fal is already a **WebRTC server** (accepts offers, sends answers)
+
+The only change is **who connects as the WebRTC client** - instead of the browser, it's the local Scope server.
+
+### Detailed Architecture Diagram
+
 ```
-Local Input ──► Scope Server ──WebRTC Client──► fal.ai ──► GPU Inference ──► fal.ai ──WebRTC──► Scope Server ──► Spout Output
-(Spout/WebRTC)                 (WebSocket)
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              LOCAL MACHINE                                       │
+│                                                                                 │
+│  ┌─────────────┐     ┌──────────────────────────────────────────────────────┐  │
+│  │   Browser   │     │                 Scope Server (Local)                  │  │
+│  │             │     │                                                       │  │
+│  │  - UI       │     │  ┌─────────────────┐      ┌─────────────────────┐    │  │
+│  │  - Preview  │◄────┼──│ WebRTC Server   │      │ FalClient           │    │  │
+│  │  - Params   │────►│  │ (to browser)    │      │ (WebRTC CLIENT)     │────┼──┼─────┐
+│  │             │     │  └─────────────────┘      │                     │    │  │     │
+│  └─────────────┘     │          │                │ - WebSocket conn    │    │  │     │
+│                      │          │                │ - Creates offers    │    │  │     │
+│  ┌─────────────┐     │          ▼                │ - Sends frames      │    │  │     │
+│  │ Spout Input │────►│  ┌─────────────────┐      │ - Receives frames   │    │  │     │
+│  │ (e.g., OBS) │     │  │ FrameProcessor  │◄────►│ - Forwards params   │    │  │     │
+│  └─────────────┘     │  │                 │      └─────────────────────┘    │  │     │
+│                      │  │ Cloud mode:     │                                  │  │     │
+│  ┌─────────────┐     │  │ - Routes frames │                                  │  │     │
+│  │ Spout Output│◄────┼──│   to FalClient  │                                  │  │     │
+│  │ (e.g., VJ)  │     │  │ - Routes params │                                  │  │     │
+│  └─────────────┘     │  │   to FalClient  │                                  │  │     │
+│                      │  └─────────────────┘                                  │  │     │
+│                      └──────────────────────────────────────────────────────┘  │     │
+└─────────────────────────────────────────────────────────────────────────────────┘     │
+                                                                                        │
+                         WebRTC Video Stream (bidirectional)                            │
+                         + WebRTC Data Channel (parameters)                             │
+                         + WebSocket (signaling only)                                   │
+                                                                                        │
+┌───────────────────────────────────────────────────────────────────────────────────────┼─┐
+│                              FAL.AI CLOUD (H100 GPU)                                  │ │
+│                                                                                       │ │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐ │ │
+│  │                          fal_app.py (ScopeApp)                                   │ │ │
+│  │                                                                                 │ │ │
+│  │   WebSocket Endpoint (/ws) ◄───────────────────────────────────────────────────┼─┘ │
+│  │         │                                                                       │   │
+│  │         │ Proxies signaling to subprocess                                       │   │
+│  │         ▼                                                                       │   │
+│  │   ┌─────────────────────────────────────────────────────────────────────────┐   │   │
+│  │   │              Scope Server (subprocess: uv run daydream-scope)           │   │   │
+│  │   │                                                                         │   │   │
+│  │   │   ┌───────────────────┐    ┌────────────────┐    ┌─────────────────┐   │   │   │
+│  │   │   │ WebRTC Server     │───►│ FrameProcessor │───►│ Pipeline        │   │   │   │
+│  │   │   │ (accepts offers)  │    │                │    │ (GPU inference) │   │   │   │
+│  │   │   │                   │◄───│                │◄───│                 │   │   │   │
+│  │   │   │ - Receives frames │    │ Local mode:    │    │ - LongLive      │   │   │   │
+│  │   │   │ - Sends frames    │    │ - Routes to    │    │ - VACE          │   │   │   │
+│  │   │   │ - Receives params │    │   pipeline     │    │ - etc.          │   │   │   │
+│  │   │   └───────────────────┘    └────────────────┘    └─────────────────┘   │   │   │
+│  │   │                                                                         │   │   │
+│  │   └─────────────────────────────────────────────────────────────────────────┘   │   │
+│  │                                                                                 │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Change:** Scope server becomes a WebRTC *client* to fal.ai instead of the browser being the client.
+### Data Flow
+
+#### Video Frames
+```
+Spout Input ──► Local FrameProcessor ──► FalClient ══WebRTC══► fal Scope Server ──► Pipeline/GPU
+                                                                       │
+Spout Output ◄── Local FrameProcessor ◄── FalClient ◄══WebRTC══════════┘ (processed frames)
+```
+
+#### Parameters (prompts, noise_scale, etc.)
+```
+Browser UI ──► Local Scope Server ──► FalClient Data Channel ══WebRTC══► fal Scope Server ──► Pipeline
+              (WebRTC data channel)   (forwards params)                   (applies to pipeline)
+```
+
+### Parameter Forwarding Detail
+
+Parameters flow through **two WebRTC data channels**:
+
+1. **Browser → Local Scope Server** (existing)
+   - Browser sends params via WebRTC data channel (same as local mode)
+   - Local FrameProcessor receives params
+
+2. **Local Scope Server → fal Cloud** (new)
+   - When `fal_enabled=True`, FrameProcessor forwards params to FalClient
+   - FalClient sends params via its own WebRTC data channel to fal
+   - fal Scope Server applies params to pipeline
+
+```python
+# In FrameProcessor.update_parameters():
+def update_parameters(self, params: dict):
+    # Handle local-only params (Spout config)
+    if "spout_sender" in params:
+        self._update_spout_sender(params.pop("spout_sender"))
+
+    # Route remaining params based on mode
+    if self.fal_enabled and self.fal_client:
+        # Forward to fal cloud
+        self.fal_client.send_parameters(params)
+    else:
+        # Apply locally
+        for processor in self.pipeline_processors:
+            processor.update_parameters(params)
+```
+
+### Summary
+
+| Aspect | Before (Browser → fal) | After (Local Scope → fal) |
+|--------|------------------------|---------------------------|
+| **WebRTC Client** | Browser | Local Scope Server (FalClient) |
+| **WebRTC Server** | fal Scope Server | fal Scope Server (unchanged) |
+| **Video Source** | Browser webcam | Spout / local WebRTC |
+| **Video Destination** | Browser video element | Spout / local WebRTC |
+| **Parameter Source** | Browser UI | Browser UI → forwarded via FalClient |
+| **fal_app.py Changes** | N/A | **None required** |
 
 ---
 
@@ -1923,12 +2053,12 @@ Use this checklist to track progress through all phases:
 |-------|------------|--------------|--------|
 | 1. FalClient Module | 9 tests | 4 tests | ✅ |
 | 2. FalOutputTrack/FalInputTrack | 18 tests | 5 tests | ✅ |
-| 3. FrameProcessor Integration | 3 tests | 2 tests | ⬜ |
+| 3. FrameProcessor Integration | 14 tests | 2 tests | ✅ |
 | 4. API Endpoints | 4 tests | 2 tests | ⬜ |
 | 5. Spout Integration | 2 tests | 3 tests | ⬜ |
 | 6. Parameter Forwarding & UI | 3 tests | 4 tests | ⬜ |
 
-**Total: 39 unit tests, 20 manual tests**
+**Total: 50 unit tests, 20 manual tests**
 
 ---
 
