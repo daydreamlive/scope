@@ -1398,6 +1398,12 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
+            cloudMode={settings.cloudMode}
+            onCloudModeChange={cloudModeUpdate => {
+              updateSettings({
+                cloudMode: { ...settings.cloudMode!, ...cloudModeUpdate },
+              });
+            }}
           />
         </div>
       </div>
