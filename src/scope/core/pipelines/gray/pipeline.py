@@ -30,16 +30,12 @@ class GrayPipeline(Pipeline):
 
     def __init__(
         self,
-        config=None,
         device: torch.device | None = None,
-        dtype: torch.dtype = torch.float16,
     ):
         """Initialize the Gray pipeline.
 
         Args:
-            config: Pipeline configuration (unused — no model to configure)
             device: Target device (defaults to CUDA if available)
-            dtype: Data type (unused — this pipeline uses float32 tensor ops)
         """
         self.device = (
             device
@@ -47,7 +43,6 @@ class GrayPipeline(Pipeline):
             else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
         self.rgb_weights = _RGB_WEIGHTS.to(device=self.device)
-        logger.info("Gray preprocessor initialized (no model required)")
 
     def prepare(self, **kwargs) -> Requirements:
         return Requirements(input_size=1)
