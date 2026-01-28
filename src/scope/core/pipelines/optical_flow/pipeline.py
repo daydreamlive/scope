@@ -1,8 +1,7 @@
 """Optical Flow Pipeline for VACE conditioning.
 
 Computes optical flow between consecutive frames using RAFT and converts it to
-RGB visualization. Uses TensorRT acceleration when available and enabled,
-otherwise falls back to PyTorch RAFT.
+RGB visualization. Uses torch.compile for optimized inference.
 """
 
 import logging
@@ -10,28 +9,20 @@ import time
 from typing import TYPE_CHECKING
 
 import torch
+import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torchvision.utils import flow_to_image
 
 from ..interface import Pipeline, Requirements
-from .download import get_engine_path, get_models_dir, get_onnx_path
 from .schema import OpticalFlowConfig
+
+# Disable CPU codegen to avoid needing MSVC on Windows
+inductor_config.disable_cpp_codegen = True
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
 
 logger = logging.getLogger(__name__)
-
-
-def _is_tensorrt_available() -> bool:
-    """Check if TensorRT and polygraphy are available."""
-    try:
-        import tensorrt  # noqa: F401
-        from polygraphy.backend.trt import engine_from_bytes  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
 
 
 class OpticalFlowPipeline(Pipeline):
@@ -41,11 +32,8 @@ class OpticalFlowPipeline(Pipeline):
     RAFT (Recurrent All-Pairs Field Transforms) and converts it to RGB
     visualization for VACE/ControlNet conditioning.
 
-    When TensorRT is available and enabled via config, uses TensorRT
-    acceleration. Otherwise falls back to PyTorch RAFT inference.
-
-    The TensorRT engine is lazily initialized on first use, automatically
-    exporting RAFT from torchvision and compiling it to a GPU-specific engine.
+    Uses torch.compile for optimized inference (~1.5x speedup over eager mode).
+    The model is lazily initialized on first use.
     """
 
     @classmethod
@@ -60,7 +48,7 @@ class OpticalFlowPipeline(Pipeline):
         """Initialize the optical flow pipeline.
 
         Args:
-            config: Pipeline configuration with model_size and use_tensorrt settings
+            config: Pipeline configuration with model_size setting
             device: Target device (defaults to CUDA if available)
         """
         from .engine import DEFAULT_HEIGHT, DEFAULT_WIDTH
@@ -73,122 +61,28 @@ class OpticalFlowPipeline(Pipeline):
         self._height = DEFAULT_HEIGHT
         self._width = DEFAULT_WIDTH
 
-        # Read settings from config (set by pipeline_manager from load_params)
+        # Read settings from config
         model_size = getattr(config, "model_size", "large")
-        use_tensorrt_config = getattr(config, "use_tensorrt", False)
 
         # Model configuration
         self._use_large_model = model_size == "large"
         self._model_name = "raft_large" if self._use_large_model else "raft_small"
 
-        # RAFT Large requires FP32 for TensorRT (FP16 causes NaN)
-        # RAFT Small can use FP16
-        self._fp16 = not self._use_large_model
-
-        # Determine backend (config setting AND runtime availability)
-        self._use_tensorrt = use_tensorrt_config and _is_tensorrt_available()
-
-        self._trt_engine = None
         self._pytorch_model = None
-        self._is_cuda_available = torch.cuda.is_available()
 
         start = time.time()
-        backend = "TensorRT" if self._use_tensorrt else "PyTorch"
         model_size_str = "Large" if self._use_large_model else "Small"
         logger.info(
-            f"Optical Flow pipeline initialized with {backend} backend, "
-            f"RAFT {model_size_str} model (loads on first use)"
+            f"Optical Flow pipeline initialized with RAFT {model_size_str} model "
+            "(loads on first use)"
         )
-        if not self._use_tensorrt and use_tensorrt_config:
-            logger.warning(
-                "TensorRT not available, using PyTorch fallback. "
-                "Install with: uv sync --group tensorrt"
-            )
         logger.info(f"Initialization time: {time.time() - start:.3f}s")
 
-    def _ensure_tensorrt_engine(self):
-        """Lazily initialize the TensorRT engine.
-
-        Exports RAFT to ONNX and compiles to TRT on first call.
-
-        Returns:
-            Initialized TensorRTEngine
-
-        Raises:
-            RuntimeError: If ONNX export or TensorRT engine build fails
-        """
-        if self._trt_engine is not None:
-            return self._trt_engine
-
-        from .engine import (
-            TensorRTEngine,
-            build_tensorrt_engine,
-            export_raft_to_onnx,
-            get_gpu_name,
-        )
-
-        models_dir = get_models_dir()
-        gpu_name = get_gpu_name()
-
-        # Get paths (include model name for separate small/large engines)
-        onnx_path = get_onnx_path(
-            models_dir, self._height, self._width, self._model_name
-        )
-        engine_path = get_engine_path(
-            models_dir, self._height, self._width, gpu_name, self._model_name
-        )
-
-        # Export RAFT to ONNX if needed
-        if not onnx_path.exists():
-            model_size = "Large" if self._use_large_model else "Small"
-            logger.info(f"Exporting RAFT {model_size} model to ONNX...")
-            success = export_raft_to_onnx(
-                onnx_path=onnx_path,
-                height=self._height,
-                width=self._width,
-                device=str(self.device),
-                use_large_model=self._use_large_model,
-            )
-            if not success:
-                raise RuntimeError("Failed to export RAFT to ONNX")
-
-        # Build TensorRT engine if needed
-        if not engine_path.exists():
-            logger.info("Building TensorRT engine...")
-            success = build_tensorrt_engine(
-                onnx_path=onnx_path,
-                engine_path=engine_path,
-                min_height=self._height,
-                min_width=self._width,
-                max_height=self._height,
-                max_width=self._width,
-                fp16=self._fp16,
-            )
-            if not success:
-                raise RuntimeError("Failed to build TensorRT engine")
-
-        # Load and activate engine
-        logger.info(f"Loading TensorRT engine: {engine_path}")
-        self._trt_engine = TensorRTEngine(engine_path)
-        self._trt_engine.load()
-        self._trt_engine.activate()
-
-        # Allocate buffers with input shape for dynamic shapes
-        input_shape = (1, 3, self._height, self._width)
-        self._trt_engine.allocate_buffers(
-            device=str(self.device), input_shape=input_shape
-        )
-
-        logger.info(
-            f"Optical Flow TensorRT engine initialized: {self._height}x{self._width}"
-        )
-        return self._trt_engine
-
     def _ensure_pytorch_model(self):
-        """Lazily initialize the PyTorch RAFT model.
+        """Lazily initialize the PyTorch RAFT model with torch.compile.
 
         Returns:
-            Initialized RAFT model
+            Compiled RAFT model for optimized inference
         """
         if self._pytorch_model is not None:
             return self._pytorch_model
@@ -199,28 +93,16 @@ class OpticalFlowPipeline(Pipeline):
         logger.info(f"Loading PyTorch RAFT {model_size} model...")
         start = time.time()
 
-        self._pytorch_model, _ = load_raft_model(
-            self._use_large_model, device=str(self.device)
-        )
+        model, _ = load_raft_model(self._use_large_model, device=str(self.device))
+
+        # Compile the model for optimized inference
+        logger.info(f"Compiling RAFT {model_size} model with torch.compile...")
+        self._pytorch_model = torch.compile(model, backend="inductor", fullgraph=False)
 
         logger.info(
-            f"Loaded PyTorch RAFT {model_size} model in {time.time() - start:.3f}s"
+            f"Loaded and compiled RAFT {model_size} model in {time.time() - start:.3f}s"
         )
         return self._pytorch_model
-
-    @staticmethod
-    def _pad_to_8(tensor: torch.Tensor) -> tuple[torch.Tensor, int, int]:
-        """Pad NCHW tensor so H and W are multiples of 8 (RAFT requirement).
-
-        Returns:
-            Tuple of (padded tensor, original height, original width)
-        """
-        _, _, h, w = tensor.shape
-        pad_h = (8 - h % 8) % 8
-        pad_w = (8 - w % 8) % 8
-        if pad_h > 0 or pad_w > 0:
-            tensor = F.pad(tensor, [0, pad_w, 0, pad_h])
-        return tensor, h, w
 
     def _preprocess_frame_batch(
         self, frames: torch.Tensor
@@ -248,61 +130,6 @@ class OpticalFlowPipeline(Pipeline):
 
         return frames_scaled, h, w
 
-    def _compute_optical_flow_tensorrt(
-        self,
-        frame1: torch.Tensor,
-        frame2: torch.Tensor,
-        orig_h: int,
-        orig_w: int,
-    ) -> torch.Tensor:
-        """Compute optical flow between two preprocessed frames using TensorRT.
-
-        Args:
-            frame1: First frame tensor (CHW format, [0,255], padded)
-            frame2: Second frame tensor (CHW format, [0,255], padded)
-            orig_h: Original height before padding
-            orig_w: Original width before padding
-
-        Returns:
-            Optical flow tensor (2HW format)
-        """
-        engine = self._ensure_tensorrt_engine()
-
-        # Run TensorRT inference (uses engine's dedicated stream)
-        feed_dict = {"frame1": frame1.unsqueeze(0), "frame2": frame2.unsqueeze(0)}
-        result = engine.infer(feed_dict)
-        flow = result["flow"][0]  # Remove batch dimension
-
-        # Remove padding
-        return flow[:, :orig_h, :orig_w]
-
-    def _compute_optical_flow_pytorch(
-        self,
-        frame1: torch.Tensor,
-        frame2: torch.Tensor,
-        orig_h: int,
-        orig_w: int,
-    ) -> torch.Tensor:
-        """Compute optical flow between two preprocessed frames using PyTorch RAFT.
-
-        Args:
-            frame1: First frame tensor (CHW format, [0,255], padded)
-            frame2: Second frame tensor (CHW format, [0,255], padded)
-            orig_h: Original height before padding
-            orig_w: Original width before padding
-
-        Returns:
-            Optical flow tensor (2HW format)
-        """
-        model = self._ensure_pytorch_model()
-
-        # Run PyTorch inference
-        flow_predictions = model(frame1.unsqueeze(0), frame2.unsqueeze(0))
-        flow = flow_predictions[-1][0]  # Last prediction, remove batch dim
-
-        # Remove padding
-        return flow[:, :orig_h, :orig_w]
-
     def _compute_optical_flow(
         self,
         frame1: torch.Tensor,
@@ -321,10 +148,14 @@ class OpticalFlowPipeline(Pipeline):
         Returns:
             Optical flow tensor (2HW format)
         """
-        if self._use_tensorrt:
-            return self._compute_optical_flow_tensorrt(frame1, frame2, orig_h, orig_w)
-        else:
-            return self._compute_optical_flow_pytorch(frame1, frame2, orig_h, orig_w)
+        model = self._ensure_pytorch_model()
+
+        # Run PyTorch inference
+        flow_predictions = model(frame1.unsqueeze(0), frame2.unsqueeze(0))
+        flow = flow_predictions[-1][0]  # Last prediction, remove batch dim
+
+        # Remove padding
+        return flow[:, :orig_h, :orig_w]
 
     def prepare(self, **kwargs) -> Requirements:
         """Return pipeline requirements.

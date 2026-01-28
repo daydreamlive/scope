@@ -981,10 +981,6 @@ class PipelineManager:
                         "model_size",
                         OpticalFlowConfig.model_fields["model_size"].default,
                     ),
-                    "use_tensorrt": params.get(
-                        "use_tensorrt",
-                        OpticalFlowConfig.model_fields["use_tensorrt"].default,
-                    ),
                 }
             )
 
