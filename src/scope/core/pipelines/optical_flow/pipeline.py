@@ -65,8 +65,10 @@ class OpticalFlowPipeline(Pipeline):
 
         self._pytorch_model = None
 
-        # Warmup: load and compile model to avoid delay on first frame
-        self._ensure_pytorch_model()
+        # Warmup: load model and run forward passes to trigger JIT compilation.
+        # This avoids delay on first real frame since torch.compile only
+        # triggers compilation on the first forward pass.
+        self._warmup()
 
     def _ensure_pytorch_model(self):
         """Lazily initialize the PyTorch RAFT model with torch.compile.
@@ -101,6 +103,28 @@ class OpticalFlowPipeline(Pipeline):
             f"Loaded and compiled RAFT {model_size} model in {time.time() - start:.3f}s"
         )
         return self._pytorch_model
+
+    def _warmup(self):
+        """Warmup the model by running forward passes to trigger JIT compilation."""
+        model = self._ensure_pytorch_model()
+
+        logger.info("Running warmup forward passes to trigger JIT compilation...")
+        start = time.time()
+
+        # Create dummy frames at the expected size (512x512 padded to multiple of 8)
+        dummy_frame = (
+            torch.randn(
+                1, 3, self._height, self._width, device=self.device, dtype=torch.float32
+            )
+            * 255.0
+        )
+
+        # Run a few forward passes to trigger and stabilize JIT compilation
+        with torch.no_grad():
+            for _ in range(3):
+                _ = model(dummy_frame, dummy_frame)
+
+        logger.info(f"Warmup completed in {time.time() - start:.3f}s")
 
     def _preprocess_frame_batch(
         self, frames: torch.Tensor
