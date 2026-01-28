@@ -954,18 +954,7 @@ class PipelineManager:
         elif pipeline_id == "scribble":
             from scope.core.pipelines import ScribblePipeline
 
-            config = OmegaConf.create({})
-
-            self._apply_load_params(
-                config,
-                load_params,
-                default_height=512,
-                default_width=512,
-                default_seed=42,
-            )
-
             pipeline = ScribblePipeline(
-                config,
                 device=get_device(),
                 dtype=torch.float16,
             )

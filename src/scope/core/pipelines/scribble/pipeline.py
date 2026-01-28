@@ -30,14 +30,12 @@ class ScribblePipeline(Pipeline):
 
     def __init__(
         self,
-        config,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.float16,
     ):
         """Initialize the Scribble pipeline.
 
         Args:
-            config: Pipeline configuration
             device: Target device (defaults to CUDA if available)
             dtype: Data type for model weights (default: float16)
         """
