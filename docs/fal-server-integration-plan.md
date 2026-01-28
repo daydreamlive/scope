@@ -1284,114 +1284,238 @@ WebSocket URL: wss://fal.run/owner/app/webrtc?fal_jwt_token=test-token
 
 **Prerequisites:** Phase 1 complete
 
-#### Unit Tests
+**Files Created:**
+- `src/scope/server/fal_tracks.py` - FalOutputTrack and FalInputTrack classes
+- `tests/server/test_fal_tracks.py` - Unit tests
 
-Create `tests/server/test_fal_tracks.py`:
+---
 
-```python
-import pytest
-import asyncio
-from av import VideoFrame
-import numpy as np
+#### Automatic Tests (Unit Tests)
 
-@pytest.mark.asyncio
-async def test_fal_output_track_put_and_recv():
-    """Test frame queue put and receive."""
-    from scope.server.fal_tracks import FalOutputTrack
+**Location:** `tests/server/test_fal_tracks.py`
 
-    track = FalOutputTrack(target_fps=30)
+**Test List (18 tests):**
 
-    # Create test frame
-    arr = np.zeros((480, 640, 3), dtype=np.uint8)
-    frame = VideoFrame.from_ndarray(arr, format="rgb24")
+##### FalOutputTrack Tests (9 tests)
 
-    # Put frame
-    result = await track.put_frame(frame)
-    assert result is True
+| Test Name | What It Tests |
+|-----------|---------------|
+| `test_initialization` | Track initializes with kind="video", target_fps=30, frame_count=0, maxsize=30 |
+| `test_initialization_custom_fps` | Track accepts custom FPS parameter |
+| `test_recv_returns_frame_with_pts` | recv() returns frame with correct pts and time_base |
+| `test_recv_increments_frame_count` | recv() increments frame count with each call |
+| `test_put_frame_success` | put_frame() successfully queues frame |
+| `test_put_frame_drops_oldest_when_full` | put_frame() drops oldest frame when queue is full |
+| `test_put_frame_nowait_success` | put_frame_nowait() successfully queues frame |
+| `test_put_frame_nowait_returns_false_when_full` | put_frame_nowait() returns False when queue is full |
+| `test_put_frame_sync_calls_nowait` | put_frame_sync() uses put_frame_nowait() |
 
-    # Receive frame
-    received = await track.recv()
-    assert received.pts == 1
-    assert received.time_base.numerator == 1
-    assert received.time_base.denominator == 30
+##### FalInputTrack Tests (9 tests)
 
-@pytest.mark.asyncio
-async def test_fal_output_track_queue_full_drops_oldest():
-    """Test that full queue drops oldest frame."""
-    from scope.server.fal_tracks import FalOutputTrack
+| Test Name | What It Tests |
+|-----------|---------------|
+| `test_initialization` | Track initializes with source_track and empty queue |
+| `test_start_consuming_creates_task` | start_consuming() creates asyncio task |
+| `test_recv_returns_frame_from_queue` | recv() returns frame from queue |
+| `test_get_frame_nowait_returns_frame` | get_frame_nowait() returns frame when available |
+| `test_get_frame_nowait_returns_none_when_empty` | get_frame_nowait() returns None when queue is empty |
+| `test_stop_cancels_consume_task` | stop() cancels the consume task |
+| `test_stop_handles_no_task` | stop() handles case when no task exists |
+| `test_consume_loop_queues_frames` | _consume_loop() receives and queues frames |
+| `test_consume_loop_drops_oldest_when_full` | _consume_loop() drops oldest frame when queue is full |
 
-    track = FalOutputTrack(target_fps=30)
-    track.frame_queue = asyncio.Queue(maxsize=2)  # Small queue for testing
-
-    arr = np.zeros((480, 640, 3), dtype=np.uint8)
-
-    # Fill queue
-    for i in range(3):
-        frame = VideoFrame.from_ndarray(arr, format="rgb24")
-        frame.pts = i
-        await track.put_frame(frame)
-
-    # Queue should have frames 1 and 2 (0 was dropped)
-    assert track.frame_queue.qsize() == 2
-
-def test_fal_output_track_put_frame_nowait():
-    """Test non-blocking frame put."""
-    from scope.server.fal_tracks import FalOutputTrack
-
-    track = FalOutputTrack(target_fps=30)
-
-    arr = np.zeros((480, 640, 3), dtype=np.uint8)
-    frame = VideoFrame.from_ndarray(arr, format="rgb24")
-
-    result = track.put_frame_nowait(frame)
-    assert result is True
-    assert track.frame_queue.qsize() == 1
-```
-
-Run with:
+**Run All Phase 2 Tests:**
 ```bash
 uv run pytest tests/server/test_fal_tracks.py -v
 ```
 
+**Expected Output:**
+```
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_initialization PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_initialization_custom_fps PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_recv_returns_frame_with_pts PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_recv_increments_frame_count PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_put_frame_success PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_put_frame_drops_oldest_when_full PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_put_frame_nowait_success PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_put_frame_nowait_returns_false_when_full PASSED
+tests/server/test_fal_tracks.py::TestFalOutputTrack::test_put_frame_sync_calls_nowait PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_initialization PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_start_consuming_creates_task PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_recv_returns_frame_from_queue PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_get_frame_nowait_returns_frame PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_get_frame_nowait_returns_none_when_empty PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_stop_cancels_consume_task PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_stop_handles_no_task PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_consume_loop_queues_frames PASSED
+tests/server/test_fal_tracks.py::TestFalInputTrack::test_consume_loop_drops_oldest_when_full PASSED
+
+============================== 18 passed ===============================
+```
+
+**Run All fal Tests (Phase 1 + Phase 2):**
+```bash
+uv run pytest tests/server/test_fal_client.py tests/server/test_fal_tracks.py -v
+```
+
+**Expected:** 27 passed (9 from Phase 1 + 18 from Phase 2)
+
+---
+
 #### Manual Tests
 
-1. **Track Creation Test**:
-   ```bash
-   uv run python -c "
-   from scope.server.fal_tracks import FalOutputTrack, FalInputTrack
-   track = FalOutputTrack()
-   print(f'Track kind: {track.kind}')
-   print(f'Queue maxsize: {track.frame_queue.maxsize}')
-   print('FalOutputTrack created successfully')
-   "
-   ```
-   Expected: `Track kind: video`, queue maxsize 30
+##### 1. Module Import Test
 
-2. **Frame Round-Trip Test**:
-   ```bash
-   uv run python -c "
-   import asyncio
-   import numpy as np
-   from av import VideoFrame
-   from scope.server.fal_tracks import FalOutputTrack
+**Purpose:** Verify the module can be imported without errors
 
-   async def test():
-       track = FalOutputTrack()
-       arr = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-       frame = VideoFrame.from_ndarray(arr, format='rgb24')
-       await track.put_frame(frame)
-       received = await track.recv()
-       print(f'Frame received: {received.width}x{received.height}, pts={received.pts}')
+```bash
+uv run python -c "from scope.server.fal_tracks import FalOutputTrack, FalInputTrack; print('fal_tracks imported successfully')"
+```
 
-   asyncio.run(test())
-   "
-   ```
-   Expected: `Frame received: 640x480, pts=1`
+**Expected Output:**
+```
+fal_tracks imported successfully
+```
 
-#### Phase 2 Completion Criteria
-- [ ] All unit tests pass
-- [ ] FalOutputTrack can queue and retrieve frames
-- [ ] Frame timestamps are correctly set
+**What to check if it fails:**
+- Import errors: Check that `aiortc` is installed
+- Missing dependencies: Run `uv sync --group dev`
+
+---
+
+##### 2. FalOutputTrack Creation Test
+
+**Purpose:** Verify FalOutputTrack initializes correctly
+
+```bash
+uv run python -c "
+from scope.server.fal_tracks import FalOutputTrack
+
+track = FalOutputTrack()
+print(f'Track kind: {track.kind}')
+print(f'Target FPS: {track.target_fps}')
+print(f'Queue maxsize: {track.frame_queue.maxsize}')
+print(f'Initial frame count: {track._frame_count}')
+print('FalOutputTrack created successfully')
+"
+```
+
+**Expected Output:**
+```
+Track kind: video
+Target FPS: 30
+Queue maxsize: 30
+Initial frame count: 0
+FalOutputTrack created successfully
+```
+
+---
+
+##### 3. FalInputTrack Creation Test
+
+**Purpose:** Verify FalInputTrack initializes correctly
+
+```bash
+uv run python -c "
+from unittest.mock import MagicMock
+from scope.server.fal_tracks import FalInputTrack
+
+mock_source = MagicMock()
+track = FalInputTrack(mock_source)
+print(f'Track kind: {track.kind}')
+print(f'Source track set: {track.source_track is not None}')
+print(f'Queue maxsize: {track.frame_queue.maxsize}')
+print(f'Consume task (before start): {track._consume_task}')
+print('FalInputTrack created successfully')
+"
+```
+
+**Expected Output:**
+```
+Track kind: video
+Source track set: True
+Queue maxsize: 30
+Consume task (before start): None
+FalInputTrack created successfully
+```
+
+---
+
+##### 4. Frame Queue Test
+
+**Purpose:** Verify frames can be queued and retrieved
+
+```bash
+uv run python -c "
+import asyncio
+from unittest.mock import MagicMock
+from scope.server.fal_tracks import FalOutputTrack
+
+async def test():
+    track = FalOutputTrack(target_fps=30)
+
+    # Create mock frame
+    mock_frame = MagicMock()
+    mock_frame.pts = None
+    mock_frame.time_base = None
+
+    # Test put
+    result = await track.put_frame(mock_frame)
+    print(f'Put frame result: {result}')
+    print(f'Queue size after put: {track.frame_queue.qsize()}')
+
+    # Test recv
+    received = await track.recv()
+    print(f'Frame pts after recv: {received.pts}')
+    print(f'Frame time_base: {received.time_base}')
+    print(f'Queue size after recv: {track.frame_queue.qsize()}')
+
+asyncio.run(test())
+"
+```
+
+**Expected Output:**
+```
+Put frame result: True
+Queue size after put: 1
+Frame pts after recv: 1
+Frame time_base: 1/30
+Queue size after recv: 0
+```
+
+---
+
+##### 5. Server Startup Test
+
+**Purpose:** Verify the server starts without import errors from the new module
+
+```bash
+timeout 5 uv run daydream-scope 2>&1 || true
+```
+
+**Expected Output:**
+```
+<timestamp> - scope.core.pipelines.registry - INFO - GPU detected with X.X GB VRAM
+```
+
+**What to check if it fails:**
+- Import errors in fal_tracks.py
+- Circular import issues between fal_client.py and fal_tracks.py
+
+---
+
+#### Phase 2 Completion Checklist
+
+| Test | Type | Status |
+|------|------|--------|
+| All 18 unit tests pass | Automatic | ⬜ |
+| Module imports without errors | Manual | ⬜ |
+| FalOutputTrack creation works | Manual | ⬜ |
+| FalInputTrack creation works | Manual | ⬜ |
+| Frame queue put/recv works | Manual | ⬜ |
+| Server starts without errors | Manual | ⬜ |
+
+**To mark Phase 2 complete, all "Automatic" and "Manual" tests must pass.**
 
 ---
 
@@ -1797,14 +1921,14 @@ Use this checklist to track progress through all phases:
 
 | Phase | Unit Tests | Manual Tests | Status |
 |-------|------------|--------------|--------|
-| 1. FalClient Module | 3 tests | 2 tests | ⬜ |
-| 2. FalOutputTrack/FalInputTrack | 3 tests | 2 tests | ⬜ |
+| 1. FalClient Module | 9 tests | 4 tests | ✅ |
+| 2. FalOutputTrack/FalInputTrack | 18 tests | 5 tests | ✅ |
 | 3. FrameProcessor Integration | 3 tests | 2 tests | ⬜ |
 | 4. API Endpoints | 4 tests | 2 tests | ⬜ |
 | 5. Spout Integration | 2 tests | 3 tests | ⬜ |
 | 6. Parameter Forwarding & UI | 3 tests | 4 tests | ⬜ |
 
-**Total: 18 unit tests, 15 manual tests**
+**Total: 39 unit tests, 20 manual tests**
 
 ---
 
