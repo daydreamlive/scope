@@ -1,4 +1,4 @@
-import { FolderOpen, Trash2 } from "lucide-react";
+import { ArrowUpSquare, FolderOpen, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import type { InstalledPlugin } from "@/types/settings";
@@ -9,8 +9,10 @@ interface PluginsTabProps {
   onInstallPathChange: (path: string) => void;
   onBrowse: () => void;
   onInstall: (pluginUrl: string) => void;
-  onCheckUpdates: () => void;
-  onDelete: (pluginId: string) => void;
+  onUpdate: (pluginName: string, packageSpec: string) => void;
+  onDelete: (pluginName: string) => void;
+  isLoading?: boolean;
+  isInstalling?: boolean;
 }
 
 // Check if running in Electron (file browsing supported)
@@ -24,8 +26,10 @@ export function PluginsTab({
   onInstallPathChange,
   onBrowse,
   onInstall,
-  onCheckUpdates,
+  onUpdate,
   onDelete,
+  isLoading = false,
+  isInstalling = false,
 }: PluginsTabProps) {
   const handleInstall = () => {
     if (installPath.trim()) {
@@ -59,19 +63,14 @@ export function PluginsTab({
               <FolderOpen className="h-4 w-4" />
             </Button>
           )}
-          <Button onClick={handleInstall} variant="outline" size="sm">
-            Install
+          <Button
+            onClick={handleInstall}
+            variant="outline"
+            size="sm"
+            disabled={isInstalling || !installPath.trim()}
+          >
+            {isInstalling ? "Installing..." : "Install"}
           </Button>
-        </div>
-
-        {/* Check for Updates */}
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-foreground">Updates</span>
-          <div className="flex-1 flex items-center justify-end">
-            <Button onClick={onCheckUpdates} variant="outline" size="sm">
-              Check for updates
-            </Button>
-          </div>
         </div>
       </div>
 
@@ -80,13 +79,15 @@ export function PluginsTab({
         <h3 className="text-sm font-medium text-foreground">
           Installed Plugins
         </h3>
-        {plugins.length === 0 ? (
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading plugins...</p>
+        ) : plugins.length === 0 ? (
           <p className="text-sm text-muted-foreground">No plugins installed</p>
         ) : (
           <div className="space-y-3">
             {plugins.map(plugin => (
               <div
-                key={plugin.id}
+                key={plugin.name}
                 className="flex items-start justify-between p-3 rounded-md border border-border bg-card"
               >
                 <div className="space-y-1">
@@ -94,25 +95,50 @@ export function PluginsTab({
                     <span className="text-sm font-medium text-foreground">
                       {plugin.name}
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      v{plugin.version}
-                    </span>
+                    {plugin.version && (
+                      <span className="text-xs text-muted-foreground">
+                        v{plugin.version}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    by {plugin.author}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {plugin.description}
-                  </p>
+                  {plugin.author && (
+                    <p className="text-xs text-muted-foreground">
+                      by {plugin.author}
+                    </p>
+                  )}
+                  {plugin.description && (
+                    <p className="text-sm text-muted-foreground">
+                      {plugin.description}
+                    </p>
+                  )}
                 </div>
-                <Button
-                  onClick={() => onDelete(plugin.id)}
-                  variant="ghost"
-                  size="icon"
-                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  {plugin.update_available && plugin.package_spec && (
+                    <Button
+                      onClick={() =>
+                        onUpdate(plugin.name, plugin.package_spec!)
+                      }
+                      variant="ghost"
+                      size="icon"
+                      disabled={isInstalling}
+                      title={
+                        plugin.latest_version
+                          ? `Update to ${plugin.latest_version}`
+                          : "Update available"
+                      }
+                    >
+                      <ArrowUpSquare className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Button
+                    onClick={() => onDelete(plugin.name)}
+                    variant="ghost"
+                    size="icon"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

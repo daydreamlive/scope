@@ -46,6 +46,33 @@ class PipelineRegistry:
         return cls._pipelines.get(pipeline_id)
 
     @classmethod
+    def unregister(cls, pipeline_id: str) -> bool:
+        """Remove a pipeline from the registry.
+
+        Args:
+            pipeline_id: Pipeline identifier to remove
+
+        Returns:
+            True if pipeline was removed, False if not found
+        """
+        if pipeline_id in cls._pipelines:
+            del cls._pipelines[pipeline_id]
+            return True
+        return False
+
+    @classmethod
+    def is_registered(cls, pipeline_id: str) -> bool:
+        """Check if a pipeline is registered.
+
+        Args:
+            pipeline_id: Pipeline identifier
+
+        Returns:
+            True if pipeline is registered, False otherwise
+        """
+        return pipeline_id in cls._pipelines
+
+    @classmethod
     def get_config_class(cls, pipeline_id: str) -> type["BasePipelineConfig"] | None:
         """Get config class for a specific pipeline.
 
