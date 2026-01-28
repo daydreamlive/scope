@@ -123,6 +123,25 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float,
                 description="Scaling factor for VACE hint injection",
             ),
+            # MagCache toggle (runtime)
+            InputParam(
+                "use_magcache",
+                default=False,
+                type_hint=bool,
+                description="Enable MagCache (magnitude-aware residual caching) for faster inference",
+            ),
+            InputParam(
+                "magcache_thresh",
+                default=0.12,
+                type_hint=float,
+                description="MagCache error threshold - lower = better quality, higher = faster",
+            ),
+            InputParam(
+                "magcache_K",
+                default=2,
+                type_hint=int,
+                description="MagCache max consecutive skips before forcing compute",
+            ),
         ]
 
     @property
@@ -151,6 +170,7 @@ class DenoiseBlock(ModularPipelineBlocks):
         batch_size = noise.shape[0]
         num_frames = noise.shape[1]
         denoising_step_list = block_state.current_denoising_step_list.clone()
+        magcache_num_steps = int(len(denoising_step_list))
 
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
 
@@ -196,6 +216,10 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
+                    use_magcache=block_state.use_magcache,
+                    magcache_thresh=block_state.magcache_thresh,
+                    magcache_K=block_state.magcache_K,
+                    magcache_num_steps=magcache_num_steps,
                 )
 
                 next_timestep = denoising_step_list[index + 1]
@@ -232,6 +256,10 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
+                    use_magcache=block_state.use_magcache,
+                    magcache_thresh=block_state.magcache_thresh,
+                    magcache_K=block_state.magcache_K,
+                    magcache_num_steps=magcache_num_steps,
                 )
 
         block_state.latents = denoised_pred

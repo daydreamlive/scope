@@ -96,6 +96,23 @@ class Parameters(BaseModel):
         default=None,
         description="Enable automatic cache management for parameter updates",
     )
+    use_magcache: bool | None = Field(
+        default=None,
+        description="Enable MagCache (magnitude-aware residual caching) to skip redundant denoising steps. "
+        "Only supported by pipelines that advertise supports_magcache.",
+    )
+    magcache_thresh: float | None = Field(
+        default=None,
+        description="MagCache error threshold. Lower values = better quality, fewer skips. Higher values = faster, more skips. Default: 0.12",
+        ge=0.05,
+        le=0.5,
+    )
+    magcache_K: int | None = Field(
+        default=None,
+        description="MagCache max consecutive skips before forcing a compute. Lower = better quality. Higher = faster but may cause instability. Default: 2",
+        ge=1,
+        le=4,
+    )
     reset_cache: bool | None = Field(default=None, description="Trigger a cache reset")
     kv_cache_attention_bias: float | None = Field(
         default=None,

@@ -2,6 +2,7 @@
 # Adapted for causal/autoregressive generation with factory pattern
 # Pipeline-agnostic using duck typing - works with any CausalWanModel
 import inspect
+import logging
 import math
 
 import torch
@@ -11,6 +12,8 @@ from .attention_blocks import (
     create_base_attention_block_class,
     create_vace_attention_block_class,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # TODO: Consolidate this with other pipeline implementations into a shared wan2_1/utils module.
@@ -467,47 +470,210 @@ class CausalVaceWanModel(nn.Module):
 
             return custom_forward
 
-        # Process through blocks
-        cache_update_infos = []
-        for block_index, block in enumerate(self.blocks):
-            # Build per-block kwargs:
-            # - kv_cache/crossattn_cache are always per-block indexed
-            # - Additional block_kwargs are dynamically filtered based on block's signature
-            #   and automatically indexed if they're per-block lists
-            filtered_block_kwargs = self._filter_block_kwargs(block_kwargs, block_index)
-            per_block_kwargs = {
-                "kv_cache": kv_cache[block_index],
-                "current_start": current_start,
-                **filtered_block_kwargs,
-            }
+        # --------------------------------------------------------------
+        # MagCache support (for VACE-wrapped causal Wan models)
+        #
+        # Same strategy as the base LongLive CausalWanModel:
+        # cache token-level residual right before the head, optionally skip blocks.
+        # --------------------------------------------------------------
 
-            if torch.is_grad_enabled() and self.causal_wan_model.gradient_checkpointing:
-                kwargs = {**base_kwargs, **per_block_kwargs}
-                result = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    x,
-                    **kwargs,
-                    use_reentrant=False,
-                )
-                if kv_cache is not None and isinstance(result, tuple):
-                    x, block_cache_update_info = result
-                    cache_update_infos.append((block_index, block_cache_update_info))
-                else:
-                    x = result
+        def _magcache_reset():
+            pass
+            '''
+            self._magcache_step = 0
+            self._magcache_accumulated_ratio = 1.0
+            self._magcache_accumulated_err = 0.0
+            self._magcache_accumulated_steps = 0
+            self._magcache_residual_cache = None
+            self._magcache_stats = {"skipped": 0, "computed": 0}
+            '''
+        if not hasattr(self, "_magcache_reset"):
+            self._magcache_reset = _magcache_reset  # type: ignore[attr-defined]
+
+        magcache_cfg = getattr(self, "_magcache_config", None)
+        magcache_enabled = bool(getattr(magcache_cfg, "enabled", False))
+        magcache_num_steps = getattr(self, "_magcache_num_steps", None)
+
+        if magcache_enabled and not hasattr(self, "_magcache_step"):
+            _magcache_reset()
+
+        skip_forward = False
+        ori_x = x
+
+        # Debug: track MagCache statistics
+        if not hasattr(self, "_magcache_stats"):
+            self._magcache_stats = {"skipped": 0, "computed": 0}
+
+        if magcache_enabled and magcache_num_steps is not None:
+            from scope.core.pipelines.wan2_1.magcache import (
+                wan21_t2v_13b_mag_ratios,
+            )
+
+            retention_ratio = float(getattr(magcache_cfg, "retention_ratio", 0.2))
+            retain_steps = int(float(magcache_num_steps) * retention_ratio)
+            step_idx = int(getattr(self, "_magcache_step", 0))
+            residual_cache = getattr(self, "_magcache_residual_cache", None)
+
+            # Match reference implementation: only consider skipping after retention phase
+            # The retention phase ensures early steps (which are most important for quality)
+            # are always computed fully.
+            if step_idx >= retain_steps:
+                ratios = getattr(self, "_magcache_ratios", None)
+                if ratios is None or int(ratios.shape[0]) != int(magcache_num_steps):
+                    ratios = wan21_t2v_13b_mag_ratios(int(magcache_num_steps))
+                    setattr(self, "_magcache_ratios", ratios)
+
+                if step_idx < int(ratios.shape[0]):
+                    cur_ratio = float(ratios[step_idx])
+                    accumulated_ratio = float(
+                        getattr(self, "_magcache_accumulated_ratio", 1.0)
+                    )
+                    accumulated_steps = int(
+                        getattr(self, "_magcache_accumulated_steps", 0)
+                    )
+                    accumulated_err = float(
+                        getattr(self, "_magcache_accumulated_err", 0.0)
+                    )
+
+                    # Accumulate error estimate for this step
+                    # (matches reference: accumulate BEFORE deciding to skip)
+                    accumulated_ratio *= cur_ratio
+                    accumulated_steps += 1
+                    cur_skip_err = abs(1.0 - accumulated_ratio)
+                    accumulated_err += cur_skip_err
+
+                    thresh = float(getattr(magcache_cfg, "thresh", 0.12))
+                    K = int(getattr(magcache_cfg, "K", 1))
+
+                    # Check if we can skip: need a cached residual, error below threshold,
+                    # and haven't exceeded max consecutive skips
+                    if (
+                        residual_cache is not None
+                        and accumulated_err < thresh
+                        and accumulated_steps <= K
+                    ):
+                        skip_forward = True
+                        # Save updated accumulation state for next step
+                        setattr(self, "_magcache_accumulated_ratio", accumulated_ratio)
+                        setattr(self, "_magcache_accumulated_steps", accumulated_steps)
+                        setattr(self, "_magcache_accumulated_err", accumulated_err)
+                        logger.debug(
+                            f"MagCache (VACE) SKIP: step={step_idx}, acc_err={accumulated_err:.4f} < thresh={thresh}, acc_steps={accumulated_steps} <= K={K}"
+                        )
+                    else:
+                        # Force compute: reset accumulation state
+                        # (matches reference: reset when NOT skipping)
+                        setattr(self, "_magcache_accumulated_ratio", 1.0)
+                        setattr(self, "_magcache_accumulated_steps", 0)
+                        setattr(self, "_magcache_accumulated_err", 0.0)
+                        logger.debug(
+                            f"MagCache (VACE) COMPUTE: step={step_idx}, acc_err={accumulated_err:.4f}, thresh={thresh}, "
+                            f"acc_steps={accumulated_steps}, K={K}, cache={'exists' if residual_cache is not None else 'None'}"
+                        )
             else:
-                per_block_kwargs["crossattn_cache"] = crossattn_cache[block_index]
-                kwargs = {**base_kwargs, **per_block_kwargs}
-                result = block(x, **kwargs)
-                if kv_cache is not None and isinstance(result, tuple):
-                    x, block_cache_update_info = result
-                    cache_update_infos.append((block_index, block_cache_update_info))
+                logger.debug(
+                    f"MagCache (VACE) RETAIN: step={step_idx} < retain_steps={retain_steps}"
+                )
+
+        # Process through blocks (or skip)
+        cache_update_infos = []
+
+        # Safety check: if we're about to skip but the KV cache expects updates,
+        # we must not skip to avoid cache index misalignment.
+        # This can happen when magcache_K is set too high relative to num_steps.
+        if skip_forward and kv_cache is not None:
+            # Check if the first block's cache indicates we need an update
+            # by comparing current_start with the cache's expected position
+            first_cache = kv_cache[0] if kv_cache else None
+            if first_cache is not None:
+                cache_global_end = first_cache.get("global_end_index")
+                if cache_global_end is not None:
+                    cache_end_val = (
+                        cache_global_end.item()
+                        if hasattr(cache_global_end, "item")
+                        else int(cache_global_end)
+                    )
+                    # If current_start is beyond what cache expects, force compute
+                    if current_start is not None and current_start > cache_end_val:
+                        logger.warning(
+                            f"MagCache (VACE): forcing compute due to KV cache misalignment "
+                            f"(current_start={current_start}, cache_end={cache_end_val})"
+                        )
+                        skip_forward = False
+
+        if skip_forward:
+            x = ori_x + getattr(self, "_magcache_residual_cache")
+            self._magcache_stats["skipped"] += 1
+        else:
+            self._magcache_stats["computed"] += 1
+            for block_index, block in enumerate(self.blocks):
+                # Build per-block kwargs:
+                # - kv_cache/crossattn_cache are always per-block indexed
+                # - Additional block_kwargs are dynamically filtered based on block's signature
+                #   and automatically indexed if they're per-block lists
+                filtered_block_kwargs = self._filter_block_kwargs(
+                    block_kwargs, block_index
+                )
+                per_block_kwargs = {
+                    "kv_cache": kv_cache[block_index],
+                    "current_start": current_start,
+                    **filtered_block_kwargs,
+                }
+
+                if torch.is_grad_enabled() and self.causal_wan_model.gradient_checkpointing:
+                    kwargs = {**base_kwargs, **per_block_kwargs}
+                    result = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        x,
+                        **kwargs,
+                        use_reentrant=False,
+                    )
+                    if kv_cache is not None and isinstance(result, tuple):
+                        x, block_cache_update_info = result
+                        cache_update_infos.append((block_index, block_cache_update_info))
+                    else:
+                        x = result
                 else:
-                    x = result
+                    per_block_kwargs["crossattn_cache"] = crossattn_cache[block_index]
+                    kwargs = {**base_kwargs, **per_block_kwargs}
+                    result = block(x, **kwargs)
+                    if kv_cache is not None and isinstance(result, tuple):
+                        x, block_cache_update_info = result
+                        cache_update_infos.append((block_index, block_cache_update_info))
+                    else:
+                        x = result
 
         if kv_cache is not None and cache_update_infos:
             self.causal_wan_model._apply_cache_updates(
                 kv_cache, cache_update_infos, **block_kwargs
             )
+
+        if magcache_enabled and not skip_forward:
+            setattr(self, "_magcache_residual_cache", x - ori_x)
+
+        if magcache_enabled and magcache_num_steps is not None:
+            next_step = int(getattr(self, "_magcache_step", 0)) + 1
+            setattr(self, "_magcache_step", next_step)
+            if next_step >= int(magcache_num_steps):
+                # Log MagCache stats at end of each chunk
+                stats = getattr(self, "_magcache_stats", {"skipped": 0, "computed": 0})
+                if stats["skipped"] > 0 or stats["computed"] > 0:
+                    total = stats["skipped"] + stats["computed"]
+                    skip_pct = 100 * stats["skipped"] / total if total > 0 else 0
+                    logger.info(
+                        f"MagCache (VACE): skipped {stats['skipped']}/{total} steps ({skip_pct:.1f}%)"
+                    )
+                # Reset ALL state between chunks.
+                # CRITICAL: The residual cache MUST be cleared because each chunk has
+                # different latent content. Reusing a residual from chunk N on chunk N+1
+                # causes severe artifacts ("looping noise") since the cached residual
+                # was computed for completely different spatial content.
+                self._magcache_step = 0
+                self._magcache_accumulated_ratio = 1.0
+                self._magcache_accumulated_err = 0.0
+                self._magcache_accumulated_steps = 0
+                self._magcache_stats = {"skipped": 0, "computed": 0}
+                self._magcache_residual_cache = None  # Clear to prevent cross-chunk artifacts
 
         x = self.causal_wan_model.head(
             x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2)
