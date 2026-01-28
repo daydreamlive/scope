@@ -523,7 +523,9 @@ class FrameProcessor:
                         if torch.cuda.is_available():
                             shape = rgb_frame.shape
                             pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                            pinned_buffer.copy_(torch.as_tensor(rgb_frame, dtype=torch.uint8))
+                            pinned_buffer.copy_(
+                                torch.as_tensor(rgb_frame, dtype=torch.uint8)
+                            )
                             frame_tensor = pinned_buffer.cuda(non_blocking=True)
                         else:
                             frame_tensor = torch.as_tensor(rgb_frame, dtype=torch.uint8)
