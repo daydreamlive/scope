@@ -1,7 +1,7 @@
 from pydantic import Field
 
 from ..artifacts import HuggingfaceRepoArtifact
-from ..base_schema import BasePipelineConfig, ModeDefaults
+from ..base_schema import BasePipelineConfig, ModeDefaults, ui_field_config
 from ..common_artifacts import (
     LIGHTTAE_ARTIFACT,
     LIGHTVAE_ARTIFACT,
@@ -10,6 +10,7 @@ from ..common_artifacts import (
     VACE_ARTIFACT,
     WAN_1_3B_ARTIFACT,
 )
+from ..enums import Quantization
 from ..utils import VaeType
 
 
@@ -42,12 +43,85 @@ class RewardForcingConfig(BasePipelineConfig):
     min_dimension = 16
     modified = True
 
-    height: int = 320
-    width: int = 576
-    denoising_steps: list[int] = [1000, 750, 500, 250]
+    vace_context_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Scaling factor for VACE hint injection (0.0 to 2.0)",
+        json_schema_extra=ui_field_config(
+            order=1, component="vace", is_load_param=True
+        ),
+    )
+    lora_merge_strategy: str = Field(
+        default="permanent_merge",
+        description="LoRA merge strategy",
+        json_schema_extra=ui_field_config(
+            order=2, component="lora", is_load_param=True
+        ),
+    )
     vae_type: VaeType = Field(
         default=VaeType.WAN,
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
+        json_schema_extra=ui_field_config(order=3, is_load_param=True, label="VAE:"),
+    )
+    height: int = Field(
+        default=320,
+        ge=1,
+        description="Output height in pixels",
+        json_schema_extra=ui_field_config(
+            order=4, component="resolution", is_load_param=True
+        ),
+    )
+    width: int = Field(
+        default=576,
+        ge=1,
+        description="Output width in pixels",
+        json_schema_extra=ui_field_config(
+            order=4, component="resolution", is_load_param=True
+        ),
+    )
+    base_seed: int = Field(
+        default=42,
+        ge=0,
+        description="Base random seed for reproducible generation",
+        json_schema_extra=ui_field_config(order=5, is_load_param=True, label="Seed"),
+    )
+    manage_cache: bool = Field(
+        default=True,
+        description="Enable automatic cache management for performance optimization",
+        json_schema_extra=ui_field_config(
+            order=5, component="cache", is_load_param=True
+        ),
+    )
+    denoising_steps: list[int] = Field(
+        default=[1000, 750, 500, 250],
+        description="Denoising step schedule for progressive generation",
+        json_schema_extra=ui_field_config(
+            order=6, component="denoising_steps", is_load_param=True
+        ),
+    )
+    noise_scale: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Amount of noise to add during video generation (video mode only)",
+        json_schema_extra=ui_field_config(
+            order=7, component="noise", modes=["video"], is_load_param=True
+        ),
+    )
+    noise_controller: bool = Field(
+        default=True,
+        description="Enable dynamic noise control during generation (video mode only)",
+        json_schema_extra=ui_field_config(
+            order=7, component="noise", modes=["video"], is_load_param=True
+        ),
+    )
+    quantization: Quantization | None = Field(
+        default=None,
+        description="Quantization method for the diffusion model.",
+        json_schema_extra=ui_field_config(
+            order=8, component="quantization", is_load_param=True
+        ),
     )
 
     modes = {

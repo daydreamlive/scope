@@ -66,7 +66,9 @@ def noise_controller_field(default: bool | None = None) -> FieldInfo:
 
 
 def input_size_field(default: int | None = 1) -> FieldInfo:
-    """Input size field with constraints."""
+    """Input size field with constraints. No json_schema_extra in base — pipelines
+    that want to show this in the UI override with ui_field_config(category="input", ...).
+    """
     return Field(
         default=default,
         ge=1,
@@ -94,6 +96,55 @@ def vace_context_scale_field(default: float = 1.0) -> FieldInfo:
 
 # Type alias for input modes
 InputMode = Literal["text", "video"]
+
+
+def ui_field_config(
+    *,
+    order: int | None = None,
+    component: str | None = None,
+    modes: list[str] | None = None,
+    is_load_param: bool = False,
+    label: str | None = None,
+    category: Literal["configuration", "input"] | None = None,
+) -> dict[str, Any]:
+    """Build json_schema_extra for a field so the frontend renders it in Settings or Input & Controls.
+
+    Use with Field(..., json_schema_extra=ui_field_config(...)).
+    - category "configuration" (default): shown in the Settings panel.
+    - category "input": shown in the Input & Controls panel, below app-defined sections (Prompts).
+    If category is omitted, the frontend treats it as "configuration".
+
+    Args:
+        order: Display order (lower first). If omitted, Pydantic field order is used.
+        component: Complex component name ("vace", "lora", "denoising_steps",
+            "quantization", "cache", "image"). Use "image" for image-path fields
+            (str | None); the UI renders an image picker like first_frame_image.
+            Omit for primitive widgets.
+        modes: Restrict to input modes, e.g. ["video"]. Omit to show in all modes.
+        is_load_param: If True, this field is a load param (passed when loading the
+            pipeline) and is disabled while the stream is active. Default False
+            means a runtime param, editable when streaming.
+        label: Short label for the UI. If set, used instead of description for
+            the field label; description remains available as tooltip.
+        category: "configuration" for Settings panel, "input" for Input & Controls
+            (below Prompts). Omit to default to "configuration".
+
+    Returns:
+        Dict to pass as json_schema_extra (produces "ui" key in JSON schema).
+    """
+    ui: dict[str, Any] = {
+        "category": category if category is not None else "configuration",
+        "is_load_param": is_load_param,
+    }
+    if order is not None:
+        ui["order"] = order
+    if component is not None:
+        ui["component"] = component
+    if modes is not None:
+        ui["modes"] = modes
+    if label is not None:
+        ui["label"] = label
+    return {"ui": ui}
 
 
 class UsageType(str, Enum):
@@ -222,6 +273,9 @@ class BasePipelineConfig(BaseModel):
         description="Base random seed for reproducible generation",
     )
     denoising_steps: list[int] | None = denoising_steps_field()
+
+    # LoRA merge strategy (optional; pipelines with supports_lora override with default + ui)
+    lora_merge_strategy: Literal["permanent_merge", "runtime_peft"] | None = None
 
     # Video mode parameters (None means not applicable/text mode)
     noise_scale: Annotated[float, Field(ge=0.0, le=1.0)] | None = noise_scale_field()

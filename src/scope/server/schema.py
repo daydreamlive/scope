@@ -1,7 +1,7 @@
 """Pydantic schemas for FastAPI application."""
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -329,9 +329,9 @@ class StreamDiffusionV2LoadParams(LoRAEnabledLoadParams):
         ge=64,
         le=2048,
     )
-    seed: int = Field(
+    base_seed: int = Field(
         default=_DEFAULT_SEED,
-        description="Random seed for generation",
+        description="Base random seed for reproducible generation",
         ge=0,
     )
     quantization: Quantization | None = Field(
@@ -372,9 +372,9 @@ class LongLiveLoadParams(LoRAEnabledLoadParams):
         ge=16,
         le=2048,
     )
-    seed: int = Field(
+    base_seed: int = Field(
         default=_DEFAULT_SEED,
-        description="Random seed for generation",
+        description="Base random seed for reproducible generation",
         ge=0,
     )
     quantization: Quantization | None = Field(
@@ -409,9 +409,9 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
         ge=64,
         le=2048,
     )
-    seed: int = Field(
+    base_seed: int = Field(
         default=_DEFAULT_SEED,
-        description="Random seed for generation",
+        description="Base random seed for reproducible generation",
         ge=0,
     )
     quantization: Quantization | None = Field(
@@ -432,15 +432,10 @@ class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
     pipeline_ids: list[str] = Field(..., description="List of pipeline IDs to load")
-    load_params: (
-        StreamDiffusionV2LoadParams
-        | PassthroughLoadParams
-        | LongLiveLoadParams
-        | KreaRealtimeVideoLoadParams
-        | None
-    ) = Field(
+    load_params: dict[str, Any] | None = Field(
         default=None,
-        description="Pipeline-specific load parameters (applies to all pipelines)",
+        description="Pipeline-specific load parameters (applies to all pipelines). "
+        "Accepts raw dict; keys match pipeline config (e.g. base_seed).",
     )
 
 
