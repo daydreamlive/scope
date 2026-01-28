@@ -70,14 +70,6 @@ class OpticalFlowPipeline(Pipeline):
 
         self._pytorch_model = None
 
-        start = time.time()
-        model_size_str = "Large" if self._use_large_model else "Small"
-        logger.info(
-            f"Optical Flow pipeline initialized with RAFT {model_size_str} model "
-            "(loads on first use)"
-        )
-        logger.info(f"Initialization time: {time.time() - start:.3f}s")
-
     def _ensure_pytorch_model(self):
         """Lazily initialize the PyTorch RAFT model with torch.compile.
 
