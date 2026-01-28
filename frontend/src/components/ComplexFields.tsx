@@ -1,5 +1,5 @@
 /**
- * Complex schema-driven settings components: VACE, LoRA, VAE type, resolution,
+ * Complex schema-driven settings components: VACE, LoRA, resolution,
  * cache, denoising steps, noise, quantization.
  * Each block is rendered once per schema configuration (deduplicated by "component" or key).
  */
@@ -227,7 +227,6 @@ export function SchemaComplexField({
   if (component === "resolution") {
     if (rendered.has("resolution")) return null;
     rendered.add("resolution");
-    if (!ctx.supportsQuantization) return null;
     const minDim = ctx.minDimension;
     const resolution = ctx.resolution;
     const handleRes = (dim: "height" | "width", v: number) =>
@@ -406,7 +405,6 @@ export function SchemaComplexField({
 
   if (component === "denoising_steps" && !rendered.has("denoising_steps")) {
     rendered.add("denoising_steps");
-    if (!ctx.supportsQuantization) return null;
     return (
       <DenoisingStepsSlider
         key="denoising_steps"
