@@ -959,6 +959,7 @@ class PipelineManager:
                 dtype=torch.float16,
             )
             logger.info("Scribble pipeline initialized")
+            return pipeline
         elif pipeline_id == "gray":
             from scope.core.pipelines import GrayPipeline
 
