@@ -14,7 +14,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:0.1.0-beta.3"
+DOCKER_IMAGE = "daydreamlive/scope:deaf741"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
