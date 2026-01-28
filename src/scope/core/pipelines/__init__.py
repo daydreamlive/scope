@@ -48,6 +48,10 @@ def __getattr__(name):
         from .gray.pipeline import GrayPipeline
 
         return GrayPipeline
+    elif name == "OpticalFlowPipeline":
+        from .optical_flow.pipeline import OpticalFlowPipeline
+
+        return OpticalFlowPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -109,6 +113,7 @@ __all__ = [
     "RIFEPipeline",
     "ScribblePipeline",
     "GrayPipeline",
+    "OpticalFlowPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
