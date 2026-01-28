@@ -144,6 +144,7 @@ def _register_pipelines():
         ),
         ("rife", ".rife.pipeline", "RIFEPipeline"),
         ("scribble", ".scribble.pipeline", "ScribblePipeline"),
+        ("gray", ".gray.pipeline", "GrayPipeline"),
     ]
 
     # Try to import and register each pipeline

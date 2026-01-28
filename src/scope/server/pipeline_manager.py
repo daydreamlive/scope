@@ -528,6 +528,7 @@ class PipelineManager:
             "controller-viz",
             "rife",
             "scribble",
+            "gray",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -950,7 +951,6 @@ class PipelineManager:
             )
             logger.info("RIFE pipeline initialized")
             return pipeline
-
         elif pipeline_id == "scribble":
             from scope.core.pipelines import ScribblePipeline
 
@@ -959,6 +959,13 @@ class PipelineManager:
                 dtype=torch.float16,
             )
             logger.info("Scribble pipeline initialized")
+        elif pipeline_id == "gray":
+            from scope.core.pipelines import GrayPipeline
+
+            pipeline = GrayPipeline(
+                device=get_device(),
+            )
+            logger.info("Gray pipeline initialized")
             return pipeline
 
         else:
