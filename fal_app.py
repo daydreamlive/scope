@@ -13,8 +13,17 @@ import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
 
+
+# update image tag below from your latest branch push e.g. https://github.com/daydreamlive/scope/actions/runs/21450540770/job/61777880949
+# look for a line like #17 pushing manifest for docker.io/daydreamlive/scope:14149c7@sha256:a9047982edf126b0fc9fe63b3e913f2291c940a63ab26420f3e00f204ee4a3fa 1.6s done
+# then run:
+# switch to python 3.10 to match the scope image
+# pip install fal
+# fal auth login
+# fal deploy fal_app.py --auth public
+
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:0.1.0-beta.3"
+DOCKER_IMAGE = "daydreamlive/scope:14149c7"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -52,6 +61,8 @@ class ScopeApp(fal.App, keep_alive=300):
         "requests",
         "httpx",  # For async HTTP requests
     ]
+
+    auth_mode = "public"
 
     def setup(self):
         """
