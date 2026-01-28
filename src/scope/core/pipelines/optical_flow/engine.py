@@ -1,7 +1,4 @@
-"""TensorRT engine wrapper and RAFT ONNX compilation utilities.
-
-Ported from StreamDiffusion's temporal_net_tensorrt.py and compile_raft_tensorrt.py
-"""
+"""TensorRT engine wrapper and RAFT ONNX compilation utilities."""
 
 import logging
 from collections import OrderedDict
@@ -119,8 +116,6 @@ def export_raft_to_onnx(
 ) -> bool:
     """Export RAFT model from torchvision to ONNX format.
 
-    Ported from StreamDiffusion's compile_raft_tensorrt.py
-
     Args:
         onnx_path: Path to save the ONNX model
         height: Input height for the model
@@ -209,8 +204,6 @@ def build_tensorrt_engine(
     workspace_size_gb: int = 4,
 ) -> bool:
     """Build TensorRT engine from ONNX model with optimization profiles.
-
-    Ported from StreamDiffusion's compile_raft_tensorrt.py
 
     Args:
         onnx_path: Path to the ONNX model
@@ -311,8 +304,7 @@ def build_tensorrt_engine(
 class TensorRTEngine:
     """TensorRT engine wrapper for RAFT optical flow inference.
 
-    Ported from StreamDiffusion's temporal_net_tensorrt.py.
-    Handles dynamic shapes and buffer reallocation.
+    Optimized for fixed-shape inference with minimal per-call overhead.
     """
 
     def __init__(self, engine_path: str | Path):
@@ -327,7 +319,9 @@ class TensorRTEngine:
         self.engine = None
         self.context = None
         self.tensors: OrderedDict[str, torch.Tensor] = OrderedDict()
-        self._cuda_stream = None
+        self._input_shape: tuple | None = None
+        self._output_tensor: torch.Tensor | None = None
+        self._device = "cuda"
 
     def load(self):
         """Load TensorRT engine from file."""
@@ -353,10 +347,9 @@ class TensorRTEngine:
             raise RuntimeError("Engine must be loaded before activation")
 
         self.context = self.engine.create_execution_context()
-        self._cuda_stream = torch.cuda.current_stream().cuda_stream
 
     def allocate_buffers(self, device: str = "cuda", input_shape: tuple | None = None):
-        """Allocate input/output buffers.
+        """Allocate input/output buffers for a specific input shape.
 
         Args:
             device: Device to allocate tensors on
@@ -369,6 +362,9 @@ class TensorRTEngine:
 
         if self.context is None:
             raise RuntimeError("Context must be activated before buffer allocation")
+
+        self._device = device
+        self._input_shape = input_shape
 
         for idx in range(self.engine.num_io_tensors):
             name = self.engine.get_tensor_name(idx)
@@ -398,73 +394,84 @@ class TensorRTEngine:
             ).to(device=device)
             self.tensors[name] = tensor
 
+            # Cache output tensor reference for fast access
+            if name == "flow":
+                self._output_tensor = tensor
+
     def infer(
         self, feed_dict: dict[str, torch.Tensor], stream: int | None = None
     ) -> OrderedDict[str, torch.Tensor]:
         """Run inference with optional stream parameter.
 
-        Handles dynamic shape reallocation if input shapes change.
+        Optimized for fixed input shapes (skips reallocation checks when possible).
 
         Args:
             feed_dict: Dictionary mapping input names to tensors
                        For RAFT: {"frame1": tensor, "frame2": tensor}
-            stream: Optional CUDA stream handle. Uses cached stream if None.
+            stream: Optional CUDA stream handle. Uses current stream if None.
 
         Returns:
             OrderedDict of output tensors (contains "flow" key)
         """
-        try:
-            import tensorrt as trt
-        except ImportError as e:
-            raise ImportError("TensorRT is required") from e
+        # Use provided stream or default CUDA stream
+        # Note: TensorRT may log a warning about default stream sync, but
+        # benchmarks show this is actually faster than dedicated stream + sync
+        use_stream = (
+            stream if stream is not None else torch.cuda.current_stream().cuda_stream
+        )
 
-        if stream is None:
-            stream = self._cuda_stream
+        # Fast path: check if input shape matches (common case)
+        first_input = next(iter(feed_dict.values()))
+        if first_input.shape != self._input_shape:
+            self._reallocate_buffers(feed_dict)
 
-        # Check if we need to update tensor shapes for dynamic dimensions
-        need_realloc = False
+        # Set input tensor addresses directly (zero-copy where possible)
         for name, buf in feed_dict.items():
-            if name in self.tensors:
-                if self.tensors[name].shape != buf.shape:
-                    need_realloc = True
-                    break
+            self.context.set_tensor_address(name, buf.data_ptr())
 
-        # Reallocate buffers if input shape changed
-        if need_realloc:
-            # Update input shapes
-            for name, buf in feed_dict.items():
-                if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                    self.context.set_input_shape(name, buf.shape)
-
-            # Reallocate all tensors with new shapes
-            for idx in range(self.engine.num_io_tensors):
-                name = self.engine.get_tensor_name(idx)
-                shape = self.context.get_tensor_shape(name)
-                dtype = trt.nptype(self.engine.get_tensor_dtype(name))
-
-                tensor = torch.empty(
-                    tuple(shape), dtype=numpy_to_torch_dtype_dict[dtype]
-                ).to(device=self.tensors[name].device)
-                self.tensors[name] = tensor
-
-        # Copy input data to tensors
-        for name, buf in feed_dict.items():
-            if name in self.tensors:
-                self.tensors[name].copy_(buf)
-
-        # Set tensor addresses
-        for name, tensor in self.tensors.items():
-            self.context.set_tensor_address(name, tensor.data_ptr())
+        # Set output tensor address
+        self.context.set_tensor_address("flow", self._output_tensor.data_ptr())
 
         # Execute inference
-        success = self.context.execute_async_v3(stream)
+        success = self.context.execute_async_v3(use_stream)
         if not success:
             raise ValueError("TensorRT inference failed")
 
         return self.tensors
 
+    def _reallocate_buffers(self, feed_dict: dict[str, torch.Tensor]):
+        """Reallocate buffers when input shape changes."""
+        try:
+            import tensorrt as trt
+        except ImportError as e:
+            raise ImportError("TensorRT is required") from e
+
+        # Update input shapes
+        for name, buf in feed_dict.items():
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                self.context.set_input_shape(name, buf.shape)
+
+        # Update cached input shape
+        self._input_shape = next(iter(feed_dict.values())).shape
+
+        # Reallocate output tensor with new shape
+        for idx in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(idx)
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.OUTPUT:
+                shape = self.context.get_tensor_shape(name)
+                dtype = trt.nptype(self.engine.get_tensor_dtype(name))
+
+                tensor = torch.empty(
+                    tuple(shape), dtype=numpy_to_torch_dtype_dict[dtype]
+                ).to(device=self._device)
+                self.tensors[name] = tensor
+
+                if name == "flow":
+                    self._output_tensor = tensor
+
     def __del__(self):
         """Cleanup resources."""
         self.tensors.clear()
+        self._output_tensor = None
         self.context = None
         self.engine = None
