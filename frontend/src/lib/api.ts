@@ -434,6 +434,90 @@ export const getPipelineSchemas =
     return result;
   };
 
+// Plugin types
+export interface PluginPipelineInfo {
+  pipeline_id: string;
+  pipeline_name: string;
+}
+
+export interface PluginInfo {
+  name: string;
+  version: string | null;
+  author: string | null;
+  description: string | null;
+  source: "pypi" | "git" | "local";
+  editable: boolean;
+  editable_path: string | null;
+  pipelines: PluginPipelineInfo[];
+  latest_version: string | null;
+  update_available: boolean | null;
+  package_spec: string | null;
+}
+
+export interface PluginListResponse {
+  plugins: PluginInfo[];
+  total: number;
+}
+
+export interface PluginInstallRequest {
+  package: string;
+  editable?: boolean;
+  upgrade?: boolean;
+  force?: boolean;
+  pre?: boolean;
+}
+
+export interface PluginInstallResponse {
+  success: boolean;
+  message: string;
+  plugin: PluginInfo | null;
+}
+
+export interface PluginUninstallResponse {
+  success: boolean;
+  message: string;
+  unloaded_pipelines: string[];
+}
+
+export const listPlugins = async (): Promise<PluginListResponse> => {
+  const response = await fetch("/api/v1/plugins");
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`List plugins failed: ${response.status}: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const installPlugin = async (
+  request: PluginInstallRequest
+): Promise<PluginInstallResponse> => {
+  const response = await fetch("/api/v1/plugins", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Install plugin failed: ${response.status}: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const uninstallPlugin = async (
+  name: string
+): Promise<PluginUninstallResponse> => {
+  const response = await fetch(`/api/v1/plugins/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Uninstall plugin failed: ${response.status}: ${errorText}`
+    );
+  }
+  return response.json();
+};
+
 export const downloadRecording = async (sessionId: string): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");

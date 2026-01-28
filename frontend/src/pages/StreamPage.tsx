@@ -13,7 +13,7 @@ import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
-import { usePipelines } from "../hooks/usePipelines";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -72,7 +72,7 @@ function getVaceParams(
 
 export function StreamPage() {
   // Fetch available pipelines dynamically
-  const { pipelines } = usePipelines();
+  const { pipelines } = usePipelinesContext();
 
   // Helper to get default mode for a pipeline
   const getPipelineDefaultMode = (pipelineId: string): InputMode => {
