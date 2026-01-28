@@ -165,14 +165,16 @@ class ScopeApp(fal.App, keep_alive=300):
             except (RuntimeError, WebSocketDisconnect):
                 pass
 
-        async def handle_get_ice_servers():
+        async def handle_get_ice_servers(payload: dict):
             """Proxy GET /api/v1/webrtc/ice-servers"""
+            request_id = payload.get("request_id")
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{SCOPE_BASE_URL}/api/v1/webrtc/ice-servers"
                 )
                 return {
                     "type": "ice_servers",
+                    "request_id": request_id,
                     "data": response.json(),
                     "status": response.status_code,
                 }

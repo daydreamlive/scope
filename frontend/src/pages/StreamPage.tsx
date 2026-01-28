@@ -3,6 +3,7 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { CloudModeToggle } from "../components/CloudModeToggle";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
@@ -1329,9 +1330,10 @@ export function StreamPage() {
         </div>
 
         {/* Right Panel - Settings */}
-        <div className="w-1/5">
+        <div className="w-1/5 flex flex-col gap-3">
+          <CloudModeToggle />
           <SettingsPanel
-            className="h-full"
+            className="flex-1 min-h-0 overflow-auto"
             pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}

@@ -489,3 +489,67 @@ class AssetsResponse(BaseModel):
     """Response containing all discoverable asset files."""
 
     assets: list[AssetFileInfo]
+
+
+# =============================================================================
+# fal.ai Cloud Integration Schemas
+# =============================================================================
+
+
+class FalConnectRequest(BaseModel):
+    """Request to connect to fal.ai cloud."""
+
+    app_id: str = Field(
+        ...,
+        description="The fal app ID (e.g., 'username/scope-fal')",
+    )
+    api_key: str = Field(
+        ...,
+        description="The fal API key for authentication",
+    )
+
+
+class FalConnectionStats(BaseModel):
+    """Statistics for fal.ai connection."""
+
+    uptime_seconds: float | None = Field(
+        default=None,
+        description="How long the connection has been active",
+    )
+    webrtc_offers_sent: int = Field(
+        default=0,
+        description="Number of WebRTC offers sent",
+    )
+    webrtc_offers_successful: int = Field(
+        default=0,
+        description="Number of successful WebRTC offers",
+    )
+    webrtc_ice_candidates_sent: int = Field(
+        default=0,
+        description="Number of ICE candidates sent",
+    )
+    api_requests_sent: int = Field(
+        default=0,
+        description="Number of API requests sent through fal",
+    )
+    api_requests_successful: int = Field(
+        default=0,
+        description="Number of successful API requests",
+    )
+
+
+class FalStatusResponse(BaseModel):
+    """Response containing fal.ai connection status."""
+
+    connected: bool = Field(
+        ...,
+        description="Whether connected to fal.ai cloud",
+    )
+    app_id: str | None = Field(
+        default=None,
+        description="The fal app ID if connected",
+    )
+    stats: FalConnectionStats | None = Field(
+        default=None,
+        description="Connection statistics (only included when connected)",
+    )

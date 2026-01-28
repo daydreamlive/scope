@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from .fal_connection import FalConnectionManager
     from .pipeline_manager import PipelineManager
     from .webrtc import WebRTCManager
 
@@ -52,6 +53,8 @@ from .recording import (
 from .schema import (
     AssetFileInfo,
     AssetsResponse,
+    FalConnectRequest,
+    FalStatusResponse,
     HardwareInfoResponse,
     HealthResponse,
     IceCandidateRequest,
@@ -206,6 +209,8 @@ def configure_static_files():
 webrtc_manager = None
 # Global pipeline manager instance
 pipeline_manager = None
+# Global fal connection manager instance
+fal_connection_manager = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -225,11 +230,12 @@ async def lifespan(app: FastAPI):
     # Lazy imports to avoid loading torch at CLI startup (fixes Windows DLL locking)
     import torch
 
+    from .fal_connection import FalConnectionManager
     from .pipeline_manager import PipelineManager
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager
+    global webrtc_manager, pipeline_manager, fal_connection_manager
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -267,6 +273,9 @@ async def lifespan(app: FastAPI):
     webrtc_manager = WebRTCManager()
     logger.info("WebRTC manager initialized")
 
+    fal_connection_manager = FalConnectionManager()
+    logger.info("fal connection manager initialized")
+
     yield
 
     # Shutdown
@@ -280,6 +289,11 @@ async def lifespan(app: FastAPI):
         pipeline_manager.unload_all_pipelines()
         logger.info("Pipeline manager shutdown complete")
 
+    if fal_connection_manager and fal_connection_manager.is_connected:
+        logger.info("Shutting down fal connection...")
+        await fal_connection_manager.disconnect()
+        logger.info("fal connection shutdown complete")
+
 
 def get_webrtc_manager() -> "WebRTCManager":
     """Dependency to get WebRTC manager instance."""
@@ -289,6 +303,11 @@ def get_webrtc_manager() -> "WebRTCManager":
 def get_pipeline_manager() -> "PipelineManager":
     """Dependency to get pipeline manager instance."""
     return pipeline_manager
+
+
+def get_fal_connection_manager() -> "FalConnectionManager":
+    """Dependency to get fal connection manager instance."""
+    return fal_connection_manager
 
 
 app = FastAPI(
@@ -343,14 +362,14 @@ async def root():
 async def load_pipeline(
     request: PipelineLoadRequest,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
-    """Load one or more pipelines."""
-    try:
-        # Convert pydantic model to dict for pipeline manager
-        load_params_dict = None
-        if request.load_params:
-            load_params_dict = request.load_params.model_dump()
+    """Load one or more pipelines.
 
+    In cloud mode (when connected to fal), this proxies the request to the
+    fal-hosted scope backend.
+    """
+    try:
         # Get pipeline IDs to load
         pipeline_ids = request.pipeline_ids
         if not pipeline_ids:
@@ -359,11 +378,37 @@ async def load_pipeline(
                 detail="pipeline_ids must be provided and cannot be empty",
             )
 
-        # Start loading in background without blocking
+        # Convert pydantic model to dict for pipeline manager
+        load_params_dict = None
+        if request.load_params:
+            load_params_dict = request.load_params.model_dump()
+
+        # If connected to fal, proxy the request
+        if fal_manager.is_connected:
+            logger.info(f"Proxying pipeline load to fal: {pipeline_ids}")
+            body = {"pipeline_ids": pipeline_ids}
+            if load_params_dict:
+                body["load_params"] = load_params_dict
+            response = await fal_manager.api_request(
+                method="POST",
+                path="/api/v1/pipeline/load",
+                body=body,
+                timeout=60.0,  # Pipeline loading can take a while
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Pipeline load failed on fal"),
+                )
+            return response.get("data", {"message": "Pipeline loading initiated on fal"})
+
+        # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(pipeline_ids, load_params_dict)
         )
         return {"message": "Pipeline loading initiated successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error loading pipeline: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -372,11 +417,32 @@ async def load_pipeline(
 @app.get("/api/v1/pipeline/status", response_model=PipelineStatusResponse)
 async def get_pipeline_status(
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
-    """Get current pipeline status."""
+    """Get current pipeline status.
+
+    In cloud mode (when connected to fal), this proxies the request to the
+    fal-hosted scope backend.
+    """
     try:
+        # If connected to fal, proxy the request
+        if fal_manager.is_connected:
+            response = await fal_manager.api_request(
+                method="GET",
+                path="/api/v1/pipeline/status",
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Pipeline status failed on fal"),
+                )
+            return PipelineStatusResponse(**response.get("data", {}))
+
+        # Local mode
         status_info = await pipeline_manager.get_status_info_async()
         return PipelineStatusResponse(**status_info)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting pipeline status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -414,10 +480,27 @@ async def get_pipeline_schemas():
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
-    """Return ICE server configuration for frontend WebRTC connection."""
-    ice_servers = []
+    """Return ICE server configuration for frontend WebRTC connection.
 
+    In cloud mode, this returns the ICE servers from the fal-hosted scope backend.
+    """
+    # If connected to fal, get ICE servers from fal
+    if fal_manager.is_connected:
+        try:
+            fal_ice_servers = await fal_manager.webrtc_get_ice_servers()
+            return IceServersResponse(
+                iceServers=[
+                    IceServerConfig(**server)
+                    for server in fal_ice_servers.get("iceServers", [])
+                ]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get ICE servers from fal, using local: {e}")
+
+    # Local mode or fallback
+    ice_servers = []
     for server in webrtc_manager.rtc_config.iceServers:
         ice_servers.append(
             IceServerConfig(
@@ -435,10 +518,29 @@ async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
-    """Handle WebRTC offer and return answer."""
+    """Handle WebRTC offer and return answer.
+
+    In cloud mode, this proxies the WebRTC signaling to the fal-hosted scope backend.
+    The actual video stream flows directly between the browser and fal.ai.
+    """
     try:
-        # Ensure pipeline is loaded before proceeding
+        # If connected to fal, proxy the WebRTC signaling
+        if fal_manager.is_connected:
+            logger.info("Proxying WebRTC offer to fal")
+            initial_params = None
+            if request.initialParameters:
+                initial_params = request.initialParameters.model_dump(exclude_none=True)
+
+            response = await fal_manager.webrtc_offer(
+                sdp=request.sdp,
+                sdp_type=request.type,
+                initial_parameters=initial_params,
+            )
+            return WebRTCOfferResponse(**response)
+
+        # Local mode: ensure pipeline is loaded before proceeding
         status_info = await pipeline_manager.get_status_info_async()
         if status_info["status"] != "loaded":
             raise HTTPException(
@@ -448,6 +550,8 @@ async def handle_webrtc_offer(
 
         return await webrtc_manager.handle_offer(request, pipeline_manager)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -460,15 +564,32 @@ async def add_ice_candidate(
     session_id: str,
     candidate_request: IceCandidateRequest,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
     """Add ICE candidate(s) to an existing WebRTC session (Trickle ICE).
 
     This endpoint follows the Trickle ICE pattern, allowing clients to send
     ICE candidates as they are discovered.
+
+    In cloud mode, ICE candidates are forwarded to the fal-hosted scope backend.
     """
     # TODO: Validate that the Content-Type is 'application/trickle-ice-sdpfrag'
     # At the moment FastAPI defaults to validating that it is 'application/json'
     try:
+        # If connected to fal, proxy ICE candidates
+        if fal_manager.is_connected:
+            for candidate_init in candidate_request.candidates:
+                await fal_manager.webrtc_ice_candidate(
+                    session_id=session_id,
+                    candidate={
+                        "candidate": candidate_init.candidate,
+                        "sdpMid": candidate_init.sdpMid,
+                        "sdpMLineIndex": candidate_init.sdpMLineIndex,
+                    },
+                )
+            return Response(status_code=204)
+
+        # Local mode
         for candidate_init in candidate_request.candidates:
             await webrtc_manager.add_ice_candidate(
                 session_id=session_id,
@@ -896,6 +1017,83 @@ async def get_current_logs():
     except Exception as e:
         logger.error(f"Error retrieving log file: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# =============================================================================
+# fal.ai Cloud Integration Endpoints
+# =============================================================================
+
+
+@app.post("/api/v1/fal/connect", response_model=FalStatusResponse)
+async def connect_to_fal(
+    request: FalConnectRequest,
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
+    """Connect to fal.ai cloud for remote GPU inference.
+
+    This establishes a WebSocket connection to the fal.ai cloud runner,
+    which stays open until disconnect is called. Once connected:
+    - Pipeline loading is proxied to the fal-hosted scope backend
+    - WebRTC signaling is proxied to the fal-hosted scope backend
+    - The fal runner stays warm and ready for video processing
+
+    Note: The connection may take 1-2 minutes on cold start while the
+    fal runner initializes.
+    """
+    try:
+        logger.info(f"Connecting to fal: {request.app_id}")
+        await fal_manager.connect(request.app_id, request.api_key)
+        return FalStatusResponse(connected=True, app_id=request.app_id)
+    except Exception as e:
+        logger.error(f"Error connecting to fal: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/fal/disconnect", response_model=FalStatusResponse)
+async def disconnect_from_fal(
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
+    """Disconnect from fal.ai cloud.
+
+    This closes the WebSocket connection to fal.ai, returning to local
+    GPU processing mode. Any in-progress operations will be interrupted.
+    """
+    try:
+        await fal_manager.disconnect()
+        return FalStatusResponse(connected=False, app_id=None)
+    except Exception as e:
+        logger.error(f"Error disconnecting from fal: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/fal/status", response_model=FalStatusResponse)
+async def get_fal_status(
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
+    """Get current fal.ai cloud connection status."""
+    status = fal_manager.get_status()
+    return FalStatusResponse(**status)
+
+
+@app.get("/api/v1/fal/stats")
+async def get_fal_stats(
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
+    """Get detailed fal.ai cloud connection statistics.
+
+    Returns connection stats including:
+    - Uptime
+    - WebRTC offers sent/successful
+    - ICE candidates sent
+    - API requests sent/successful
+
+    Also prints stats to the server log for debugging.
+    """
+    # Print stats to log
+    fal_manager.print_stats()
+
+    # Return full status with stats
+    return fal_manager.get_status()
 
 
 @app.get("/{path:path}")
