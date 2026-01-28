@@ -1,9 +1,11 @@
 # Modified from https://github.com/guandeh17/Self-Forcing
 import inspect
 import json
+import logging
 import os
 import types
 
+logger = logging.getLogger(__name__)
 import torch
 
 from scope.core.pipelines.utils import load_state_dict
@@ -206,6 +208,21 @@ class WanDiffusionWrapper(torch.nn.Module):
             }
         return self.model(*args, **accepted)
 
+    def _get_base_model(self, model):
+        """Walk down wrappers (PEFT, VACE) to find the actual model implementation."""
+        curr = model
+        while True:
+            if hasattr(curr, "base_model"):  # PEFT wrapper
+                curr = curr.base_model
+            elif hasattr(curr, "causal_wan_model"):  # VACE wrapper
+                curr = curr.causal_wan_model
+            elif hasattr(curr, "model") and isinstance(curr.model, torch.nn.Module):
+                # Some other wrappers might use .model
+                curr = curr.model
+            else:
+                break
+        return curr
+
     def forward(
         self,
         noisy_image_or_video: torch.Tensor,
@@ -229,6 +246,12 @@ class WanDiffusionWrapper(torch.nn.Module):
         vace_context: torch.Tensor | None = None,
         vace_context_scale: float = 1.0,
         sink_recache_after_switch: bool = False,
+        # MagCache (runtime toggle)
+        use_magcache: bool | None = None,
+        magcache_thresh: float | None = None,
+        magcache_K: int | None = None,
+        magcache_retention_ratio: float | None = None,
+        magcache_num_steps: int | None = None,
     ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
 
@@ -240,6 +263,60 @@ class WanDiffusionWrapper(torch.nn.Module):
 
         logits = None
         # X0 prediction
+
+        # Apply MagCache settings to the underlying model (if provided).
+        # We find the actual model implementation through any wrappers (LoRA, VACE).
+        if use_magcache is not None:
+            # Lazy import to avoid bringing numpy into every import path.
+            from scope.core.pipelines.wan2_1.magcache import MagCacheConfig
+
+            cfg = MagCacheConfig(
+                enabled=bool(use_magcache),
+                thresh=float(magcache_thresh) if magcache_thresh is not None else 0.12,
+                K=int(magcache_K) if magcache_K is not None else 2,
+                retention_ratio=float(magcache_retention_ratio)
+                if magcache_retention_ratio is not None
+                else 0.2,
+            )
+
+            # Find all modules in the stack that might have MagCache logic
+            target_models = []
+            curr = self.model
+            target_models.append(curr)
+            while True:
+                if hasattr(curr, "base_model"):
+                    curr = curr.base_model
+                    target_models.append(curr)
+                elif hasattr(curr, "causal_wan_model"):
+                    curr = curr.causal_wan_model
+                    target_models.append(curr)
+                elif hasattr(curr, "model") and isinstance(curr.model, torch.nn.Module):
+                    curr = curr.model
+                    target_models.append(curr)
+                else:
+                    break
+
+            for model in target_models:
+                # Update config + step count, and reset internal state when toggled/changed.
+                if getattr(model, "_magcache_config", None) != cfg:
+                    logger.info(
+                        f"MagCache config changed on {model.__class__.__name__}: enabled={cfg.enabled}, thresh={cfg.thresh}, K={cfg.K}"
+                    )
+                    model._magcache_config = cfg
+                    if hasattr(model, "_magcache_reset"):
+                        model._magcache_reset()
+
+                if magcache_num_steps is not None:
+                    if getattr(model, "_magcache_num_steps", None) != int(
+                        magcache_num_steps
+                    ):
+                        logger.info(
+                            f"MagCache num_steps set on {model.__class__.__name__}: {magcache_num_steps}"
+                        )
+                        model._magcache_num_steps = int(magcache_num_steps)
+                        if hasattr(model, "_magcache_reset"):
+                            model._magcache_reset()
+
         if kv_cache is not None:
             flow_pred = self._call_model(
                 noisy_image_or_video.permute(0, 2, 1, 3, 4),

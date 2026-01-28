@@ -66,6 +66,12 @@ interface SettingsPanelProps {
   onNoiseControllerChange?: (enabled: boolean) => void;
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
+  useMagcache?: boolean;
+  onUseMagcacheChange?: (enabled: boolean) => void;
+  magcacheThresh?: number;
+  onMagcacheThreshChange?: (thresh: number) => void;
+  magcacheK?: number;
+  onMagcacheKChange?: (k: number) => void;
   quantization?: "fp8_e4m3fn" | null;
   onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
   kvCacheAttentionBias?: number;
@@ -123,6 +129,12 @@ export function SettingsPanel({
   onNoiseControllerChange,
   manageCache = true,
   onManageCacheChange,
+  useMagcache = false,
+  onUseMagcacheChange,
+  magcacheThresh = 0.12,
+  onMagcacheThreshChange,
+  magcacheK = 4,
+  onMagcacheKChange,
   quantization = "fp8_e4m3fn",
   onQuantizationChange,
   kvCacheAttentionBias = 0.3,
@@ -160,6 +172,11 @@ export function SettingsPanel({
     vaceContextScale,
     onVaceContextScaleChange
   );
+  const magcacheThreshSlider = useLocalSliderValue(
+    magcacheThresh,
+    onMagcacheThreshChange
+  );
+  const magcacheKSlider = useLocalSliderValue(magcacheK, onMagcacheKChange);
 
   // Validation error states
   const [heightError, setHeightError] = useState<string | null>(null);
@@ -746,6 +763,61 @@ export function SettingsPanel({
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="space-y-2 pt-2">
+                {/* MagCache toggle - shown for pipelines that support it */}
+                {pipelines?.[pipelineId]?.supportsMagcache && (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <LabelWithTooltip
+                        label={PARAMETER_METADATA.useMagcache.label}
+                        tooltip={PARAMETER_METADATA.useMagcache.tooltip}
+                        className="text-sm text-foreground"
+                      />
+                      <Toggle
+                        pressed={useMagcache}
+                        onPressedChange={onUseMagcacheChange || (() => {})}
+                        variant="outline"
+                        size="sm"
+                        className="h-7"
+                      >
+                        {useMagcache ? "ON" : "OFF"}
+                      </Toggle>
+                    </div>
+                    {/* MagCache quality controls - only shown when MagCache is enabled */}
+                    {useMagcache && (
+                      <>
+                        <SliderWithInput
+                          label={PARAMETER_METADATA.magcacheThresh.label}
+                          tooltip={PARAMETER_METADATA.magcacheThresh.tooltip}
+                          value={magcacheThreshSlider.localValue}
+                          onValueChange={magcacheThreshSlider.handleValueChange}
+                          onValueCommit={magcacheThreshSlider.handleValueCommit}
+                          min={0.05}
+                          max={0.5}
+                          step={0.01}
+                          incrementAmount={0.01}
+                          labelClassName="text-sm text-foreground w-28"
+                          valueFormatter={magcacheThreshSlider.formatValue}
+                          inputParser={v => parseFloat(v) || 0.12}
+                        />
+                        <SliderWithInput
+                          label={PARAMETER_METADATA.magcacheK.label}
+                          tooltip={PARAMETER_METADATA.magcacheK.tooltip}
+                          value={magcacheKSlider.localValue}
+                          onValueChange={magcacheKSlider.handleValueChange}
+                          onValueCommit={magcacheKSlider.handleValueCommit}
+                          min={1}
+                          max={4}
+                          step={1}
+                          incrementAmount={1}
+                          labelClassName="text-sm text-foreground w-28"
+                          valueFormatter={(v: number) => Math.round(v)}
+                          inputParser={v => parseInt(v) || 2}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+
                 {/* KV Cache bias control - shown for pipelines that support it */}
                 {pipelines?.[pipelineId]?.supportsKvCacheBias && (
                   <SliderWithInput

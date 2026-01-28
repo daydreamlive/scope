@@ -16,6 +16,9 @@ interface InitialParameters {
   noise_scale?: number;
   noise_controller?: boolean;
   manage_cache?: boolean;
+  use_magcache?: boolean;
+  magcache_thresh?: number;
+  magcache_K?: number;
   kv_cache_attention_bias?: number;
   vace_ref_images?: string[];
   vace_context_scale?: number;
@@ -324,6 +327,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       noise_scale?: number;
       noise_controller?: boolean;
       manage_cache?: boolean;
+      use_magcache?: boolean;
+      magcache_thresh?: number;
+      magcache_K?: number;
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;

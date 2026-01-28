@@ -524,6 +524,30 @@ export function StreamPage() {
     });
   };
 
+  const handleUseMagcacheChange = (enabled: boolean) => {
+    updateSettings({ useMagcache: enabled });
+    // Send MagCache update to backend (runtime)
+    sendParameterUpdate({
+      use_magcache: enabled,
+    });
+  };
+
+  const handleMagcacheThreshChange = (thresh: number) => {
+    updateSettings({ magcacheThresh: thresh });
+    // Send MagCache threshold update to backend (runtime)
+    sendParameterUpdate({
+      magcache_thresh: thresh,
+    });
+  };
+
+  const handleMagcacheKChange = (k: number) => {
+    updateSettings({ magcacheK: k });
+    // Send MagCache K update to backend (runtime)
+    sendParameterUpdate({
+      magcache_K: k,
+    });
+  };
+
   const handleQuantizationChange = (quantization: "fp8_e4m3fn" | null) => {
     updateSettings({ quantization });
     // Note: This setting requires pipeline reload, so we don't send parameter update here
@@ -976,6 +1000,7 @@ export function StreamPage() {
         noise_scale?: number;
         noise_controller?: boolean;
         manage_cache?: boolean;
+        use_magcache?: boolean;
         kv_cache_attention_bias?: number;
         spout_sender?: { enabled: boolean; name: string };
         spout_receiver?: { enabled: boolean; name: string };
@@ -1005,6 +1030,11 @@ export function StreamPage() {
       // Cache management for pipelines that support it
       if (currentPipeline?.supportsCacheManagement) {
         initialParameters.manage_cache = settings.manageCache ?? true;
+      }
+
+      // MagCache for pipelines that support it
+      if (currentPipeline?.supportsMagcache) {
+        initialParameters.use_magcache = settings.useMagcache ?? false;
       }
 
       // KV cache bias for pipelines that support it
@@ -1356,6 +1386,12 @@ export function StreamPage() {
             onNoiseControllerChange={handleNoiseControllerChange}
             manageCache={settings.manageCache ?? true}
             onManageCacheChange={handleManageCacheChange}
+            useMagcache={settings.useMagcache ?? false}
+            onUseMagcacheChange={handleUseMagcacheChange}
+            magcacheThresh={settings.magcacheThresh ?? 0.12}
+            onMagcacheThreshChange={handleMagcacheThreshChange}
+            magcacheK={settings.magcacheK ?? 4}
+            onMagcacheKChange={handleMagcacheKChange}
             quantization={
               settings.quantization !== undefined
                 ? settings.quantization

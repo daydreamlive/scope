@@ -181,6 +181,7 @@ class BasePipelineConfig(BaseModel):
     supports_cache_management: ClassVar[bool] = False
     supports_kv_cache_bias: ClassVar[bool] = False
     supports_quantization: ClassVar[bool] = False
+    supports_magcache: ClassVar[bool] = False
     min_dimension: ClassVar[int] = 1
     # Whether this pipeline contains modifications based on the original project
     modified: ClassVar[bool] = False
@@ -231,6 +232,16 @@ class BasePipelineConfig(BaseModel):
     # VACE (optional reference image conditioning)
     ref_images: list[str] | None = ref_images_field()
     vace_context_scale: float = vace_context_scale_field()
+
+    # MagCache quality parameters (only used when supports_magcache=True)
+    magcache_thresh: Annotated[float, Field(ge=0.05, le=0.5)] = Field(
+        default=0.12,
+        description="MagCache error threshold - higher values allow more skipping (faster but lower quality)",
+    )
+    magcache_K: Annotated[int, Field(ge=1, le=4)] = Field(
+        default=2,
+        description="MagCache max consecutive skips - higher values allow more skipping but may cause instability",
+    )
 
     @classmethod
     def get_pipeline_metadata(cls) -> dict[str, str]:
@@ -321,6 +332,7 @@ class BasePipelineConfig(BaseModel):
         metadata["supports_cache_management"] = cls.supports_cache_management
         metadata["supports_kv_cache_bias"] = cls.supports_kv_cache_bias
         metadata["supports_quantization"] = cls.supports_quantization
+        metadata["supports_magcache"] = cls.supports_magcache
         metadata["min_dimension"] = cls.min_dimension
         metadata["recommended_quantization_vram_threshold"] = (
             cls.recommended_quantization_vram_threshold

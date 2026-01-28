@@ -22,11 +22,16 @@ export interface WebRTCOfferRequest {
     noise_scale?: number;
     noise_controller?: boolean;
     manage_cache?: boolean;
+    use_magcache?: boolean;
+    magcache_thresh?: number;
+    magcache_K?: number;
     kv_cache_attention_bias?: number;
     vace_ref_images?: string[];
     vace_context_scale?: number;
     pipeline_ids?: string[];
     images?: string[];
+    first_frame_image?: string;
+    last_frame_image?: string;
   };
 }
 
@@ -390,6 +395,7 @@ export interface PipelineSchemaInfo {
   requires_models: boolean;
   supports_lora: boolean;
   supports_vace: boolean;
+  supports_magcache?: boolean;
   usage: string[];
   // Pipeline config schema
   config_schema: PipelineConfigSchema;

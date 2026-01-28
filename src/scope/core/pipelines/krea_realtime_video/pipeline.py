@@ -181,6 +181,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
         self.state.set("kv_cache_attention_bias", DEFAULT_KV_CACHE_ATTENTION_BIAS)
+        self.state.set("use_magcache", False)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
