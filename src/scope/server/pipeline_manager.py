@@ -527,6 +527,7 @@ class PipelineManager:
             "video-depth-anything",
             "controller-viz",
             "rife",
+            "scribble",
             "gray",
         }
 
@@ -950,7 +951,14 @@ class PipelineManager:
             )
             logger.info("RIFE pipeline initialized")
             return pipeline
+        elif pipeline_id == "scribble":
+            from scope.core.pipelines import ScribblePipeline
 
+            pipeline = ScribblePipeline(
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("Scribble pipeline initialized")
         elif pipeline_id == "gray":
             from scope.core.pipelines import GrayPipeline
 

@@ -40,6 +40,10 @@ def __getattr__(name):
         from .rife.pipeline import RIFEPipeline
 
         return RIFEPipeline
+    elif name == "ScribblePipeline":
+        from .scribble.pipeline import ScribblePipeline
+
+        return ScribblePipeline
     elif name == "GrayPipeline":
         from .gray.pipeline import GrayPipeline
 
@@ -81,6 +85,10 @@ def __getattr__(name):
         from .rife.schema import RIFEConfig
 
         return RIFEConfig
+    elif name == "ScribbleConfig":
+        from .scribble.schema import ScribbleConfig
+
+        return ScribbleConfig
     elif name == "GrayConfig":
         from .gray.schema import GrayConfig
 
@@ -99,6 +107,7 @@ __all__ = [
     "VideoDepthAnythingPipeline",
     "ControllerVisualizerPipeline",
     "RIFEPipeline",
+    "ScribblePipeline",
     "GrayPipeline",
     # Config classes
     "BasePipelineConfig",
@@ -110,5 +119,6 @@ __all__ = [
     "MemFlowConfig",
     "VideoDepthAnythingConfig",
     "RIFEConfig",
+    "ScribbleConfig",
     "GrayConfig",
 ]
