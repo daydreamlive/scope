@@ -431,3 +431,118 @@ class TestFrameProcessorSpoutFalRouting:
 
         # Verify frame was put into local pipeline
         mock_input_queue.put_nowait.assert_called_once()
+
+
+class TestFrameProcessorParameterRouting:
+    """Tests for parameter routing to fal vs local pipelines."""
+
+    def test_update_parameters_routes_to_fal_when_enabled(self):
+        """Test that parameters are forwarded to fal when cloud mode enabled."""
+        from scope.server.frame_processor import FrameProcessor
+
+        mock_pm = MagicMock()
+        processor = FrameProcessor(pipeline_manager=mock_pm)
+        processor.running = True
+
+        # Set up fal client with mocked send_parameters
+        mock_client = MagicMock()
+        mock_client.send_parameters = MagicMock(return_value=True)
+        processor.fal_client = mock_client
+        processor.fal_enabled = True
+
+        # Set up local pipeline processor (should NOT be called)
+        mock_pipeline_processor = MagicMock()
+        processor.pipeline_processors = [mock_pipeline_processor]
+
+        # Send parameters
+        processor.update_parameters({"prompts": ["test prompt"], "noise_scale": 0.5})
+
+        # Should route to fal
+        mock_client.send_parameters.assert_called_once_with(
+            {"prompts": ["test prompt"], "noise_scale": 0.5}
+        )
+        # Local pipeline should NOT receive parameters
+        mock_pipeline_processor.update_parameters.assert_not_called()
+
+    def test_update_parameters_routes_to_local_when_fal_disabled(self):
+        """Test that parameters go to local pipelines when cloud mode disabled."""
+        from scope.server.frame_processor import FrameProcessor
+
+        mock_pm = MagicMock()
+        processor = FrameProcessor(pipeline_manager=mock_pm)
+        processor.running = True
+        processor.fal_enabled = False
+        processor.fal_client = None
+
+        # Set up local pipeline processor
+        mock_pipeline_processor = MagicMock()
+        processor.pipeline_processors = [mock_pipeline_processor]
+
+        # Send parameters
+        processor.update_parameters({"prompts": ["test prompt"], "noise_scale": 0.5})
+
+        # Should route to local pipeline
+        mock_pipeline_processor.update_parameters.assert_called_once_with(
+            {"prompts": ["test prompt"], "noise_scale": 0.5}
+        )
+
+    def test_spout_params_stay_local_when_fal_enabled(self):
+        """Test that Spout parameters are always handled locally."""
+        from scope.server.frame_processor import FrameProcessor
+
+        mock_pm = MagicMock()
+        processor = FrameProcessor(pipeline_manager=mock_pm)
+        processor.running = True
+
+        # Set up fal client
+        mock_client = MagicMock()
+        mock_client.send_parameters = MagicMock(return_value=True)
+        processor.fal_client = mock_client
+        processor.fal_enabled = True
+
+        # Mock _update_spout_sender and _update_spout_receiver
+        processor._update_spout_sender = MagicMock()
+        processor._update_spout_receiver = MagicMock()
+
+        # Send mixed parameters (Spout + pipeline params)
+        processor.update_parameters(
+            {
+                "spout_sender": {"enabled": True, "name": "TestSender"},
+                "spout_receiver": {"enabled": True, "name": "TestReceiver"},
+                "prompts": ["test prompt"],
+            }
+        )
+
+        # Spout params should be handled locally
+        processor._update_spout_sender.assert_called_once_with(
+            {"enabled": True, "name": "TestSender"}
+        )
+        processor._update_spout_receiver.assert_called_once_with(
+            {"enabled": True, "name": "TestReceiver"}
+        )
+
+        # Only non-Spout params should be forwarded to fal
+        mock_client.send_parameters.assert_called_once_with(
+            {"prompts": ["test prompt"]}
+        )
+
+    def test_parameters_stored_locally_regardless_of_mode(self):
+        """Test that parameters are always stored locally for state tracking."""
+        from scope.server.frame_processor import FrameProcessor
+
+        mock_pm = MagicMock()
+        processor = FrameProcessor(pipeline_manager=mock_pm)
+        processor.running = True
+
+        # Set up fal client
+        mock_client = MagicMock()
+        mock_client.send_parameters = MagicMock(return_value=True)
+        processor.fal_client = mock_client
+        processor.fal_enabled = True
+
+        # Send parameters
+        processor.update_parameters({"prompts": ["test"], "noise_scale": 0.5})
+
+        # Parameters should be stored locally
+        assert processor.parameters["prompts"] == ["test"]
+        assert processor.parameters["noise_scale"] == 0.5

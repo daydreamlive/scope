@@ -71,12 +71,16 @@ Browser ──WebRTC──► fal.ai ──proxy──► Scope Backend ──�
 
 | Component | Local Machine | fal.ai Cloud |
 |-----------|---------------|--------------|
-| **Scope Server** | ✅ Runs (with FalClient) | ✅ Runs (via fal_app.py subprocess) |
-| **WebRTC Role** | **Client** (creates offers) | **Server** (accepts offers) |
-| **Pipelines** | ❌ Not used in cloud mode | ✅ Used for GPU inference |
-| **Video Input** | Spout receiver, WebRTC from browser | WebRTC from local Scope |
-| **Video Output** | Spout sender, WebRTC to browser | WebRTC to local Scope |
-| **Parameter Source** | UI via browser WebRTC data channel | Forwarded from local Scope |
+| **Scope Server** | ✅ Runs in **CLOUD MODE** (FalClient enabled) | ✅ Runs in **LOCAL MODE** (normal operation) |
+| **WebRTC Role** | **Client** (creates offers via FalClient) | **Server** (accepts offers, same as browser) |
+| **Pipelines** | ❌ Disabled (frames sent to fal) | ✅ Enabled for GPU inference |
+| **Video Input** | Spout receiver, WebRTC from browser | WebRTC from local Scope's FalClient |
+| **Video Output** | Spout sender, WebRTC to browser | WebRTC to local Scope's FalClient |
+| **Parameter Source** | Browser UI → forwarded to fal | Received via WebRTC data channel |
+
+**Key terminology:**
+- **CLOUD MODE**: `fal_enabled=True` - frames routed to fal via FalClient, local pipelines disabled
+- **LOCAL MODE**: `fal_enabled=False` - normal operation, frames processed by local pipelines
 
 ### Key Insight: No Changes Needed on fal Side
 
@@ -94,7 +98,7 @@ The only change is **who connects as the WebRTC client** - instead of the browse
 │                              LOCAL MACHINE                                       │
 │                                                                                 │
 │  ┌─────────────┐     ┌──────────────────────────────────────────────────────┐  │
-│  │   Browser   │     │                 Scope Server (Local)                  │  │
+│  │   Browser   │     │          Scope Server (CLOUD MODE: fal_enabled=True)  │  │
 │  │             │     │                                                       │  │
 │  │  - UI       │     │  ┌─────────────────┐      ┌─────────────────────┐    │  │
 │  │  - Preview  │◄────┼──│ WebRTC Server   │      │ FalClient           │    │  │
@@ -106,8 +110,8 @@ The only change is **who connects as the WebRTC client** - instead of the browse
 │  │ Spout Input │────►│  ┌─────────────────┐      │ - Receives frames   │    │  │     │
 │  │ (e.g., OBS) │     │  │ FrameProcessor  │◄────►│ - Forwards params   │    │  │     │
 │  └─────────────┘     │  │                 │      └─────────────────────┘    │  │     │
-│                      │  │ Cloud mode:     │                                  │  │     │
-│  ┌─────────────┐     │  │ - Routes frames │                                  │  │     │
+│                      │  │ fal_enabled=True│                                  │  │     │
+│  ┌─────────────┐     │  │ - Routes frames │  [Local pipelines DISABLED]     │  │     │
 │  │ Spout Output│◄────┼──│   to FalClient  │                                  │  │     │
 │  │ (e.g., VJ)  │     │  │ - Routes params │                                  │  │     │
 │  └─────────────┘     │  │   to FalClient  │                                  │  │     │
@@ -130,17 +134,20 @@ The only change is **who connects as the WebRTC client** - instead of the browse
 │  │         │ Proxies signaling to subprocess                                       │   │
 │  │         ▼                                                                       │   │
 │  │   ┌─────────────────────────────────────────────────────────────────────────┐   │   │
-│  │   │              Scope Server (subprocess: uv run daydream-scope)           │   │   │
+│  │   │     Scope Server (LOCAL MODE: fal_enabled=False, subprocess)            │   │   │
+│  │   │     Command: uv run daydream-scope                                      │   │   │
 │  │   │                                                                         │   │   │
 │  │   │   ┌───────────────────┐    ┌────────────────┐    ┌─────────────────┐   │   │   │
 │  │   │   │ WebRTC Server     │───►│ FrameProcessor │───►│ Pipeline        │   │   │   │
-│  │   │   │ (accepts offers)  │    │                │    │ (GPU inference) │   │   │   │
-│  │   │   │                   │◄───│                │◄───│                 │   │   │   │
-│  │   │   │ - Receives frames │    │ Local mode:    │    │ - LongLive      │   │   │   │
-│  │   │   │ - Sends frames    │    │ - Routes to    │    │ - VACE          │   │   │   │
-│  │   │   │ - Receives params │    │   pipeline     │    │ - etc.          │   │   │   │
+│  │   │   │ (accepts offers   │    │                │    │ (GPU inference) │   │   │   │
+│  │   │   │  from FalClient)  │◄───│ fal_enabled=   │◄───│                 │   │   │   │
+│  │   │   │                   │    │ False          │    │ - LongLive      │   │   │   │
+│  │   │   │ - Receives frames │    │                │    │ - VACE          │   │   │   │
+│  │   │   │ - Sends frames    │    │ Routes to      │    │ - etc.          │   │   │   │
+│  │   │   │ - Receives params │    │ local pipeline │    │                 │   │   │   │
 │  │   │   └───────────────────┘    └────────────────┘    └─────────────────┘   │   │   │
 │  │   │                                                                         │   │   │
+│  │   │   [Local pipelines ENABLED - this is where GPU inference happens]       │   │   │
 │  │   └─────────────────────────────────────────────────────────────────────────┘   │   │
 │  │                                                                                 │   │
 │  └─────────────────────────────────────────────────────────────────────────────────┘   │
@@ -2153,10 +2160,10 @@ Use this checklist to track progress through all phases:
 | 2. FalOutputTrack/FalInputTrack | 18 tests | 5 tests | ✅ |
 | 3. FrameProcessor Integration | 14 tests | 2 tests | ✅ |
 | 4. API Endpoints | 11 tests | 2 tests | ✅ |
-| 5. Spout Receiver fal Routing | 2 tests | 1 test | ⬜ |
-| 6. Parameter Forwarding & UI | 3 tests | 4 tests | ⬜ |
+| 5. Spout Receiver fal Routing | 2 tests | 1 test | ✅ |
+| 6. Parameter Forwarding & UI | 10 tests | 4 tests | ✅ |
 
-**Total: 57 unit tests, 18 manual tests**
+**Total: 64 unit tests, 18 manual tests**
 
 ---
 

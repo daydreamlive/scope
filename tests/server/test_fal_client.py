@@ -175,3 +175,116 @@ async def test_disconnect_when_not_connected():
     assert client.stop_event.is_set()
     assert client.pc is None
     assert client.ws is None
+
+
+def test_fal_client_initialization_includes_data_channel_attrs():
+    """Test FalClient initializes with data channel attributes."""
+    from scope.server.fal_client import FalClient
+
+    client = FalClient(app_id="owner/app/webrtc", api_key="test-key")
+
+    assert client.data_channel is None
+    assert client._pending_parameters == {}
+
+
+def test_send_parameters_queues_when_channel_closed():
+    """Test parameters are queued when data channel is not open."""
+
+    from scope.server.fal_client import FalClient
+
+    client = FalClient(app_id="owner/app/webrtc", api_key="test-key")
+
+    # No data channel (not connected)
+    client.data_channel = None
+
+    result = client.send_parameters({"prompt": "test prompt", "noise_scale": 0.5})
+
+    assert result is False
+    assert client._pending_parameters == {"prompt": "test prompt", "noise_scale": 0.5}
+
+
+def test_send_parameters_queues_when_channel_not_open():
+    """Test parameters are queued when data channel exists but not open."""
+    from unittest.mock import MagicMock
+
+    from scope.server.fal_client import FalClient
+
+    client = FalClient(app_id="owner/app/webrtc", api_key="test-key")
+
+    # Data channel exists but not open
+    mock_channel = MagicMock()
+    mock_channel.readyState = "connecting"
+    client.data_channel = mock_channel
+
+    result = client.send_parameters({"prompt": "test prompt"})
+
+    assert result is False
+    assert client._pending_parameters == {"prompt": "test prompt"}
+
+
+def test_send_parameters_sends_when_channel_open():
+    """Test parameters are sent when data channel is open."""
+    from unittest.mock import MagicMock
+
+    from scope.server.fal_client import FalClient
+
+    client = FalClient(app_id="owner/app/webrtc", api_key="test-key")
+
+    # Data channel is open
+    mock_channel = MagicMock()
+    mock_channel.readyState = "open"
+    mock_channel.send = MagicMock()
+    client.data_channel = mock_channel
+
+    result = client.send_parameters({"prompt": "test prompt", "noise_scale": 0.5})
+
+    assert result is True
+    mock_channel.send.assert_called_once()
+    # Verify JSON contains the parameters
+    sent_json = mock_channel.send.call_args[0][0]
+    import json
+
+    sent_data = json.loads(sent_json)
+    assert sent_data == {"prompt": "test prompt", "noise_scale": 0.5}
+
+
+def test_send_parameters_filters_none_values():
+    """Test parameters with None values are filtered out."""
+    from unittest.mock import MagicMock
+
+    from scope.server.fal_client import FalClient
+
+    client = FalClient(app_id="owner/app/webrtc", api_key="test-key")
+
+    # Data channel is open
+    mock_channel = MagicMock()
+    mock_channel.readyState = "open"
+    mock_channel.send = MagicMock()
+    client.data_channel = mock_channel
+
+    result = client.send_parameters(
+        {"prompt": "test", "noise_scale": None, "denoising_steps": 5}
+    )
+
+    assert result is True
+    # Verify None values are filtered
+    sent_json = mock_channel.send.call_args[0][0]
+    import json
+
+    sent_data = json.loads(sent_json)
+    assert sent_data == {"prompt": "test", "denoising_steps": 5}
+    assert "noise_scale" not in sent_data
+
+
+def test_send_parameters_accumulates_pending():
+    """Test multiple send_parameters calls accumulate pending parameters."""
+    from scope.server.fal_client import FalClient
+
+    client = FalClient(app_id="owner/app/webrtc", api_key="test-key")
+    client.data_channel = None  # Not connected
+
+    client.send_parameters({"prompt": "first"})
+    client.send_parameters({"noise_scale": 0.5})
+    client.send_parameters({"prompt": "second"})  # Should override first
+
+    assert client._pending_parameters == {"prompt": "second", "noise_scale": 0.5}

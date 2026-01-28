@@ -10,11 +10,11 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import websockets
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription
 from aiortc.sdp import candidate_from_sdp
 
 if TYPE_CHECKING:
@@ -47,6 +47,8 @@ class FalClient:
         self.ws: websockets.WebSocketClientProtocol | None = None
         self.pc: RTCPeerConnection | None = None
         self.output_track: FalOutputTrack | None = None
+        self.data_channel: RTCDataChannel | None = None
+        self._pending_parameters: dict[str, Any] = {}
         self.stop_event = asyncio.Event()
         self._receive_task: asyncio.Task | None = None
 
@@ -113,6 +115,10 @@ class FalClient:
 
         self.output_track = FalOutputTrack()
         self.pc.addTrack(self.output_track)
+
+        # Create data channel for parameter forwarding (must be before createOffer)
+        self.data_channel = self.pc.createDataChannel("parameters", ordered=True)
+        self._setup_data_channel_handlers()
 
         # Create and send offer (we are the client)
         offer = await self.pc.createOffer()
@@ -187,6 +193,59 @@ class FalClient:
             except Exception as e:
                 logger.error(f"Error receiving frame: {e}")
                 break
+
+    def _setup_data_channel_handlers(self) -> None:
+        """Set up data channel event handlers."""
+        if self.data_channel is None:
+            return
+
+        @self.data_channel.on("open")
+        def on_data_channel_open():
+            logger.info("Data channel to fal opened")
+            # Send any pending parameters
+            if self._pending_parameters:
+                self._send_parameters(self._pending_parameters)
+                self._pending_parameters = {}
+
+        @self.data_channel.on("close")
+        def on_data_channel_close():
+            logger.info("Data channel to fal closed")
+
+        @self.data_channel.on("error")
+        def on_data_channel_error(error):
+            logger.error(f"Data channel error: {error}")
+
+    def send_parameters(self, parameters: dict[str, Any]) -> bool:
+        """Forward parameter update to fal.ai via data channel.
+
+        Args:
+            parameters: Dictionary of parameters to send.
+
+        Returns:
+            True if sent immediately, False if queued for later.
+        """
+        if self.data_channel and self.data_channel.readyState == "open":
+            return self._send_parameters(parameters)
+        else:
+            # Queue for when channel opens
+            self._pending_parameters.update(parameters)
+            logger.debug(f"Queued parameters for later: {list(parameters.keys())}")
+            return False
+
+    def _send_parameters(self, parameters: dict[str, Any]) -> bool:
+        """Internal: send parameters over data channel."""
+        if self.data_channel is None:
+            return False
+        try:
+            # Filter out None values (same as frontend)
+            filtered = {k: v for k, v in parameters.items() if v is not None}
+            message = json.dumps(filtered)
+            self.data_channel.send(message)
+            logger.debug(f"Sent parameters to fal: {list(filtered.keys())}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send parameters: {e}")
+            return False
 
     async def _receive_loop(self) -> None:
         """Receive and handle WebSocket messages."""

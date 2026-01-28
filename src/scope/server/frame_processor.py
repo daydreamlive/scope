@@ -13,7 +13,7 @@ from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
 if TYPE_CHECKING:
-    pass
+    from .fal_client import FalClient
 
 logger = logging.getLogger(__name__)
 
@@ -308,22 +308,31 @@ class FrameProcessor:
             return 512, 512
 
     def update_parameters(self, parameters: dict[str, Any]):
-        """Update parameters that will be used in the next pipeline call."""
-        # Handle Spout output settings
+        """Update parameters that will be used in the next pipeline call.
+
+        When fal cloud mode is enabled, pipeline parameters are forwarded to fal.
+        Spout configuration is always handled locally.
+        """
+        # Handle Spout output settings (always local)
         if "spout_sender" in parameters:
             spout_config = parameters.pop("spout_sender")
             self._update_spout_sender(spout_config)
 
-        # Handle Spout input settings
+        # Handle Spout input settings (always local)
         if "spout_receiver" in parameters:
             spout_config = parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
 
-        # Update parameters for all pipeline processors
-        for processor in self.pipeline_processors:
-            processor.update_parameters(parameters)
+        # Route remaining parameters based on mode
+        if self.fal_enabled and self.fal_client:
+            # Forward to fal cloud via data channel
+            self.fal_client.send_parameters(parameters)
+        else:
+            # Local processing: update pipeline processors
+            for processor in self.pipeline_processors:
+                processor.update_parameters(parameters)
 
-        # Update local parameters
+        # Always store locally for state tracking
         self.parameters = {**self.parameters, **parameters}
 
         return True
