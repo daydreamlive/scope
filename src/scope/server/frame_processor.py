@@ -52,6 +52,9 @@ class FrameProcessor:
 
         self.paused = False
 
+        self._pinned_buffer_cache = {}
+        self._pinned_buffer_lock = threading.Lock()
+
         # Spout integration
         self.spout_sender = None
         self.spout_sender_enabled = False
@@ -162,6 +165,19 @@ class FrameProcessor:
             except Exception as e:
                 logger.error(f"Error in frame processor stop callback: {e}")
 
+    def _get_or_create_pinned_buffer(self, shape):
+        """Get or create a reusable pinned memory buffer for the given shape.
+
+        This avoids repeated pinned memory allocations, which are expensive.
+        Pinned memory enables faster DMA transfers to GPU.
+        """
+        with self._pinned_buffer_lock:
+            if shape not in self._pinned_buffer_cache:
+                self._pinned_buffer_cache[shape] = torch.empty(
+                    shape, dtype=torch.uint8, pin_memory=True
+                )
+            return self._pinned_buffer_cache[shape]
+
     def put(self, frame: VideoFrame) -> bool:
         if not self.running:
             return False
@@ -170,9 +186,16 @@ class FrameProcessor:
         if self.pipeline_processors:
             first_processor = self.pipeline_processors[0]
 
-            # Convert VideoFrame to (H, W, C) uint8 tensor, then to [1, H, W, C]
             frame_array = frame.to_ndarray(format="rgb24")
-            frame_tensor = torch.from_numpy(frame_array)
+
+            if torch.cuda.is_available():
+                shape = frame_array.shape
+                pinned_buffer = self._get_or_create_pinned_buffer(shape)
+                pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
+                frame_tensor = pinned_buffer.cuda(non_blocking=True)
+            else:
+                frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
+
             frame_tensor = frame_tensor.unsqueeze(0)
 
             # Put frame into first processor's input queue
@@ -198,7 +221,9 @@ class FrameProcessor:
             frame = last_processor.output_queue.get_nowait()
             # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
             # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
-            frame = frame.squeeze(0).cpu()
+            frame = frame.squeeze(0)
+            if frame.is_cuda:
+                frame = frame.cpu()
 
             # Enqueue frame for async Spout sending (non-blocking)
             if self.spout_sender_enabled and self.spout_sender is not None:
@@ -494,7 +519,15 @@ class FrameProcessor:
                     # Convert to tensor and put into first processor's input queue
                     if self.pipeline_processors:
                         first_processor = self.pipeline_processors[0]
-                        frame_tensor = torch.from_numpy(rgb_frame)
+
+                        if torch.cuda.is_available():
+                            shape = rgb_frame.shape
+                            pinned_buffer = self._get_or_create_pinned_buffer(shape)
+                            pinned_buffer.copy_(torch.as_tensor(rgb_frame, dtype=torch.uint8))
+                            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+                        else:
+                            frame_tensor = torch.as_tensor(rgb_frame, dtype=torch.uint8)
+
                         frame_tensor = frame_tensor.unsqueeze(0)
 
                         try:
