@@ -613,8 +613,13 @@ class FrameProcessor:
                 if rgb_frame is not None:
                     last_frame_time = time.time()
 
-                    # Convert to tensor and put into first processor's input queue
-                    if self.pipeline_processors:
+                    # Route based on fal mode
+                    if self.fal_enabled and self.fal_client:
+                        # Convert numpy to av.VideoFrame for WebRTC and route through put()
+                        video_frame = VideoFrame.from_ndarray(rgb_frame, format="rgb24")
+                        self.put(video_frame)
+                    elif self.pipeline_processors:
+                        # Local processing: put directly into pipeline
                         first_processor = self.pipeline_processors[0]
                         frame_tensor = torch.from_numpy(rgb_frame)
                         frame_tensor = frame_tensor.unsqueeze(0)

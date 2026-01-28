@@ -705,17 +705,115 @@ async def get_fal_status() -> FalStatusResponse:
     return FalStatusResponse(connected=False)
 ```
 
-### Phase 5: Handle Spout Input → fal → Spout Output Flow
+### Phase 5: Fix Spout Receiver to Route Through fal
 
-The complete data flow with Spout:
+**Problem:** The current `_spout_receiver_loop` bypasses `put()` and writes directly to the local pipeline processor queue. This means Spout input doesn't route through fal even when fal is enabled.
+
+**What already works:**
+- ✅ Browser WebRTC input → fal (browser frames go through `put()`)
+- ✅ fal output → Browser WebRTC (via `get()`)
+- ✅ fal output → Spout sender (handled in `get()`)
+
+**What needs fixing:**
+- ❌ Spout input → fal: `_spout_receiver_loop` must route through `put()` when fal is enabled
+
+#### Data Flow Diagram (all inputs/outputs)
 
 ```
-Spout Receiver → FrameProcessor.put() → FalOutputTrack → WebRTC → fal.ai GPU
-                                                                        │
-Spout Sender ← FrameProcessor.get() ← _fal_received_frames ← WebRTC ←───┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           LOCAL SCOPE SERVER                                 │
+│                                                                             │
+│   INPUTS                      ROUTING                      OUTPUTS          │
+│   ───────                     ───────                      ───────          │
+│                                                                             │
+│   Browser ──WebRTC──►┐                              ┌──►WebRTC──► Browser   │
+│                      │                              │   (preview)           │
+│   Spout  ───────────►├──► put() ──► [fal or local] │                       │
+│   Receiver           │         │                    ├──► Spout ──► External │
+│   (external app)     │         │                    │   Sender    App       │
+│                      │         ▼                    │                       │
+│                      │   ┌──────────────┐           │                       │
+│                      │   │ fal_enabled? │──► get() ─┘                       │
+│                      │   └──────┬───────┘                                   │
+│                      │    YES   │   NO                                      │
+│                      │          ▼                                           │
+│                      │   ┌─────────────────┐   ┌──────────────┐             │
+│                      │   │ FalClient       │   │ Local        │             │
+│                      │   │ (WebRTC to fal) │   │ Pipeline     │             │
+│                      │   └────────┬────────┘   └──────────────┘             │
+│                      │            │                                         │
+│                      │            ▼                                         │
+│                      │   ┌─────────────────┐                                │
+│                      │   │   fal.ai GPU    │                                │
+│                      │   │   (H100 cloud)  │                                │
+│                      │   └────────┬────────┘                                │
+│                      │            │                                         │
+│                      │            ▼                                         │
+│                      │   _fal_received_frames                               │
+│                      │                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Note: Browser connection required - it drives get() loop which feeds both
+      WebRTC output (preview) and Spout sender.
 ```
 
-The existing `_spout_receiver_loop` and `_spout_sender_loop` already handle async frame I/O. The fal integration slots in at the FrameProcessor level transparently.
+#### Implementation
+
+**File:** `src/scope/server/frame_processor.py`
+
+**Change:** Modify `_spout_receiver_loop` to route through `put()` when fal is enabled
+
+```python
+def _spout_receiver_loop(self):
+    """Background thread that receives frames from Spout and adds to buffer."""
+    ...
+    while self.running and self.spout_receiver_enabled and self.spout_receiver is not None:
+        ...
+        rgb_frame = self.spout_receiver.receive(as_rgb=True)
+        if rgb_frame is not None:
+            last_frame_time = time.time()
+
+            # Route based on fal mode
+            if self.fal_enabled and self.fal_client:
+                # Convert numpy to av.VideoFrame for WebRTC and route through put()
+                from av import VideoFrame
+                video_frame = VideoFrame.from_ndarray(rgb_frame, format='rgb24')
+                self.put(video_frame)
+            elif self.pipeline_processors:
+                # Local processing: put directly into pipeline (existing behavior)
+                first_processor = self.pipeline_processors[0]
+                frame_tensor = torch.from_numpy(rgb_frame)
+                frame_tensor = frame_tensor.unsqueeze(0)
+                try:
+                    first_processor.input_queue.put_nowait(frame_tensor)
+                except queue.Full:
+                    logger.debug("First processor input queue full, dropping Spout frame")
+
+            frame_count += 1
+            ...
+```
+
+#### Supported Configurations
+
+| Input | Output | Works? |
+|-------|--------|--------|
+| Browser WebRTC | Browser WebRTC | ✅ Yes |
+| Browser WebRTC | Browser + Spout | ✅ Yes |
+| Spout Receiver | Browser WebRTC | ✅ Yes (after fix) |
+| Spout Receiver | Browser + Spout | ✅ Yes (after fix) |
+| Spout Receiver | Spout only (no browser) | ❌ No (browser required to drive get()) |
+
+#### Tests
+
+**Unit tests** (add to `tests/server/test_frame_processor_fal.py`):
+- `test_spout_receiver_routes_to_fal_when_enabled`
+- `test_spout_receiver_routes_to_local_when_fal_disabled`
+
+**Manual tests:**
+1. Start Scope server with fal connected
+2. Enable Spout receiver (connect to OBS or similar)
+3. Verify frames appear in browser preview (proves Spout → fal → browser works)
+4. Enable Spout sender, verify external app receives processed frames
 
 ### Phase 6: Parameter Forwarding and UI Integration
 
@@ -2054,11 +2152,11 @@ Use this checklist to track progress through all phases:
 | 1. FalClient Module | 9 tests | 4 tests | ✅ |
 | 2. FalOutputTrack/FalInputTrack | 18 tests | 5 tests | ✅ |
 | 3. FrameProcessor Integration | 14 tests | 2 tests | ✅ |
-| 4. API Endpoints | 4 tests | 2 tests | ⬜ |
-| 5. Spout Integration | 2 tests | 3 tests | ⬜ |
+| 4. API Endpoints | 11 tests | 2 tests | ✅ |
+| 5. Spout Receiver fal Routing | 2 tests | 1 test | ⬜ |
 | 6. Parameter Forwarding & UI | 3 tests | 4 tests | ⬜ |
 
-**Total: 50 unit tests, 20 manual tests**
+**Total: 57 unit tests, 18 manual tests**
 
 ---
 
