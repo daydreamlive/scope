@@ -7,13 +7,15 @@ import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
-import { useWebRTC } from "../hooks/useWebRTC";
+import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
+import { useApi } from "../hooks/useApi";
+import { useFalContext } from "../lib/falContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -26,11 +28,6 @@ import type {
   VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import {
-  checkModelStatus,
-  downloadPipelineModels,
-  downloadRecording,
-} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -71,6 +68,17 @@ function getVaceParams(
 }
 
 export function StreamPage() {
+  // Get API functions that work in both local and fal modes
+  const api = useApi();
+  const { isFalMode, isReady: isFalReady } = useFalContext();
+
+  // Show loading state while connecting to fal
+  useEffect(() => {
+    if (isFalMode) {
+      console.log("[StreamPage] Fal mode enabled, ready:", isFalReady);
+    }
+  }, [isFalMode, isFalReady]);
+
   // Fetch available pipelines dynamically
   const { pipelines } = usePipelines();
 
@@ -161,7 +169,7 @@ export function StreamPage() {
     pipelineInfo,
   } = usePipeline();
 
-  // WebRTC for streaming
+  // WebRTC for streaming (unified hook works in both local and fal modes)
   const {
     remoteStream,
     isStreaming,
@@ -172,7 +180,7 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
     sessionId,
-  } = useWebRTC();
+  } = useUnifiedWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
   const isLoading = isDownloading || isPipelineLoading || isConnecting;
@@ -350,12 +358,12 @@ export function StreamPage() {
     setDownloadProgress(null);
 
     try {
-      await downloadPipelineModels(pipelineId);
+      await api.downloadPipelineModels(pipelineId);
 
       // Enhanced polling with progress updates
       const checkDownloadProgress = async () => {
         try {
-          const status = await checkModelStatus(pipelineId);
+          const status = await api.checkModelStatus(pipelineId);
 
           // Update progress state
           if (status.progress) {
@@ -851,7 +859,7 @@ export function StreamPage() {
         const pipelineInfo = pipelines?.[pipelineId];
         if (pipelineInfo?.requiresModels) {
           try {
-            const status = await checkModelStatus(pipelineId);
+            const status = await api.checkModelStatus(pipelineId);
             if (!status.downloaded) {
               missingPipelines.push(pipelineId);
             }
@@ -1084,7 +1092,7 @@ export function StreamPage() {
         });
         return;
       }
-      await downloadRecording(sessionId);
+      await api.downloadRecording(sessionId);
     } catch (error) {
       console.error("Error downloading recording:", error);
       toast.error("Error downloading recording", {
