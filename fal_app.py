@@ -91,6 +91,10 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env = os.environ.copy()
         # Add any scope-specific environment variables here
         # scope_env["PIPELINE"] = "some-default-pipeline"
+        # Use fal's /data directory for persistent storage
+        scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
+        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
+        scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = "/data/assets"
 
         # Start the scope server in a background thread
         def start_server():
