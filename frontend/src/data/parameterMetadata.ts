@@ -32,6 +32,21 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Enables pipeline to automatically manage the cache which influences newly generated frames. Disable for manual control via Reset Cache.",
   },
+  useMagcache: {
+    label: "MagCache:",
+    tooltip:
+      "Enables MagCache (magnitude-aware residual caching) to skip redundant denoising steps for faster inference. Toggle during a live stream to compare speed vs quality.",
+  },
+  magcacheThresh: {
+    label: "MagCache Threshold:",
+    tooltip:
+      "Controls quality vs speed tradeoff. Lower values (0.05-0.08) = better quality, fewer skips. Higher values (0.15-0.25) = faster, more skips. Default: 0.12",
+  },
+  magcacheK: {
+    label: "MagCache Max Skips:",
+    tooltip:
+      "Maximum consecutive denoising steps to skip before forcing a compute. Lower values (1) = better quality. Higher values (3-4) = faster but may cause instability. Default: 2",
+  },
   resetCache: {
     label: "Reset Cache:",
     tooltip:

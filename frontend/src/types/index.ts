@@ -59,6 +59,9 @@ export interface SettingsState {
   noiseScale?: number;
   noiseController?: boolean;
   manageCache?: boolean;
+  useMagcache?: boolean;
+  magcacheThresh?: number;
+  magcacheK?: number;
   quantization?: "fp8_e4m3fn" | null;
   kvCacheAttentionBias?: number;
   paused?: boolean;
@@ -117,6 +120,7 @@ export interface PipelineInfo {
   supportsCacheManagement?: boolean;
   supportsKvCacheBias?: boolean;
   supportsQuantization?: boolean;
+  supportsMagcache?: boolean;
   minDimension?: number;
   recommendedQuantizationVramThreshold?: number | null;
   // Available VAE types from config schema enum (derived from vae_type field presence)
