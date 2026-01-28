@@ -23,7 +23,6 @@ import type {
   LoRAConfig,
   LoraMergeStrategy,
   DownloadProgress,
-  VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import {
@@ -902,11 +901,9 @@ export function StreamPage() {
           width: resolution.width,
         };
 
-        // Add seed if pipeline supports quantization (implies it needs seed)
+        // Add quantization when pipeline supports it
         if (currentPipeline?.supportsQuantization) {
-          loadParams.seed = settings.seed ?? 42;
           loadParams.quantization = settings.quantization ?? null;
-          loadParams.vae_type = settings.vaeType ?? "wan";
         }
 
         // Add LoRA parameters if pipeline supports LoRA
@@ -1401,15 +1398,9 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
-            schemaFieldOverrides={{
-              ...(settings.schemaFieldOverrides ?? {}),
-              base_seed: settings.seed ?? 42,
-              vae_type: settings.vaeType ?? "wan",
-            }}
+            schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
             onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
               updateSettings({
-                ...(key === "base_seed" ? { seed: value as number } : {}),
-                ...(key === "vae_type" ? { vaeType: value as VaeType } : {}),
                 schemaFieldOverrides: {
                   ...(settings.schemaFieldOverrides ?? {}),
                   [key]: value,

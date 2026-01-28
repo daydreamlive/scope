@@ -370,7 +370,7 @@ export interface PipelineSchemaProperty {
   anyOf?: unknown[];
   enum?: unknown[];
   $ref?: string;
-  /** UI hints from backend (Field json_schema_extra); only render when ui.category === "configuration" */
+  /** UI hints from backend (Field json_schema_extra) */
   ui?: SchemaFieldUI;
 }
 

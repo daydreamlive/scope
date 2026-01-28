@@ -20,7 +20,6 @@ const BASE_FALLBACK = {
   height: 320,
   width: 576,
   denoisingSteps: [1000, 750, 500, 250] as number[],
-  seed: 42,
 };
 
 // Get fallback defaults for a pipeline before schemas are loaded
@@ -38,7 +37,6 @@ function getFallbackDefaults(mode?: InputMode) {
     noiseController: isVideoMode ? true : undefined,
     defaultTemporalInterpolationSteps: undefined as number | undefined,
     inputMode: effectiveMode,
-    seed: BASE_FALLBACK.seed,
     quantization: undefined as "fp8_e4m3fn" | undefined,
   };
 }
@@ -107,7 +105,6 @@ export function useStreamState() {
           noiseController,
           defaultTemporalInterpolationSteps,
           inputMode: effectiveMode,
-          seed: (props.base_seed?.default as number) ?? 42,
           quantization: undefined as "fp8_e4m3fn" | undefined,
         };
       }
@@ -145,7 +142,6 @@ export function useStreamState() {
       height: initialDefaults.height,
       width: initialDefaults.width,
     },
-    seed: initialDefaults.seed,
     denoisingSteps: initialDefaults.denoisingSteps,
     noiseScale: initialDefaults.noiseScale,
     noiseController: initialDefaults.noiseController,

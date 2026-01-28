@@ -1,5 +1,5 @@
 /**
- * Complex schema-driven settings components: VACE, LoRA, VAE type, resolution,
+ * Complex schema-driven settings components: VACE, LoRA, resolution,
  * cache, denoising steps, noise, quantization.
  * Each block is rendered once per schema configuration (deduplicated by "component" or key).
  */
