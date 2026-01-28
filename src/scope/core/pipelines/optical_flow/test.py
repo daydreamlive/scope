@@ -18,7 +18,7 @@ def main():
 
     config = OmegaConf.create(
         {
-            "model_size": "large",
+            "model_size": "small",
         }
     )
 

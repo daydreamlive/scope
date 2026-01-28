@@ -9,15 +9,11 @@ import time
 from typing import TYPE_CHECKING
 
 import torch
-import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torchvision.utils import flow_to_image
 
 from ..interface import Pipeline, Requirements
 from .schema import OpticalFlowConfig
-
-# Disable CPU codegen to avoid needing MSVC on Windows
-inductor_config.disable_cpp_codegen = True
 
 if TYPE_CHECKING:
     from ..schema import BasePipelineConfig
@@ -62,13 +58,15 @@ class OpticalFlowPipeline(Pipeline):
         self._width = DEFAULT_WIDTH
 
         # Read settings from config
-        model_size = getattr(config, "model_size", "large")
+        model_size = getattr(config, "model_size", "small")
 
         # Model configuration
         self._use_large_model = model_size == "large"
-        self._model_name = "raft_large" if self._use_large_model else "raft_small"
 
         self._pytorch_model = None
+
+        # Warmup: load and compile model to avoid delay on first frame
+        self._ensure_pytorch_model()
 
     def _ensure_pytorch_model(self):
         """Lazily initialize the PyTorch RAFT model with torch.compile.
@@ -79,7 +77,15 @@ class OpticalFlowPipeline(Pipeline):
         if self._pytorch_model is not None:
             return self._pytorch_model
 
+        import sys
+
+        import torch._inductor.config as inductor_config
+
         from .engine import load_raft_model
+
+        # Disable CPU codegen on Windows to avoid needing MSVC
+        if sys.platform == "win32":
+            inductor_config.disable_cpp_codegen = True
 
         model_size = "Large" if self._use_large_model else "Small"
         logger.info(f"Loading PyTorch RAFT {model_size} model...")
@@ -155,8 +161,10 @@ class OpticalFlowPipeline(Pipeline):
         Returns:
             Requirements specifying input_size needed for temporal consistency
         """
-        return Requirements(input_size=4)
+        # Optical flow requires 2 consecutive frames to compute motion between them
+        return Requirements(input_size=2)
 
+    @torch.no_grad()
     def __call__(self, **kwargs) -> dict:
         """Process video frames and return optical flow visualizations.
 
@@ -197,7 +205,9 @@ class OpticalFlowPipeline(Pipeline):
         # Convert to CHW format for processing: [T, H, W, C] -> [T, C, H, W]
         frames_tchw = frames_thwc.permute(0, 3, 1, 2)
 
-        # Resize all frames to flow computation size at once if needed
+        # Resize frames to fixed size for RAFT computation (512x512 by default).
+        # This improves performance and memory usage while preserving motion quality.
+        # Output is resized back to original resolution after flow computation.
         if h != self._height or w != self._width:
             frames_for_flow = F.interpolate(
                 frames_tchw,
