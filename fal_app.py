@@ -39,6 +39,7 @@ class ScopeApp(fal.App, keep_alive=300):
 
     The actual WebRTC video stream flows directly between browser and this runner
     once the signaling is complete.
+
     """
 
     # Set custom Docker image
