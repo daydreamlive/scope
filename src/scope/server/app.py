@@ -522,23 +522,19 @@ async def handle_webrtc_offer(
 ):
     """Handle WebRTC offer and return answer.
 
-    In cloud mode, this proxies the WebRTC signaling to the fal-hosted scope backend.
-    The actual video stream flows directly between the browser and fal.ai.
+    In cloud mode, video flows through the backend to fal.ai:
+        Browser → Backend (WebRTC) → fal.ai (WebRTC) → Backend → Browser
+
+    This enables:
+    - Spout input to be forwarded to fal.ai
+    - Full control over the video pipeline on the backend
+    - Local backend can record/manipulate frames
     """
     try:
-        # If connected to fal, proxy the WebRTC signaling
+        # If connected to fal, use relay mode (video flows through backend)
         if fal_manager.is_connected:
-            logger.info("Proxying WebRTC offer to fal")
-            initial_params = None
-            if request.initialParameters:
-                initial_params = request.initialParameters.model_dump(exclude_none=True)
-
-            response = await fal_manager.webrtc_offer(
-                sdp=request.sdp,
-                sdp_type=request.type,
-                initial_parameters=initial_params,
-            )
-            return WebRTCOfferResponse(**response)
+            logger.info("[CLOUD] Using relay mode - video will flow through backend to fal.ai")
+            return await webrtc_manager.handle_offer_with_relay(request, fal_manager)
 
         # Local mode: ensure pipeline is loaded before proceeding
         status_info = await pipeline_manager.get_status_info_async()
@@ -564,32 +560,21 @@ async def add_ice_candidate(
     session_id: str,
     candidate_request: IceCandidateRequest,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
     """Add ICE candidate(s) to an existing WebRTC session (Trickle ICE).
 
     This endpoint follows the Trickle ICE pattern, allowing clients to send
     ICE candidates as they are discovered.
 
-    In cloud mode, ICE candidates are forwarded to the fal-hosted scope backend.
+    Note: In cloud mode, the browser still connects to the LOCAL backend via WebRTC.
+    The backend then relays frames to/from fal.ai via a separate WebRTC connection.
+    So browser ICE candidates always go to the local WebRTC session.
     """
     # TODO: Validate that the Content-Type is 'application/trickle-ice-sdpfrag'
     # At the moment FastAPI defaults to validating that it is 'application/json'
     try:
-        # If connected to fal, proxy ICE candidates
-        if fal_manager.is_connected:
-            for candidate_init in candidate_request.candidates:
-                await fal_manager.webrtc_ice_candidate(
-                    session_id=session_id,
-                    candidate={
-                        "candidate": candidate_init.candidate,
-                        "sdpMid": candidate_init.sdpMid,
-                        "sdpMLineIndex": candidate_init.sdpMLineIndex,
-                    },
-                )
-            return Response(status_code=204)
-
-        # Local mode
+        # Always add ICE candidates to the local session
+        # (In cloud mode, browser connects to local backend, not directly to fal)
         for candidate_init in candidate_request.candidates:
             await webrtc_manager.add_ice_candidate(
                 session_id=session_id,
@@ -598,9 +583,9 @@ async def add_ice_candidate(
                 sdp_mline_index=candidate_init.sdpMLineIndex,
             )
 
-            logger.debug(
-                f"Added {len(candidate_request.candidates)} ICE candidates to session {session_id}"
-            )
+        logger.debug(
+            f"Added {len(candidate_request.candidates)} ICE candidates to session {session_id}"
+        )
 
         # Return 204 No Content on success
         return Response(status_code=204)
@@ -1034,16 +1019,24 @@ async def connect_to_fal(
     This establishes a WebSocket connection to the fal.ai cloud runner,
     which stays open until disconnect is called. Once connected:
     - Pipeline loading is proxied to the fal-hosted scope backend
-    - WebRTC signaling is proxied to the fal-hosted scope backend
+    - Video from the browser flows through the backend to fal.ai
     - The fal runner stays warm and ready for video processing
 
     Note: The connection may take 1-2 minutes on cold start while the
     fal runner initializes.
+
+    Architecture:
+        Browser → Backend (WebRTC) → fal.ai (WebRTC) → Backend → Browser
+        Spout → Backend → fal.ai (WebRTC) → Backend → Spout/Browser
     """
     try:
         logger.info(f"Connecting to fal: {request.app_id}")
         await fal_manager.connect(request.app_id, request.api_key)
-        return FalStatusResponse(connected=True, app_id=request.app_id)
+        return FalStatusResponse(
+            connected=True,
+            webrtc_connected=False,
+            app_id=request.app_id,
+        )
     except Exception as e:
         logger.error(f"Error connecting to fal: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1055,12 +1048,12 @@ async def disconnect_from_fal(
 ):
     """Disconnect from fal.ai cloud.
 
-    This closes the WebSocket connection to fal.ai, returning to local
-    GPU processing mode. Any in-progress operations will be interrupted.
+    This closes the WebSocket and WebRTC connections to fal.ai, returning
+    to local GPU processing mode. Any in-progress operations will be interrupted.
     """
     try:
         await fal_manager.disconnect()
-        return FalStatusResponse(connected=False, app_id=None)
+        return FalStatusResponse(connected=False, webrtc_connected=False, app_id=None)
     except Exception as e:
         logger.error(f"Error disconnecting from fal: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

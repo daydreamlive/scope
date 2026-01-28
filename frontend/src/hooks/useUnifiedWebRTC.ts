@@ -128,6 +128,15 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         const pc = new RTCPeerConnection(config);
         peerConnectionRef.current = pc;
 
+        // Log peer connection configuration
+        console.log("[UnifiedWebRTC] Created RTCPeerConnection with config:", {
+          mode: isFalMode ? "FAL (frontend direct)" : "LOCAL (backend)",
+          iceServers: config.iceServers?.map((s: RTCIceServer) => ({
+            urls: s.urls,
+            hasCredentials: !!(s.username && s.credential),
+          })),
+        });
+
         // Create data channel for parameter updates
         const dataChannel = pc.createDataChannel("parameters", {
           ordered: true,
@@ -222,6 +231,11 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             setIsConnecting(false);
             setIsStreaming(true);
 
+            // Log detailed connection info
+            console.log("[UnifiedWebRTC] ========== CONNECTION ESTABLISHED ==========");
+            console.log("[UnifiedWebRTC] Mode:", isFalMode ? "FAL (frontend → fal.ai)" : "LOCAL (frontend → backend)");
+            console.log("[UnifiedWebRTC] Session ID:", sessionIdRef.current);
+
             // Log negotiated codec
             const senders = pc.getSenders();
             const videoSender = senders.find((s) => s.track?.kind === "video");
@@ -232,6 +246,44 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
                 console.log(`[UnifiedWebRTC] Negotiated codec: ${codec.mimeType}`);
               }
             }
+
+            // Log remote description info
+            if (pc.remoteDescription) {
+              const sdpLines = pc.remoteDescription.sdp.split("\n");
+              const originLine = sdpLines.find((l: string) => l.startsWith("o="));
+              const connectionLine = sdpLines.find((l: string) => l.startsWith("c="));
+              console.log("[UnifiedWebRTC] Remote SDP origin:", originLine);
+              console.log("[UnifiedWebRTC] Remote SDP connection:", connectionLine);
+            }
+
+            // Get connection stats after a short delay
+            setTimeout(async () => {
+              try {
+                const stats = await pc.getStats();
+                stats.forEach((report) => {
+                  if (report.type === "candidate-pair" && report.state === "succeeded") {
+                    console.log("[UnifiedWebRTC] Active candidate pair:", {
+                      localCandidateId: report.localCandidateId,
+                      remoteCandidateId: report.remoteCandidateId,
+                      bytesSent: report.bytesSent,
+                      bytesReceived: report.bytesReceived,
+                    });
+                  }
+                  if (report.type === "remote-candidate") {
+                    console.log("[UnifiedWebRTC] Remote candidate:", {
+                      address: report.address,
+                      port: report.port,
+                      protocol: report.protocol,
+                      candidateType: report.candidateType,
+                    });
+                  }
+                });
+              } catch (e) {
+                console.warn("[UnifiedWebRTC] Failed to get stats:", e);
+              }
+            }, 1000);
+
+            console.log("[UnifiedWebRTC] ==============================================");
           } else if (
             pc.connectionState === "disconnected" ||
             pc.connectionState === "failed"
@@ -279,6 +331,14 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
           console.log("[UnifiedWebRTC] Received answer, sessionId:", answer.sessionId);
           sessionIdRef.current = answer.sessionId;
+
+          // Parse the SDP to show where we're connecting
+          const sdpLines = answer.sdp.split("\n");
+          const originLine = sdpLines.find((l: string) => l.startsWith("o="));
+          const sessionName = sdpLines.find((l: string) => l.startsWith("s="));
+          console.log("[UnifiedWebRTC] Server SDP origin:", originLine);
+          console.log("[UnifiedWebRTC] Server SDP session:", sessionName);
+          console.log("[UnifiedWebRTC] Stream target:", isFalMode ? "fal.ai cloud" : "local backend");
 
           // Flush queued ICE candidates
           if (queuedCandidatesRef.current.length > 0) {

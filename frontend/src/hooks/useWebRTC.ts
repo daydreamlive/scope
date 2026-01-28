@@ -83,6 +83,14 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         const pc = new RTCPeerConnection(config);
         peerConnectionRef.current = pc;
 
+        // Log peer connection configuration
+        console.log("[WebRTC] Created RTCPeerConnection with config:", {
+          iceServers: config.iceServers?.map(s => ({
+            urls: s.urls,
+            hasCredentials: !!(s.username && s.credential),
+          })),
+        });
+
         // Create data channel for parameter updates
         const dataChannel = pc.createDataChannel("parameters", {
           ordered: true,
@@ -173,12 +181,16 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         };
 
         const onConnectionStateChange = () => {
-          console.log("Connection state changed:", pc.connectionState);
+          console.log("[WebRTC] Connection state changed:", pc.connectionState);
           setConnectionState(pc.connectionState);
 
           if (pc.connectionState === "connected") {
             setIsConnecting(false);
             setIsStreaming(true);
+
+            // Log detailed connection info
+            console.log("[WebRTC] ========== CONNECTION ESTABLISHED ==========");
+            console.log("[WebRTC] Session ID:", sessionIdRef.current);
 
             // Log the actual negotiated codec for verification
             const senders = pc.getSenders();
@@ -187,9 +199,55 @@ export function useWebRTC(options?: UseWebRTCOptions) {
               const params = videoSender.getParameters();
               const codec = params.codecs?.[0];
               if (codec) {
-                console.log(`Negotiated video codec: ${codec.mimeType}`);
+                console.log(`[WebRTC] Negotiated video codec: ${codec.mimeType}`);
               }
             }
+
+            // Log remote description info
+            if (pc.remoteDescription) {
+              const sdpLines = pc.remoteDescription.sdp.split("\n");
+              const originLine = sdpLines.find(l => l.startsWith("o="));
+              const connectionLine = sdpLines.find(l => l.startsWith("c="));
+              console.log("[WebRTC] Remote SDP origin:", originLine);
+              console.log("[WebRTC] Remote SDP connection:", connectionLine);
+            }
+
+            // Get connection stats after a short delay
+            setTimeout(async () => {
+              try {
+                const stats = await pc.getStats();
+                stats.forEach(report => {
+                  if (report.type === "candidate-pair" && report.state === "succeeded") {
+                    console.log("[WebRTC] Active candidate pair:", {
+                      localCandidateId: report.localCandidateId,
+                      remoteCandidateId: report.remoteCandidateId,
+                      bytesSent: report.bytesSent,
+                      bytesReceived: report.bytesReceived,
+                    });
+                  }
+                  if (report.type === "remote-candidate") {
+                    console.log("[WebRTC] Remote candidate:", {
+                      address: report.address,
+                      port: report.port,
+                      protocol: report.protocol,
+                      candidateType: report.candidateType,
+                    });
+                  }
+                  if (report.type === "local-candidate") {
+                    console.log("[WebRTC] Local candidate:", {
+                      address: report.address,
+                      port: report.port,
+                      protocol: report.protocol,
+                      candidateType: report.candidateType,
+                    });
+                  }
+                });
+              } catch (e) {
+                console.warn("[WebRTC] Failed to get stats:", e);
+              }
+            }, 1000);
+
+            console.log("[WebRTC] ==============================================");
           } else if (
             pc.connectionState === "disconnected" ||
             pc.connectionState === "failed"
@@ -200,7 +258,10 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         };
 
         const onIceConnectionStateChange = () => {
-          console.log("ICE connection state changed:", pc.iceConnectionState);
+          console.log("[WebRTC] ICE connection state:", pc.iceConnectionState);
+          if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+            console.log("[WebRTC] ICE connection successful - media can now flow");
+          }
         };
 
         const onIceCandidate = async ({
@@ -245,11 +306,18 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             initialParameters,
           });
 
-          console.log("Received server answer:", answer);
+          console.log("[WebRTC] Received server answer");
 
           // Store session ID for sending candidates
           sessionIdRef.current = answer.sessionId;
-          console.log("Session ID:", answer.sessionId);
+          console.log("[WebRTC] Session ID:", answer.sessionId);
+
+          // Parse the SDP to show where we're connecting
+          const sdpLines = answer.sdp.split("\n");
+          const originLine = sdpLines.find((l: string) => l.startsWith("o="));
+          const sessionName = sdpLines.find((l: string) => l.startsWith("s="));
+          console.log("[WebRTC] Server SDP origin:", originLine);
+          console.log("[WebRTC] Server SDP session:", sessionName);
 
           // Flush any queued ICE candidates
           if (queuedCandidatesRef.current.length > 0) {

@@ -33,14 +33,25 @@ class _SpoutFrame:
 
 
 class FrameProcessor:
+    """Processes video frames through pipelines or fal.ai cloud relay.
+    
+    Supports two modes:
+    1. Local mode: Frames processed through local GPU pipelines
+    2. Relay mode: Frames sent to fal.ai for cloud processing
+    
+    Spout integration works in both modes.
+    """
+    
     def __init__(
         self,
-        pipeline_manager: PipelineManager,
+        pipeline_manager: "PipelineManager | None" = None,
         max_parameter_queue_size: int = 8,
         initial_parameters: dict = None,
         notification_callback: callable = None,
+        fal_manager: "Any | None" = None,  # FalConnectionManager for relay mode
     ):
         self.pipeline_manager = pipeline_manager
+        self.fal_manager = fal_manager
 
         # Current parameters
         self.parameters = initial_parameters or {}
@@ -51,8 +62,14 @@ class FrameProcessor:
         self.notification_callback = notification_callback
 
         self.paused = False
+        
+        # Relay mode: send frames to fal.ai instead of local processing
+        self._relay_mode = fal_manager is not None
+        self._fal_output_queue: queue.Queue = queue.Queue(maxsize=2)
+        self._frames_to_fal = 0
+        self._frames_from_fal = 0
 
-        # Spout integration
+        # Spout integration (works in both local and relay modes)
         self.spout_sender = None
         self.spout_sender_enabled = False
         self.spout_sender_name = "ScopeSyphonSpoutOut"
@@ -72,9 +89,14 @@ class FrameProcessor:
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Pipeline chaining support
+        # Pipeline chaining support (local mode only)
         self.pipeline_processors: list[PipelineProcessor] = []
         self.pipeline_ids: list[str] = []
+
+        # Frame counting for debug logging
+        self._frames_in = 0
+        self._frames_out = 0
+        self._last_stats_time = time.time()
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -96,6 +118,25 @@ class FrameProcessor:
             spout_config = self.parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
 
+        # Reset frame counters on start
+        self._frames_in = 0
+        self._frames_out = 0
+        self._frames_to_fal = 0
+        self._frames_from_fal = 0
+        self._last_stats_time = time.time()
+
+        if self._relay_mode:
+            # Relay mode: frames go to fal.ai instead of local pipelines
+            logger.info("[FRAME-PROCESSOR] Starting in RELAY mode (fal.ai cloud)")
+            
+            # Register callback to receive frames from fal.ai
+            if self.fal_manager:
+                self.fal_manager.add_frame_callback(self._on_frame_from_fal)
+            
+            logger.info("[FRAME-PROCESSOR] Started in relay mode")
+            return
+
+        # Local mode: setup pipeline chain
         if not self.pipeline_ids:
             logger.error("No pipeline IDs provided, cannot start")
             self.running = False
@@ -107,9 +148,9 @@ class FrameProcessor:
             logger.error(f"Pipeline chain setup failed: {e}")
             self.running = False
             return
-
+        
         logger.info(
-            f"FrameProcessor started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
+            f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
         )
 
     def stop(self, error_message: str = None):
@@ -150,7 +191,21 @@ class FrameProcessor:
                 logger.error(f"Error releasing Spout receiver: {e}")
             self.spout_receiver = None
 
-        logger.info("FrameProcessor stopped")
+        # Clean up fal.ai callback in relay mode
+        if self._relay_mode and self.fal_manager:
+            self.fal_manager.remove_frame_callback(self._on_frame_from_fal)
+
+        # Log final frame stats
+        if self._relay_mode:
+            logger.info(
+                f"[FRAME-PROCESSOR] Stopped (relay mode). "
+                f"Frames: in={self._frames_in}, to_fal={self._frames_to_fal}, "
+                f"from_fal={self._frames_from_fal}, out={self._frames_out}"
+            )
+        else:
+            logger.info(
+                f"[FRAME-PROCESSOR] Stopped. Total frames: in={self._frames_in}, out={self._frames_out}"
+            )
 
         # Notify callback that frame processor has stopped
         if self.notification_callback:
@@ -166,7 +221,25 @@ class FrameProcessor:
         if not self.running:
             return False
 
-        # Convert VideoFrame to tensor and put into first processor's input queue
+        self._frames_in += 1
+        
+        # Log stats every 100 frames
+        if self._frames_in % 100 == 0:
+            self._log_frame_stats()
+
+        if self._relay_mode:
+            # Relay mode: send frame to fal.ai
+            if self.fal_manager:
+                frame_array = frame.to_ndarray(format="rgb24")
+                if self.fal_manager.send_frame_to_fal(frame_array):
+                    self._frames_to_fal += 1
+                    return True
+                else:
+                    logger.debug("[FRAME-PROCESSOR] Failed to send frame to fal.ai")
+                    return False
+            return False
+
+        # Local mode: put into first processor's input queue
         if self.pipeline_processors:
             first_processor = self.pipeline_processors[0]
 
@@ -186,10 +259,33 @@ class FrameProcessor:
         return True
 
     def get(self) -> torch.Tensor | None:
-        if not self.running or not self.pipeline_processors:
+        if not self.running:
             return None
 
-        # Get frame from last pipeline processor's output queue
+        if self._relay_mode:
+            # Relay mode: get frame from fal.ai output queue
+            try:
+                frame_np = self._fal_output_queue.get_nowait()
+                self._frames_out += 1
+                
+                # Enqueue frame for async Spout sending (non-blocking)
+                if self.spout_sender_enabled and self.spout_sender is not None:
+                    try:
+                        self.spout_sender_queue.put_nowait(frame_np)
+                    except queue.Full:
+                        logger.debug("Spout output queue full, dropping frame")
+                    except Exception as e:
+                        logger.error(f"Error enqueueing Spout frame: {e}")
+
+                # Return as tensor for compatibility
+                return torch.from_numpy(frame_np)
+            except queue.Empty:
+                return None
+
+        # Local mode: get from pipeline processor
+        if not self.pipeline_processors:
+            return None
+
         last_processor = self.pipeline_processors[-1]
         if not last_processor.output_queue:
             return None
@@ -199,6 +295,8 @@ class FrameProcessor:
             # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
             # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
             frame = frame.squeeze(0).cpu()
+            
+            self._frames_out += 1
 
             # Enqueue frame for async Spout sending (non-blocking)
             if self.spout_sender_enabled and self.spout_sender is not None:
@@ -216,6 +314,25 @@ class FrameProcessor:
         except queue.Empty:
             return None
 
+    def _on_frame_from_fal(self, frame: "VideoFrame") -> None:
+        """Callback when a processed frame is received from fal.ai (relay mode)."""
+        self._frames_from_fal += 1
+
+        try:
+            # Convert to numpy and queue for output
+            frame_np = frame.to_ndarray(format="rgb24")
+            try:
+                self._fal_output_queue.put_nowait(frame_np)
+            except queue.Full:
+                # Drop oldest frame to make room
+                try:
+                    self._fal_output_queue.get_nowait()
+                    self._fal_output_queue.put_nowait(frame_np)
+                except queue.Empty:
+                    pass
+        except Exception as e:
+            logger.error(f"[FRAME-PROCESSOR] Error processing frame from fal: {e}")
+
     def get_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS.
 
@@ -228,6 +345,52 @@ class FrameProcessor:
         # Get FPS from the last processor in the chain
         last_processor = self.pipeline_processors[-1]
         return last_processor.get_fps()
+
+    def _log_frame_stats(self):
+        """Log frame processing statistics."""
+        now = time.time()
+        elapsed = now - self._last_stats_time
+        
+        if elapsed > 0:
+            fps_in = self._frames_in / elapsed if self._frames_in > 0 else 0
+            fps_out = self._frames_out / elapsed if self._frames_out > 0 else 0
+            
+            if self._relay_mode:
+                logger.info(
+                    f"[FRAME-PROCESSOR] RELAY MODE | "
+                    f"Frames: in={self._frames_in}, to_fal={self._frames_to_fal}, "
+                    f"from_fal={self._frames_from_fal}, out={self._frames_out} | "
+                    f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out"
+                )
+            else:
+                logger.info(
+                    f"[FRAME-PROCESSOR] Frames: in={self._frames_in}, out={self._frames_out} | "
+                    f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out | "
+                    f"Pipeline FPS: {self.get_fps():.1f}"
+                )
+
+    def get_frame_stats(self) -> dict:
+        """Get current frame processing statistics."""
+        now = time.time()
+        elapsed = now - self._last_stats_time
+        
+        stats = {
+            "frames_in": self._frames_in,
+            "frames_out": self._frames_out,
+            "elapsed_seconds": elapsed,
+            "fps_in": self._frames_in / elapsed if elapsed > 0 else 0,
+            "fps_out": self._frames_out / elapsed if elapsed > 0 else 0,
+            "pipeline_fps": self.get_fps(),
+            "spout_receiver_enabled": self.spout_receiver_enabled,
+            "spout_sender_enabled": self.spout_sender_enabled,
+            "relay_mode": self._relay_mode,
+        }
+        
+        if self._relay_mode:
+            stats["frames_to_fal"] = self._frames_to_fal
+            stats["frames_from_fal"] = self._frames_from_fal
+            
+        return stats
 
     def _get_pipeline_dimensions(self) -> tuple[int, int]:
         """Get current pipeline dimensions from pipeline manager."""

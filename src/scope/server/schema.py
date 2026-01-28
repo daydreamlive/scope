@@ -518,7 +518,7 @@ class FalConnectionStats(BaseModel):
     )
     webrtc_offers_sent: int = Field(
         default=0,
-        description="Number of WebRTC offers sent",
+        description="Number of WebRTC offers sent (signaling)",
     )
     webrtc_offers_successful: int = Field(
         default=0,
@@ -536,6 +536,14 @@ class FalConnectionStats(BaseModel):
         default=0,
         description="Number of successful API requests",
     )
+    frames_sent_to_fal: int = Field(
+        default=0,
+        description="Number of video frames sent to fal.ai for processing",
+    )
+    frames_received_from_fal: int = Field(
+        default=0,
+        description="Number of processed video frames received from fal.ai",
+    )
 
 
 class FalStatusResponse(BaseModel):
@@ -543,7 +551,11 @@ class FalStatusResponse(BaseModel):
 
     connected: bool = Field(
         ...,
-        description="Whether connected to fal.ai cloud",
+        description="Whether connected to fal.ai cloud (WebSocket)",
+    )
+    webrtc_connected: bool = Field(
+        default=False,
+        description="Whether WebRTC media connection to fal.ai is active",
     )
     app_id: str | None = Field(
         default=None,

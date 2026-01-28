@@ -4,14 +4,15 @@ This module handles the connection to fal.ai cloud for remote GPU inference.
 The connection is established when cloud mode is toggled ON and stays open
 until toggled OFF, allowing:
 1. API calls to be proxied to the fal-hosted scope backend
-2. WebRTC signaling to be routed through the fal WebSocket
+2. WebRTC media relay - video flows through the backend to fal.ai
 3. The fal runner to stay warm and ready for requests
 
 Architecture:
 - FalConnectionManager is instantiated once at app startup
 - When connect() is called, it opens a WebSocket to fal and waits for "ready"
-- All API/signaling calls go through this single connection
-- When disconnect() is called, the WebSocket is closed
+- When start_webrtc() is called, it establishes a WebRTC connection to fal.ai
+- Video frames flow: Browser/Spout → Backend → fal.ai → Backend → Browser/Spout
+- When disconnect() is called, both WebSocket and WebRTC are closed
 """
 
 from __future__ import annotations
@@ -21,9 +22,14 @@ import json
 import logging
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import aiohttp
+import numpy as np
+from av import VideoFrame
+
+if TYPE_CHECKING:
+    from .fal_webrtc_client import FalWebRTCClient
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +55,10 @@ class FalConnectionManager:
         self._connected = False
         self._stop_event = asyncio.Event()
 
+        # WebRTC client for media relay
+        self._webrtc_client: "FalWebRTCClient | None" = None
+        self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
+
         # Stats tracking
         self._stats = {
             "webrtc_offers_sent": 0,
@@ -58,6 +68,8 @@ class FalConnectionManager:
             "api_requests_successful": 0,
             "connected_at": None,
             "last_activity_at": None,
+            "frames_sent_to_fal": 0,
+            "frames_received_from_fal": 0,
         }
 
     @property
@@ -389,6 +401,9 @@ class FalConnectionManager:
         self._stop_event.set()
         self._connected = False
 
+        # Stop WebRTC client first
+        await self.stop_webrtc()
+
         # Cancel pending requests
         for request_id, future in self._pending_requests.items():
             if not future.done():
@@ -406,6 +421,108 @@ class FalConnectionManager:
 
         await self._cleanup()
         logger.info("Disconnected from fal")
+
+    # =========================================================================
+    # WebRTC Media Relay - Video flows through backend to fal.ai
+    # =========================================================================
+
+    @property
+    def webrtc_connected(self) -> bool:
+        """Check if WebRTC connection to fal.ai is established."""
+        return self._webrtc_client is not None and self._webrtc_client.is_connected
+
+    async def start_webrtc(self, initial_parameters: dict | None = None) -> None:
+        """Start WebRTC connection to fal.ai for media relay.
+
+        This establishes a WebRTC peer connection FROM the backend TO fal.ai,
+        allowing video frames to flow through the backend.
+
+        Args:
+            initial_parameters: Initial pipeline parameters (prompts, etc.)
+        """
+        if not self.is_connected:
+            raise RuntimeError("Must be connected to fal.ai WebSocket first")
+
+        if self._webrtc_client is not None:
+            logger.info("[CLOUD-RTC] WebRTC already active, stopping first")
+            await self.stop_webrtc()
+
+        # Import here to avoid circular imports
+        from .fal_webrtc_client import FalWebRTCClient
+
+        logger.info("[CLOUD-RTC] Starting WebRTC connection to fal.ai...")
+        self._webrtc_client = FalWebRTCClient(self)
+
+        # Register frame callback to update stats and forward to subscribers
+        self._webrtc_client.output_handler.add_callback(self._on_frame_from_fal)
+
+        try:
+            await self._webrtc_client.connect(initial_parameters)
+            logger.info("[CLOUD-RTC] WebRTC connection established")
+        except Exception as e:
+            logger.error(f"[CLOUD-RTC] Failed to start WebRTC: {e}")
+            self._webrtc_client = None
+            raise
+
+    async def stop_webrtc(self) -> None:
+        """Stop the WebRTC connection to fal.ai."""
+        if self._webrtc_client is not None:
+            logger.info("[CLOUD-RTC] Stopping WebRTC connection...")
+            await self._webrtc_client.disconnect()
+            self._webrtc_client = None
+            logger.info("[CLOUD-RTC] WebRTC connection stopped")
+
+    def send_frame_to_fal(self, frame: "VideoFrame | np.ndarray") -> bool:
+        """Send a video frame to fal.ai for processing.
+
+        Args:
+            frame: VideoFrame or numpy array (RGB24 format)
+
+        Returns:
+            True if frame was queued, False if not connected or queue full
+        """
+        if self._webrtc_client is None or not self._webrtc_client.is_connected:
+            return False
+
+        success = self._webrtc_client.send_frame(frame)
+        if success:
+            self._stats["frames_sent_to_fal"] += 1
+        return success
+
+    def send_parameters_to_fal(self, params: dict) -> None:
+        """Send parameter update to fal.ai via WebRTC data channel.
+
+        Args:
+            params: Parameters to send (prompts, noise_scale, etc.)
+        """
+        if self._webrtc_client is not None and self._webrtc_client.is_connected:
+            self._webrtc_client.send_parameters(params)
+        else:
+            logger.warning("[CLOUD-RTC] Cannot send parameters - WebRTC not connected")
+
+    def add_frame_callback(self, callback: Callable[[VideoFrame], None]) -> None:
+        """Register a callback to receive processed frames from fal.ai.
+
+        Args:
+            callback: Function to call with each processed VideoFrame
+        """
+        self._frame_callbacks.append(callback)
+
+    def remove_frame_callback(self, callback: Callable[[VideoFrame], None]) -> None:
+        """Remove a frame callback."""
+        if callback in self._frame_callbacks:
+            self._frame_callbacks.remove(callback)
+
+    def _on_frame_from_fal(self, frame: VideoFrame) -> None:
+        """Handle frames received from fal.ai."""
+        self._stats["frames_received_from_fal"] += 1
+
+        # Forward to all registered callbacks
+        for callback in self._frame_callbacks:
+            try:
+                callback(frame)
+            except Exception as e:
+                logger.error(f"[CLOUD-RTC] Error in frame callback: {e}")
 
     async def _cleanup(self) -> None:
         """Clean up WebSocket and session."""
@@ -425,6 +542,7 @@ class FalConnectionManager:
         status = {
             "connected": self.is_connected,
             "app_id": self.app_id if self.is_connected else None,
+            "webrtc_connected": self.webrtc_connected,
         }
 
         # Include stats if connected
@@ -440,7 +558,13 @@ class FalConnectionManager:
                 "webrtc_ice_candidates_sent": self._stats["webrtc_ice_candidates_sent"],
                 "api_requests_sent": self._stats["api_requests_sent"],
                 "api_requests_successful": self._stats["api_requests_successful"],
+                "frames_sent_to_fal": self._stats["frames_sent_to_fal"],
+                "frames_received_from_fal": self._stats["frames_received_from_fal"],
             }
+
+            # Include WebRTC client stats if available
+            if self._webrtc_client is not None:
+                status["webrtc_stats"] = self._webrtc_client.get_stats()
 
         return status
 
@@ -459,7 +583,20 @@ class FalConnectionManager:
         logger.info("=" * 50)
         logger.info(f"  App ID: {self.app_id}")
         logger.info(f"  Uptime: {uptime:.1f}s")
-        logger.info(f"  WebRTC offers: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']}")
-        logger.info(f"  ICE candidates sent: {self._stats['webrtc_ice_candidates_sent']}")
-        logger.info(f"  API requests: {self._stats['api_requests_successful']}/{self._stats['api_requests_sent']}")
+        logger.info(f"  WebSocket: connected")
+        logger.info(f"  WebRTC Media: {'connected' if self.webrtc_connected else 'not connected'}")
+        logger.info("")
+        logger.info("  Signaling Stats:")
+        logger.info(f"    WebRTC offers: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']}")
+        logger.info(f"    ICE candidates sent: {self._stats['webrtc_ice_candidates_sent']}")
+        logger.info(f"    API requests: {self._stats['api_requests_successful']}/{self._stats['api_requests_sent']}")
+        logger.info("")
+        logger.info("  Media Stats:")
+        logger.info(f"    Frames sent to fal: {self._stats['frames_sent_to_fal']}")
+        logger.info(f"    Frames received from fal: {self._stats['frames_received_from_fal']}")
+
+        if self._webrtc_client is not None:
+            rtc_stats = self._webrtc_client.get_stats()
+            logger.info(f"    WebRTC state: {rtc_stats.get('connection_state', 'unknown')}")
+
         logger.info("=" * 50)
