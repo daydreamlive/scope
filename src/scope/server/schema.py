@@ -489,3 +489,26 @@ class AssetsResponse(BaseModel):
     """Response containing all discoverable asset files."""
 
     assets: list[AssetFileInfo]
+
+
+# =============================================================================
+# fal.ai cloud integration schemas
+# =============================================================================
+
+
+class FalConnectRequest(BaseModel):
+    """Request to connect to fal.ai cloud for remote GPU inference."""
+
+    app_id: str = Field(
+        ..., description="The fal app ID (e.g., 'owner/scope-fal/webrtc')"
+    )
+    api_key: str = Field(..., description="The fal API key for authentication")
+
+
+class FalStatusResponse(BaseModel):
+    """Response containing fal.ai cloud connection status."""
+
+    connected: bool = Field(..., description="Whether connected to fal cloud")
+    app_id: str | None = Field(
+        default=None, description="The connected fal app ID (if connected)"
+    )

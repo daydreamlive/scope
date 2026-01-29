@@ -1,14 +1,19 @@
+from __future__ import annotations
+
 import logging
 import queue
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
-from aiortc.mediastreams import VideoFrame
+from av import VideoFrame
 
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
+
+if TYPE_CHECKING:
+    from .fal_client import FalClient
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,13 @@ class FrameProcessor:
         if pipeline_ids is not None:
             self.pipeline_ids = pipeline_ids
 
+        # fal.ai cloud integration
+        self.fal_client: FalClient | None = None
+        self.fal_enabled = False
+        self._fal_received_frames: queue.Queue[VideoFrame] = queue.Queue(maxsize=30)
+        # Pending fal connection info (set in start() if cloud mode params are present)
+        self._pending_fal_connection: dict | None = None
+
     def start(self):
         if self.running:
             return
@@ -95,6 +107,17 @@ class FrameProcessor:
         if "spout_receiver" in self.parameters:
             spout_config = self.parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
+
+        # Check if we should use fal cloud (from frontend initial params)
+        # Store pending connection info for async connect later
+        fal_cloud_enabled = self.parameters.get("fal_cloud_enabled", False)
+        if fal_cloud_enabled:
+            app_id = self.parameters.get("fal_app_id")
+            api_key = self.parameters.get("fal_api_key")
+            if app_id and api_key:
+                self._pending_fal_connection = {"app_id": app_id, "api_key": api_key}
+                logger.info("Cloud mode enabled, skipping local pipeline setup")
+                return  # Don't set up local pipelines - fal connection will happen later
 
         if not self.pipeline_ids:
             logger.error("No pipeline IDs provided, cannot start")
@@ -150,6 +173,19 @@ class FrameProcessor:
                 logger.error(f"Error releasing Spout receiver: {e}")
             self.spout_receiver = None
 
+        # Clean up fal client (synchronous cleanup - async disconnect handled separately)
+        if self.fal_client is not None:
+            self.fal_enabled = False
+            # Note: For full cleanup, call disconnect_from_fal() before stop()
+            # This is a fallback that clears local state
+            self.fal_client = None
+            # Clear received frames queue
+            while not self._fal_received_frames.empty():
+                try:
+                    self._fal_received_frames.get_nowait()
+                except queue.Empty:
+                    break
+
         logger.info("FrameProcessor stopped")
 
         # Notify callback that frame processor has stopped
@@ -162,11 +198,29 @@ class FrameProcessor:
             except Exception as e:
                 logger.error(f"Error in frame processor stop callback: {e}")
 
+    async def stop_async(self, error_message: str | None = None) -> None:
+        """Async version of stop that properly disconnects from fal.
+
+        Use this when calling from an async context to ensure proper cleanup
+        of the fal WebRTC connection.
+        """
+        # Disconnect from fal first (async operation)
+        if self.fal_client is not None:
+            await self.disconnect_from_fal()
+
+        # Then do the regular synchronous cleanup
+        self.stop(error_message)
+
     def put(self, frame: VideoFrame) -> bool:
         if not self.running:
             return False
 
-        # Convert VideoFrame to tensor and put into first processor's input queue
+        # Route to fal cloud if enabled
+        if self.fal_enabled and self.fal_client and self.fal_client.output_track:
+            # Send frame directly to fal via WebRTC
+            return self.fal_client.output_track.put_frame_nowait(frame)
+
+        # Local processing: Convert VideoFrame to tensor and put into first processor's input queue
         if self.pipeline_processors:
             first_processor = self.pipeline_processors[0]
 
@@ -186,10 +240,35 @@ class FrameProcessor:
         return True
 
     def get(self) -> torch.Tensor | None:
-        if not self.running or not self.pipeline_processors:
+        if not self.running:
             return None
 
-        # Get frame from last pipeline processor's output queue
+        # Get frame from fal cloud if enabled
+        if self.fal_enabled:
+            try:
+                fal_frame = self._fal_received_frames.get_nowait()
+                # Convert av.VideoFrame to tensor for consistency with local processing
+                frame_array = fal_frame.to_ndarray(format="rgb24")
+                frame = torch.from_numpy(frame_array)
+
+                # Enqueue frame for async Spout sending (non-blocking)
+                if self.spout_sender_enabled and self.spout_sender is not None:
+                    try:
+                        frame_np = frame.numpy()
+                        self.spout_sender_queue.put_nowait(frame_np)
+                    except queue.Full:
+                        logger.debug("Spout output queue full, dropping frame")
+                    except Exception as e:
+                        logger.error(f"Error enqueueing Spout frame: {e}")
+
+                return frame
+            except queue.Empty:
+                return None
+
+        # Local processing: Get frame from last pipeline processor's output queue
+        if not self.pipeline_processors:
+            return None
+
         last_processor = self.pipeline_processors[-1]
         if not last_processor.output_queue:
             return None
@@ -242,25 +321,96 @@ class FrameProcessor:
             return 512, 512
 
     def update_parameters(self, parameters: dict[str, Any]):
-        """Update parameters that will be used in the next pipeline call."""
-        # Handle Spout output settings
+        """Update parameters that will be used in the next pipeline call.
+
+        When fal cloud mode is enabled, pipeline parameters are forwarded to fal.
+        Spout configuration is always handled locally.
+        """
+        # Handle Spout output settings (always local)
         if "spout_sender" in parameters:
             spout_config = parameters.pop("spout_sender")
             self._update_spout_sender(spout_config)
 
-        # Handle Spout input settings
+        # Handle Spout input settings (always local)
         if "spout_receiver" in parameters:
             spout_config = parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
 
-        # Update parameters for all pipeline processors
-        for processor in self.pipeline_processors:
-            processor.update_parameters(parameters)
+        # Route remaining parameters based on mode
+        if self.fal_enabled and self.fal_client:
+            # Forward to fal cloud via data channel
+            self.fal_client.send_parameters(parameters)
+        else:
+            # Local processing: update pipeline processors
+            for processor in self.pipeline_processors:
+                processor.update_parameters(parameters)
 
-        # Update local parameters
+        # Always store locally for state tracking
         self.parameters = {**self.parameters, **parameters}
 
         return True
+
+    # =========================================================================
+    # fal.ai cloud integration methods
+    # =========================================================================
+
+    def _on_fal_frame_received(self, frame: VideoFrame) -> None:
+        """Callback when frame is received from fal.
+
+        This is called by FalClient when a processed frame arrives via WebRTC.
+        """
+        try:
+            self._fal_received_frames.put_nowait(frame)
+        except queue.Full:
+            # Drop oldest frame to make room
+            try:
+                self._fal_received_frames.get_nowait()
+                self._fal_received_frames.put_nowait(frame)
+            except queue.Empty:
+                pass
+
+    async def connect_to_fal(
+        self,
+        app_id: str,
+        api_key: str | None = None,
+        initial_parameters: dict | None = None,
+    ) -> None:
+        """Connect to fal.ai cloud for remote GPU inference.
+
+        Args:
+            app_id: The fal app ID (e.g., "owner/scope-fal/ws")
+            api_key: The fal API key for authentication (optional for public apps)
+            initial_parameters: Initial parameters to send with the offer (pipeline_ids, etc.)
+        """
+        # Disconnect existing connection if any
+        if self.fal_client is not None:
+            await self.disconnect_from_fal()
+
+        # Import FalClient here to avoid circular imports
+        from .fal_client import FalClient
+
+        self.fal_client = FalClient(
+            app_id=app_id,
+            api_key=api_key,
+            on_frame_received=self._on_fal_frame_received,
+        )
+        await self.fal_client.connect(initial_parameters=initial_parameters)
+        self.fal_enabled = True
+        logger.info(f"Connected to fal cloud: {app_id}")
+
+    async def disconnect_from_fal(self) -> None:
+        """Disconnect from fal.ai cloud."""
+        if self.fal_client is not None:
+            await self.fal_client.disconnect()
+            self.fal_client = None
+        self.fal_enabled = False
+        # Clear any pending received frames
+        while not self._fal_received_frames.empty():
+            try:
+                self._fal_received_frames.get_nowait()
+            except queue.Empty:
+                break
+        logger.info("Disconnected from fal cloud")
 
     def _update_spout_sender(self, config: dict):
         """Update Spout output configuration."""
@@ -491,8 +641,13 @@ class FrameProcessor:
                 if rgb_frame is not None:
                     last_frame_time = time.time()
 
-                    # Convert to tensor and put into first processor's input queue
-                    if self.pipeline_processors:
+                    # Route based on fal mode
+                    if self.fal_enabled and self.fal_client:
+                        # Convert numpy to av.VideoFrame for WebRTC and route through put()
+                        video_frame = VideoFrame.from_ndarray(rgb_frame, format="rgb24")
+                        self.put(video_frame)
+                    elif self.pipeline_processors:
+                        # Local processing: put directly into pipeline
                         first_processor = self.pipeline_processors[0]
                         frame_tensor = torch.from_numpy(rgb_frame)
                         frame_tensor = frame_tensor.unsqueeze(0)

@@ -48,6 +48,21 @@ export interface LoRAConfig {
   mergeMode?: LoraMergeStrategy;
 }
 
+// Cloud mode status for server-side fal integration
+export type CloudModeStatus =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "error";
+
+export interface CloudModeState {
+  enabled: boolean;
+  appId: string;
+  apiKey: string;
+  status: CloudModeStatus;
+  errorMessage?: string;
+}
+
 export interface SettingsState {
   pipelineId: PipelineId;
   resolution?: {
@@ -90,6 +105,8 @@ export interface SettingsState {
   preprocessorIds?: string[];
   // Postprocessors
   postprocessorIds?: string[];
+  // Cloud mode settings (server-side fal integration)
+  cloudMode?: CloudModeState;
 }
 
 export interface PipelineInfo {

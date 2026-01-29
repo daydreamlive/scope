@@ -141,6 +141,24 @@ class WebRTCManager:
         self.sessions: dict[str, Session] = {}
         self.rtc_config = create_rtc_config()
         self.is_first_track = True
+        # Store fal cloud config for new sessions
+        self._pending_fal_config: dict | None = None
+
+    def set_fal_config(self, app_id: str, api_key: str) -> None:
+        """Store fal credentials for new sessions.
+
+        When cloud mode is enabled, these credentials will be injected
+        into the initial_parameters of new WebRTC sessions.
+        """
+        self._pending_fal_config = {"app_id": app_id, "api_key": api_key}
+
+    def clear_fal_config(self) -> None:
+        """Clear pending fal config."""
+        self._pending_fal_config = None
+
+    def get_fal_config(self) -> dict | None:
+        """Get current fal config."""
+        return self._pending_fal_config
 
     async def handle_offer(
         self, request: WebRTCOfferRequest, pipeline_manager: PipelineManager
@@ -164,6 +182,15 @@ class WebRTCManager:
                     exclude_none=True
                 )
             logger.info(f"Received initial parameters: {initial_parameters}")
+
+            # Inject fal cloud config if enabled
+            if self._pending_fal_config:
+                initial_parameters["fal_cloud_enabled"] = True
+                initial_parameters["fal_app_id"] = self._pending_fal_config["app_id"]
+                initial_parameters["fal_api_key"] = self._pending_fal_config["api_key"]
+                logger.info(
+                    f"Injected fal cloud config for new session: {self._pending_fal_config['app_id']}"
+                )
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
