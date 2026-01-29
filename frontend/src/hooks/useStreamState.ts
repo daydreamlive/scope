@@ -6,13 +6,15 @@ import type {
   PromptData,
   PipelineId,
   InputMode,
+  CloudModeState,
 } from "../types";
 import {
-  getHardwareInfo,
-  getPipelineSchemas,
+  getHardwareInfo as getHardwareInfoApi,
+  getPipelineSchemas as getPipelineSchemasApi,
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
+import { useFalContext } from "../lib/falContext";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
@@ -22,6 +24,34 @@ const BASE_FALLBACK = {
   denoisingSteps: [1000, 750, 500, 250] as number[],
   seed: 42,
 };
+
+// Local storage key for cloud mode credentials
+const CLOUD_MODE_STORAGE_KEY = "daydream-scope-cloud-mode";
+
+// Default cloud mode state (not enabled, no credentials)
+const DEFAULT_CLOUD_MODE: CloudModeState = {
+  enabled: false,
+  appId: "",
+  apiKey: "",
+  status: "disconnected",
+};
+
+// Load cloud mode credentials from localStorage
+function loadCloudModeCredentials(): Partial<CloudModeState> {
+  try {
+    const stored = localStorage.getItem(CLOUD_MODE_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return {
+        appId: parsed.appId || "",
+        apiKey: parsed.apiKey || "",
+      };
+    }
+  } catch (e) {
+    console.warn("Failed to load cloud mode credentials from localStorage:", e);
+  }
+  return {};
+}
 
 // Get fallback defaults for a pipeline before schemas are loaded
 function getFallbackDefaults(mode?: InputMode) {
@@ -44,6 +74,23 @@ function getFallbackDefaults(mode?: InputMode) {
 }
 
 export function useStreamState() {
+  const { adapter, isFalMode, isReady } = useFalContext();
+
+  // Helper functions that use fal adapter when available
+  const getPipelineSchemas = useCallback(async (): Promise<PipelineSchemasResponse> => {
+    if (isFalMode && adapter) {
+      return adapter.api.getPipelineSchemas();
+    }
+    return getPipelineSchemasApi();
+  }, [adapter, isFalMode]);
+
+  const getHardwareInfo = useCallback(async (): Promise<HardwareInfoResponse> => {
+    if (isFalMode && adapter) {
+      return adapter.api.getHardwareInfo();
+    }
+    return getHardwareInfoApi();
+  }, [adapter, isFalMode]);
+
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
     gpu: 0,
@@ -139,6 +186,9 @@ export function useStreamState() {
   // Get initial defaults (use fallback since schemas haven't loaded yet)
   const initialDefaults = getFallbackDefaults("text");
 
+  // Load cloud mode credentials from localStorage
+  const savedCloudCredentials = loadCloudModeCredentials();
+
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "longlive",
     resolution: {
@@ -155,6 +205,10 @@ export function useStreamState() {
     paused: false,
     loraMergeStrategy: "permanent_merge",
     inputMode: initialDefaults.inputMode,
+    cloudMode: {
+      ...DEFAULT_CLOUD_MODE,
+      ...savedCloudCredentials,
+    },
   });
 
   const [promptData, setPromptData] = useState<PromptData>({
@@ -169,6 +223,11 @@ export function useStreamState() {
 
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
+    // In fal mode, wait until adapter is ready
+    if (isFalMode && !isReady) {
+      return;
+    }
+
     const fetchInitialData = async () => {
       try {
         const [schemasResult, hardwareResult] = await Promise.allSettled([
@@ -218,7 +277,7 @@ export function useStreamState() {
     };
 
     fetchInitialData();
-  }, []);
+  }, [isFalMode, isReady, getPipelineSchemas, getHardwareInfo]);
 
   // Update inputMode when schemas load or pipeline changes
   // This sets the correct default mode for the pipeline
@@ -290,6 +349,27 @@ export function useStreamState() {
     }
     // If no threshold is set, VACE remains enabled by default (from schema)
   }, [settings.pipelineId, hardwareInfo, pipelineSchemas]);
+
+  // Persist cloud mode credentials to localStorage when they change
+  // Note: We only persist appId and apiKey, not the enabled state or status
+  useEffect(() => {
+    if (settings.cloudMode) {
+      try {
+        localStorage.setItem(
+          CLOUD_MODE_STORAGE_KEY,
+          JSON.stringify({
+            appId: settings.cloudMode.appId,
+            apiKey: settings.cloudMode.apiKey,
+          })
+        );
+      } catch (e) {
+        console.warn(
+          "Failed to save cloud mode credentials to localStorage:",
+          e
+        );
+      }
+    }
+  }, [settings.cloudMode?.appId, settings.cloudMode?.apiKey]);
 
   const updateMetrics = useCallback((newMetrics: Partial<SystemMetrics>) => {
     setSystemMetrics(prev => ({ ...prev, ...newMetrics }));

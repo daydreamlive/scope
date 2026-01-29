@@ -52,6 +52,8 @@ from .recording import (
 from .schema import (
     AssetFileInfo,
     AssetsResponse,
+    FalConnectRequest,
+    FalStatusResponse,
     HardwareInfoResponse,
     HealthResponse,
     IceCandidateRequest,
@@ -438,13 +440,32 @@ async def handle_webrtc_offer(
 ):
     """Handle WebRTC offer and return answer."""
     try:
-        # Ensure pipeline is loaded before proceeding
-        status_info = await pipeline_manager.get_status_info_async()
-        if status_info["status"] != "loaded":
-            raise HTTPException(
-                status_code=400,
-                detail="Pipeline not loaded. Please load pipeline first.",
-            )
+        # Check if cloud mode is enabled (fal config stored)
+        fal_config = webrtc_manager.get_fal_config()
+        is_cloud_mode = fal_config is not None
+
+        # Only require local pipeline when NOT in cloud mode
+        # In cloud mode, the pipeline runs on fal.ai servers
+        if not is_cloud_mode:
+            status_info = await pipeline_manager.get_status_info_async()
+            if status_info["status"] != "loaded":
+                # Try to auto-load pipeline from initialParameters
+                if (
+                    request.initialParameters
+                    and request.initialParameters.pipeline_ids
+                ):
+                    pipeline_ids = request.initialParameters.pipeline_ids
+                    logger.info(
+                        f"Auto-loading pipeline from initialParameters: {pipeline_ids}"
+                    )
+                    await pipeline_manager.load_pipelines(pipeline_ids)
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Pipeline not loaded. Please load pipeline first.",
+                    )
+        else:
+            logger.info("Cloud mode enabled, skipping local pipeline check")
 
         return await webrtc_manager.handle_offer(request, pipeline_manager)
 
@@ -862,6 +883,117 @@ async def get_hardware_info():
         )
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# =============================================================================
+# fal.ai cloud integration endpoints
+# =============================================================================
+
+
+@app.post("/api/v1/fal/connect", response_model=FalStatusResponse)
+async def connect_to_fal(
+    request: FalConnectRequest,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Connect to fal.ai cloud for remote GPU inference.
+
+    This stores fal credentials for future sessions and connects any
+    existing WebRTC sessions to the specified fal.ai app.
+    """
+
+    try:
+        # Store config for future sessions (key fix: new sessions will inherit this)
+        webrtc_manager.set_fal_config(request.app_id, request.api_key)
+        logger.info(f"Stored fal config for future sessions: {request.app_id}")
+
+        # Connect existing sessions if any
+        connected_count = 0
+        for session_id, session in webrtc_manager.sessions.items():
+            if session.video_track and session.video_track.frame_processor:
+                # Get initial parameters from the video track if available
+                initial_params = getattr(
+                    session.video_track, "initial_parameters", None
+                )
+                await session.video_track.frame_processor.connect_to_fal(
+                    app_id=request.app_id,
+                    api_key=request.api_key,
+                    initial_parameters=initial_params,
+                )
+                connected_count += 1
+                logger.info(
+                    f"Connected session {session_id} to fal app {request.app_id}"
+                )
+
+        if connected_count == 0:
+            logger.info("No existing sessions, fal config saved for new sessions")
+
+        return FalStatusResponse(connected=True, app_id=request.app_id)
+    except Exception as e:
+        logger.error(f"Error connecting to fal: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/fal/disconnect", response_model=FalStatusResponse)
+async def disconnect_from_fal(
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Disconnect from fal.ai cloud.
+
+    This clears stored fal credentials and disconnects all active
+    WebRTC sessions from fal.ai, returning to local GPU processing.
+    """
+
+    try:
+        # Clear stored config so new sessions won't use fal
+        webrtc_manager.clear_fal_config()
+        logger.info("Cleared fal config for future sessions")
+
+        # Disconnect existing sessions
+        disconnected_count = 0
+        for session_id, session in webrtc_manager.sessions.items():
+            if session.video_track and session.video_track.frame_processor:
+                await session.video_track.frame_processor.disconnect_from_fal()
+                disconnected_count += 1
+                logger.info(f"Disconnected session {session_id} from fal")
+
+        if disconnected_count == 0:
+            logger.info("No existing sessions to disconnect")
+
+        return FalStatusResponse(connected=False, app_id=None)
+    except Exception as e:
+        logger.error(f"Error disconnecting from fal: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/fal/status", response_model=FalStatusResponse)
+async def get_fal_status(
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Get current fal.ai cloud connection status.
+
+    Returns whether cloud mode is enabled (config stored or session connected)
+    and the app ID if available.
+    """
+
+    try:
+        # Check if any session is actively connected to fal
+        for session in webrtc_manager.sessions.values():
+            if session.video_track and session.video_track.frame_processor:
+                fp = session.video_track.frame_processor
+                if fp.fal_enabled and fp.fal_client:
+                    # Return the app_id from the first connected session
+                    app_id = getattr(fp.fal_client, "app_id", None)
+                    return FalStatusResponse(connected=True, app_id=app_id)
+
+        # Check if fal config is stored for future sessions
+        fal_config = webrtc_manager.get_fal_config()
+        if fal_config:
+            return FalStatusResponse(connected=True, app_id=fal_config["app_id"])
+
+        return FalStatusResponse(connected=False, app_id=None)
+    except Exception as e:
+        logger.error(f"Error getting fal status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

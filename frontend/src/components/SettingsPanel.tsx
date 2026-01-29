@@ -35,8 +35,10 @@ import type {
   InputMode,
   PipelineInfo,
   VaeType,
+  CloudModeState,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
+import { CloudModeToggle } from "./CloudModeToggle";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
@@ -101,6 +103,9 @@ interface SettingsPanelProps {
   // Postprocessors
   postprocessorIds?: string[];
   onPostprocessorIdsChange?: (ids: string[]) => void;
+  // Cloud mode settings (server-side fal integration)
+  cloudMode?: CloudModeState;
+  onCloudModeChange?: (cloudMode: Partial<CloudModeState>) => void;
 }
 
 export function SettingsPanel({
@@ -149,6 +154,8 @@ export function SettingsPanel({
   onPreprocessorIdsChange,
   postprocessorIds = [],
   onPostprocessorIdsChange,
+  cloudMode,
+  onCloudModeChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -947,6 +954,15 @@ export function SettingsPanel({
               </div>
             )}
           </div>
+        )}
+
+        {/* Cloud GPU Mode (server-side fal.ai integration) */}
+        {cloudMode && onCloudModeChange && (
+          <CloudModeToggle
+            cloudMode={cloudMode}
+            onCloudModeChange={onCloudModeChange}
+            disabled={isStreaming || isLoading}
+          />
         )}
       </CardContent>
     </Card>

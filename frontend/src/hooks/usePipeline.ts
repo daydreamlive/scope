@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { loadPipeline, getPipelineStatus } from "../lib/api";
+import { loadPipeline as loadPipelineApi, getPipelineStatus as getPipelineStatusApi } from "../lib/api";
+import { useFalContext } from "../lib/falContext";
 import type { PipelineStatusResponse, PipelineLoadParams } from "../lib/api";
 import { toast } from "sonner";
 
@@ -10,6 +11,22 @@ interface UsePipelineOptions {
 
 export function usePipeline(options: UsePipelineOptions = {}) {
   const { pollInterval = 2000, maxTimeout = 600000 } = options;
+  const { adapter, isFalMode } = useFalContext();
+
+  // Helper functions that use fal adapter when available
+  const getPipelineStatus = useCallback(async (): Promise<PipelineStatusResponse> => {
+    if (isFalMode && adapter) {
+      return adapter.api.getPipelineStatus();
+    }
+    return getPipelineStatusApi();
+  }, [adapter, isFalMode]);
+
+  const loadPipelineRequest = useCallback(async (data: { pipeline_ids: string[]; load_params?: PipelineLoadParams | null }) => {
+    if (isFalMode && adapter) {
+      return adapter.api.loadPipeline(data);
+    }
+    return loadPipelineApi(data);
+  }, [adapter, isFalMode]);
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
@@ -155,7 +172,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         shownErrorRef.current = null; // Reset error tracking when starting new load
 
         // Start the load request
-        await loadPipeline({
+        await loadPipelineRequest({
           pipeline_ids: pipelineIds,
           load_params: loadParams,
         });
@@ -241,7 +258,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         setIsLoading(false);
       }
     },
-    [isLoading, maxTimeout, pollInterval, startPolling, stopPolling]
+    [isLoading, maxTimeout, pollInterval, startPolling, stopPolling, getPipelineStatus, loadPipelineRequest]
   );
 
   // Load pipeline with proper state management

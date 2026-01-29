@@ -1,8 +1,11 @@
 import { useState, useEffect } from "react";
 import { getPipelineSchemas } from "../lib/api";
+import { useFalContext } from "../lib/falContext";
 import type { InputMode, PipelineInfo } from "../types";
 
 export function usePipelines() {
+  const { adapter, isFalMode, isReady } = useFalContext();
+
   const [pipelines, setPipelines] = useState<Record<
     string,
     PipelineInfo
@@ -11,12 +14,21 @@ export function usePipelines() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // In fal mode, wait until adapter is ready
+    if (isFalMode && !isReady) {
+      return;
+    }
+
     let mounted = true;
 
     async function fetchPipelines() {
       try {
         setIsLoading(true);
-        const schemas = await getPipelineSchemas();
+
+        // Use adapter if in fal mode, otherwise direct API
+        const schemas = isFalMode && adapter
+          ? await adapter.api.getPipelineSchemas()
+          : await getPipelineSchemas();
 
         if (!mounted) return;
 
@@ -95,7 +107,7 @@ export function usePipelines() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [adapter, isFalMode, isReady]);
 
   return { pipelines, isLoading, error };
 }

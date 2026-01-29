@@ -7,13 +7,15 @@ import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
-import { useWebRTC } from "../hooks/useWebRTC";
+import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
+import { useApi } from "../hooks/useApi";
+import { useFalContext } from "../lib/falContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -26,11 +28,6 @@ import type {
   VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import {
-  checkModelStatus,
-  downloadPipelineModels,
-  downloadRecording,
-} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -71,6 +68,17 @@ function getVaceParams(
 }
 
 export function StreamPage() {
+  // Get API functions that work in both local and fal modes
+  const api = useApi();
+  const { isFalMode, isReady: isFalReady } = useFalContext();
+
+  // Show loading state while connecting to fal
+  useEffect(() => {
+    if (isFalMode) {
+      console.log("[StreamPage] Fal mode enabled, ready:", isFalReady);
+    }
+  }, [isFalMode, isFalReady]);
+
   // Fetch available pipelines dynamically
   const { pipelines } = usePipelines();
 
@@ -161,7 +169,7 @@ export function StreamPage() {
     pipelineInfo,
   } = usePipeline();
 
-  // WebRTC for streaming
+  // WebRTC for streaming (unified hook works in both local and fal modes)
   const {
     remoteStream,
     isStreaming,
@@ -172,7 +180,7 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
     sessionId,
-  } = useWebRTC();
+  } = useUnifiedWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
   const isLoading = isDownloading || isPipelineLoading || isConnecting;
@@ -350,12 +358,12 @@ export function StreamPage() {
     setDownloadProgress(null);
 
     try {
-      await downloadPipelineModels(pipelineId);
+      await api.downloadPipelineModels(pipelineId);
 
       // Enhanced polling with progress updates
       const checkDownloadProgress = async () => {
         try {
-          const status = await checkModelStatus(pipelineId);
+          const status = await api.checkModelStatus(pipelineId);
 
           // Update progress state
           if (status.progress) {
@@ -833,6 +841,14 @@ export function StreamPage() {
     // Use override pipeline ID if provided, otherwise use current settings
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
+    // Check cloud mode FIRST before any local operations
+    const isCloudMode =
+      settings.cloudMode?.enabled && settings.cloudMode?.status === "connected";
+
+    if (isCloudMode) {
+      console.log("Cloud mode enabled, skipping local pipeline/model loading");
+    }
+
     try {
       // Build pipeline chain: preprocessors + main pipeline + postprocessors
       const pipelineIds: string[] = [];
@@ -844,114 +860,122 @@ export function StreamPage() {
         pipelineIds.push(...settings.postprocessorIds);
       }
 
-      // Check if models are needed but not downloaded for all pipelines in the chain
-      // Collect all missing pipelines/preprocessors
-      const missingPipelines: string[] = [];
-      for (const pipelineId of pipelineIds) {
-        const pipelineInfo = pipelines?.[pipelineId];
-        if (pipelineInfo?.requiresModels) {
-          try {
-            const status = await checkModelStatus(pipelineId);
-            if (!status.downloaded) {
-              missingPipelines.push(pipelineId);
+      // Skip model checks and download in cloud mode - models run on fal.ai servers
+      if (!isCloudMode) {
+        // Check if models are needed but not downloaded for all pipelines in the chain
+        // Collect all missing pipelines/preprocessors
+        const missingPipelines: string[] = [];
+        for (const pipelineId of pipelineIds) {
+          const pipelineInfo = pipelines?.[pipelineId];
+          if (pipelineInfo?.requiresModels) {
+            try {
+              const status = await api.checkModelStatus(pipelineId);
+              if (!status.downloaded) {
+                missingPipelines.push(pipelineId);
+              }
+            } catch (error) {
+              console.error(
+                `Error checking model status for ${pipelineId}:`,
+                error
+              );
+              // Continue anyway if check fails
             }
-          } catch (error) {
-            console.error(
-              `Error checking model status for ${pipelineId}:`,
-              error
-            );
-            // Continue anyway if check fails
           }
+        }
+
+        // If any pipelines are missing models, show download dialog
+        if (missingPipelines.length > 0) {
+          setPipelinesNeedingModels(missingPipelines);
+          setShowDownloadDialog(true);
+          return false; // Stream did not start
         }
       }
 
-      // If any pipelines are missing models, show download dialog
-      if (missingPipelines.length > 0) {
-        setPipelinesNeedingModels(missingPipelines);
-        setShowDownloadDialog(true);
-        return false; // Stream did not start
-      }
-
-      // Always load pipeline with current parameters - backend will handle the rest
-      console.log(`Loading ${pipelineIdToUse} pipeline...`);
-
-      // Determine current input mode
+      // Determine current input mode (needed for both cloud and local paths)
       const currentMode =
         settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
 
-      // Use settings.resolution if available, otherwise fall back to videoResolution
-      let resolution = settings.resolution || videoResolution;
-
-      // Adjust resolution to be divisible by required scale factor for the pipeline
-      if (resolution) {
-        const { resolution: adjustedResolution, wasAdjusted } =
-          adjustResolutionForPipeline(pipelineIdToUse, resolution);
-
-        if (wasAdjusted) {
-          // Update settings with adjusted resolution
-          updateSettings({ resolution: adjustedResolution });
-          resolution = adjustedResolution;
-        }
-      }
-
-      // Build load parameters dynamically based on pipeline capabilities and settings
-      // The backend will use only the parameters it needs based on the pipeline schema
+      // Get current pipeline info (needed for both paths)
       const currentPipeline = pipelines?.[pipelineIdToUse];
+
       // Compute VACE enabled state - needed for both loadParams and initialParameters
       const vaceEnabled = currentPipeline?.supportsVACE
         ? (settings.vaceEnabled ?? currentMode !== "video")
         : false;
 
-      let loadParams: Record<string, unknown> | null = null;
+      // Skip loading local pipeline in cloud mode - processing happens on fal.ai
+      if (!isCloudMode) {
+        // Always load pipeline with current parameters - backend will handle the rest
+        console.log(`Loading ${pipelineIdToUse} pipeline...`);
 
-      if (resolution) {
-        // Start with common parameters
-        loadParams = {
-          height: resolution.height,
-          width: resolution.width,
-        };
+        // Use settings.resolution if available, otherwise fall back to videoResolution
+        let resolution = settings.resolution || videoResolution;
 
-        // Add seed if pipeline supports quantization (implies it needs seed)
-        if (currentPipeline?.supportsQuantization) {
-          loadParams.seed = settings.seed ?? 42;
-          loadParams.quantization = settings.quantization ?? null;
-          loadParams.vae_type = settings.vaeType ?? "wan";
+        // Adjust resolution to be divisible by required scale factor for the pipeline
+        if (resolution) {
+          const { resolution: adjustedResolution, wasAdjusted } =
+            adjustResolutionForPipeline(pipelineIdToUse, resolution);
+
+          if (wasAdjusted) {
+            // Update settings with adjusted resolution
+            updateSettings({ resolution: adjustedResolution });
+            resolution = adjustedResolution;
+          }
         }
 
-        // Add LoRA parameters if pipeline supports LoRA
-        if (currentPipeline?.supportsLoRA && settings.loras) {
-          const loraParams = buildLoRAParams(
-            settings.loras,
-            settings.loraMergeStrategy
+        // Build load parameters dynamically based on pipeline capabilities and settings
+        // The backend will use only the parameters it needs based on the pipeline schema
+        let loadParams: Record<string, unknown> | null = null;
+
+        if (resolution) {
+          // Start with common parameters
+          loadParams = {
+            height: resolution.height,
+            width: resolution.width,
+          };
+
+          // Add seed if pipeline supports quantization (implies it needs seed)
+          if (currentPipeline?.supportsQuantization) {
+            loadParams.seed = settings.seed ?? 42;
+            loadParams.quantization = settings.quantization ?? null;
+            loadParams.vae_type = settings.vaeType ?? "wan";
+          }
+
+          // Add LoRA parameters if pipeline supports LoRA
+          if (currentPipeline?.supportsLoRA && settings.loras) {
+            const loraParams = buildLoRAParams(
+              settings.loras,
+              settings.loraMergeStrategy
+            );
+            loadParams = { ...loadParams, ...loraParams };
+          }
+
+          // Add VACE parameters if pipeline supports VACE
+          if (currentPipeline?.supportsVACE) {
+            loadParams.vace_enabled = vaceEnabled;
+
+            // Add VACE reference images if provided
+            const vaceParams = getVaceParams(
+              settings.refImages,
+              settings.vaceContextScale
+            );
+            loadParams = { ...loadParams, ...vaceParams };
+          }
+
+          console.log(
+            `Loading ${pipelineIds.length} pipeline(s) (${pipelineIds.join(", ")}) with resolution ${resolution.width}x${resolution.height}`,
+            loadParams
           );
-          loadParams = { ...loadParams, ...loraParams };
         }
 
-        // Add VACE parameters if pipeline supports VACE
-        if (currentPipeline?.supportsVACE) {
-          loadParams.vace_enabled = vaceEnabled;
-
-          // Add VACE reference images if provided
-          const vaceParams = getVaceParams(
-            settings.refImages,
-            settings.vaceContextScale
-          );
-          loadParams = { ...loadParams, ...vaceParams };
-        }
-
-        console.log(
-          `Loading ${pipelineIds.length} pipeline(s) (${pipelineIds.join(", ")}) with resolution ${resolution.width}x${resolution.height}`,
-          loadParams
+        const loadSuccess = await loadPipeline(
+          pipelineIds,
+          loadParams || undefined
         );
-      }
-
-      const loadSuccess = await loadPipeline(
-        pipelineIds,
-        loadParams || undefined
-      );
-      if (!loadSuccess) {
-        console.error("Failed to load pipeline, cannot start stream");
-        return false;
+        if (!loadSuccess) {
+          console.error("Failed to load pipeline, cannot start stream");
+          return false;
+        }
       }
 
       // Check video requirements based on input mode
@@ -987,6 +1011,10 @@ export function StreamPage() {
         first_frame_image?: string;
         last_frame_image?: string;
         images?: string[];
+        // Cloud mode params - tells backend to auto-connect to fal
+        fal_cloud_enabled?: boolean;
+        fal_app_id?: string;
+        fal_api_key?: string;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1062,6 +1090,13 @@ export function StreamPage() {
         initialParameters.spout_receiver = settings.spoutReceiver;
       }
 
+      // Cloud mode params - tells backend to auto-connect to fal
+      if (isCloudMode) {
+        initialParameters.fal_cloud_enabled = true;
+        initialParameters.fal_app_id = settings.cloudMode?.appId;
+        initialParameters.fal_api_key = settings.cloudMode?.apiKey;
+      }
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
@@ -1084,7 +1119,7 @@ export function StreamPage() {
         });
         return;
       }
-      await downloadRecording(sessionId);
+      await api.downloadRecording(sessionId);
     } catch (error) {
       console.error("Error downloading recording:", error);
       toast.error("Error downloading recording", {
@@ -1390,6 +1425,12 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
+            cloudMode={settings.cloudMode}
+            onCloudModeChange={cloudModeUpdate => {
+              updateSettings({
+                cloudMode: { ...settings.cloudMode!, ...cloudModeUpdate },
+              });
+            }}
           />
         </div>
       </div>

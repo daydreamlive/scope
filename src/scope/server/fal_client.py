@@ -1,0 +1,398 @@
+"""WebSocket + WebRTC client for connecting to fal.ai cloud.
+
+Based on fal-demos/yolo_webcam_webrtc reference implementation.
+Scope acts as WebRTC client (creates offers), fal.ai acts as server.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+import aiohttp
+import websockets
+from aiortc import (
+    RTCDataChannel,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
+from aiortc.sdp import candidate_from_sdp
+
+if TYPE_CHECKING:
+    from av import VideoFrame
+
+    from scope.server.fal_tracks import FalOutputTrack
+
+logger = logging.getLogger(__name__)
+
+TOKEN_EXPIRATION_SECONDS = 120
+
+
+class FalClient:
+    """WebSocket + WebRTC client for connecting to fal.ai cloud.
+
+    Based on fal-demos/yolo_webcam_webrtc reference implementation.
+    Scope acts as WebRTC client (creates offers), fal.ai acts as server.
+    """
+
+    def __init__(
+        self,
+        app_id: str,
+        api_key: str | None = None,
+        on_frame_received: Callable[[VideoFrame], None] | None = None,
+        use_auth: bool = False,
+    ):
+        self.app_id = app_id  # e.g., "owner/app-name/ws"
+        self.api_key = api_key
+        self.on_frame_received = on_frame_received
+        self.use_auth = use_auth  # Set to True for private apps
+
+        self.ws: websockets.WebSocketClientProtocol | None = None
+        self.pc: RTCPeerConnection | None = None
+        self.output_track: FalOutputTrack | None = None
+        self.data_channel: RTCDataChannel | None = None
+        self._pending_parameters: dict[str, Any] = {}
+        self.stop_event = asyncio.Event()
+        self._receive_task: asyncio.Task | None = None
+
+    async def _get_temporary_token(self) -> str:
+        """Get temporary JWT token from fal API (mirrors frontend pattern)."""
+        # Extract alias from app_id (e.g., "owner/app-name/webrtc" -> "app-name")
+        parts = self.app_id.split("/")
+        alias = parts[1] if len(parts) >= 2 else self.app_id
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://rest.alpha.fal.ai/tokens/",
+                headers={
+                    "Authorization": f"Key {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "allowed_apps": [alias],
+                    "token_expiration": TOKEN_EXPIRATION_SECONDS,
+                },
+            ) as resp:
+                if not resp.ok:
+                    error_body = await resp.text()
+                    raise RuntimeError(
+                        f"Token request failed: {resp.status} {error_body}"
+                    )
+                token = await resp.json()
+                # Handle both string and object responses
+                if isinstance(token, dict) and "detail" in token:
+                    return token["detail"]
+                return token
+
+    def _build_ws_url(self, token: str | None = None) -> str:
+        """Build WebSocket URL, optionally with JWT token.
+
+        The app_id should be the full path including the WebSocket endpoint,
+        e.g., 'username/app-name/ws' or 'username/app-name/webrtc'.
+
+        For public apps, token can be None.
+        """
+        app_id = self.app_id.strip("/")
+        base_url = f"wss://fal.run/{app_id}"
+        if token:
+            return f"{base_url}?fal_jwt_token={token}"
+        return base_url
+
+    async def connect(self, initial_parameters: dict | None = None) -> None:
+        """Connect to fal WebSocket and establish WebRTC connection.
+
+        Args:
+            initial_parameters: Initial parameters to send with the offer
+                               (e.g., pipeline_ids, prompts, etc.)
+        """
+        self._initial_parameters = initial_parameters
+
+        # Get temporary token only if auth is enabled (for private apps)
+        token = None
+        if self.use_auth and self.api_key:
+            logger.info("Using JWT authentication for private app")
+            token = await self._get_temporary_token()
+
+        ws_url = self._build_ws_url(token)
+
+        # Log URL without token for debugging
+        ws_url_without_token = ws_url.split("?")[0]
+        logger.info(f"Connecting to fal WebSocket: {ws_url_without_token}")
+        try:
+            logger.info("Attempting WebSocket connection (may take up to 2 min if app is cold)...")
+            self.ws = await asyncio.wait_for(
+                websockets.connect(ws_url, compression=None),
+                timeout=120.0,  # 2 minutes for cold start
+            )
+            logger.info("WebSocket connection established, waiting for ready message...")
+        except TimeoutError:
+            logger.error(f"Timeout connecting to fal WebSocket after 10s")
+            raise RuntimeError(
+                f"Timeout connecting to fal WebSocket. Check that app_id '{self.app_id}' "
+                "is correct (format: 'username/app-name' or full path like 'username/app-name/ws')"
+            ) from None
+        except Exception as e:
+            logger.error(f"Failed to connect to fal WebSocket: {e}")
+            raise RuntimeError(f"Failed to connect to fal WebSocket: {e}") from e
+
+        # Wait for "ready" message from server (with timeout)
+        try:
+            logger.info("Waiting for ready message from fal server...")
+            ready_msg = await asyncio.wait_for(self.ws.recv(), timeout=120.0)
+            logger.info(f"Received message from fal: {ready_msg[:100] if ready_msg else 'empty'}")
+        except TimeoutError:
+            logger.error("Timeout waiting for ready message after 10s")
+            await self.ws.close()
+            raise RuntimeError(
+                f"Timeout waiting for 'ready' message from fal server. "
+                f"The fal app at '{self.app_id}' may not be running or may not be a WebRTC app."
+            ) from None
+        except Exception as e:
+            logger.error(f"Error receiving ready message: {e}")
+            await self.ws.close()
+            raise
+
+        ready_data = json.loads(ready_msg)
+        if ready_data.get("type") != "ready":
+            await self.ws.close()
+            raise RuntimeError(f"Expected 'ready' message, got: {ready_data}")
+        logger.info("fal server ready")
+
+        # Create peer connection with STUN server
+        from aiortc import RTCConfiguration, RTCIceServer
+
+        config = RTCConfiguration(
+            iceServers=[RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
+        )
+        self.pc = RTCPeerConnection(configuration=config)
+
+        # Set up event handlers
+        self._setup_pc_handlers()
+
+        # Add output track (for sending frames to fal)
+        from scope.server.fal_tracks import FalOutputTrack
+
+        self.output_track = FalOutputTrack()
+        self.pc.addTrack(self.output_track)
+
+        # Create data channel for parameter forwarding (must be before createOffer)
+        self.data_channel = self.pc.createDataChannel("parameters", ordered=True)
+        self._setup_data_channel_handlers()
+
+        # Create and send offer (we are the client)
+        offer = await self.pc.createOffer()
+        await self.pc.setLocalDescription(offer)
+
+        # Build offer message with optional initial parameters
+        offer_msg: dict[str, Any] = {
+            "type": "offer",
+            "sdp": self.pc.localDescription.sdp,
+        }
+        if self._initial_parameters:
+            offer_msg["initialParameters"] = self._initial_parameters
+            logger.info(
+                f"Including initial parameters: {list(self._initial_parameters.keys())}"
+            )
+
+        await self.ws.send(json.dumps(offer_msg))
+        logger.info("Sent WebRTC offer")
+
+        # Start message receive loop
+        self._receive_task = asyncio.create_task(self._receive_loop())
+
+    def _setup_pc_handlers(self) -> None:
+        """Set up RTCPeerConnection event handlers."""
+        if self.pc is None:
+            return
+
+        @self.pc.on("icecandidate")
+        async def on_icecandidate(candidate):
+            if self.ws is None:
+                return
+            if candidate is None:
+                await self.ws.send(
+                    json.dumps(
+                        {
+                            "type": "icecandidate",
+                            "candidate": None,
+                        }
+                    )
+                )
+            else:
+                await self.ws.send(
+                    json.dumps(
+                        {
+                            "type": "icecandidate",
+                            "candidate": {
+                                "candidate": candidate.candidate,
+                                "sdpMid": candidate.sdpMid,
+                                "sdpMLineIndex": candidate.sdpMLineIndex,
+                            },
+                        }
+                    )
+                )
+
+        @self.pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            if self.pc is None:
+                return
+            logger.info(f"Connection state: {self.pc.connectionState}")
+            if self.pc.connectionState in ("failed", "closed", "disconnected"):
+                self.stop_event.set()
+
+        @self.pc.on("track")
+        def on_track(track):
+            """Handle incoming track (processed frames from fal)."""
+            if track.kind == "video":
+                logger.info("Received video track from fal")
+                asyncio.create_task(self._consume_track(track))
+
+    async def _consume_track(self, track) -> None:
+        """Consume frames from the incoming track."""
+        while not self.stop_event.is_set():
+            try:
+                frame = await track.recv()
+                if self.on_frame_received:
+                    self.on_frame_received(frame)
+            except Exception as e:
+                logger.error(f"Error receiving frame: {e}")
+                break
+
+    def _setup_data_channel_handlers(self) -> None:
+        """Set up data channel event handlers."""
+        if self.data_channel is None:
+            return
+
+        @self.data_channel.on("open")
+        def on_data_channel_open():
+            logger.info("Data channel to fal opened")
+            # Send any pending parameters
+            if self._pending_parameters:
+                self._send_parameters(self._pending_parameters)
+                self._pending_parameters = {}
+
+        @self.data_channel.on("close")
+        def on_data_channel_close():
+            logger.info("Data channel to fal closed")
+
+        @self.data_channel.on("error")
+        def on_data_channel_error(error):
+            logger.error(f"Data channel error: {error}")
+
+    def send_parameters(self, parameters: dict[str, Any]) -> bool:
+        """Forward parameter update to fal.ai via data channel.
+
+        Args:
+            parameters: Dictionary of parameters to send.
+
+        Returns:
+            True if sent immediately, False if queued for later.
+        """
+        if self.data_channel and self.data_channel.readyState == "open":
+            return self._send_parameters(parameters)
+        else:
+            # Queue for when channel opens
+            self._pending_parameters.update(parameters)
+            logger.debug(f"Queued parameters for later: {list(parameters.keys())}")
+            return False
+
+    def _send_parameters(self, parameters: dict[str, Any]) -> bool:
+        """Internal: send parameters over data channel."""
+        if self.data_channel is None:
+            return False
+        try:
+            # Filter out None values (same as frontend)
+            filtered = {k: v for k, v in parameters.items() if v is not None}
+            message = json.dumps(filtered)
+            self.data_channel.send(message)
+            logger.debug(f"Sent parameters to fal: {list(filtered.keys())}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send parameters: {e}")
+            return False
+
+    async def _receive_loop(self) -> None:
+        """Receive and handle WebSocket messages."""
+        if self.ws is None or self.pc is None:
+            return
+
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    message = await asyncio.wait_for(
+                        self.ws.recv(),
+                        timeout=1.0,
+                    )
+                except TimeoutError:
+                    continue
+
+                try:
+                    data = json.loads(message)
+                except json.JSONDecodeError:
+                    logger.warning(f"Non-JSON message: {message}")
+                    continue
+
+                msg_type = data.get("type")
+
+                if msg_type == "answer":
+                    # Set remote description from server's answer
+                    answer = RTCSessionDescription(
+                        sdp=data["sdp"],
+                        type="answer",
+                    )
+                    await self.pc.setRemoteDescription(answer)
+                    logger.info("Set remote description from answer")
+
+                elif msg_type == "icecandidate":
+                    candidate_data = data.get("candidate")
+                    if candidate_data is None:
+                        await self.pc.addIceCandidate(None)
+                    else:
+                        candidate = candidate_from_sdp(
+                            candidate_data.get("candidate", "")
+                        )
+                        candidate.sdpMid = candidate_data.get("sdpMid")
+                        candidate.sdpMLineIndex = candidate_data.get("sdpMLineIndex")
+                        await self.pc.addIceCandidate(candidate)
+
+                elif msg_type == "error":
+                    logger.error(f"Server error: {data.get('error')}")
+
+                else:
+                    logger.debug(f"Unknown message type: {msg_type}")
+
+        except websockets.exceptions.ConnectionClosed:
+            logger.info("WebSocket connection closed")
+        except Exception as e:
+            logger.error(f"Receive loop error: {e}")
+        finally:
+            self.stop_event.set()
+
+    async def send_frame(self, frame: VideoFrame) -> None:
+        """Send a frame to fal for processing."""
+        if self.output_track:
+            await self.output_track.put_frame(frame)
+
+    async def disconnect(self) -> None:
+        """Close WebRTC and WebSocket connections."""
+        self.stop_event.set()
+
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.pc:
+            await self.pc.close()
+            self.pc = None
+
+        if self.ws:
+            await self.ws.close()
+            self.ws = None
+
+        logger.info("Disconnected from fal")
