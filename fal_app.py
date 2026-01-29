@@ -183,12 +183,17 @@ class ScopeApp(fal.App, keep_alive=300):
             nonlocal session_id
             request_id = payload.get("request_id")
 
+            # Debug: log the full offer payload
+            print(f"Received offer - keys: {list(payload.keys())}")
+            initial_params = payload.get("initialParameters") or {}
+            print(f"initialParameters keys: {list(initial_params.keys()) if initial_params else 'None'}")
+            pipeline_ids = initial_params.get("pipeline_ids")
+            print(f"pipeline_ids value: {pipeline_ids} (type: {type(pipeline_ids).__name__})")
+
             async with httpx.AsyncClient() as client:
                 # Auto-load pipeline from initialParameters if provided
-                initial_params = payload.get("initialParameters") or {}
-                pipeline_ids = initial_params.get("pipeline_ids")
                 if pipeline_ids:
-                    print(f"Auto-loading pipeline: {pipeline_ids}")
+                    print(f">>> Auto-loading pipeline: {pipeline_ids}")
                     load_response = await client.post(
                         f"{SCOPE_BASE_URL}/api/v1/pipeline/load",
                         json={"pipeline_ids": pipeline_ids},
