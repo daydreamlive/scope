@@ -1175,6 +1175,9 @@ async def connect_to_fal(
     - Video from the browser flows through the backend to fal.ai
     - The fal runner stays warm and ready for video processing
 
+    Credentials can be provided in the request body or via CLI args:
+    --fal-app-id and --fal-api-key (or FAL_APP_ID/FAL_API_KEY env vars).
+
     Note: The connection may take 1-2 minutes on cold start while the
     fal runner initializes.
 
@@ -1183,12 +1186,28 @@ async def connect_to_fal(
         Spout → Backend → fal.ai (WebRTC) → Backend → Spout/Browser
     """
     try:
-        logger.info(f"Connecting to fal: {request.app_id}")
-        await fal_manager.connect(request.app_id, request.api_key)
+        # Use request body credentials if provided, otherwise fall back to CLI/env
+        app_id = request.app_id or os.environ.get("SCOPE_FAL_APP_ID")
+        api_key = request.api_key or os.environ.get("SCOPE_FAL_API_KEY")
+
+        if not app_id:
+            raise HTTPException(
+                status_code=400,
+                detail="fal.ai credentials not configured. Use --fal-app-id and --fal-api-key CLI args, "
+                "or FAL_APP_ID and FAL_API_KEY environment variables.",
+            )
+
+        logger.info(f"Connecting to fal: {app_id}")
+        await fal_manager.connect(app_id, api_key)
+
+        credentials_configured = bool(
+            os.environ.get("SCOPE_FAL_APP_ID")
+        )
         return FalStatusResponse(
             connected=True,
             webrtc_connected=False,
-            app_id=request.app_id,
+            app_id=app_id,
+            credentials_configured=credentials_configured,
         )
     except Exception as e:
         logger.error(f"Error connecting to fal: {e}")
@@ -1206,7 +1225,15 @@ async def disconnect_from_fal(
     """
     try:
         await fal_manager.disconnect()
-        return FalStatusResponse(connected=False, webrtc_connected=False, app_id=None)
+        credentials_configured = bool(
+            os.environ.get("SCOPE_FAL_APP_ID")
+        )
+        return FalStatusResponse(
+            connected=False,
+            webrtc_connected=False,
+            app_id=None,
+            credentials_configured=credentials_configured,
+        )
     except Exception as e:
         logger.error(f"Error disconnecting from fal: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1218,7 +1245,11 @@ async def get_fal_status(
 ):
     """Get current fal.ai cloud connection status."""
     status = fal_manager.get_status()
-    return FalStatusResponse(**status)
+    # Check if credentials are configured via CLI/env
+    credentials_configured = bool(
+        os.environ.get("SCOPE_FAL_APP_ID")
+    )
+    return FalStatusResponse(**status, credentials_configured=credentials_configured)
 
 
 @app.get("/api/v1/fal/stats")
@@ -1382,12 +1413,39 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     is_flag=True,
     help="Do not automatically open a browser window after the server starts",
 )
+@click.option(
+    "--fal-app-id",
+    default="Daydream/scope-app/ws",
+    envvar="FAL_APP_ID",
+    help="fal.ai app ID for cloud mode (e.g., 'username/scope-fal')",
+)
+@click.option(
+    "--fal-api-key",
+    default=None,
+    envvar="FAL_API_KEY",
+    help="fal.ai API key for cloud mode",
+)
 @click.pass_context
-def main(ctx, version: bool, reload: bool, host: str, port: int, no_browser: bool):
+def main(
+    ctx,
+    version: bool,
+    reload: bool,
+    host: str,
+    port: int,
+    no_browser: bool,
+    fal_app_id: str | None,
+    fal_api_key: str | None,
+):
     # Handle version flag
     if version:
         print_version_info()
         sys.exit(0)
+
+    # Store fal credentials in environment for app access
+    if fal_app_id:
+        os.environ["SCOPE_FAL_APP_ID"] = fal_app_id
+    if fal_api_key:
+        os.environ["SCOPE_FAL_API_KEY"] = fal_api_key
 
     # If no subcommand was invoked, run the server
     if ctx.invoked_subcommand is None:

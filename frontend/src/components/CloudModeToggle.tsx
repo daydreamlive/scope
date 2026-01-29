@@ -9,12 +9,13 @@
  * - The local scope backend connects to fal.ai via WebSocket
  * - API calls (pipeline load, status) are proxied through fal
  * - WebRTC signaling is proxied through fal
- * - Video streams flow directly between browser and fal.ai
+ * - Video streams flow through the backend to fal.ai
+ *
+ * Credentials (app_id and api_key) are set via backend command line args.
  */
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Cloud, CloudOff, Loader2 } from "lucide-react";
@@ -22,6 +23,7 @@ import { Cloud, CloudOff, Loader2 } from "lucide-react";
 interface CloudStatus {
   connected: boolean;
   app_id: string | null;
+  credentials_configured: boolean;
 }
 
 interface CloudModeToggleProps {
@@ -30,10 +32,6 @@ interface CloudModeToggleProps {
   onStatusChange?: (connected: boolean) => void;
 }
 
-// Local storage keys for persistence
-const STORAGE_KEY_APP_ID = "scope-cloud-app-id";
-const STORAGE_KEY_API_KEY = "scope-cloud-api-key";
-
 export function CloudModeToggle({
   className,
   onStatusChange,
@@ -41,24 +39,10 @@ export function CloudModeToggle({
   const [status, setStatus] = useState<CloudStatus>({
     connected: false,
     app_id: null,
+    credentials_configured: false,
   });
-  const [appId, setAppId] = useState(
-    () => localStorage.getItem(STORAGE_KEY_APP_ID) || ""
-  );
-  const [apiKey, setApiKey] = useState(
-    () => localStorage.getItem(STORAGE_KEY_API_KEY) || ""
-  );
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Persist credentials to localStorage
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_APP_ID, appId);
-  }, [appId]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_API_KEY, apiKey);
-  }, [apiKey]);
 
   // Poll status on mount and periodically
   const fetchStatus = useCallback(async () => {
@@ -82,11 +66,6 @@ export function CloudModeToggle({
   }, [fetchStatus]);
 
   const handleConnect = async () => {
-    if (!appId.trim() || !apiKey.trim()) {
-      setError("Please enter both App ID and API Key");
-      return;
-    }
-
     setIsConnecting(true);
     setError(null);
 
@@ -94,10 +73,7 @@ export function CloudModeToggle({
       const response = await fetch("/api/v1/fal/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          app_id: appId.trim(),
-          api_key: apiKey.trim(),
-        }),
+        body: JSON.stringify({}),
       });
 
       if (!response.ok) {
@@ -163,45 +139,37 @@ export function CloudModeToggle({
       <CardContent className="space-y-3">
         {!status.connected ? (
           <>
-            <div className="space-y-2">
-              <Input
-                placeholder="App ID (e.g., username/scope-fal)"
-                value={appId}
-                onChange={(e) => setAppId(e.target.value)}
-                disabled={isConnecting}
-                className="text-sm"
-              />
-              <Input
-                type="password"
-                placeholder="fal API Key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                disabled={isConnecting}
-                className="text-sm"
-              />
-            </div>
-            <Button
-              onClick={handleConnect}
-              disabled={isConnecting || !appId.trim() || !apiKey.trim()}
-              className="w-full"
-              size="sm"
-            >
-              {isConnecting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <Cloud className="mr-2 h-4 w-4" />
-                  Connect to Cloud
-                </>
-              )}
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Connect to fal.ai for cloud GPU inference. Cold starts may take
-              1-2 minutes.
-            </p>
+            {status.credentials_configured ? (
+              <>
+                <Button
+                  onClick={handleConnect}
+                  disabled={isConnecting}
+                  className="w-full"
+                  size="sm"
+                >
+                  {isConnecting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Connecting...
+                    </>
+                  ) : (
+                    <>
+                      <Cloud className="mr-2 h-4 w-4" />
+                      Connect to Cloud
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Connect to fal.ai for cloud GPU inference. Cold starts may take
+                  1-2 minutes.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Cloud mode requires --fal-app-id and --fal-api-key command line
+                arguments to be set when starting the server.
+              </p>
+            )}
           </>
         ) : (
           <>

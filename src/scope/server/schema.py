@@ -497,15 +497,20 @@ class AssetsResponse(BaseModel):
 
 
 class FalConnectRequest(BaseModel):
-    """Request to connect to fal.ai cloud."""
+    """Request to connect to fal.ai cloud.
 
-    app_id: str = Field(
-        ...,
-        description="The fal app ID (e.g., 'username/scope-fal')",
+    Credentials can be provided in the request body or via CLI args/env vars.
+    If not provided here, the server will use --fal-app-id and --fal-api-key
+    (or FAL_APP_ID and FAL_API_KEY environment variables).
+    """
+
+    app_id: str | None = Field(
+        default=None,
+        description="The fal app ID (e.g., 'username/scope-fal'). Optional if set via CLI.",
     )
-    api_key: str = Field(
-        ...,
-        description="The fal API key for authentication",
+    api_key: str | None = Field(
+        default=None,
+        description="The fal API key for authentication. Optional if set via CLI.",
     )
 
 
@@ -560,6 +565,10 @@ class FalStatusResponse(BaseModel):
     app_id: str | None = Field(
         default=None,
         description="The fal app ID if connected",
+    )
+    credentials_configured: bool = Field(
+        default=False,
+        description="Whether fal.ai credentials are configured via CLI args or env vars",
     )
     stats: FalConnectionStats | None = Field(
         default=None,
