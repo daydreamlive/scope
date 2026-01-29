@@ -603,12 +603,50 @@ async def download_recording(
     session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
     """Download the recording file for the specified session.
     This will finalize the current recording and create a copy for download,
-    then continue recording with a new file."""
+    then continue recording with a new file.
+    
+    In cloud mode, this proxies the download request to fal.ai.
+    """
     try:
-        # Get the session by ID
+        # If cloud mode is active, proxy to fal.ai
+        if fal_manager.is_connected:
+            logger.info(f"[CLOUD] Downloading recording for session {session_id}")
+            
+            # Use the fal.ai session ID if we have an active WebRTC connection
+            fal_session_id = fal_manager.fal_session_id
+            if not fal_session_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No active fal.ai session for recording download",
+                )
+            
+            # Download from fal.ai
+            content = await fal_manager.download_recording(fal_session_id)
+            if not content:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Recording not available from fal.ai",
+                )
+            
+            # Generate filename with datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording-{timestamp}.mp4"
+            
+            # Return as streaming response
+            return Response(
+                content=content,
+                media_type="video/mp4",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(len(content)),
+                },
+            )
+        
+        # Local mode: use local recording manager
         session = webrtc_manager.get_session(session_id)
         if not session:
             raise HTTPException(

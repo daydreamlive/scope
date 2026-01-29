@@ -524,6 +524,56 @@ class FalConnectionManager:
             except Exception as e:
                 logger.error(f"[CLOUD-RTC] Error in frame callback: {e}")
 
+    @property
+    def fal_session_id(self) -> str | None:
+        """Get the current fal.ai WebRTC session ID."""
+        if self._webrtc_client is not None:
+            return self._webrtc_client.session_id
+        return None
+
+    async def download_recording(self, session_id: str | None = None) -> bytes | None:
+        """Download a recording from fal.ai.
+
+        Args:
+            session_id: The fal.ai session ID. If None, uses the current session.
+
+        Returns:
+            The recording file bytes, or None if not available.
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to fal.ai")
+
+        # Use provided session ID or fall back to current
+        target_session_id = session_id or self.fal_session_id
+        if not target_session_id:
+            raise RuntimeError("No fal.ai session ID available")
+
+        logger.info(f"[CLOUD] Downloading recording for session: {target_session_id}")
+
+        # Request recording via WebSocket - fal_app will base64 encode the response
+        response = await self.api_request(
+            method="GET",
+            path=f"/api/v1/recordings/{target_session_id}",
+            timeout=120.0,  # Longer timeout for large files
+        )
+
+        # Check if we got binary data (base64 encoded)
+        if response.get("_base64_content"):
+            import base64
+            content = base64.b64decode(response["_base64_content"])
+            logger.info(f"[CLOUD] Downloaded recording: {len(content)} bytes")
+            return content
+
+        # Check for error
+        if response.get("status") != 200:
+            error = response.get("error", "Unknown error")
+            logger.error(f"[CLOUD] Recording download failed: {error}")
+            return None
+
+        # Unexpected response format
+        logger.warning(f"[CLOUD] Unexpected recording response format: {list(response.keys())}")
+        return None
+
     async def _cleanup(self) -> None:
         """Clean up WebSocket and session."""
         if self.ws:

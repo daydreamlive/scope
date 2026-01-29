@@ -306,8 +306,10 @@ class ScopeApp(fal.App, keep_alive=300):
                     )
 
                     if method == "GET":
+                        # Use longer timeout for potential binary downloads (recordings)
+                        timeout = 120.0 if "/recordings/" in path else 30.0
                         response = await client.get(
-                            f"{SCOPE_BASE_URL}{path}", timeout=30.0
+                            f"{SCOPE_BASE_URL}{path}", timeout=timeout
                         )
                     elif method == "POST":
                         if is_binary_upload:
@@ -340,6 +342,26 @@ class ScopeApp(fal.App, keep_alive=300):
                             "request_id": request_id,
                             "status": 400,
                             "error": f"Unsupported method: {method}",
+                        }
+
+                    # Check if response is binary (e.g., video/mp4 download)
+                    content_type = response.headers.get("content-type", "")
+                    is_binary_response = any(
+                        ct in content_type
+                        for ct in ["video/", "audio/", "application/octet-stream", "image/"]
+                    )
+
+                    if is_binary_response and response.status_code == 200:
+                        # Base64 encode binary content for JSON transport
+                        binary_content = response.content
+                        encoded = base64.b64encode(binary_content).decode("utf-8")
+                        return {
+                            "type": "api_response",
+                            "request_id": request_id,
+                            "status": response.status_code,
+                            "_base64_content": encoded,
+                            "_content_type": content_type,
+                            "_content_length": len(binary_content),
                         }
 
                     # Try to parse JSON response
