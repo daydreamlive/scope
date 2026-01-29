@@ -864,7 +864,7 @@ async def upload_asset(
 
         # If cloud mode is active, upload to fal.ai AND save locally for thumbnails
         if fal_manager.is_connected:
-            # TODO need a unique directory for each user so that they can't see each other's assets
+            # TODO need a unique directory for each user so that they can't see each other's assets or just make sure we clean the dir for each websocket connection
             logger.info(f"upload_asset: Uploading {asset_type} to fal.ai and locally: {filename}")
             
             # Also save locally for thumbnail serving

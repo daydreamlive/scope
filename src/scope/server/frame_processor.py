@@ -262,57 +262,49 @@ class FrameProcessor:
         if not self.running:
             return None
 
+        # Get frame based on mode
+        frame: torch.Tensor | None = None
+        
         if self._relay_mode:
             # Relay mode: get frame from fal.ai output queue
             try:
                 frame_np = self._fal_output_queue.get_nowait()
-                self._frames_out += 1
-                
-                # Enqueue frame for async Spout sending (non-blocking)
-                if self.spout_sender_enabled and self.spout_sender is not None:
-                    try:
-                        self.spout_sender_queue.put_nowait(frame_np)
-                    except queue.Full:
-                        logger.debug("Spout output queue full, dropping frame")
-                    except Exception as e:
-                        logger.error(f"Error enqueueing Spout frame: {e}")
+                frame = torch.from_numpy(frame_np)
+            except queue.Empty:
+                return None
+        else:
+            # Local mode: get from pipeline processor
+            if not self.pipeline_processors:
+                return None
 
-                # Return as tensor for compatibility
-                return torch.from_numpy(frame_np)
+            last_processor = self.pipeline_processors[-1]
+            if not last_processor.output_queue:
+                return None
+
+            try:
+                frame = last_processor.output_queue.get_nowait()
+                # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
+                # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
+                frame = frame.squeeze(0).cpu()
             except queue.Empty:
                 return None
 
-        # Local mode: get from pipeline processor
-        if not self.pipeline_processors:
-            return None
+        # Common processing for both modes
+        self._frames_out += 1
 
-        last_processor = self.pipeline_processors[-1]
-        if not last_processor.output_queue:
-            return None
+        # Enqueue frame for async Spout sending (non-blocking)
+        if self.spout_sender_enabled and self.spout_sender is not None:
+            try:
+                # Frame is (H, W, C) uint8 [0, 255]
+                frame_np = frame.numpy()
+                self.spout_sender_queue.put_nowait(frame_np)
+            except queue.Full:
+                # Queue full, drop frame (non-blocking)
+                logger.debug("Spout output queue full, dropping frame")
+            except Exception as e:
+                logger.error(f"Error enqueueing Spout frame: {e}")
 
-        try:
-            frame = last_processor.output_queue.get_nowait()
-            # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
-            # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
-            frame = frame.squeeze(0).cpu()
-            
-            self._frames_out += 1
-
-            # Enqueue frame for async Spout sending (non-blocking)
-            if self.spout_sender_enabled and self.spout_sender is not None:
-                try:
-                    # Frame is (H, W, C) uint8 [0, 255]
-                    frame_np = frame.numpy()
-                    self.spout_sender_queue.put_nowait(frame_np)
-                except queue.Full:
-                    # Queue full, drop frame (non-blocking)
-                    logger.debug("Spout output queue full, dropping frame")
-                except Exception as e:
-                    logger.error(f"Error enqueueing Spout frame: {e}")
-
-            return frame
-        except queue.Empty:
-            return None
+        return frame
 
     def _on_frame_from_fal(self, frame: "VideoFrame") -> None:
         """Callback when a processed frame is received from fal.ai (relay mode)."""
