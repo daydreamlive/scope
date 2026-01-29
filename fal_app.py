@@ -371,7 +371,7 @@ class ScopeApp(fal.App, keep_alive=1800):
             request_id = payload.get("request_id")
 
             if msg_type == "get_ice_servers":
-                return await handle_get_ice_servers(payload)
+                return await handle_get_ice_servers()
             elif msg_type == "offer":
                 return await handle_offer(payload)
             elif msg_type == "icecandidate":

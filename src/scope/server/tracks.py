@@ -53,6 +53,10 @@ class VideoProcessingTrack(MediaStreamTrack):
             try:
                 input_frame = await self.track.recv()
 
+                # Skip frame if frame_processor isn't ready yet (can happen during initialization)
+                if self.frame_processor is None:
+                    continue
+
                 # Store raw VideoFrame for later processing (tracks input FPS internally)
                 self.frame_processor.put(input_frame)
 
