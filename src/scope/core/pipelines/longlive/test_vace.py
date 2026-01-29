@@ -70,6 +70,10 @@ CONFIG = {
     "first_frame_image": "frontend/public/assets/example.png",  # For firstframe or firstlastframe modes
     "last_frame_image": "frontend/public/assets/woman2.jpg",  # For lastframe or firstlastframe modes
     "extension_mode": "firstframe",  # "firstframe", "lastframe", or "firstlastframe"
+    # Auto-resize for first/last frame images:
+    # - True (default): Scale to fill target dimensions (seamless UX)
+    # - False: Center at original size, pad for outpainting
+    "auto_resize": True,
     # ===== GENERATION PARAMETERS =====
     "prompt": None,  # Set to override mode-specific prompts, or None to use defaults
     "prompt_r2v": "",  # Default prompt for R2V mode
@@ -722,8 +726,11 @@ def main():
                     kwargs["first_frame_image"] = first_frame_image
                 if last_frame_image is not None:
                     kwargs["last_frame_image"] = last_frame_image
+                # Pass auto_resize setting (False for outpainting)
+                kwargs["auto_resize"] = config.get("auto_resize", True)
                 print(
                     f"Chunk {chunk_index}: Extension mode={extension_mode}, "
+                    f"auto_resize={kwargs['auto_resize']}, "
                     f"chunk={'first' if is_first_chunk else 'last' if is_last_chunk else 'middle'}"
                 )
 
