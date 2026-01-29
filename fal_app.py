@@ -14,7 +14,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:deaf741"
+DOCKER_IMAGE = "daydreamlive/scope:7079f98"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -54,6 +54,9 @@ class ScopeApp(fal.App, keep_alive=300):
         "httpx",  # For async HTTP requests
     ]
 
+    # Public auth mode (no JWT token required)
+    auth_mode = "public"
+
     def setup(self):
         """
         Start the Scope backend server as a background process.
@@ -79,8 +82,10 @@ class ScopeApp(fal.App, keep_alive=300):
 
         # Environment for scope
         scope_env = os.environ.copy()
-        # Add any scope-specific environment variables here
-        # scope_env["PIPELINE"] = "some-default-pipeline"
+        # Use fal's /data directory for persistent storage (survives restarts)
+        scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
+        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
+        scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = "/data/assets"
 
         # Start the scope server in a background thread
         def start_server():
