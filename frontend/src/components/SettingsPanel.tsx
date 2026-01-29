@@ -101,6 +101,7 @@ interface SettingsPanelProps {
   // Postprocessors
   postprocessorIds?: string[];
   onPostprocessorIdsChange?: (ids: string[]) => void;
+  isFalMode?: boolean;
 }
 
 export function SettingsPanel({
@@ -149,6 +150,7 @@ export function SettingsPanel({
   onPreprocessorIdsChange,
   postprocessorIds = [],
   onPostprocessorIdsChange,
+  isFalMode = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -440,7 +442,7 @@ export function SettingsPanel({
           </div>
         )}
 
-        {currentPipeline?.supportsLoRA && (
+        {currentPipeline?.supportsLoRA && !isFalMode && (
           <div className="space-y-4">
             <LoRAManager
               loras={loras}

@@ -73,6 +73,12 @@ export function StreamPage() {
   const api = useApi();
   const { isFalMode, isReady: isFalReady } = useFalContext();
 
+  // Track backend cloud relay mode (local backend connected to fal.ai)
+  const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
+
+  // Combined cloud mode: either frontend direct-to-fal or backend relay to fal
+  const isCloudMode = isFalMode || isBackendCloudConnected;
+
   // Show loading state while connecting to fal
   useEffect(() => {
     if (isFalMode) {
@@ -1331,7 +1337,7 @@ export function StreamPage() {
 
         {/* Right Panel - Settings */}
         <div className="w-1/5 flex flex-col gap-3">
-          <CloudModeToggle />
+          <CloudModeToggle onStatusChange={setIsBackendCloudConnected} />
           <SettingsPanel
             className="flex-1 min-h-0 overflow-auto"
             pipelines={pipelines}
@@ -1400,6 +1406,7 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
+            isFalMode={isCloudMode}
           />
         </div>
       </div>
