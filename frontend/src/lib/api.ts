@@ -518,6 +518,53 @@ export const uninstallPlugin = async (
   return response.json();
 };
 
+export const restartServer = async (): Promise<number | null> => {
+  // Get current server start time before triggering restart
+  let oldStartTime: number | null = null;
+  try {
+    const response = await fetch(`/health?_t=${Date.now()}`);
+    if (response.ok) {
+      const data = await response.json();
+      oldStartTime = data.server_start_time;
+    }
+  } catch {
+    // Ignore
+  }
+
+  try {
+    await fetch("/api/v1/restart", { method: "POST" });
+  } catch {
+    // Expected - server shuts down and connection is lost
+  }
+
+  return oldStartTime;
+};
+
+export const waitForServer = async (
+  oldStartTime: number | null,
+  maxAttempts = 30,
+  delayMs = 1000
+): Promise<void> => {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const response = await fetch(`/health?_t=${Date.now()}`);
+      if (response.ok) {
+        const data = await response.json();
+        // If we have an old start time, wait for it to change
+        if (oldStartTime === null || data.server_start_time !== oldStartTime) {
+          // New server is up
+          return;
+        }
+        // Same server still running, keep waiting
+      }
+    } catch {
+      // Server not ready yet
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  throw new Error("Server did not restart in time");
+};
+
 export const downloadRecording = async (sessionId: string): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");

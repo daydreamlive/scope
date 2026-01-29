@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { GeneralTab } from "./settings/GeneralTab";
@@ -6,7 +6,13 @@ import { PluginsTab } from "./settings/PluginsTab";
 import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
 import type { InstalledPlugin } from "@/types/settings";
-import { listPlugins, installPlugin, uninstallPlugin } from "@/lib/api";
+import {
+  listPlugins,
+  installPlugin,
+  uninstallPlugin,
+  restartServer,
+  waitForServer,
+} from "@/lib/api";
 import { toast } from "sonner";
 
 interface SettingsDialogProps {
@@ -26,6 +32,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
+  // Track install/update/uninstall operations to suppress spurious error toasts
+  const isModifyingPluginsRef = useRef(false);
 
   const fetchPlugins = useCallback(async () => {
     setIsLoadingPlugins(true);
@@ -46,7 +54,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       );
     } catch (error) {
       console.error("Failed to fetch plugins:", error);
-      toast.error("Failed to load plugins");
+      // Don't show error toast during install/update/uninstall operations
+      // as the server may be busy or restarting
+      if (!isModifyingPluginsRef.current) {
+        toast.error("Failed to load plugins");
+      }
     } finally {
       setIsLoadingPlugins(false);
     }
@@ -76,12 +88,38 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   const handleInstallPlugin = async (packageSpec: string) => {
     setIsInstalling(true);
+    isModifyingPluginsRef.current = true;
     try {
       const response = await installPlugin({ package: packageSpec });
       if (response.success) {
         const pluginName = response.plugin?.name || packageSpec;
-        toast.success(`Successfully installed ${pluginName}`);
+        toast.success(`Installed ${pluginName}. Restarting server...`);
         setPluginInstallPath("");
+
+        // Optimistically add plugin to local state
+        if (response.plugin) {
+          setPlugins(prev => [
+            ...prev,
+            {
+              name: response.plugin!.name,
+              version: response.plugin!.version,
+              author: response.plugin!.author,
+              description: response.plugin!.description,
+              source: response.plugin!.source,
+              editable: response.plugin!.editable,
+              latest_version: response.plugin!.latest_version,
+              update_available: response.plugin!.update_available,
+              package_spec: response.plugin!.package_spec,
+            },
+          ]);
+        }
+
+        // Trigger restart and wait for server to come back
+        const oldStartTime = await restartServer();
+        await waitForServer(oldStartTime);
+        toast.success("Server restarted");
+
+        // Sync with server after restart
         await fetchPlugins();
         await refetchPipelines();
       } else {
@@ -94,6 +132,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       );
     } finally {
       setIsInstalling(false);
+      isModifyingPluginsRef.current = false;
     }
   };
 
@@ -102,13 +141,42 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     packageSpec: string
   ) => {
     setIsInstalling(true);
+    isModifyingPluginsRef.current = true;
     try {
       const response = await installPlugin({
         package: packageSpec,
         upgrade: true,
       });
       if (response.success) {
-        toast.success(`Successfully updated ${pluginName}`);
+        toast.success(`Updated ${pluginName}. Restarting server...`);
+
+        // Optimistically update plugin in local state
+        if (response.plugin) {
+          setPlugins(prev =>
+            prev.map(p =>
+              p.name === pluginName
+                ? {
+                    name: response.plugin!.name,
+                    version: response.plugin!.version,
+                    author: response.plugin!.author,
+                    description: response.plugin!.description,
+                    source: response.plugin!.source,
+                    editable: response.plugin!.editable,
+                    latest_version: response.plugin!.latest_version,
+                    update_available: response.plugin!.update_available,
+                    package_spec: response.plugin!.package_spec,
+                  }
+                : p
+            )
+          );
+        }
+
+        // Trigger restart and wait for server to come back
+        const oldStartTime = await restartServer();
+        await waitForServer(oldStartTime);
+        toast.success("Server restarted");
+
+        // Sync with server after restart
         await fetchPlugins();
         await refetchPipelines();
       } else {
@@ -121,20 +189,29 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       );
     } finally {
       setIsInstalling(false);
+      isModifyingPluginsRef.current = false;
     }
   };
 
   const handleDeletePlugin = async (pluginName: string) => {
-    console.log("Uninstalling plugin:", pluginName);
+    isModifyingPluginsRef.current = true;
     try {
       const response = await uninstallPlugin(pluginName);
-      console.log("Uninstall response:", response);
       if (response.success) {
-        toast.success(response.message);
+        toast.success(`Uninstalled ${pluginName}. Restarting server...`);
+
+        // Optimistically remove plugin from local state
+        setPlugins(prev => prev.filter(p => p.name !== pluginName));
+
+        // Trigger restart and wait for server to come back
+        const oldStartTime = await restartServer();
+        await waitForServer(oldStartTime);
+        toast.success("Server restarted");
+
+        // Sync with server after restart
         await fetchPlugins();
         await refetchPipelines();
       } else {
-        console.error("Uninstall failed:", response.message);
         toast.error(response.message);
       }
     } catch (error) {
@@ -142,6 +219,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       toast.error(
         error instanceof Error ? error.message : "Failed to uninstall plugin"
       );
+    } finally {
+      isModifyingPluginsRef.current = false;
     }
   };
 

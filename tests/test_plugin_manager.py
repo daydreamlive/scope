@@ -272,6 +272,102 @@ class TestCheckUpdates:
         assert updates[0]["update_available"] is True
 
 
+class TestGetVersionFromResolved:
+    """Tests for _get_version_from_resolved method."""
+
+    def test_extracts_version_from_pypi_package(self, tmp_path):
+        """Should extract version from package==version format."""
+        pm = PluginManager()
+
+        resolved_file = tmp_path / "resolved.txt"
+        resolved_file.write_text("some-package==1.2.3\nother-package==4.5.6\n")
+
+        version = pm._get_version_from_resolved("some-package", str(resolved_file))
+
+        assert version == "1.2.3"
+
+    def test_extracts_commit_from_git_package(self, tmp_path):
+        """Should extract commit hash from git URL format."""
+        pm = PluginManager()
+
+        resolved_file = tmp_path / "resolved.txt"
+        resolved_file.write_text(
+            "my-plugin @ git+https://github.com/user/repo@abc123def456\n"
+        )
+
+        version = pm._get_version_from_resolved("my-plugin", str(resolved_file))
+
+        assert version == "abc123def456"
+
+    def test_handles_hyphenated_package_names(self, tmp_path):
+        """Should correctly match package names with multiple hyphens.
+
+        This tests the fix for a regex bug where chained .replace() calls
+        would corrupt the pattern. For example, 'scope-test-generator' would
+        incorrectly become 'scope[-[-_]]test[-[-_]]generator' instead of
+        'scope[-_]test[-_]generator'.
+        """
+        pm = PluginManager()
+
+        resolved_file = tmp_path / "resolved.txt"
+        resolved_file.write_text(
+            "scope-test-generator @ git+https://github.com/user/repo@deadbeef123\n"
+        )
+
+        version = pm._get_version_from_resolved(
+            "scope-test-generator", str(resolved_file)
+        )
+
+        assert version == "deadbeef123"
+
+    def test_matches_underscore_variant_of_hyphenated_name(self, tmp_path):
+        """Should match package with underscores when searching with hyphens.
+
+        Python package names treat - and _ as equivalent, so searching for
+        'my-package' should match 'my_package' in resolved.txt.
+        """
+        pm = PluginManager()
+
+        resolved_file = tmp_path / "resolved.txt"
+        resolved_file.write_text("my_package==2.0.0\n")
+
+        version = pm._get_version_from_resolved("my-package", str(resolved_file))
+
+        assert version == "2.0.0"
+
+    def test_matches_hyphen_variant_of_underscored_name(self, tmp_path):
+        """Should match package with hyphens when searching with underscores."""
+        pm = PluginManager()
+
+        resolved_file = tmp_path / "resolved.txt"
+        resolved_file.write_text("my-package==3.0.0\n")
+
+        version = pm._get_version_from_resolved("my_package", str(resolved_file))
+
+        assert version == "3.0.0"
+
+    def test_returns_none_for_missing_file(self, tmp_path):
+        """Should return None if resolved file doesn't exist."""
+        pm = PluginManager()
+
+        version = pm._get_version_from_resolved(
+            "any-package", str(tmp_path / "nonexistent.txt")
+        )
+
+        assert version is None
+
+    def test_returns_none_for_missing_package(self, tmp_path):
+        """Should return None if package not found in resolved file."""
+        pm = PluginManager()
+
+        resolved_file = tmp_path / "resolved.txt"
+        resolved_file.write_text("other-package==1.0.0\n")
+
+        version = pm._get_version_from_resolved("missing-package", str(resolved_file))
+
+        assert version is None
+
+
 class TestValidateInstall:
     """Tests for validate_install_async method."""
 
@@ -320,73 +416,111 @@ class TestValidateInstall:
 class TestInstallPlugin:
     """Tests for install_plugin_async method."""
 
-    def test_runs_uv_pip_install(self):
-        """Verify subprocess command is correct."""
+    def test_uses_compile_based_resolution(self):
+        """Verify compile and sync are called for non-editable installs."""
         pm = PluginManager()
 
-        with patch.object(pm, "_validate_install_sync", return_value=(True, None)):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-                with patch.object(pm, "_reload_all_plugins"):
-                    with patch.object(pm, "_list_plugins_sync", return_value=[]):
-                        pm._install_plugin_sync("test-package")
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ) as mock_compile:
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(True, None)
+                    ) as mock_sync:
+                        with patch.object(pm, "_reload_all_plugins"):
+                            with patch.object(
+                                pm, "_list_plugins_sync", return_value=[]
+                            ):
+                                pm._install_plugin_sync("test-package")
 
-        mock_run.assert_called_once()
-        args = mock_run.call_args[0][0]
-        assert "uv" in args
-        assert "pip" in args
-        assert "install" in args
-        assert "test-package" in args
+        mock_compile.assert_called_once()
+        mock_sync.assert_called_once_with("/tmp/resolved.txt")
 
     def test_handles_editable_install(self):
-        """Verify --editable flag is included."""
+        """Verify --editable flag is included for editable installs."""
         pm = PluginManager()
 
-        with patch.object(pm, "_validate_install_sync", return_value=(True, None)):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-                with patch.object(pm, "_reload_all_plugins"):
-                    with patch.object(pm, "_list_plugins_sync", return_value=[]):
-                        pm._install_plugin_sync("/path/to/package", editable=True)
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with patch.object(pm, "_reload_all_plugins"):
+                with patch.object(pm, "_list_plugins_sync", return_value=[]):
+                    pm._install_plugin_sync("/path/to/package", editable=True)
 
         args = mock_run.call_args[0][0]
         assert "--editable" in args
 
-    def test_handles_upgrade_flag(self):
-        """Verify --upgrade flag is included."""
+    def test_upgrade_uses_upgrade_package_flag(self):
+        """Verify --upgrade-package is passed to compile when upgrading."""
         pm = PluginManager()
 
-        with patch.object(pm, "_validate_install_sync", return_value=(True, None)):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-                with patch.object(pm, "_reload_all_plugins"):
-                    with patch.object(pm, "_list_plugins_sync", return_value=[]):
-                        pm._install_plugin_sync("test-package", upgrade=True)
+        with patch.object(pm, "_read_plugins_file", return_value=["test-package"]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ) as mock_compile:
+                    with patch.object(pm, "_sync_plugins", return_value=(True, None)):
+                        with patch.object(pm, "_reload_all_plugins"):
+                            with patch.object(
+                                pm, "_list_plugins_sync", return_value=[]
+                            ):
+                                pm._install_plugin_sync("test-package", upgrade=True)
 
-        args = mock_run.call_args[0][0]
-        assert "--upgrade" in args
+        # Check that upgrade_package was passed to _compile_plugins
+        mock_compile.assert_called_once_with(upgrade_package="test-package")
 
     def test_raises_on_dependency_error(self):
-        """PluginDependencyError should be raised on validation fail."""
+        """PluginDependencyError should be raised on compile fail."""
         pm = PluginManager()
 
-        with patch.object(
-            pm, "_validate_install_sync", return_value=(False, "Conflict")
-        ):
-            with pytest.raises(PluginDependencyError):
-                pm._install_plugin_sync("conflicting-package")
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm, "_compile_plugins", return_value=(False, "", "Conflict error")
+                ):
+                    with pytest.raises(PluginDependencyError):
+                        pm._install_plugin_sync("conflicting-package")
 
     def test_raises_on_install_error(self):
-        """PluginInstallError should be raised on subprocess fail."""
+        """PluginInstallError should be raised on sync fail."""
         pm = PluginManager()
 
-        with patch.object(pm, "_validate_install_sync", return_value=(True, None)):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=1, stdout="", stderr="Install failed"
-                )
-                with pytest.raises(PluginInstallError):
-                    pm._install_plugin_sync("bad-package")
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(False, "Install failed")
+                    ):
+                        with pytest.raises(PluginInstallError):
+                            pm._install_plugin_sync("bad-package")
+
+    def test_rollback_plugins_file_on_compile_failure(self):
+        """Plugins.txt should be rolled back if compile fails."""
+        pm = PluginManager()
+
+        original_plugins = ["existing-package"]
+        with patch.object(
+            pm, "_read_plugins_file", return_value=original_plugins.copy()
+        ):
+            with patch.object(pm, "_write_plugins_file") as mock_write:
+                with patch.object(
+                    pm, "_compile_plugins", return_value=(False, "", "Conflict")
+                ):
+                    with pytest.raises(PluginDependencyError):
+                        pm._install_plugin_sync("new-package")
+
+        # Should have been called twice: once to add, once to rollback
+        assert mock_write.call_count == 2
+        # Last call should be the rollback with original plugins
+        mock_write.assert_called_with(original_plugins)
 
 
 class TestUninstallPlugin:
@@ -402,9 +536,16 @@ class TestUninstallPlugin:
             "_list_plugins_sync",
             return_value=[{"name": "test-plugin", "pipelines": []}],
         ):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-                pm._uninstall_plugin_sync("test-plugin")
+            with patch.object(pm, "_read_plugins_file", return_value=[]):
+                with patch.object(pm, "_write_plugins_file"):
+                    with patch.object(
+                        pm, "_compile_plugins", return_value=(True, "", None)
+                    ):
+                        with patch("subprocess.run") as mock_run:
+                            mock_run.return_value = MagicMock(
+                                returncode=0, stdout="", stderr=""
+                            )
+                            pm._uninstall_plugin_sync("test-plugin")
 
         # Find the uv pip uninstall call among all subprocess.run calls
         # (other modules like pipeline registry may also call subprocess.run)
@@ -443,14 +584,62 @@ class TestUninstallPlugin:
                 }
             ],
         ):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0)
-                with patch(
-                    "scope.core.pipelines.registry.PipelineRegistry.unregister"
-                ) as mock_unregister:
-                    pm._uninstall_plugin_sync("test-plugin")
+            with patch.object(pm, "_read_plugins_file", return_value=[]):
+                with patch.object(pm, "_write_plugins_file"):
+                    with patch.object(
+                        pm, "_compile_plugins", return_value=(True, "", None)
+                    ):
+                        with patch("subprocess.run") as mock_run:
+                            mock_run.return_value = MagicMock(returncode=0)
+                            with patch(
+                                "scope.core.pipelines.registry.PipelineRegistry.unregister"
+                            ) as mock_unregister:
+                                pm._uninstall_plugin_sync("test-plugin")
 
-                    mock_unregister.assert_called_once_with("test-pipeline")
+                                mock_unregister.assert_called_once_with("test-pipeline")
+
+    def test_removes_from_plugins_file(self):
+        """Verify plugin is removed from plugins.txt."""
+        pm = PluginManager()
+
+        with patch.object(
+            pm,
+            "_list_plugins_sync",
+            return_value=[{"name": "test-plugin", "pipelines": []}],
+        ):
+            with patch.object(
+                pm, "_read_plugins_file", return_value=["test-plugin", "other-plugin"]
+            ):
+                with patch.object(pm, "_write_plugins_file") as mock_write:
+                    with patch.object(
+                        pm, "_compile_plugins", return_value=(True, "", None)
+                    ):
+                        with patch("subprocess.run") as mock_run:
+                            mock_run.return_value = MagicMock(returncode=0)
+                            pm._uninstall_plugin_sync("test-plugin")
+
+        # Should write plugins file without test-plugin
+        mock_write.assert_called_once_with(["other-plugin"])
+
+    def test_recompiles_after_uninstall(self):
+        """Verify compile is called after removing from plugins.txt."""
+        pm = PluginManager()
+
+        with patch.object(
+            pm,
+            "_list_plugins_sync",
+            return_value=[{"name": "test-plugin", "pipelines": []}],
+        ):
+            with patch.object(pm, "_read_plugins_file", return_value=["test-plugin"]):
+                with patch.object(pm, "_write_plugins_file"):
+                    with patch.object(
+                        pm, "_compile_plugins", return_value=(True, "", None)
+                    ) as mock_compile:
+                        with patch("subprocess.run") as mock_run:
+                            mock_run.return_value = MagicMock(returncode=0)
+                            pm._uninstall_plugin_sync("test-plugin")
+
+        mock_compile.assert_called_once()
 
 
 class TestReloadPlugin:

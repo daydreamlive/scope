@@ -207,6 +207,8 @@ def configure_static_files():
 webrtc_manager = None
 # Global pipeline manager instance
 pipeline_manager = None
+# Server startup timestamp for detecting restarts
+server_start_time = time.time()
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -312,7 +314,68 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
-    return HealthResponse(status="healthy", timestamp=datetime.now().isoformat())
+    return HealthResponse(
+        status="healthy",
+        timestamp=datetime.now().isoformat(),
+        server_start_time=server_start_time,
+    )
+
+
+@app.post("/api/v1/restart")
+async def restart_server():
+    """Restart the server process.
+
+    This endpoint is called after plugin install/uninstall to ensure
+    Python's module cache is refreshed. The server restarts by re-executing
+    the entry point, which replaces the current process and keeps terminal
+    output working.
+
+    Known limitation (Windows/Git Bash): After the server restarts and you
+    press Ctrl+C, the terminal may appear to hang. The process exits correctly,
+    but MinTTY's input buffer gets stuck. Press any key to get your prompt back.
+    This is a quirk of how MinTTY handles process replacement and doesn't affect
+    CMD, PowerShell, or the Electron app.
+    """
+
+    def do_restart():
+        time.sleep(0.5)  # Give time for response to be sent
+
+        # Close all logging handlers to avoid file descriptor warnings
+        for handler in logging.root.handlers[:]:
+            handler.close()
+            logging.root.removeHandler(handler)
+
+        # On Windows, entry points are .exe files but sys.argv[0] may not have extension
+        executable = sys.argv[0]
+        if sys.platform == "win32" and not executable.endswith(".exe"):
+            executable += ".exe"
+
+        if sys.platform == "win32":
+            # On Windows, we can't use os.execv() because it spawns a child process
+            # instead of replacing in-place (unlike Unix). So we spawn with Popen
+            # and exit. Known issue: In Git Bash/MinTTY, after Ctrl+C the terminal
+            # may require an extra keypress due to MinTTY's input buffer handling.
+            subprocess.Popen(
+                [executable] + sys.argv[1:],
+                stdin=subprocess.DEVNULL,
+                stdout=None,  # Inherit parent's stdout
+                stderr=None,  # Inherit parent's stderr
+            )
+            sys.stdout.flush()
+            sys.stderr.flush()
+            try:
+                sys.stdin.close()
+            except Exception:
+                pass
+            os._exit(0)
+        else:
+            # On Unix, execv works correctly (replaces process in-place)
+            os.execv(executable, sys.argv)
+
+    # Run in a thread to allow response to be sent first
+    thread = threading.Thread(target=do_restart, daemon=True)
+    thread.start()
+    return {"message": "Server restarting..."}
 
 
 @app.get("/")
