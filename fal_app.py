@@ -9,9 +9,45 @@ Based on:
 - https://github.com/fal-ai-community/fal-demos/blob/main/fal_demos/video/yolo_webcam_webrtc/yolo.py
 """
 
+import shutil
+
 import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
+
+
+def cleanup_session_data():
+    """Clean up session-specific data when WebSocket disconnects.
+
+    This prevents data leakage between users on fal.ai by clearing:
+    - Assets directory (uploaded images, videos)
+    - Recording files in temp directory
+    """
+    # Import here to avoid circular imports and ensure scope is available
+    try:
+        from scope.server.models_config import get_assets_dir
+        from scope.server.recording import RecordingManager
+
+        # Clean assets directory
+        assets_dir = get_assets_dir()
+        if assets_dir.exists():
+            for item in assets_dir.iterdir():
+                try:
+                    if item.is_file():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+                except Exception as e:
+                    print(f"Warning: Failed to delete {item}: {e}")
+            print(f"Cleaned up assets directory: {assets_dir}")
+
+        # Clean recording files
+        RecordingManager.cleanup_old_recordings("scope_recording_*")
+        RecordingManager.cleanup_old_recordings("scope_download_*")
+        print("Cleaned up recording files")
+
+    except Exception as e:
+        print(f"Warning: Session cleanup failed: {e}")
 
 
 # update image tag below from your latest branch push e.g. https://github.com/daydreamlive/scope/actions/runs/21450540770/job/61777880949
@@ -23,7 +59,7 @@ from fastapi import WebSocket
 # fal deploy fal_app.py --auth public
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:14149c7"
+DOCKER_IMAGE = "daydreamlive/scope:27ed915"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -437,7 +473,9 @@ class ScopeApp(fal.App, keep_alive=300):
             logger.error(f"WebSocket error: {e}")
             await safe_send_json({"type": "error", "error": str(e)})
         finally:
-            print("WebSocket connection closed")
+            # Clean up session data to prevent data leakage between users
+            cleanup_session_data()
+            print("WebSocket connection closed, session data cleaned up")
 
 
 # Deployment:

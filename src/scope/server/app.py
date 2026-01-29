@@ -1161,7 +1161,7 @@ async def get_current_logs():
 # fal.ai Cloud Integration Endpoints
 # =============================================================================
 
-
+# TODO disconnect from fal if browser is closed
 @app.post("/api/v1/fal/connect", response_model=FalStatusResponse)
 async def connect_to_fal(
     request: FalConnectRequest,
