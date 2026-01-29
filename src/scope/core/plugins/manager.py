@@ -15,6 +15,7 @@ import pluggy
 
 from .dependency_validator import DependencyValidator
 from .hookspecs import ScopeHookSpec
+from .plugins_config import ensure_plugins_dir, get_plugins_file, get_resolved_file
 
 if TYPE_CHECKING:
     from scope.core.pipelines.registry import PipelineRegistry
@@ -77,6 +78,143 @@ class PluginManager:
 
         # Cache of registered plugin names (package names)
         self._registered_plugins: set[str] = set()
+
+    def _read_plugins_file(self) -> list[str]:
+        """Read plugin specifiers from plugins.txt."""
+        plugins_file = get_plugins_file()
+        if not plugins_file.exists():
+            return []
+        return [
+            line.strip()
+            for line in plugins_file.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+    def _write_plugins_file(self, plugins: list[str]) -> None:
+        """Write plugin specifiers to plugins.txt."""
+        ensure_plugins_dir()
+        get_plugins_file().write_text("\n".join(plugins) + "\n" if plugins else "")
+
+    def _compile_plugins(
+        self, upgrade_package: str | None = None
+    ) -> tuple[bool, str, str | None]:
+        """Compile plugins against project constraints.
+
+        Uses uv pip compile to resolve plugins along with project dependencies,
+        ensuring plugins respect project constraints (e.g., torch pin).
+
+        Args:
+            upgrade_package: If provided, upgrade only this package
+
+        Returns:
+            Tuple of (success, resolved_file_path, error_message)
+        """
+        plugins_file = get_plugins_file()
+        resolved_file = get_resolved_file()
+        project_root = Path.cwd()
+        pyproject = project_root / "pyproject.toml"
+
+        if not pyproject.exists():
+            return False, "", "pyproject.toml not found"
+
+        args = [
+            "uv",
+            "pip",
+            "compile",
+            str(pyproject),
+            "--torch-backend",
+            "cu128",
+            "-o",
+            str(resolved_file),
+        ]
+
+        # Add plugins file if it exists and has content
+        if plugins_file.exists() and plugins_file.read_text().strip():
+            args.append(str(plugins_file))
+
+        if upgrade_package:
+            args.extend(["--upgrade-package", upgrade_package])
+
+        env = {**os.environ, "PYTHONUTF8": "1"}
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=project_root,
+            env=env,
+        )
+
+        if result.returncode != 0:
+            return False, "", result.stderr
+
+        return True, str(resolved_file), None
+
+    def _sync_plugins(self, resolved_file: str) -> tuple[bool, str | None]:
+        """Install packages from resolved.txt.
+
+        Args:
+            resolved_file: Path to resolved.txt
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        args = ["uv", "pip", "install", "--torch-backend", "cu128", "-r", resolved_file]
+        logger.info(f"Running: {' '.join(args)}")
+
+        env = {**os.environ, "PYTHONUTF8": "1"}
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+
+        logger.info(f"uv pip install returncode: {result.returncode}")
+        if result.stdout:
+            logger.info(f"uv pip install stdout: {result.stdout}")
+        if result.stderr:
+            logger.info(f"uv pip install stderr: {result.stderr}")
+
+        if result.returncode != 0:
+            return False, result.stderr
+
+        return True, None
+
+    def _extract_package_name(self, spec: str) -> str:
+        """Extract package name from a specifier.
+
+        Handles various formats:
+        - git+https://github.com/user/repo.git -> repo
+        - git+https://github.com/user/repo.git@branch -> repo
+        - package==1.0 -> package
+        - package>=1.0,<2.0 -> package
+        - package[extra] -> package
+        """
+        # Handle git URLs: git+https://github.com/user/repo.git -> repo
+        if spec.startswith("git+"):
+            # Extract repo name from URL
+            url_part = spec.split("@")[0]  # Remove @branch or @commit
+            repo_name = url_part.split("/")[-1].replace(".git", "")
+            return repo_name
+
+        # Handle version specifiers and extras
+        # Split on any version specifier chars and take first part
+        for sep in ["[", "==", ">=", "<=", "!=", "<", ">", "~="]:
+            spec = spec.split(sep)[0]
+
+        return spec.strip()
+
+    def _normalize_package_name(self, name: str) -> str:
+        """Normalize package name for comparison.
+
+        Python packaging treats hyphens and underscores as equivalent,
+        and comparisons are case-insensitive.
+        """
+        return name.lower().replace("-", "_")
 
     @property
     def pm(self) -> pluggy.PluginManager:
@@ -300,67 +438,128 @@ class PluginManager:
     def _check_plugin_update(
         self, name: str, package_spec: str | None = None
     ) -> dict[str, Any]:
-        """Check for updates using uv pip install --dry-run.
+        """Check for updates using compile --upgrade-package.
 
-        This works for both PyPI and git packages uniformly.
+        Compares current resolved.txt with a fresh compile using --upgrade-package
+        to find if a newer version is available that respects project constraints.
 
         Args:
-            name: Package name (used for logging and regex matching)
-            package_spec: Package specifier for uv (e.g., "package-name" for PyPI,
-                         "git+https://..." for git). Defaults to name if not provided.
+            name: Package name (used for version lookup)
+            package_spec: Package specifier (not used in compile approach, kept for API compat)
 
-        Output when update available (PyPI):
-            Would install 1 package
-             + package==1.2.3
-
-        Output when update available (git):
-            Would install 1 package
-             + package @ git+https://github.com/user/repo.git@commit_hash
-
-        Output when up to date:
-            Would make no changes
+        Returns:
+            Dict with latest_version and update_available keys
         """
-        import re
+        import tempfile
 
-        if package_spec is None:
-            package_spec = name
+        resolved_file = get_resolved_file()
 
+        # Get current version from resolved.txt (if it exists)
+        current_version = self._get_version_from_resolved(name, str(resolved_file))
+
+        # If no resolved file exists, we can't check for updates via compile
+        if not resolved_file.exists():
+            return {"latest_version": None, "update_available": None}
+
+        # Create temp file for upgrade check
         try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False
+            ) as f:
+                temp_resolved = f.name
+
+            plugins_file = get_plugins_file()
+            project_root = Path.cwd()
+            pyproject = project_root / "pyproject.toml"
+
+            if not pyproject.exists():
+                return {"latest_version": None, "update_available": None}
+
+            args = [
+                "uv",
+                "pip",
+                "compile",
+                str(pyproject),
+                "--torch-backend",
+                "cu128",
+                "-o",
+                temp_resolved,
+                "--upgrade-package",
+                name,
+                "--refresh-package",
+                name,  # Force refresh for git packages
+            ]
+
+            if plugins_file.exists() and plugins_file.read_text().strip():
+                args.append(str(plugins_file))
+
             env = {**os.environ, "PYTHONUTF8": "1"}
             result = subprocess.run(
-                ["uv", "pip", "install", "--dry-run", "--upgrade", package_spec],
+                args,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=30,
+                cwd=project_root,
                 env=env,
+                timeout=60,
             )
 
-            output = result.stdout + result.stderr
+            if result.returncode != 0:
+                return {"latest_version": None, "update_available": None}
 
-            # Check if no changes needed
-            if "Would make no changes" in output:
-                return {"latest_version": None, "update_available": False}
+            # Get new version from temp resolved file
+            new_version = self._get_version_from_resolved(name, temp_resolved)
 
-            # Parse the new version from output:
-            # PyPI format: "+ package==1.2.3"
-            # Git format: "+ package @ git+https://...@commit_hash"
-            pattern = r"\+ " + re.escape(name) + r"(?:==| @ )([\S]+)"
-            match = re.search(pattern, output, re.IGNORECASE)
-            if match:
-                latest_version = match.group(1)
-                return {"latest_version": latest_version, "update_available": True}
+            if new_version and new_version != current_version:
+                return {"latest_version": new_version, "update_available": True}
 
-            # If we see "Would install" but couldn't parse version, still mark as update available
-            if "Would install" in output:
-                return {"latest_version": None, "update_available": True}
-
-            return {"latest_version": None, "update_available": None}
+            return {"latest_version": None, "update_available": False}
 
         except Exception as e:
             logger.warning(f"Failed to check updates for {name}: {e}")
             return {"latest_version": None, "update_available": None}
+        finally:
+            Path(temp_resolved).unlink(missing_ok=True)
+
+    def _get_version_from_resolved(self, name: str, resolved_file: str) -> str | None:
+        """Extract package version/commit from resolved.txt.
+
+        Args:
+            name: Package name to look for
+            resolved_file: Path to resolved.txt file
+
+        Returns:
+            Version string or git commit hash, or None if not found
+        """
+        import re
+
+        if not Path(resolved_file).exists():
+            return None
+
+        content = Path(resolved_file).read_text()
+
+        # Normalize package name for regex (handle - vs _)
+        # Use re.sub to avoid replacing characters in the replacement string
+        normalized = re.sub(r"[-_]", "[-_]", name)
+
+        # Try version match: package==1.2.3
+        match = re.search(
+            rf"^{normalized}==([\S]+)", content, re.MULTILINE | re.IGNORECASE
+        )
+        if match:
+            return match.group(1)
+
+        # Try git commit match: package @ git+https://...@commit
+        match = re.search(
+            rf"^{normalized}\s+@\s+git\+[^@]+@(\w+)",
+            content,
+            re.MULTILINE | re.IGNORECASE,
+        )
+        if match:
+            return match.group(1)
+
+        return None
 
     async def get_plugin_info_async(self, name: str) -> dict[str, Any] | None:
         """Get info for a specific plugin.
@@ -514,30 +713,95 @@ class PluginManager:
         pre: bool = False,
         force: bool = False,
     ) -> dict[str, Any]:
-        """Synchronous implementation of install_plugin."""
-        # Validate dependencies unless forced
-        packages_to_validate = [package]
-        if not force:
-            is_valid, error_message = self._validate_install_sync(packages_to_validate)
-            if not is_valid:
-                raise PluginDependencyError(error_message or "Dependency conflict")
+        """Synchronous implementation of install_plugin.
 
-        # Build uv pip install command
-        args = ["uv", "pip", "install", "--torch-backend", "cu128"]
-
-        if upgrade:
-            args.append("--upgrade")
+        Uses compile-based resolution to ensure plugins respect project
+        constraints (e.g., torch pin).
+        """
+        # For editable installs, use direct pip install (local dev)
         if editable:
-            args.extend(["--editable", package])
+            return self._install_editable_plugin(package)
+
+        # Extract package name for tracking
+        package_base = self._extract_package_name(package)
+        normalized_base = self._normalize_package_name(package_base)
+
+        # Read current plugins and check if already in list
+        plugins = self._read_plugins_file()
+        existing_idx = None
+        for i, p in enumerate(plugins):
+            if (
+                self._normalize_package_name(self._extract_package_name(p))
+                == normalized_base
+            ):
+                existing_idx = i
+                break
+
+        # Store original for rollback
+        original_plugins = plugins.copy()
+
+        # Update plugins list
+        if existing_idx is not None:
+            plugins[existing_idx] = package  # Update specifier
         else:
-            args.append(package)
-        if pre:
-            args.append("--pre")
+            plugins.append(package)
 
-        # Set PYTHONUTF8=1 for proper Unicode handling
+        self._write_plugins_file(plugins)
+
+        # Compile with project constraints
+        logger.info(f"Compiling plugins with package: {package}")
+        success, resolved_file, error = self._compile_plugins(
+            upgrade_package=package_base if upgrade else None
+        )
+
+        if not success:
+            # Rollback plugins.txt on failure
+            self._write_plugins_file(original_plugins)
+            raise PluginDependencyError(f"Dependency resolution failed: {error}")
+
+        # Install resolved packages
+        logger.info(f"Installing from resolved file: {resolved_file}")
+        success, error = self._sync_plugins(resolved_file)
+
+        if not success:
+            # Rollback plugins.txt on failure
+            self._write_plugins_file(original_plugins)
+            raise PluginInstallError(f"Installation failed: {error}")
+
+        # Reload plugins to pick up the new one
+        self._reload_all_plugins()
+
+        # Find the installed plugin
+        plugins_list = self._list_plugins_sync()
+        installed_plugin = None
+        for plugin in plugins_list:
+            if plugin["name"].lower() == package_base.lower():
+                installed_plugin = plugin
+                break
+
+        return {
+            "success": True,
+            "message": f"Successfully installed {package}",
+            "plugin": installed_plugin,
+        }
+
+    def _install_editable_plugin(self, package: str) -> dict[str, Any]:
+        """Install a plugin in editable mode (for local development).
+
+        Editable installs bypass compile-based resolution since they're
+        used for local development where the developer manages dependencies.
+        """
+        args = [
+            "uv",
+            "pip",
+            "install",
+            "--torch-backend",
+            "cu128",
+            "--editable",
+            package,
+        ]
+
         env = {**os.environ, "PYTHONUTF8": "1"}
-
-        # Run installation
         logger.info(f"Running: {' '.join(args)}")
         result = subprocess.run(
             args,
@@ -562,20 +826,9 @@ class PluginManager:
         # Reload plugins to pick up the new one
         self._reload_all_plugins()
 
-        # Get info about the installed plugin
-        # For editable installs, extract package name from path
-        if editable:
-            # Try to get package name from pyproject.toml or setup.py
-            package_path = Path(package).resolve()
-            package_name = self._get_package_name_from_path(package_path)
-        else:
-            # For PyPI/git, extract base package name
-            package_name = (
-                package.split("[")[0].split("==")[0].split(">=")[0].split("<=")[0]
-            )
-            package_name = (
-                package_name.replace("git+", "").split("/")[-1].replace(".git", "")
-            )
+        # Get package name from path
+        package_path = Path(package).resolve()
+        package_name = self._get_package_name_from_path(package_path)
 
         # Find the installed plugin
         plugins = self._list_plugins_sync()
@@ -587,7 +840,7 @@ class PluginManager:
 
         return {
             "success": True,
-            "message": f"Successfully installed {package}",
+            "message": f"Successfully installed {package} (editable)",
             "plugin": installed_plugin,
         }
 
@@ -636,9 +889,9 @@ class PluginManager:
 
         # Check if plugin exists
         plugin_info = None
-        plugins = self._list_plugins_sync()
-        logger.debug(f"Found {len(plugins)} installed plugins")
-        for plugin in plugins:
+        plugins_list = self._list_plugins_sync()
+        logger.debug(f"Found {len(plugins_list)} installed plugins")
+        for plugin in plugins_list:
             if plugin["name"] == name:
                 plugin_info = plugin
                 break
@@ -672,6 +925,27 @@ class PluginManager:
                     del self._pipeline_to_plugin[pipeline_id]
                 logger.info(f"Unregistered pipeline from registry: {pipeline_id}")
 
+        # Remove from plugins.txt
+        plugins = self._read_plugins_file()
+        normalized_name = self._normalize_package_name(name)
+        new_plugins = [
+            p
+            for p in plugins
+            if self._normalize_package_name(self._extract_package_name(p))
+            != normalized_name
+        ]
+
+        # Check if plugin was in plugins.txt (non-editable plugins)
+        plugins_file_changed = len(new_plugins) != len(plugins)
+        if plugins_file_changed:
+            self._write_plugins_file(new_plugins)
+            logger.info(f"Removed {name} from plugins.txt")
+        else:
+            logger.warning(
+                f"Plugin {name} not found in plugins.txt. "
+                f"Searched for normalized name '{normalized_name}' in: {plugins}"
+            )
+
         # Run uv pip uninstall
         args = ["uv", "pip", "uninstall", name]
         logger.info(f"Running: {' '.join(args)}")
@@ -696,6 +970,11 @@ class PluginManager:
             raise PluginInstallError(
                 f"Uninstallation failed: {result.stderr or result.stdout}"
             )
+
+        # Re-compile to update resolved.txt (if plugins.txt was changed)
+        if plugins_file_changed:
+            self._compile_plugins()
+            logger.info("Re-compiled plugins after uninstall")
 
         return {
             "success": True,

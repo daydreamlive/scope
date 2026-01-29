@@ -28,6 +28,9 @@ class HealthResponse(BaseModel):
 
     status: str = Field(default="healthy")
     timestamp: str
+    server_start_time: float = Field(
+        ..., description="Unix timestamp when the server started"
+    )
 
 
 class PromptItem(BaseModel):
