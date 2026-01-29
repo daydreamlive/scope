@@ -143,6 +143,7 @@ def _register_pipelines():
             "ControllerVisualizerPipeline",
         ),
         ("rife", ".rife.pipeline", "RIFEPipeline"),
+        ("image_filter", ".image_filter.pipeline", "ImageFilterPipeline"),
     ]
 
     # Try to import and register each pipeline

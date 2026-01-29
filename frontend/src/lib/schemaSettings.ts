@@ -14,6 +14,10 @@ export interface SchemaFieldUI {
   is_load_param?: boolean;
   /** Short label for the UI. When set, used instead of description for the field label. */
   label?: string;
+  /** For component="custom": URL to load the web component script from */
+  script_url?: string;
+  /** For component="custom": Custom element tag name (e.g., "image-filter-layers") */
+  element_name?: string;
 }
 
 export interface SchemaProperty {
@@ -211,6 +215,14 @@ export const COMPLEX_COMPONENTS = [
   "noise",
   "quantization",
   "image",
+  "custom",
 ] as const;
 
 export type ComplexComponentName = (typeof COMPLEX_COMPONENTS)[number];
+
+/**
+ * Check if a component is a custom web component (has script_url and element_name).
+ */
+export function isCustomWebComponent(ui?: SchemaFieldUI): boolean {
+  return ui?.component === "custom" && !!ui?.script_url && !!ui?.element_name;
+}

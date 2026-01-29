@@ -106,6 +106,8 @@ def ui_field_config(
     is_load_param: bool = False,
     label: str | None = None,
     category: Literal["configuration", "input"] | None = None,
+    script_url: str | None = None,
+    element_name: str | None = None,
 ) -> dict[str, Any]:
     """Build json_schema_extra for a field so the frontend renders it in Settings or Input & Controls.
 
@@ -117,8 +119,9 @@ def ui_field_config(
     Args:
         order: Display order (lower first). If omitted, Pydantic field order is used.
         component: Complex component name ("vace", "lora", "denoising_steps",
-            "quantization", "cache", "image"). Use "image" for image-path fields
-            (str | None); the UI renders an image picker like first_frame_image.
+            "quantization", "cache", "image", "custom"). Use "image" for image-path
+            fields (str | None); the UI renders an image picker. Use "custom" with
+            script_url and element_name for custom Web Components.
             Omit for primitive widgets.
         modes: Restrict to input modes, e.g. ["video"]. Omit to show in all modes.
         is_load_param: If True, this field is a load param (passed when loading the
@@ -128,6 +131,10 @@ def ui_field_config(
             the field label; description remains available as tooltip.
         category: "configuration" for Settings panel, "input" for Input & Controls
             (below Prompts). Omit to default to "configuration".
+        script_url: For component="custom": URL to load the Web Component script from.
+            The script should define a custom element using customElements.define().
+        element_name: For component="custom": The custom element tag name
+            (e.g., "image-filter-layers"). Must match the name used in the script.
 
     Returns:
         Dict to pass as json_schema_extra (produces "ui" key in JSON schema).
@@ -144,6 +151,11 @@ def ui_field_config(
         ui["modes"] = modes
     if label is not None:
         ui["label"] = label
+    # Custom Web Component support
+    if script_url is not None:
+        ui["script_url"] = script_url
+    if element_name is not None:
+        ui["element_name"] = element_name
     return {"ui": ui}
 
 

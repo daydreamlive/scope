@@ -411,6 +411,86 @@ async def get_pipeline_schemas():
     return PipelineSchemasResponse(pipelines=pipelines)
 
 
+@app.get("/api/v1/pipelines/{pipeline_id}/static/{file_path:path}")
+async def serve_pipeline_static(pipeline_id: str, file_path: str):
+    """Serve static files from a pipeline's static/ directory.
+
+    This enables pipelines to provide custom Web Components and other static assets.
+    Files are served from: <pipeline_directory>/static/<file_path>
+
+    Args:
+        pipeline_id: The pipeline ID (e.g., "image_filter")
+        file_path: Path to the file within the pipeline's static/ directory
+
+    Returns:
+        The requested file with appropriate content type
+    """
+    from pathlib import Path
+
+    from scope.core.pipelines.registry import PipelineRegistry
+
+    try:
+        # Get the pipeline class to find its directory
+        pipeline_class = PipelineRegistry.get(pipeline_id)
+        if pipeline_class is None:
+            raise HTTPException(
+                status_code=404, detail=f"Pipeline not found: {pipeline_id}"
+            )
+
+        # Get the pipeline module's directory
+        import inspect
+
+        module = inspect.getmodule(pipeline_class)
+        if module is None or module.__file__ is None:
+            raise HTTPException(status_code=404, detail="Pipeline module not found")
+
+        pipeline_dir = Path(module.__file__).parent
+        static_dir = pipeline_dir / "static"
+
+        if not static_dir.exists():
+            raise HTTPException(status_code=404, detail="Static directory not found")
+
+        # Resolve the requested file path
+        requested_file = static_dir / file_path
+
+        # Security check: ensure the path is within static directory
+        try:
+            requested_file = requested_file.resolve()
+            static_dir_resolved = static_dir.resolve()
+            if not str(requested_file).startswith(str(static_dir_resolved)):
+                raise HTTPException(status_code=403, detail="Access denied")
+        except Exception:
+            raise HTTPException(status_code=403, detail="Invalid path") from None
+
+        if not requested_file.exists() or not requested_file.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # Determine media type based on extension
+        file_extension = requested_file.suffix.lower()
+        media_types = {
+            ".js": "application/javascript",
+            ".mjs": "application/javascript",
+            ".css": "text/css",
+            ".html": "text/html",
+            ".json": "application/json",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".svg": "image/svg+xml",
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
+        }
+        media_type = media_types.get(file_extension, "application/octet-stream")
+
+        return FileResponse(requested_file, media_type=media_type)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"serve_pipeline_static: Error serving static file: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),

@@ -24,6 +24,7 @@ import { LoRAManager } from "./LoRAManager";
 import { RotateCcw } from "lucide-react";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { SchemaFieldUI } from "../lib/schemaSettings";
+import { CustomWebComponent } from "./CustomWebComponent";
 
 /** Slider state from useLocalSliderValue, passed in from parent */
 export interface SliderState {
@@ -123,6 +124,45 @@ export function SchemaComplexField({
           disabled={disabled}
           maxImages={1}
           hideLabel
+        />
+      </div>
+    );
+  }
+
+  // Custom Web Component - dynamically loaded from external script
+  if (component === "custom" && ui?.script_url && ui?.element_name) {
+    const uniqueKey = `custom:${fieldKey}`;
+    if (rendered.has(uniqueKey)) return null;
+    rendered.add(uniqueKey);
+
+    const value = ctx.schemaFieldOverrides?.[fieldKey];
+    const isRuntimeParam = ui?.is_load_param === false;
+    const disabled =
+      ((ctx.isStreaming ?? false) && !isRuntimeParam) ||
+      (ctx.isLoading ?? false);
+
+    return (
+      <div key={uniqueKey} className="space-y-1">
+        {ui?.label != null && (
+          <span className="text-xs text-muted-foreground">{ui.label}</span>
+        )}
+        <CustomWebComponent
+          scriptUrl={ui.script_url}
+          elementName={ui.element_name}
+          value={value}
+          onChange={newValue =>
+            ctx.onSchemaFieldOverrideChange?.(
+              fieldKey,
+              newValue,
+              isRuntimeParam
+            )
+          }
+          config={{
+            pipelineId: ctx.pipelineId,
+            inputMode: ctx.inputMode,
+          }}
+          disabled={disabled}
+          fieldKey={fieldKey}
         />
       </div>
     );
