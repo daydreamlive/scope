@@ -14,7 +14,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:7079f98"
+DOCKER_IMAGE = "daydreamlive/scope:9c0146b"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -28,7 +28,7 @@ custom_image = ContainerImage.from_dockerfile_str(
 )
 
 
-class ScopeApp(fal.App, keep_alive=300):
+class ScopeApp(fal.App, keep_alive=1800):
     """
     Scope server on fal.ai.
 
