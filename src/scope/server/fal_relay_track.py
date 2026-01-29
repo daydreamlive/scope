@@ -85,8 +85,19 @@ class FalRelayTrack(MediaStreamTrack):
         self._started = True
         logger.info("[FAL-RELAY] Starting fal.ai relay...")
 
-        # Start WebRTC connection to fal.ai if not already connected
-        if not self.fal_manager.webrtc_connected:
+        # Check if we need to start or restart WebRTC connection
+        # We restart if parameters changed significantly (e.g., input_mode switch)
+        if self.fal_manager.webrtc_connected:
+            # Connection exists - send updated parameters and restart if input_mode changed
+            current_input_mode = self.initial_parameters.get("input_mode")
+            logger.info(f"[FAL-RELAY] WebRTC already connected, sending parameter update (input_mode={current_input_mode})")
+            
+            # Always restart on session switch to ensure clean state with new parameters
+            # This handles text->video mode switches where the pipeline config differs
+            logger.info("[FAL-RELAY] Restarting WebRTC connection for new session parameters...")
+            await self.fal_manager.stop_webrtc()
+            await self.fal_manager.start_webrtc(self.initial_parameters)
+        else:
             logger.info("[FAL-RELAY] Starting WebRTC connection to fal.ai...")
             await self.fal_manager.start_webrtc(self.initial_parameters)
 
@@ -221,6 +232,7 @@ class FalRelayTrack(MediaStreamTrack):
         logger.info("[FAL-RELAY] Stopping...")
 
         self._input_running = False
+        self._started = False  # Reset so next session starts fresh
 
         if self._input_task:
             self._input_task.cancel()
@@ -238,6 +250,9 @@ class FalRelayTrack(MediaStreamTrack):
             self.frame_processor = None
         else:
             logger.info("[FAL-RELAY] Stopped.")
+        
+        # Note: We don't stop the WebRTC connection here - it will be restarted
+        # with new parameters when the next session starts (handled in _start)
 
     def get_stats(self) -> dict:
         """Get relay statistics."""
