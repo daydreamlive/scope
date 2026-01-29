@@ -14,7 +14,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:802e944"
+DOCKER_IMAGE = "daydreamlive/scope:d117be7"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -184,56 +184,18 @@ class ScopeApp(fal.App, keep_alive=1800):
                 }
 
         async def handle_offer(payload: dict):
-            """Proxy POST /api/v1/webrtc/offer"""
+            """Proxy POST /api/v1/webrtc/offer
+
+            The backend's offer endpoint handles pipeline loading:
+            - If pipeline not loaded, it auto-loads from initialParameters
+            - The load is awaited, so it blocks until complete
+            - No pre-loading needed here
+            """
             nonlocal session_id
             request_id = payload.get("request_id")
 
-            # Debug: log the full offer payload
-            print(f"Received offer - keys: {list(payload.keys())}")
-            initial_params = payload.get("initialParameters") or {}
-            print(f"initialParameters keys: {list(initial_params.keys()) if initial_params else 'None'}")
-            pipeline_ids = initial_params.get("pipeline_ids")
-            print(f"pipeline_ids value: {pipeline_ids} (type: {type(pipeline_ids).__name__})")
-
             async with httpx.AsyncClient() as client:
-                # Auto-load pipeline from initialParameters if provided
-                if pipeline_ids:
-                    print(f">>> Auto-loading pipeline: {pipeline_ids}")
-                    load_response = await client.post(
-                        f"{SCOPE_BASE_URL}/api/v1/pipeline/load",
-                        json={"pipeline_ids": pipeline_ids},
-                        timeout=120.0,  # Pipeline loading can take time
-                    )
-                    if load_response.status_code != 200:
-                        print(f"Warning: Pipeline load returned {load_response.status_code}: {load_response.text}")
-                    else:
-                        # Poll until pipeline is actually loaded (load endpoint returns before fully loaded)
-                        import asyncio
-                        max_wait = 180  # 3 minutes max
-                        poll_interval = 2
-                        waited = 0
-                        while waited < max_wait:
-                            status_response = await client.get(
-                                f"{SCOPE_BASE_URL}/api/v1/pipeline/status",
-                                timeout=10.0,
-                            )
-                            if status_response.status_code == 200:
-                                status = status_response.json()
-                                # Status response has: status, pipeline_id (singular)
-                                loaded_id = status.get("pipeline_id")
-                                pipeline_status = status.get("status")
-                                # Check if requested pipeline is loaded
-                                if loaded_id in pipeline_ids and pipeline_status == "loaded":
-                                    print(f">>> Pipeline loaded: {loaded_id} (status={pipeline_status})")
-                                    break
-                            await asyncio.sleep(poll_interval)
-                            waited += poll_interval
-                            if waited % 10 == 0:
-                                print(f">>> Waiting for pipeline to load... ({waited}s)")
-                        else:
-                            print(f"Warning: Pipeline load timed out after {max_wait}s")
-
-                # Pass through initialParameters (pipeline already loaded, so double-load is a no-op)
+                # Just proxy the offer - backend handles pipeline loading and waits for it
                 response = await client.post(
                     f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
                     json={
@@ -241,7 +203,7 @@ class ScopeApp(fal.App, keep_alive=1800):
                         "type": payload.get("sdp_type", "offer"),
                         "initialParameters": payload.get("initialParameters"),
                     },
-                    timeout=30.0,
+                    timeout=180.0,  # Long timeout - backend may need to load pipeline first
                 )
 
                 if response.status_code == 200:
