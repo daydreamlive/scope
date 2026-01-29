@@ -14,7 +14,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:8db96e9"
+DOCKER_IMAGE = "daydreamlive/scope:802e944"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -233,14 +233,13 @@ class ScopeApp(fal.App, keep_alive=1800):
                         else:
                             print(f"Warning: Pipeline load timed out after {max_wait}s")
 
-                # Remove pipeline_ids from initialParameters to avoid double-loading in app.py
-                filtered_params = {k: v for k, v in initial_params.items() if k != "pipeline_ids"}
+                # Pass through initialParameters (pipeline already loaded, so double-load is a no-op)
                 response = await client.post(
                     f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
                     json={
                         "sdp": payload.get("sdp"),
                         "type": payload.get("sdp_type", "offer"),
-                        "initialParameters": filtered_params if filtered_params else None,
+                        "initialParameters": payload.get("initialParameters"),
                     },
                     timeout=30.0,
                 )
