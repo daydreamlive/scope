@@ -94,7 +94,8 @@ class ScopeApp(fal.App, keep_alive=300):
         # Use fal's /data directory for persistent storage
         scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
         scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
-        scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = "/data/assets"
+        # commented out so that we get a blank assets directory each time
+        # scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = "/data/assets"
 
         # Start the scope server in a background thread
         def start_server():

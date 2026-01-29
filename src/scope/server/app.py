@@ -713,8 +713,12 @@ async def list_lora_files():
 @app.get("/api/v1/assets", response_model=AssetsResponse)
 async def list_assets(
     type: str | None = Query(None, description="Filter by asset type (image, video)"),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
-    """List available asset files in the assets directory and its subdirectories."""
+    """List available asset files in the assets directory and its subdirectories.
+    
+    When cloud mode is active, lists assets from the fal.ai server instead.
+    """
 
     def process_asset_file(
         file_path: Path, assets_dir: Path, asset_type: str
@@ -736,6 +740,39 @@ async def list_assets(
         )
 
     try:
+        # If cloud mode is active, proxy to fal.ai
+        if fal_manager.is_connected:
+            logger.info("[CLOUD] Fetching assets list from fal.ai")
+            path = "/api/v1/assets"
+            if type:
+                path = f"{path}?type={type}"
+            
+            response = await fal_manager.api_request(
+                method="GET",
+                path=path,
+                timeout=30.0,
+            )
+            
+            # Parse response data
+            data = response.get("data", {})
+            assets_data = data.get("assets", [])
+            
+            asset_files = [
+                AssetFileInfo(
+                    name=a.get("name", ""),
+                    path=a.get("path", ""),
+                    size_mb=a.get("size_mb", 0),
+                    folder=a.get("folder"),
+                    type=a.get("type", "image"),
+                    created_at=a.get("created_at", 0),
+                )
+                for a in assets_data
+            ]
+            
+            logger.info(f"[CLOUD] Found {len(asset_files)} assets on fal.ai")
+            return AssetsResponse(assets=asset_files)
+        
+        # Local mode: list local assets
         assets_dir = get_assets_dir()
         asset_files: list[AssetFileInfo] = []
 
@@ -769,8 +806,17 @@ async def list_assets(
 
 
 @app.post("/api/v1/assets", response_model=AssetFileInfo)
-async def upload_asset(request: Request, filename: str = Query(...)):
-    """Upload an asset file (image or video) to the assets directory."""
+async def upload_asset(
+    request: Request,
+    filename: str = Query(...),
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
+    """Upload an asset file (image or video) to the assets directory.
+    
+    When cloud mode is active, the file is uploaded to the fal.ai server instead.
+    """
+    import base64
+    
     try:
         # Validate file type - support both images and videos
         allowed_image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -784,15 +830,26 @@ async def upload_asset(request: Request, filename: str = Query(...)):
                 detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
             )
 
-        # Determine asset type
+        # Determine asset type and content type
         if file_extension in allowed_image_extensions:
             asset_type = "image"
+            content_type_map = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+                ".bmp": "image/bmp",
+            }
         else:
             asset_type = "video"
-
-        # Ensure assets directory exists
-        assets_dir = get_assets_dir()
-        assets_dir.mkdir(parents=True, exist_ok=True)
+            content_type_map = {
+                ".mp4": "video/mp4",
+                ".avi": "video/x-msvideo",
+                ".mov": "video/quicktime",
+                ".mkv": "video/x-matroska",
+                ".webm": "video/webm",
+            }
+        content_type = content_type_map.get(file_extension, "application/octet-stream")
 
         # Read file content from request body
         content = await request.body()
@@ -804,6 +861,51 @@ async def upload_asset(request: Request, filename: str = Query(...)):
                 status_code=400,
                 detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
             )
+
+        # If cloud mode is active, upload to fal.ai AND save locally for thumbnails
+        if fal_manager.is_connected:
+            # TODO need a unique directory for each user so that they can't see each other's assets
+            logger.info(f"upload_asset: Uploading {asset_type} to fal.ai and locally: {filename}")
+            
+            # Also save locally for thumbnail serving
+            assets_dir = get_assets_dir()
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            local_file_path = assets_dir / filename
+            local_file_path.write_bytes(content)
+            logger.info(f"upload_asset: Saved local copy for thumbnails: {local_file_path}")
+            
+            # Base64 encode the content for JSON transport to fal.ai
+            base64_content = base64.b64encode(content).decode("utf-8")
+            
+            # Send to fal.ai via WebSocket proxy
+            response = await fal_manager.api_request(
+                method="POST",
+                path=f"/api/v1/assets?filename={filename}",
+                body={
+                    "_base64_content": base64_content,
+                    "_content_type": content_type,
+                },
+                timeout=60.0,  # Longer timeout for uploads
+            )
+            
+            # Extract data from response - this is the fal.ai path
+            data = response.get("data", {})
+            fal_path = data.get("path", "")
+            logger.info(f"upload_asset: Uploaded to fal.ai: {fal_path}")
+            
+            # Return the fal.ai path (which fal.ai will use for processing)
+            return AssetFileInfo(
+                name=data.get("name", filename),
+                path=fal_path,  # Use fal.ai path for parameters sent to cloud
+                size_mb=data.get("size_mb", round(len(content) / (1024 * 1024), 2)),
+                folder=data.get("folder"),
+                type=data.get("type", asset_type),
+                created_at=data.get("created_at", time.time()),
+            )
+
+        # Local mode: save to local assets directory
+        assets_dir = get_assets_dir()
+        assets_dir.mkdir(parents=True, exist_ok=True)
 
         # Save file to assets directory
         file_path = assets_dir / filename
@@ -836,10 +938,23 @@ async def upload_asset(request: Request, filename: str = Query(...)):
 
 @app.get("/api/v1/assets/{asset_path:path}")
 async def serve_asset(asset_path: str):
-    """Serve an asset file (for thumbnails/previews)."""
+    """Serve an asset file (for thumbnails/previews).
+    
+    Handles both relative paths and absolute paths (e.g., from fal.ai).
+    For absolute paths, extracts the filename and serves from local assets.
+    """
     try:
         assets_dir = get_assets_dir()
-        file_path = assets_dir / asset_path
+        
+        # Handle absolute paths (e.g., from fal.ai: /root/.daydream-scope/assets/filename.png)
+        # Extract just the filename to serve from local cache
+        if asset_path.startswith("/") or asset_path.startswith("root/"):
+            # Extract just the filename
+            filename = Path(asset_path).name
+            file_path = assets_dir / filename
+            logger.debug(f"serve_asset: Extracted filename '{filename}' from absolute path")
+        else:
+            file_path = assets_dir / asset_path
 
         # Security check: ensure the path is within assets directory
         try:
