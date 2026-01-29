@@ -14,7 +14,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:9c0146b"
+DOCKER_IMAGE = "daydreamlive/scope:1de95bc"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -206,13 +206,40 @@ class ScopeApp(fal.App, keep_alive=1800):
                     )
                     if load_response.status_code != 200:
                         print(f"Warning: Pipeline load returned {load_response.status_code}: {load_response.text}")
+                    else:
+                        # Poll until pipeline is actually loaded (load endpoint returns before fully loaded)
+                        import asyncio
+                        max_wait = 180  # 3 minutes max
+                        poll_interval = 2
+                        waited = 0
+                        while waited < max_wait:
+                            status_response = await client.get(
+                                f"{SCOPE_BASE_URL}/api/v1/pipeline/status",
+                                timeout=10.0,
+                            )
+                            if status_response.status_code == 200:
+                                status = status_response.json()
+                                loaded_pipelines = status.get("loaded_pipelines", [])
+                                # Check if all requested pipelines are loaded
+                                all_loaded = all(pid in loaded_pipelines for pid in pipeline_ids)
+                                if all_loaded:
+                                    print(f">>> Pipeline(s) loaded: {pipeline_ids}")
+                                    break
+                            await asyncio.sleep(poll_interval)
+                            waited += poll_interval
+                            if waited % 10 == 0:
+                                print(f">>> Waiting for pipeline to load... ({waited}s)")
+                        else:
+                            print(f"Warning: Pipeline load timed out after {max_wait}s")
 
+                # Remove pipeline_ids from initialParameters to avoid double-loading in app.py
+                filtered_params = {k: v for k, v in initial_params.items() if k != "pipeline_ids"}
                 response = await client.post(
                     f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
                     json={
                         "sdp": payload.get("sdp"),
                         "type": payload.get("sdp_type", "offer"),
-                        "initialParameters": payload.get("initialParameters"),
+                        "initialParameters": filtered_params if filtered_params else None,
                     },
                     timeout=30.0,
                 )
