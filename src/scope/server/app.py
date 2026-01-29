@@ -449,10 +449,21 @@ async def handle_webrtc_offer(
         if not is_cloud_mode:
             status_info = await pipeline_manager.get_status_info_async()
             if status_info["status"] != "loaded":
-                raise HTTPException(
-                    status_code=400,
-                    detail="Pipeline not loaded. Please load pipeline first.",
-                )
+                # Try to auto-load pipeline from initialParameters
+                if (
+                    request.initialParameters
+                    and request.initialParameters.pipeline_ids
+                ):
+                    pipeline_ids = request.initialParameters.pipeline_ids
+                    logger.info(
+                        f"Auto-loading pipeline from initialParameters: {pipeline_ids}"
+                    )
+                    await pipeline_manager.load_pipelines(pipeline_ids)
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Pipeline not loaded. Please load pipeline first.",
+                    )
         else:
             logger.info("Cloud mode enabled, skipping local pipeline check")
 
@@ -900,9 +911,14 @@ async def connect_to_fal(
         connected_count = 0
         for session_id, session in webrtc_manager.sessions.items():
             if session.video_track and session.video_track.frame_processor:
+                # Get initial parameters from the video track if available
+                initial_params = getattr(
+                    session.video_track, "initial_parameters", None
+                )
                 await session.video_track.frame_processor.connect_to_fal(
                     app_id=request.app_id,
                     api_key=request.api_key,
+                    initial_parameters=initial_params,
                 )
                 connected_count += 1
                 logger.info(

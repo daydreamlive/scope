@@ -369,12 +369,18 @@ class FrameProcessor:
             except queue.Empty:
                 pass
 
-    async def connect_to_fal(self, app_id: str, api_key: str) -> None:
+    async def connect_to_fal(
+        self,
+        app_id: str,
+        api_key: str | None = None,
+        initial_parameters: dict | None = None,
+    ) -> None:
         """Connect to fal.ai cloud for remote GPU inference.
 
         Args:
-            app_id: The fal app ID (e.g., "owner/scope-fal/webrtc")
-            api_key: The fal API key for authentication
+            app_id: The fal app ID (e.g., "owner/scope-fal/ws")
+            api_key: The fal API key for authentication (optional for public apps)
+            initial_parameters: Initial parameters to send with the offer (pipeline_ids, etc.)
         """
         # Disconnect existing connection if any
         if self.fal_client is not None:
@@ -388,7 +394,7 @@ class FrameProcessor:
             api_key=api_key,
             on_frame_received=self._on_fal_frame_received,
         )
-        await self.fal_client.connect()
+        await self.fal_client.connect(initial_parameters=initial_parameters)
         self.fal_enabled = True
         logger.info(f"Connected to fal cloud: {app_id}")
 

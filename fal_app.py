@@ -184,6 +184,19 @@ class ScopeApp(fal.App, keep_alive=300):
             request_id = payload.get("request_id")
 
             async with httpx.AsyncClient() as client:
+                # Auto-load pipeline from initialParameters if provided
+                initial_params = payload.get("initialParameters") or {}
+                pipeline_ids = initial_params.get("pipeline_ids")
+                if pipeline_ids:
+                    print(f"Auto-loading pipeline: {pipeline_ids}")
+                    load_response = await client.post(
+                        f"{SCOPE_BASE_URL}/api/v1/pipeline/load",
+                        json={"pipeline_ids": pipeline_ids},
+                        timeout=120.0,  # Pipeline loading can take time
+                    )
+                    if load_response.status_code != 200:
+                        print(f"Warning: Pipeline load returned {load_response.status_code}: {load_response.text}")
+
                 response = await client.post(
                     f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
                     json={

@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import websockets
-from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription
+from aiortc import (
+    RTCDataChannel,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
 from aiortc.sdp import candidate_from_sdp
 
 if TYPE_CHECKING:
@@ -37,12 +41,14 @@ class FalClient:
     def __init__(
         self,
         app_id: str,
-        api_key: str,
+        api_key: str | None = None,
         on_frame_received: Callable[[VideoFrame], None] | None = None,
+        use_auth: bool = False,
     ):
-        self.app_id = app_id  # e.g., "owner/app-name/webrtc"
+        self.app_id = app_id  # e.g., "owner/app-name/ws"
         self.api_key = api_key
         self.on_frame_received = on_frame_received
+        self.use_auth = use_auth  # Set to True for private apps
 
         self.ws: websockets.WebSocketClientProtocol | None = None
         self.pc: RTCPeerConnection | None = None
@@ -81,46 +87,73 @@ class FalClient:
                     return token["detail"]
                 return token
 
-    def _build_ws_url(self, token: str) -> str:
-        """Build WebSocket URL with JWT token.
+    def _build_ws_url(self, token: str | None = None) -> str:
+        """Build WebSocket URL, optionally with JWT token.
 
         The app_id should be the full path including the WebSocket endpoint,
         e.g., 'username/app-name/ws' or 'username/app-name/webrtc'.
+
+        For public apps, token can be None.
         """
         app_id = self.app_id.strip("/")
-        return f"wss://fal.run/{app_id}?fal_jwt_token={token}"
+        base_url = f"wss://fal.run/{app_id}"
+        if token:
+            return f"{base_url}?fal_jwt_token={token}"
+        return base_url
 
-    async def connect(self) -> None:
-        """Connect to fal WebSocket and establish WebRTC connection."""
-        # Get temporary token
-        token = await self._get_temporary_token()
+    async def connect(self, initial_parameters: dict | None = None) -> None:
+        """Connect to fal WebSocket and establish WebRTC connection.
+
+        Args:
+            initial_parameters: Initial parameters to send with the offer
+                               (e.g., pipeline_ids, prompts, etc.)
+        """
+        self._initial_parameters = initial_parameters
+
+        # Get temporary token only if auth is enabled (for private apps)
+        token = None
+        if self.use_auth and self.api_key:
+            logger.info("Using JWT authentication for private app")
+            token = await self._get_temporary_token()
+
         ws_url = self._build_ws_url(token)
 
         # Log URL without token for debugging
         ws_url_without_token = ws_url.split("?")[0]
         logger.info(f"Connecting to fal WebSocket: {ws_url_without_token}")
         try:
+            logger.info("Attempting WebSocket connection (may take up to 2 min if app is cold)...")
             self.ws = await asyncio.wait_for(
-                websockets.connect(ws_url),
-                timeout=10.0,
+                websockets.connect(ws_url, compression=None),
+                timeout=120.0,  # 2 minutes for cold start
             )
+            logger.info("WebSocket connection established, waiting for ready message...")
         except TimeoutError:
+            logger.error(f"Timeout connecting to fal WebSocket after 10s")
             raise RuntimeError(
                 f"Timeout connecting to fal WebSocket. Check that app_id '{self.app_id}' "
                 "is correct (format: 'username/app-name' or full path like 'username/app-name/ws')"
             ) from None
         except Exception as e:
+            logger.error(f"Failed to connect to fal WebSocket: {e}")
             raise RuntimeError(f"Failed to connect to fal WebSocket: {e}") from e
 
         # Wait for "ready" message from server (with timeout)
         try:
-            ready_msg = await asyncio.wait_for(self.ws.recv(), timeout=10.0)
+            logger.info("Waiting for ready message from fal server...")
+            ready_msg = await asyncio.wait_for(self.ws.recv(), timeout=120.0)
+            logger.info(f"Received message from fal: {ready_msg[:100] if ready_msg else 'empty'}")
         except TimeoutError:
+            logger.error("Timeout waiting for ready message after 10s")
             await self.ws.close()
             raise RuntimeError(
                 f"Timeout waiting for 'ready' message from fal server. "
                 f"The fal app at '{self.app_id}' may not be running or may not be a WebRTC app."
             ) from None
+        except Exception as e:
+            logger.error(f"Error receiving ready message: {e}")
+            await self.ws.close()
+            raise
 
         ready_data = json.loads(ready_msg)
         if ready_data.get("type") != "ready":
@@ -128,10 +161,13 @@ class FalClient:
             raise RuntimeError(f"Expected 'ready' message, got: {ready_data}")
         logger.info("fal server ready")
 
-        # Create peer connection
-        self.pc = RTCPeerConnection(
-            configuration={"iceServers": [{"urls": "stun:stun.l.google.com:19302"}]}
+        # Create peer connection with STUN server
+        from aiortc import RTCConfiguration, RTCIceServer
+
+        config = RTCConfiguration(
+            iceServers=[RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
         )
+        self.pc = RTCPeerConnection(configuration=config)
 
         # Set up event handlers
         self._setup_pc_handlers()
@@ -149,14 +185,19 @@ class FalClient:
         # Create and send offer (we are the client)
         offer = await self.pc.createOffer()
         await self.pc.setLocalDescription(offer)
-        await self.ws.send(
-            json.dumps(
-                {
-                    "type": "offer",
-                    "sdp": self.pc.localDescription.sdp,
-                }
+
+        # Build offer message with optional initial parameters
+        offer_msg: dict[str, Any] = {
+            "type": "offer",
+            "sdp": self.pc.localDescription.sdp,
+        }
+        if self._initial_parameters:
+            offer_msg["initialParameters"] = self._initial_parameters
+            logger.info(
+                f"Including initial parameters: {list(self._initial_parameters.keys())}"
             )
-        )
+
+        await self.ws.send(json.dumps(offer_msg))
         logger.info("Sent WebRTC offer")
 
         # Start message receive loop

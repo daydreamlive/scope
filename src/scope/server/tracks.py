@@ -110,6 +110,7 @@ class VideoProcessingTrack(MediaStreamTrack):
                 await self.frame_processor.connect_to_fal(
                     app_id=conn_info["app_id"],
                     api_key=conn_info["api_key"],
+                    initial_parameters=self.initial_parameters,
                 )
                 self.frame_processor._pending_fal_connection = None
 
