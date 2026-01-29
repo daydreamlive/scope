@@ -65,7 +65,7 @@ const FAL_WS_URL = "wss://fal.run/your-username/scope-app/ws";
 async function initApp() {
   // Check if we should use fal mode
   const useFal = import.meta.env.VITE_USE_FAL === "true";
-  
+
   if (useFal) {
     const adapter = initFalAdapter(FAL_WS_URL);
     await adapter.connect();
@@ -104,11 +104,11 @@ import { getFalAdapter, isFalMode } from "./lib/falAdapter";
 function VideoStream() {
   // Choose the right hook based on deployment mode
   const adapter = getFalAdapter();
-  
+
   const webrtc = isFalMode() && adapter
     ? useWebRTCFal({ adapter })
     : useWebRTC();
-    
+
   // Use webrtc.startStream, webrtc.stopStream, etc.
 }
 ```

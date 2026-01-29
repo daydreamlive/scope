@@ -34,14 +34,14 @@ class _SpoutFrame:
 
 class FrameProcessor:
     """Processes video frames through pipelines or fal.ai cloud relay.
-    
+
     Supports two modes:
     1. Local mode: Frames processed through local GPU pipelines
     2. Relay mode: Frames sent to fal.ai for cloud processing
-    
+
     Spout integration works in both modes.
     """
-    
+
     def __init__(
         self,
         pipeline_manager: "PipelineManager | None" = None,
@@ -62,7 +62,7 @@ class FrameProcessor:
         self.notification_callback = notification_callback
 
         self.paused = False
-        
+
         # Relay mode: send frames to fal.ai instead of local processing
         self._relay_mode = fal_manager is not None
         self._fal_output_queue: queue.Queue = queue.Queue(maxsize=2)
@@ -128,11 +128,11 @@ class FrameProcessor:
         if self._relay_mode:
             # Relay mode: frames go to fal.ai instead of local pipelines
             logger.info("[FRAME-PROCESSOR] Starting in RELAY mode (fal.ai cloud)")
-            
+
             # Register callback to receive frames from fal.ai
             if self.fal_manager:
                 self.fal_manager.add_frame_callback(self._on_frame_from_fal)
-            
+
             logger.info("[FRAME-PROCESSOR] Started in relay mode")
             return
 
@@ -148,7 +148,7 @@ class FrameProcessor:
             logger.error(f"Pipeline chain setup failed: {e}")
             self.running = False
             return
-        
+
         logger.info(
             f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
         )
@@ -222,7 +222,7 @@ class FrameProcessor:
             return False
 
         self._frames_in += 1
-        
+
         # Log stats every 100 frames
         if self._frames_in % 100 == 0:
             self._log_frame_stats()
@@ -264,7 +264,7 @@ class FrameProcessor:
 
         # Get frame based on mode
         frame: torch.Tensor | None = None
-        
+
         if self._relay_mode:
             # Relay mode: get frame from fal.ai output queue
             try:
@@ -342,11 +342,11 @@ class FrameProcessor:
         """Log frame processing statistics."""
         now = time.time()
         elapsed = now - self._last_stats_time
-        
+
         if elapsed > 0:
             fps_in = self._frames_in / elapsed if self._frames_in > 0 else 0
             fps_out = self._frames_out / elapsed if self._frames_out > 0 else 0
-            
+
             if self._relay_mode:
                 logger.info(
                     f"[FRAME-PROCESSOR] RELAY MODE | "
@@ -365,7 +365,7 @@ class FrameProcessor:
         """Get current frame processing statistics."""
         now = time.time()
         elapsed = now - self._last_stats_time
-        
+
         stats = {
             "frames_in": self._frames_in,
             "frames_out": self._frames_out,
@@ -377,11 +377,11 @@ class FrameProcessor:
             "spout_sender_enabled": self.spout_sender_enabled,
             "relay_mode": self._relay_mode,
         }
-        
+
         if self._relay_mode:
             stats["frames_to_fal"] = self._frames_to_fal
             stats["frames_from_fal"] = self._frames_from_fal
-            
+
         return stats
 
     def _get_pipeline_dimensions(self) -> tuple[int, int]:

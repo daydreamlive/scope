@@ -608,14 +608,14 @@ async def download_recording(
     """Download the recording file for the specified session.
     This will finalize the current recording and create a copy for download,
     then continue recording with a new file.
-    
+
     In cloud mode, this proxies the download request to fal.ai.
     """
     try:
         # If cloud mode is active, proxy to fal.ai
         if fal_manager.is_connected:
             logger.info(f"[CLOUD] Downloading recording for session {session_id}")
-            
+
             # Use the fal.ai session ID if we have an active WebRTC connection
             fal_session_id = fal_manager.fal_session_id
             if not fal_session_id:
@@ -623,7 +623,7 @@ async def download_recording(
                     status_code=404,
                     detail="No active fal.ai session for recording download",
                 )
-            
+
             # Download from fal.ai
             content = await fal_manager.download_recording(fal_session_id)
             if not content:
@@ -631,11 +631,11 @@ async def download_recording(
                     status_code=404,
                     detail="Recording not available from fal.ai",
                 )
-            
+
             # Generate filename with datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"recording-{timestamp}.mp4"
-            
+
             # Return as streaming response
             return Response(
                 content=content,
@@ -645,7 +645,7 @@ async def download_recording(
                     "Content-Length": str(len(content)),
                 },
             )
-        
+
         # Local mode: use local recording manager
         session = webrtc_manager.get_session(session_id)
         if not session:
@@ -754,7 +754,7 @@ async def list_assets(
     fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
     """List available asset files in the assets directory and its subdirectories.
-    
+
     When cloud mode is active, lists assets from the fal.ai server instead.
     """
 
@@ -784,17 +784,17 @@ async def list_assets(
             path = "/api/v1/assets"
             if type:
                 path = f"{path}?type={type}"
-            
+
             response = await fal_manager.api_request(
                 method="GET",
                 path=path,
                 timeout=30.0,
             )
-            
+
             # Parse response data
             data = response.get("data", {})
             assets_data = data.get("assets", [])
-            
+
             asset_files = [
                 AssetFileInfo(
                     name=a.get("name", ""),
@@ -806,10 +806,10 @@ async def list_assets(
                 )
                 for a in assets_data
             ]
-            
+
             logger.info(f"[CLOUD] Found {len(asset_files)} assets on fal.ai")
             return AssetsResponse(assets=asset_files)
-        
+
         # Local mode: list local assets
         assets_dir = get_assets_dir()
         asset_files: list[AssetFileInfo] = []
@@ -850,11 +850,11 @@ async def upload_asset(
     fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
 ):
     """Upload an asset file (image or video) to the assets directory.
-    
+
     When cloud mode is active, the file is uploaded to the fal.ai server instead.
     """
     import base64
-    
+
     try:
         # Validate file type - support both images and videos
         allowed_image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -904,17 +904,17 @@ async def upload_asset(
         if fal_manager.is_connected:
             # TODO need a unique directory for each user so that they can't see each other's assets or just make sure we clean the dir for each websocket connection
             logger.info(f"upload_asset: Uploading {asset_type} to fal.ai and locally: {filename}")
-            
+
             # Also save locally for thumbnail serving
             assets_dir = get_assets_dir()
             assets_dir.mkdir(parents=True, exist_ok=True)
             local_file_path = assets_dir / filename
             local_file_path.write_bytes(content)
             logger.info(f"upload_asset: Saved local copy for thumbnails: {local_file_path}")
-            
+
             # Base64 encode the content for JSON transport to fal.ai
             base64_content = base64.b64encode(content).decode("utf-8")
-            
+
             # Send to fal.ai via WebSocket proxy
             response = await fal_manager.api_request(
                 method="POST",
@@ -925,12 +925,12 @@ async def upload_asset(
                 },
                 timeout=60.0,  # Longer timeout for uploads
             )
-            
+
             # Extract data from response - this is the fal.ai path
             data = response.get("data", {})
             fal_path = data.get("path", "")
             logger.info(f"upload_asset: Uploaded to fal.ai: {fal_path}")
-            
+
             # Return the fal.ai path (which fal.ai will use for processing)
             return AssetFileInfo(
                 name=data.get("name", filename),
@@ -977,13 +977,13 @@ async def upload_asset(
 @app.get("/api/v1/assets/{asset_path:path}")
 async def serve_asset(asset_path: str):
     """Serve an asset file (for thumbnails/previews).
-    
+
     Handles both relative paths and absolute paths (e.g., from fal.ai).
     For absolute paths, extracts the filename and serves from local assets.
     """
     try:
         assets_dir = get_assets_dir()
-        
+
         # Handle absolute paths (e.g., from fal.ai: /root/.daydream-scope/assets/filename.png)
         # Extract just the filename to serve from local cache
         if asset_path.startswith("/") or asset_path.startswith("root/"):

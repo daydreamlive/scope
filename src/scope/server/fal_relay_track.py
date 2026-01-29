@@ -91,7 +91,7 @@ class FalRelayTrack(MediaStreamTrack):
 
         # Create FrameProcessor in relay mode
         from .frame_processor import FrameProcessor
-        
+
         self.frame_processor = FrameProcessor(
             pipeline_manager=None,  # Not needed in relay mode
             initial_parameters=self.initial_parameters,
@@ -205,7 +205,7 @@ class FalRelayTrack(MediaStreamTrack):
         # Handle Spout settings via FrameProcessor
         if self.frame_processor:
             self.frame_processor.update_parameters(params)
-        
+
         # Also send to fal.ai
         self.fal_manager.send_parameters_to_fal(params)
 
@@ -238,7 +238,7 @@ class FalRelayTrack(MediaStreamTrack):
             self.frame_processor = None
         else:
             logger.info("[FAL-RELAY] Stopped.")
-        
+
         # Stop WebRTC connection to fal.ai - next session will start fresh
         await self.fal_manager.stop_webrtc()
 
