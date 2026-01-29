@@ -36,7 +36,7 @@ def initialize_state_from_config(
     state.set(
         "manage_cache", getattr(config, "manage_cache", pipeline_config.manage_cache)
     )
-    state.set("base_seed", getattr(config, "seed", pipeline_config.base_seed))
+    state.set("base_seed", getattr(config, "base_seed", pipeline_config.base_seed))
 
     # Optional parameters - only set if defined in pipeline config
     if pipeline_config.denoising_steps is not None:

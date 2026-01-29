@@ -336,6 +336,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       images?: string[];
       first_frame_image?: string;
       last_frame_image?: string;
+      [key: string]: unknown;
     }) => {
       if (
         dataChannelRef.current &&
