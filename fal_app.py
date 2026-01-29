@@ -14,7 +14,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:1de95bc"
+DOCKER_IMAGE = "daydreamlive/scope:8db96e9"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -219,11 +219,12 @@ class ScopeApp(fal.App, keep_alive=1800):
                             )
                             if status_response.status_code == 200:
                                 status = status_response.json()
-                                loaded_pipelines = status.get("loaded_pipelines", [])
-                                # Check if all requested pipelines are loaded
-                                all_loaded = all(pid in loaded_pipelines for pid in pipeline_ids)
-                                if all_loaded:
-                                    print(f">>> Pipeline(s) loaded: {pipeline_ids}")
+                                # Status response has: status, pipeline_id (singular)
+                                loaded_id = status.get("pipeline_id")
+                                pipeline_status = status.get("status")
+                                # Check if requested pipeline is loaded
+                                if loaded_id in pipeline_ids and pipeline_status == "loaded":
+                                    print(f">>> Pipeline loaded: {loaded_id} (status={pipeline_status})")
                                     break
                             await asyncio.sleep(poll_interval)
                             waited += poll_interval
