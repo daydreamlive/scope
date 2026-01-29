@@ -191,6 +191,9 @@ class FrameProcessor:
             if torch.cuda.is_available():
                 shape = frame_array.shape
                 pinned_buffer = self._get_or_create_pinned_buffer(shape)
+                # Note: We reuse pinned buffers for performance. This assumes the copy_()
+                # operation complete before the next frame arrives.
+                # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS at max
                 pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
                 frame_tensor = pinned_buffer.cuda(non_blocking=True)
             else:
@@ -523,6 +526,7 @@ class FrameProcessor:
                         if torch.cuda.is_available():
                             shape = rgb_frame.shape
                             pinned_buffer = self._get_or_create_pinned_buffer(shape)
+                            # Note: Same pinned buffer reuse assumption as in put() - see comment there
                             pinned_buffer.copy_(
                                 torch.as_tensor(rgb_frame, dtype=torch.uint8)
                             )
