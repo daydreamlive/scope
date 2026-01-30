@@ -65,10 +65,10 @@ def main() -> None:
     # Check if build was successful
     dist_dir = frontend_dir / "dist"
     if not dist_dir.exists():
-        print("❌ Error: Frontend build failed - dist directory not found")
+        print("Error: Frontend build failed - dist directory not found")
         sys.exit(1)
 
-    print("✅ Frontend build completed successfully")
+    print("Frontend build completed successfully")
 
 
 if __name__ == "__main__":

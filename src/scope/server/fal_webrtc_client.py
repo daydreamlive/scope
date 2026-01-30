@@ -243,7 +243,7 @@ class FalWebRTCClient:
             if state == "connected":
                 self._connected = True
                 self._stats["connected_at"] = time.time()
-                logger.info("[FAL-RTC] ✅ WebRTC connected to fal.ai")
+                logger.info("[FAL-RTC] WebRTC connected to fal.ai")
             elif state in ("disconnected", "failed", "closed"):
                 self._connected = False
 
