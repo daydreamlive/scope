@@ -53,6 +53,7 @@ export function CloudModeToggle({
     credentials_configured: false,
   });
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -90,10 +91,10 @@ export function CloudModeToggle({
     return () => clearInterval(interval);
   }, [fetchStatus]);
 
-  // Notify parent when connecting state changes
+  // Notify parent when connecting/disconnecting state changes
   useEffect(() => {
-    onConnectingChange?.(isConnecting);
-  }, [isConnecting, onConnectingChange]);
+    onConnectingChange?.(isConnecting || isDisconnecting);
+  }, [isConnecting, isDisconnecting, onConnectingChange]);
 
   const handleConnect = async () => {
     setIsConnecting(true);
@@ -160,9 +161,8 @@ export function CloudModeToggle({
 
     setIsConnecting(false);
   };
-// reenable connect button on connection timeout
   const handleDisconnect = async () => {
-    setIsConnecting(true);
+    setIsDisconnecting(true);
     setError(null);
 
     try {
@@ -192,7 +192,7 @@ export function CloudModeToggle({
       setError(message);
       console.error("[CloudModeToggle] Disconnect failed:", e);
     } finally {
-      setIsConnecting(false);
+      setIsDisconnecting(false);
     }
   };
 
@@ -287,12 +287,12 @@ export function CloudModeToggle({
             )}
             <Button
               onClick={handleDisconnect}
-              disabled={isConnecting || disabled}
+              disabled={isDisconnecting || disabled}
               variant="outline"
               className="w-full"
               size="sm"
             >
-              {isConnecting ? (
+              {isDisconnecting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Disconnecting...
