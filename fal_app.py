@@ -16,7 +16,9 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 
-# TODO close websocket after a period of inactivity
+# Inactivity timeout settings
+INACTIVITY_TIMEOUT_SECONDS = 300  # Close connection after 5 minutes of inactivity
+RECEIVE_TIMEOUT_SECONDS = 60  # Check for inactivity every 60 seconds
 
 def cleanup_session_data():
     """Clean up session-specific data when WebSocket disconnects.
@@ -210,6 +212,10 @@ class ScopeApp(fal.App, keep_alive=300):
 
         # Track WebRTC session ID for ICE candidate routing
         session_id = None
+
+        # Track last activity time for inactivity timeout
+        import time
+        last_activity = time.time()
 
         async def safe_send_json(payload: dict):
             """Send JSON, handling connection errors gracefully."""
@@ -456,7 +462,26 @@ class ScopeApp(fal.App, keep_alive=300):
         try:
             while True:
                 try:
-                    message = await ws.receive_text()
+                    # Use timeout on receive to periodically check for inactivity
+                    message = await asyncio.wait_for(
+                        ws.receive_text(),
+                        timeout=RECEIVE_TIMEOUT_SECONDS
+                    )
+                    # Reset activity timer on any message received
+                    last_activity = time.time()
+                except asyncio.TimeoutError:
+                    # Check if we've exceeded the inactivity timeout
+                    inactive_seconds = time.time() - last_activity
+                    if inactive_seconds >= INACTIVITY_TIMEOUT_SECONDS:
+                        print(f"[{connection_id}] Closing due to inactivity ({inactive_seconds:.0f}s)")
+                        await safe_send_json({
+                            "type": "closing",
+                            "reason": "inactivity",
+                            "inactive_seconds": inactive_seconds,
+                        })
+                        break
+                    # Otherwise, continue waiting
+                    continue
                 except RuntimeError:
                     break
 
