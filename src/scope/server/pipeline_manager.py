@@ -3,29 +3,18 @@
 import asyncio
 import gc
 import logging
-import sys
 import threading
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import torch
 from omegaconf import OmegaConf
-
-# torch is not available on macOS (cloud mode only)
-if sys.platform != "darwin":
-    import torch
-else:
-    torch = None  # type: ignore[assignment]
-
-if TYPE_CHECKING:
-    import torch
 
 logger = logging.getLogger(__name__)
 
 
-def get_device() -> "torch.device":
+def get_device() -> torch.device:
     """Get the appropriate device (CUDA if available, CPU otherwise)."""
-    if torch is None:
-        raise RuntimeError("torch is not available on macOS (cloud mode only)")
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -510,7 +499,7 @@ class PipelineManager:
 
         # Cleanup resources
         gc.collect()
-        if torch is not None and torch.cuda.is_available():
+        if torch.cuda.is_available():
             try:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
