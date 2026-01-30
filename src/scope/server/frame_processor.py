@@ -646,8 +646,13 @@ class FrameProcessor:
                 if rgb_frame is not None:
                     last_frame_time = time.time()
 
-                    # Convert to tensor and put into first processor's input queue
-                    if self.pipeline_processors:
+                    if self._relay_mode:
+                        # Relay mode: send Spout frames to fal.ai
+                        if self.fal_manager:
+                            if self.fal_manager.send_frame_to_fal(rgb_frame):
+                                self._frames_to_fal += 1
+                    elif self.pipeline_processors:
+                        # Local mode: put into first processor's input queue
                         first_processor = self.pipeline_processors[0]
                         frame_tensor = torch.from_numpy(rgb_frame)
                         frame_tensor = frame_tensor.unsqueeze(0)
