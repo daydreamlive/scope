@@ -30,11 +30,14 @@ interface CloudModeToggleProps {
   className?: string;
   /** Callback when cloud mode status changes */
   onStatusChange?: (connected: boolean) => void;
+  /** Callback to refresh pipeline list after cloud mode toggle */
+  onPipelinesRefresh?: () => Promise<unknown>;
 }
 
 export function CloudModeToggle({
   className,
   onStatusChange,
+  onPipelinesRefresh,
 }: CloudModeToggleProps) {
   const [status, setStatus] = useState<CloudStatus>({
     connected: false,
@@ -84,6 +87,15 @@ export function CloudModeToggle({
       const data = await response.json();
       setStatus(data);
       onStatusChange?.(data.connected);
+
+      // Refresh pipeline list to get cloud-available pipelines
+      if (data.connected && onPipelinesRefresh) {
+        try {
+          await onPipelinesRefresh();
+        } catch (refreshError) {
+          console.error("[CloudModeToggle] Failed to refresh pipelines:", refreshError);
+        }
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Connection failed";
       setError(message);
@@ -110,6 +122,15 @@ export function CloudModeToggle({
       const data = await response.json();
       setStatus(data);
       onStatusChange?.(data.connected);
+
+      // Refresh pipeline list to get local pipelines
+      if (!data.connected && onPipelinesRefresh) {
+        try {
+          await onPipelinesRefresh();
+        } catch (refreshError) {
+          console.error("[CloudModeToggle] Failed to refresh pipelines:", refreshError);
+        }
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Disconnect failed";
       setError(message);

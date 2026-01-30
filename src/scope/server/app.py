@@ -452,7 +452,9 @@ async def get_pipeline_status(
 
 
 @app.get("/api/v1/pipelines/schemas", response_model=PipelineSchemasResponse)
-async def get_pipeline_schemas():
+async def get_pipeline_schemas(
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
     """Get configuration schemas and defaults for all available pipelines.
 
     Returns the output of each pipeline's get_schema_with_metadata() method,
@@ -464,7 +466,27 @@ async def get_pipeline_schemas():
     - config_schema: Full JSON schema with defaults
 
     The frontend should use this as the source of truth for parameter defaults.
+
+    In cloud mode (when connected to fal), this proxies the request to the
+    fal-hosted scope backend to get the available pipelines there.
     """
+    # If connected to fal, proxy the request to get fal's available pipelines
+    if fal_manager.is_connected:
+        logger.info("Proxying pipeline schemas request to fal")
+        response = await fal_manager.api_request(
+            method="GET",
+            path="/api/v1/pipelines/schemas",
+            timeout=30.0,
+        )
+        if response.get("status", 200) >= 400:
+            raise HTTPException(
+                status_code=response.get("status", 500),
+                detail=response.get("error", "Failed to get pipeline schemas from fal"),
+            )
+        # Return the fal response data directly
+        return PipelineSchemasResponse(pipelines=response.get("data", {}).get("pipelines", {}))
+
+    # Local mode: get schemas from local registry
     from scope.core.pipelines.registry import PipelineRegistry
 
     pipelines: dict = {}

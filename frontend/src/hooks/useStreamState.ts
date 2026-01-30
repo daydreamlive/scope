@@ -185,6 +185,40 @@ export function useStreamState() {
     null
   );
 
+  // Function to refresh pipeline schemas (can be called externally)
+  const refreshPipelineSchemas = useCallback(async () => {
+    try {
+      const schemas = await getPipelineSchemas();
+      setPipelineSchemas(schemas);
+
+      // Check if the current pipeline is still available
+      // If not, switch to the first available pipeline
+      const availablePipelines = Object.keys(schemas.pipelines);
+
+      setSettings(prev => {
+        if (
+          !availablePipelines.includes(prev.pipelineId) &&
+          availablePipelines.length > 0
+        ) {
+          const firstPipelineId = availablePipelines[0] as PipelineId;
+          const firstPipelineSchema = schemas.pipelines[firstPipelineId];
+
+          return {
+            ...prev,
+            pipelineId: firstPipelineId,
+            inputMode: firstPipelineSchema.default_mode,
+          };
+        }
+        return prev;
+      });
+
+      return schemas;
+    } catch (error) {
+      console.error("useStreamState: Failed to refresh pipeline schemas:", error);
+      throw error;
+    }
+  }, [getPipelineSchemas]);
+
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
     // In fal mode, wait until adapter is ready
@@ -347,5 +381,6 @@ export function useStreamState() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    refreshPipelineSchemas,
   };
 }

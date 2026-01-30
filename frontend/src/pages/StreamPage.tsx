@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -87,7 +87,7 @@ export function StreamPage() {
   }, [isFalMode, isFalReady]);
 
   // Fetch available pipelines dynamically
-  const { pipelines } = usePipelines();
+  const { pipelines, refreshPipelines } = usePipelines();
 
   // Helper to get default mode for a pipeline
   const getPipelineDefaultMode = (pipelineId: string): InputMode => {
@@ -101,7 +101,14 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    refreshPipelineSchemas,
   } = useStreamState();
+
+  // Combined refresh function for both pipeline schemas and pipelines list
+  const handlePipelinesRefresh = useCallback(async () => {
+    // Refresh both hooks to keep them in sync
+    await Promise.all([refreshPipelineSchemas(), refreshPipelines()]);
+  }, [refreshPipelineSchemas, refreshPipelines]);
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -1337,7 +1344,10 @@ export function StreamPage() {
 
         {/* Right Panel - Settings */}
         <div className="w-1/5 flex flex-col gap-3">
-          <CloudModeToggle onStatusChange={setIsBackendCloudConnected} />
+          <CloudModeToggle
+            onStatusChange={setIsBackendCloudConnected}
+            onPipelinesRefresh={handlePipelinesRefresh}
+          />
           <SettingsPanel
             className="flex-1 min-h-0 overflow-auto"
             pipelines={pipelines}

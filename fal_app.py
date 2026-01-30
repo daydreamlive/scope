@@ -16,6 +16,8 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 
+# TODO close websocket after a period of inactivity
+
 def cleanup_session_data():
     """Clean up session-specific data when WebSocket disconnects.
 
