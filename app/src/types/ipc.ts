@@ -13,6 +13,9 @@ export const IPC_CHANNELS = {
   SHOW_LOGS: 'show-logs',
   GET_LOGS: 'get-logs',
   SHOW_CONTEXT_MENU: 'show-context-menu',
+
+  // File system
+  BROWSE_DIRECTORY: 'browse-directory',
 } as const;
 
 export const SETUP_STATUS = {

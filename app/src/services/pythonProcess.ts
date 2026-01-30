@@ -61,9 +61,17 @@ export class ScopePythonProcessService implements PythonProcessService {
     logger.info(`Starting server with: ${uvCommand} run daydream-scope --host ${SERVER_CONFIG.host} --port ${SERVER_CONFIG.port} --no-browser`);
     logger.info(`Working directory: ${projectRoot}`);
 
-    const enhancedPath = getEnhancedPath();
-    logger.info(`Using PATH: ${enhancedPath}`);
-
+    // Build PATH with uv directory included so Python subprocess can find uv
+    const uvDir = path.dirname(paths.uvBin);
+    let pathEnv: string;
+    if (process.platform === 'win32') {
+      // On Windows, use semicolon separator and add uv directory
+      pathEnv = [uvDir, process.env.PATH || ''].filter(Boolean).join(';');
+    } else {
+      // On Unix, include uv directory alongside enhanced paths
+      pathEnv = [uvDir, getEnhancedPath()].filter(Boolean).join(':');
+    }
+    logger.info(`Using PATH: ${pathEnv}`);
 
     const child = spawn(uvCommand, [
       'run',
@@ -79,7 +87,7 @@ export class ScopePythonProcessService implements PythonProcessService {
       shell: false,
       env: {
         ...process.env,
-        PATH: enhancedPath,
+        PATH: pathEnv,
         PYTHONUNBUFFERED: '1',
         // Use UV_PROJECT_ENVIRONMENT to use .venv from userData (writable)
         // while running source code from resources (read-only)

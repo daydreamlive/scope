@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from .pipeline_manager import PipelineManager
+    from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
 from .download_models import download_models
@@ -206,6 +207,8 @@ def configure_static_files():
 webrtc_manager = None
 # Global pipeline manager instance
 pipeline_manager = None
+# Server startup timestamp for detecting restarts
+server_start_time = time.time()
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -311,7 +314,68 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
-    return HealthResponse(status="healthy", timestamp=datetime.now().isoformat())
+    return HealthResponse(
+        status="healthy",
+        timestamp=datetime.now().isoformat(),
+        server_start_time=server_start_time,
+    )
+
+
+@app.post("/api/v1/restart")
+async def restart_server():
+    """Restart the server process.
+
+    This endpoint is called after plugin install/uninstall to ensure
+    Python's module cache is refreshed. The server restarts by re-executing
+    the entry point, which replaces the current process and keeps terminal
+    output working.
+
+    Known limitation (Windows/Git Bash): After the server restarts and you
+    press Ctrl+C, the terminal may appear to hang. The process exits correctly,
+    but MinTTY's input buffer gets stuck. Press any key to get your prompt back.
+    This is a quirk of how MinTTY handles process replacement and doesn't affect
+    CMD, PowerShell, or the Electron app.
+    """
+
+    def do_restart():
+        time.sleep(0.5)  # Give time for response to be sent
+
+        # Close all logging handlers to avoid file descriptor warnings
+        for handler in logging.root.handlers[:]:
+            handler.close()
+            logging.root.removeHandler(handler)
+
+        # On Windows, entry points are .exe files but sys.argv[0] may not have extension
+        executable = sys.argv[0]
+        if sys.platform == "win32" and not executable.endswith(".exe"):
+            executable += ".exe"
+
+        if sys.platform == "win32":
+            # On Windows, we can't use os.execv() because it spawns a child process
+            # instead of replacing in-place (unlike Unix). So we spawn with Popen
+            # and exit. Known issue: In Git Bash/MinTTY, after Ctrl+C the terminal
+            # may require an extra keypress due to MinTTY's input buffer handling.
+            subprocess.Popen(
+                [executable] + sys.argv[1:],
+                stdin=subprocess.DEVNULL,
+                stdout=None,  # Inherit parent's stdout
+                stderr=None,  # Inherit parent's stderr
+            )
+            sys.stdout.flush()
+            sys.stderr.flush()
+            try:
+                sys.stdin.close()
+            except Exception:
+                pass
+            os._exit(0)
+        else:
+            # On Unix, execv works correctly (replaces process in-place)
+            os.execv(executable, sys.argv)
+
+    # Run in a thread to allow response to be sent first
+    thread = threading.Thread(target=do_restart, daemon=True)
+    thread.start()
+    return {"message": "Server restarting..."}
 
 
 @app.get("/")
@@ -895,6 +959,233 @@ async def get_current_logs():
         raise
     except Exception as e:
         logger.error(f"Error retrieving log file: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# Plugin Management API Endpoints
+
+
+def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
+    """Convert a plugin dictionary from PluginManager to PluginInfo schema."""
+    from .schema import PluginInfo, PluginPipelineInfo, PluginSource
+
+    pipelines = [
+        PluginPipelineInfo(
+            pipeline_id=p["pipeline_id"],
+            pipeline_name=p["pipeline_name"],
+        )
+        for p in plugin_dict.get("pipelines", [])
+    ]
+
+    return PluginInfo(
+        name=plugin_dict["name"],
+        version=plugin_dict.get("version"),
+        author=plugin_dict.get("author"),
+        description=plugin_dict.get("description"),
+        source=PluginSource(plugin_dict.get("source", "pypi")),
+        editable=plugin_dict.get("editable", False),
+        editable_path=plugin_dict.get("editable_path"),
+        pipelines=pipelines,
+        latest_version=plugin_dict.get("latest_version"),
+        update_available=plugin_dict.get("update_available"),
+        package_spec=plugin_dict.get("package_spec"),
+    )
+
+
+@app.get("/api/v1/plugins")
+async def list_plugins():
+    """List all installed plugins with metadata."""
+    from scope.core.plugins import get_plugin_manager
+
+    from .schema import PluginListResponse
+
+    try:
+        plugin_manager = get_plugin_manager()
+        plugins_data = await plugin_manager.list_plugins_async()
+
+        plugins = [_convert_plugin_dict_to_info(p) for p in plugins_data]
+
+        return PluginListResponse(plugins=plugins, total=len(plugins))
+    except Exception as e:
+        logger.error(f"Error listing plugins: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/plugins")
+async def install_plugin(
+    request: Request,
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Install a plugin from PyPI, git URL, or local path."""
+    from scope.core.plugins import (
+        PluginDependencyError,
+        PluginInstallError,
+        PluginNameCollisionError,
+        get_plugin_manager,
+    )
+
+    from .schema import PluginInstallRequest, PluginInstallResponse
+
+    # Parse request body
+    body = await request.json()
+    install_request = PluginInstallRequest(**body)
+
+    logger.info(f"Installing plugin: {install_request.package}")
+    try:
+        plugin_manager = get_plugin_manager()
+
+        result = await plugin_manager.install_plugin_async(
+            package=install_request.package,
+            editable=install_request.editable,
+            upgrade=install_request.upgrade,
+            pre=install_request.pre,
+            force=install_request.force,
+        )
+
+        plugin_info = None
+        plugin_name = install_request.package
+        if result.get("plugin"):
+            plugin_info = _convert_plugin_dict_to_info(result["plugin"])
+            plugin_name = plugin_info.name
+
+        logger.info(f"Plugin installed: {plugin_name}")
+        return PluginInstallResponse(
+            success=result["success"],
+            message=result["message"],
+            plugin=plugin_info,
+        )
+
+    except PluginDependencyError as e:
+        logger.error(
+            f"Plugin install failed (dependency error): {install_request.package} - {e}"
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=f"Dependency validation failed: {e}",
+        ) from e
+    except PluginNameCollisionError as e:
+        logger.error(
+            f"Plugin install failed (name collision): {install_request.package} - {e}"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=str(e),
+        ) from e
+    except PluginInstallError as e:
+        logger.error(f"Plugin install failed: {install_request.package} - {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(f"Plugin install failed: {install_request.package} - {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.delete("/api/v1/plugins/{name}")
+async def uninstall_plugin(
+    name: str,
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Uninstall a plugin, cleaning up loaded pipelines."""
+    from scope.core.plugins import (
+        PluginInstallError,
+        PluginNotFoundError,
+        get_plugin_manager,
+    )
+
+    from .schema import PluginUninstallResponse
+
+    logger.info(f"Uninstalling plugin: {name}")
+    try:
+        plugin_manager = get_plugin_manager()
+
+        result = await plugin_manager.uninstall_plugin_async(
+            name=name,
+            pipeline_manager=pipeline_manager,
+        )
+
+        logger.info(f"Plugin uninstalled: {name}")
+        return PluginUninstallResponse(
+            success=result["success"],
+            message=result["message"],
+            unloaded_pipelines=result.get("unloaded_pipelines", []),
+        )
+
+    except PluginNotFoundError as e:
+        logger.error(f"Plugin uninstall failed (not found): {name} - {e}")
+        raise HTTPException(
+            status_code=404,
+            detail=str(e),
+        ) from e
+    except PluginInstallError as e:
+        logger.error(f"Plugin uninstall failed: {name} - {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(f"Plugin uninstall failed: {name} - {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/plugins/{name}/reload")
+async def reload_plugin(
+    name: str,
+    request: Request,
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Reload an editable plugin for development (without server restart)."""
+    from scope.core.plugins import (
+        PluginInUseError,
+        PluginNotEditableError,
+        PluginNotFoundError,
+        get_plugin_manager,
+    )
+
+    from .schema import PluginReloadRequest, PluginReloadResponse
+
+    # Parse request body
+    body = await request.json()
+    reload_request = PluginReloadRequest(**body)
+
+    try:
+        plugin_manager = get_plugin_manager()
+
+        result = await plugin_manager.reload_plugin_async(
+            name=name,
+            force=reload_request.force,
+            pipeline_manager=pipeline_manager,
+        )
+
+        return PluginReloadResponse(
+            success=result["success"],
+            message=result["message"],
+            reloaded_pipelines=result.get("reloaded_pipelines", []),
+            added_pipelines=result.get("added_pipelines", []),
+            removed_pipelines=result.get("removed_pipelines", []),
+        )
+
+    except PluginNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e),
+        ) from e
+    except PluginNotEditableError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        ) from e
+    except PluginInUseError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "loaded_pipelines": e.loaded_pipelines,
+            },
+        ) from e
+    except Exception as e:
+        logger.error(f"Error reloading plugin: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

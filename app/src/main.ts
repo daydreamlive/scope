@@ -267,6 +267,19 @@ ipcMain.handle(IPC_CHANNELS.GET_LOGS, validateIPC(async () => {
   return 'Service not initialized';
 }, IPC_CHANNELS.GET_LOGS));
 
+ipcMain.handle(IPC_CHANNELS.BROWSE_DIRECTORY, validateIPC(async (_event: any, title?: string) => {
+  if (!appState.mainWindow || appState.mainWindow.isDestroyed()) {
+    return null;
+  }
+
+  const result = await dialog.showOpenDialog(appState.mainWindow, {
+    properties: ['openDirectory'],
+    title: title || 'Select Directory',
+  });
+
+  return result.canceled ? null : result.filePaths[0];
+}, IPC_CHANNELS.BROWSE_DIRECTORY));
+
 // Setup error callback for Python process
 function setupPythonProcessErrorHandler(): void {
   pythonProcessService.setErrorCallback((error: string) => {
