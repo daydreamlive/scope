@@ -75,6 +75,8 @@ export function StreamPage() {
 
   // Track backend cloud relay mode (local backend connected to fal.ai)
   const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
+  // Track when cloud connection is in progress (to disable controls)
+  const [isCloudConnecting, setIsCloudConnecting] = useState(false);
 
   // Combined cloud mode: either frontend direct-to-fal or backend relay to fal
   const isCloudMode = isFalMode || isBackendCloudConnected;
@@ -201,8 +203,8 @@ export function StreamPage() {
     sessionId,
   } = useUnifiedWebRTC();
 
-  // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
-  const isLoading = isDownloading || isPipelineLoading || isConnecting;
+  // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or connecting to cloud
+  const isLoading = isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
 
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
@@ -1189,6 +1191,7 @@ export function StreamPage() {
             onRefImagesChange={handleRefImagesChange}
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
+            isCloudConnecting={isCloudConnecting}
             supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
             firstFrameImage={settings.firstFrameImage}
             onFirstFrameImageChange={handleFirstFrameImageChange}
@@ -1209,6 +1212,7 @@ export function StreamPage() {
               remoteStream={remoteStream}
               isPipelineLoading={isPipelineLoading}
               isConnecting={isConnecting}
+              isCloudConnecting={isCloudConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
               isDownloading={isDownloading}
@@ -1315,7 +1319,7 @@ export function StreamPage() {
                   });
                 }
               }}
-              disabled={isPipelineLoading || isConnecting || showDownloadDialog}
+              disabled={isPipelineLoading || isConnecting || isCloudConnecting || showDownloadDialog}
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}
@@ -1351,6 +1355,7 @@ export function StreamPage() {
         <div className="w-1/5 flex flex-col gap-3">
           <CloudModeToggle
             onStatusChange={setIsBackendCloudConnected}
+            onConnectingChange={setIsCloudConnecting}
             onPipelinesRefresh={handlePipelinesRefresh}
             disabled={isStreaming}
           />

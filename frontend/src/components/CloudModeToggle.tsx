@@ -14,11 +14,11 @@
  * Credentials (app_id and api_key) are set via backend command line args.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Cloud, CloudOff, Loader2 } from "lucide-react";
+import { Cloud, CloudOff, Loader2, X } from "lucide-react";
 
 interface CloudStatus {
   connected: boolean;
@@ -30,6 +30,8 @@ interface CloudModeToggleProps {
   className?: string;
   /** Callback when cloud mode status changes */
   onStatusChange?: (connected: boolean) => void;
+  /** Callback when connecting state changes (for disabling controls during connection) */
+  onConnectingChange?: (connecting: boolean) => void;
   /** Callback to refresh pipeline list after cloud mode toggle */
   onPipelinesRefresh?: () => Promise<unknown>;
   /** Disable the toggle (e.g., when streaming) */
@@ -39,6 +41,7 @@ interface CloudModeToggleProps {
 export function CloudModeToggle({
   className,
   onStatusChange,
+  onConnectingChange,
   onPipelinesRefresh,
   disabled = false,
 }: CloudModeToggleProps) {
@@ -49,6 +52,7 @@ export function CloudModeToggle({
   });
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Poll status on mount and periodically
   const fetchStatus = useCallback(async () => {
@@ -71,15 +75,25 @@ export function CloudModeToggle({
     return () => clearInterval(interval);
   }, [fetchStatus]);
 
+  // Notify parent when connecting state changes
+  useEffect(() => {
+    onConnectingChange?.(isConnecting);
+  }, [isConnecting, onConnectingChange]);
+
   const handleConnect = async () => {
     setIsConnecting(true);
     setError(null);
+
+    // Create new AbortController for this connection attempt
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     try {
       const response = await fetch("/api/v1/fal/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -100,14 +114,38 @@ export function CloudModeToggle({
         }
       }
     } catch (e) {
+      // Don't show error if the request was aborted (user canceled)
+      if (e instanceof Error && e.name === "AbortError") {
+        console.log("[CloudModeToggle] Connection canceled by user");
+        return;
+      }
       const message = e instanceof Error ? e.message : "Connection failed";
       setError(message);
       console.error("[CloudModeToggle] Connect failed:", e);
     } finally {
+      abortControllerRef.current = null;
       setIsConnecting(false);
     }
   };
 
+  const handleCancel = async () => {
+    // Abort the ongoing fetch request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // Also call disconnect to clean up any partial connection state on the backend
+    try {
+      await fetch("/api/v1/fal/disconnect", { method: "POST" });
+      await fetchStatus();
+    } catch (e) {
+      console.error("[CloudModeToggle] Failed to cleanup after cancel:", e);
+    }
+
+    setIsConnecting(false);
+  };
+// reenable connect button on connection timeout
   const handleDisconnect = async () => {
     setIsConnecting(true);
     setError(null);
@@ -165,24 +203,36 @@ export function CloudModeToggle({
           <>
             {status.credentials_configured ? (
               <>
-                <Button
-                  onClick={handleConnect}
-                  disabled={isConnecting || disabled}
-                  className="w-full"
-                  size="sm"
-                >
-                  {isConnecting ? (
-                    <>
+                {isConnecting ? (
+                  <div className="flex gap-2">
+                    <Button
+                      disabled
+                      className="flex-1"
+                      size="sm"
+                    >
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Cloud className="mr-2 h-4 w-4" />
-                      Connect to Cloud
-                    </>
-                  )}
-                </Button>
+                    </Button>
+                    <Button
+                      onClick={handleCancel}
+                      variant="outline"
+                      size="sm"
+                      title="Cancel connection"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    onClick={handleConnect}
+                    disabled={disabled}
+                    className="w-full"
+                    size="sm"
+                  >
+                    <Cloud className="mr-2 h-4 w-4" />
+                    Connect to Cloud
+                  </Button>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Connect to fal.ai for cloud GPU inference. Cold starts may take
                   1-2 minutes.
