@@ -219,6 +219,18 @@ export function useStreamState() {
     }
   }, [getPipelineSchemas]);
 
+  // Function to refresh hardware info (can be called externally)
+  const refreshHardwareInfo = useCallback(async () => {
+    try {
+      const hardware = await getHardwareInfo();
+      setHardwareInfo(hardware);
+      return hardware;
+    } catch (error) {
+      console.error("useStreamState: Failed to refresh hardware info:", error);
+      throw error;
+    }
+  }, [getHardwareInfo]);
+
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
     // In fal mode, wait until adapter is ready
@@ -382,5 +394,6 @@ export function useStreamState() {
     supportsNoiseControls,
     spoutAvailable,
     refreshPipelineSchemas,
+    refreshHardwareInfo,
   };
 }

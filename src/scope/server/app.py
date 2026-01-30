@@ -1166,11 +1166,37 @@ def is_spout_available() -> bool:
 
 
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
-async def get_hardware_info():
-    """Get hardware information including available VRAM and Spout availability."""
-    import torch  # Lazy import to avoid loading at CLI startup
+async def get_hardware_info(
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
+    """Get hardware information including available VRAM and Spout availability.
 
+    In cloud mode (when connected to fal), this proxies the request to the
+    fal-hosted scope backend to get the cloud GPU's hardware info.
+    """
     try:
+        # If connected to fal, proxy the request to get fal's hardware info
+        if fal_manager.is_connected:
+            logger.info("Proxying hardware info request to fal")
+            response = await fal_manager.api_request(
+                method="GET",
+                path="/api/v1/hardware/info",
+                timeout=30.0,
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Failed to get hardware info from fal"),
+                )
+            data = response.get("data", {})
+            return HardwareInfoResponse(
+                vram_gb=data.get("vram_gb"),
+                spout_available=data.get("spout_available", False),
+            )
+
+        # Local mode: get local hardware info
+        import torch  # Lazy import to avoid loading at CLI startup
+
         vram_gb = None
 
         if torch.cuda.is_available():
@@ -1182,6 +1208,8 @@ async def get_hardware_info():
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

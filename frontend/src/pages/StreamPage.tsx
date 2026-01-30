@@ -102,13 +102,18 @@ export function StreamPage() {
     supportsNoiseControls,
     spoutAvailable,
     refreshPipelineSchemas,
+    refreshHardwareInfo,
   } = useStreamState();
 
-  // Combined refresh function for both pipeline schemas and pipelines list
+  // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
-    // Refresh both hooks to keep them in sync
-    await Promise.all([refreshPipelineSchemas(), refreshPipelines()]);
-  }, [refreshPipelineSchemas, refreshPipelines]);
+    // Refresh all hooks to keep them in sync when cloud mode toggles
+    await Promise.all([
+      refreshPipelineSchemas(),
+      refreshPipelines(),
+      refreshHardwareInfo(),
+    ]);
+  }, [refreshPipelineSchemas, refreshPipelines, refreshHardwareInfo]);
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -1347,6 +1352,7 @@ export function StreamPage() {
           <CloudModeToggle
             onStatusChange={setIsBackendCloudConnected}
             onPipelinesRefresh={handlePipelinesRefresh}
+            disabled={isStreaming}
           />
           <SettingsPanel
             className="flex-1 min-h-0 overflow-auto"

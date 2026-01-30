@@ -32,12 +32,15 @@ interface CloudModeToggleProps {
   onStatusChange?: (connected: boolean) => void;
   /** Callback to refresh pipeline list after cloud mode toggle */
   onPipelinesRefresh?: () => Promise<unknown>;
+  /** Disable the toggle (e.g., when streaming) */
+  disabled?: boolean;
 }
 
 export function CloudModeToggle({
   className,
   onStatusChange,
   onPipelinesRefresh,
+  disabled = false,
 }: CloudModeToggleProps) {
   const [status, setStatus] = useState<CloudStatus>({
     connected: false,
@@ -164,7 +167,7 @@ export function CloudModeToggle({
               <>
                 <Button
                   onClick={handleConnect}
-                  disabled={isConnecting}
+                  disabled={isConnecting || disabled}
                   className="w-full"
                   size="sm"
                 >
@@ -199,7 +202,7 @@ export function CloudModeToggle({
             </div>
             <Button
               onClick={handleDisconnect}
-              disabled={isConnecting}
+              disabled={isConnecting || disabled}
               variant="outline"
               className="w-full"
               size="sm"
