@@ -88,68 +88,6 @@ export function usePipeline(options: UsePipelineOptions = {}) {
     }
   }, []);
 
-  // Start polling for status updates
-  const startPolling = useCallback(() => {
-    if (isPollingRef.current) return;
-
-    isPollingRef.current = true;
-
-    const poll = async () => {
-      if (!isPollingRef.current) return;
-
-      try {
-        const statusResponse = await getPipelineStatus();
-        setStatus(statusResponse.status);
-        setPipelineInfo(statusResponse);
-
-        if (statusResponse.status === "error") {
-          const errorMessage = statusResponse.error || "Unknown pipeline error";
-          // Show toast if we haven't shown this error yet
-          if (shownErrorRef.current !== errorMessage) {
-            toast.error("Pipeline Error", {
-              description: errorMessage,
-              duration: 8000,
-            });
-            shownErrorRef.current = errorMessage;
-          }
-          // Don't set error in state - it's shown as toast and cleared on backend
-          setError(null);
-        } else {
-          setError(null);
-          shownErrorRef.current = null; // Reset when status is not error
-        }
-
-        // Stop polling if loaded or error
-        if (
-          statusResponse.status === "loaded" ||
-          statusResponse.status === "error"
-        ) {
-          stopPolling();
-          return;
-        }
-      } catch (err) {
-        console.error("Polling error:", err);
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to get pipeline status";
-        // Show toast for polling errors
-        if (shownErrorRef.current !== errorMessage) {
-          toast.error("Pipeline Error", {
-            description: errorMessage,
-            duration: 5000,
-          });
-          shownErrorRef.current = errorMessage;
-        }
-        setError(null); // Don't persist in state
-      }
-
-      if (isPollingRef.current) {
-        pollTimeoutRef.current = setTimeout(poll, pollInterval);
-      }
-    };
-
-    poll();
-  }, [pollInterval, stopPolling]);
-
   // Load pipeline
   const triggerLoad = useCallback(
     async (
@@ -176,9 +114,6 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           pipeline_ids: pipelineIds,
           load_params: loadParams,
         });
-
-        // Start polling for updates
-        startPolling();
 
         // Set up timeout for the load operation
         const timeoutPromise = new Promise<boolean>((_, reject) => {
@@ -258,7 +193,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         setIsLoading(false);
       }
     },
-    [isLoading, maxTimeout, pollInterval, startPolling, stopPolling, getPipelineStatus, loadPipelineRequest]
+    [isLoading, maxTimeout, pollInterval, stopPolling, getPipelineStatus, loadPipelineRequest]
   );
 
   // Load pipeline with proper state management
