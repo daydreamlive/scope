@@ -768,21 +768,12 @@ class PluginManager:
             self._write_plugins_file(original_plugins)
             raise PluginInstallError(f"Installation failed: {error}")
 
-        # Reload plugins to pick up the new one
-        self._reload_all_plugins()
-
-        # Find the installed plugin
-        plugins_list = self._list_plugins_sync()
-        installed_plugin = None
-        for plugin in plugins_list:
-            if plugin["name"].lower() == package_base.lower():
-                installed_plugin = plugin
-                break
-
+        # Don't try to reload plugins in-process - the server restart will
+        # handle loading the new plugin with a clean slate (no caching issues)
         return {
             "success": True,
-            "message": f"Successfully installed {package}",
-            "plugin": installed_plugin,
+            "message": f"Successfully installed {package}. Restart server to load.",
+            "plugin": {"name": package_base},
         }
 
     def _install_editable_plugin(self, package: str) -> dict[str, Any]:
@@ -823,25 +814,15 @@ class PluginManager:
                 f"Installation failed: {result.stderr or result.stdout}"
             )
 
-        # Reload plugins to pick up the new one
-        self._reload_all_plugins()
-
-        # Get package name from path
+        # Don't try to reload plugins in-process - the server restart will
+        # handle loading the new plugin with a clean slate (no caching issues)
         package_path = Path(package).resolve()
         package_name = self._get_package_name_from_path(package_path)
 
-        # Find the installed plugin
-        plugins = self._list_plugins_sync()
-        installed_plugin = None
-        for plugin in plugins:
-            if plugin["name"].lower() == package_name.lower():
-                installed_plugin = plugin
-                break
-
         return {
             "success": True,
-            "message": f"Successfully installed {package} (editable)",
-            "plugin": installed_plugin,
+            "message": f"Successfully installed {package} (editable). Restart server to load.",
+            "plugin": {"name": package_name},
         }
 
     def _get_package_name_from_path(self, path: Path) -> str:
@@ -1147,51 +1128,6 @@ class PluginManager:
                 # Remove from sys.modules to force fresh import
                 if name in sys.modules:
                     del sys.modules[name]
-
-    def _reload_all_plugins(self) -> None:
-        """Reload all plugins from entry points.
-
-        This clears the module cache for all registered plugins to ensure
-        new code is loaded (important for upgrades).
-        """
-        # Clear module cache for all registered plugins
-        for package_name in list(self._registered_plugins):
-            self._clear_package_modules(package_name)
-
-        # Clear existing plugins from pluggy
-        for plugin in list(self._pm.get_plugins()):
-            try:
-                self._pm.unregister(plugin)
-            except Exception:
-                pass
-
-        # Reload entry points
-        self._pm.load_setuptools_entrypoints("scope")
-
-        # Update pipeline mapping
-        from scope.core.pipelines.registry import PipelineRegistry
-
-        self.register_plugin_pipelines(PipelineRegistry)
-
-    def _clear_package_modules(self, package_name: str) -> None:
-        """Clear all modules from a package from sys.modules.
-
-        Args:
-            package_name: Package name (will be normalized to module form)
-        """
-        # Normalize the package name to module form (e.g., my-package -> my_package)
-        module_name = package_name.replace("-", "_")
-
-        # Find and remove all modules from this package
-        modules_to_remove = [
-            name
-            for name in sys.modules
-            if name == module_name or name.startswith(f"{module_name}.")
-        ]
-
-        for name in modules_to_remove:
-            del sys.modules[name]
-            logger.debug(f"Cleared module from cache: {name}")
 
 
 # Module-level singleton
