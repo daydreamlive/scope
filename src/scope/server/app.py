@@ -1189,9 +1189,11 @@ async def get_hardware_info(
                     detail=response.get("error", "Failed to get hardware info from fal"),
                 )
             data = response.get("data", {})
+            # Use cloud VRAM, but LOCAL Spout availability
+            # (Spout frames flow through local backend to cloud, so local Spout support matters)
             return HardwareInfoResponse(
                 vram_gb=data.get("vram_gb"),
-                spout_available=data.get("spout_available", False),
+                spout_available=is_spout_available(),
             )
 
         # Local mode: get local hardware info
