@@ -232,6 +232,9 @@ class FalWebRTCClient:
                 self._receive_task = asyncio.create_task(
                     self._receive_frames(track)
                 )
+                # Request keyframe immediately to avoid VP8 decode errors
+                # PLI (Picture Loss Indication) tells remote to send an I-frame
+                asyncio.create_task(self._request_keyframe())
 
         # Monitor connection state
         @self.pc.on("connectionstatechange")
@@ -334,6 +337,24 @@ class FalWebRTCClient:
                 f"[FAL-RTC] Frame receive loop ended, "
                 f"total frames: {self._stats['frames_received']}"
             )
+
+    async def _request_keyframe(self):
+        """Request a keyframe via PLI after short delay for receiver setup.
+
+        VP8/VP9 decoders need a keyframe (I-frame) to start decoding.
+        After a new WebRTC connection, we may receive P-frames first,
+        causing decode errors. Sending PLI (Picture Loss Indication)
+        requests the remote end to send a keyframe.
+        """
+        await asyncio.sleep(0.1)  # Allow receiver to initialize
+        for receiver in self.pc.getReceivers():
+            if receiver.track and receiver.track.kind == "video":
+                try:
+                    # Access internal PLI method from aiortc
+                    await receiver._send_rtcp_pli()
+                    logger.info("[FAL-RTC] Sent PLI (keyframe request)")
+                except Exception as e:
+                    logger.debug(f"[FAL-RTC] Could not send PLI: {e}")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a frame to fal.ai for processing.
