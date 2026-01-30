@@ -566,6 +566,10 @@ class FalStatusResponse(BaseModel):
         default=None,
         description="The fal app ID if connected",
     )
+    connection_id: str | None = Field(
+        default=None,
+        description="Unique ID for the current WebSocket connection (for log correlation)",
+    )
     credentials_configured: bool = Field(
         default=False,
         description="Whether fal.ai credentials are configured via CLI args or env vars",

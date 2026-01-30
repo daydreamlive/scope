@@ -18,11 +18,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Cloud, CloudOff, Loader2, X } from "lucide-react";
+import { Cloud, CloudOff, Loader2, X, Copy, Check } from "lucide-react";
 
 interface CloudStatus {
   connected: boolean;
   app_id: string | null;
+  connection_id: string | null;
   credentials_configured: boolean;
 }
 
@@ -48,11 +49,25 @@ export function CloudModeToggle({
   const [status, setStatus] = useState<CloudStatus>({
     connected: false,
     app_id: null,
+    connection_id: null,
     credentials_configured: false,
   });
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleCopyConnectionId = async () => {
+    if (status.connection_id) {
+      try {
+        await navigator.clipboard.writeText(status.connection_id);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (e) {
+        console.error("[CloudModeToggle] Failed to copy connection ID:", e);
+      }
+    }
+  };
 
   // Poll status on mount and periodically
   const fetchStatus = useCallback(async () => {
@@ -250,6 +265,26 @@ export function CloudModeToggle({
             <div className="text-sm text-muted-foreground truncate">
               {status.app_id}
             </div>
+            {status.connection_id && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  Connection ID: <code className="bg-muted px-1 rounded">{status.connection_id}</code>
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  onClick={handleCopyConnectionId}
+                  title="Copy connection ID"
+                >
+                  {copied ? (
+                    <Check className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </Button>
+              </div>
+            )}
             <Button
               onClick={handleDisconnect}
               disabled={isConnecting || disabled}

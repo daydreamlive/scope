@@ -191,6 +191,7 @@ class ScopeApp(fal.App, keep_alive=300):
         import asyncio
         import json
         import logging
+        import uuid
 
         import httpx
         from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -199,10 +200,13 @@ class ScopeApp(fal.App, keep_alive=300):
         SCOPE_BASE_URL = "http://localhost:8000"
 
         await ws.accept()
-        print("✅ WebSocket connection accepted")
 
-        # Send ready message
-        await ws.send_json({"type": "ready"})
+        # Generate a unique connection ID for this WebSocket session
+        connection_id = str(uuid.uuid4())[:8]  # Short ID for readability in logs
+        print(f"[{connection_id}] ✅ WebSocket connection accepted")
+
+        # Send ready message with connection_id
+        await ws.send_json({"type": "ready", "connection_id": connection_id})
 
         # Track WebRTC session ID for ICE candidate routing
         session_id = None
@@ -470,14 +474,14 @@ class ScopeApp(fal.App, keep_alive=300):
                     await safe_send_json(response)
 
         except WebSocketDisconnect:
-            print("WebSocket disconnected")
+            print(f"[{connection_id}] WebSocket disconnected")
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
+            logger.error(f"[{connection_id}] WebSocket error: {e}")
             await safe_send_json({"type": "error", "error": str(e)})
         finally:
             # Clean up session data to prevent data leakage between users
             cleanup_session_data()
-            print("WebSocket connection closed, session data cleaned up")
+            print(f"[{connection_id}] WebSocket connection closed, session data cleaned up")
 
 
 # Deployment:

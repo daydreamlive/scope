@@ -54,6 +54,8 @@ class FalConnectionManager:
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._connected = False
         self._stop_event = asyncio.Event()
+        # Connection ID from fal.ai for log correlation
+        self._connection_id: str | None = None
 
         # WebRTC client for media relay
         self._webrtc_client: "FalWebRTCClient | None" = None
@@ -122,11 +124,13 @@ class FalConnectionManager:
 
         # Wait for "ready" message
         try:
-            msg = await asyncio.wait_for(self.ws.receive(), timeout=120.0)
+            msg = await asyncio.wait_for(self.ws.receive(), timeout=180.0)
             if msg.type == aiohttp.WSMsgType.TEXT:
                 data = json.loads(msg.data)
                 if data.get("type") != "ready":
                     raise RuntimeError(f"Expected 'ready' message, got: {data}")
+                # Extract connection_id for log correlation
+                self._connection_id = data.get("connection_id")
             else:
                 raise RuntimeError(f"Unexpected message type: {msg.type}")
         except asyncio.TimeoutError:
@@ -136,7 +140,7 @@ class FalConnectionManager:
                 "The fal runner may be starting up (cold start can take 1-2 minutes)."
             ) from None
 
-        logger.info("fal server ready")
+        logger.info(f"fal server ready (connection_id: {self._connection_id})")
         self._connected = True
         self._stats["connected_at"] = time.time()
         self._stats["last_activity_at"] = time.time()
@@ -400,6 +404,7 @@ class FalConnectionManager:
         """Disconnect from fal.ai cloud."""
         self._stop_event.set()
         self._connected = False
+        self._connection_id = None
 
         # Stop WebRTC client first
         await self.stop_webrtc()
@@ -592,6 +597,7 @@ class FalConnectionManager:
         status = {
             "connected": self.is_connected,
             "app_id": self.app_id if self.is_connected else None,
+            "connection_id": self._connection_id if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,
         }
 
