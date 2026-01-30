@@ -1032,9 +1032,27 @@ async def serve_asset(asset_path: str):
 
 
 @app.get("/api/v1/models/status")
-async def get_model_status(pipeline_id: str):
+async def get_model_status(
+    pipeline_id: str,
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
     """Check if models for a pipeline are downloaded and get download progress."""
     try:
+        # If connected to fal, proxy the request to fal backend
+        if fal_manager.is_connected:
+            logger.info(f"Proxying model status check to fal: {pipeline_id}")
+            response = await fal_manager.api_request(
+                method="GET",
+                path=f"/api/v1/models/status?pipeline_id={pipeline_id}",
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Model status check failed on fal"),
+                )
+            return response.get("data", {"downloaded": True, "progress": None})
+
+        # Local mode: check local files
         progress = download_progress_manager.get_progress(pipeline_id)
 
         # If download is in progress, always report as not downloaded
@@ -1050,13 +1068,18 @@ async def get_model_status(pipeline_id: str):
             progress = None
 
         return {"downloaded": downloaded, "progress": progress}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error checking model status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/v1/models/download")
-async def download_pipeline_models(request: DownloadModelsRequest):
+async def download_pipeline_models(
+    request: DownloadModelsRequest,
+    fal_manager: "FalConnectionManager" = Depends(get_fal_connection_manager),
+):
     """Download models for a specific pipeline."""
     try:
         if not request.pipeline_id:
@@ -1064,7 +1087,25 @@ async def download_pipeline_models(request: DownloadModelsRequest):
 
         pipeline_id = request.pipeline_id
 
-        # Check if download already in progress
+        # If connected to fal, proxy the download request to fal backend
+        if fal_manager.is_connected:
+            logger.info(f"Proxying model download to fal: {pipeline_id}")
+            response = await fal_manager.api_request(
+                method="POST",
+                path="/api/v1/models/download",
+                body={"pipeline_id": pipeline_id},
+                timeout=60.0,  # Model downloads can take a while to start
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Model download failed on fal"),
+                )
+            return response.get(
+                "data", {"message": f"Model download started on fal for {pipeline_id}"}
+            )
+
+        # Local mode: check if download already in progress
         existing_progress = download_progress_manager.get_progress(pipeline_id)
         if existing_progress and existing_progress.get("is_downloading"):
             raise HTTPException(
