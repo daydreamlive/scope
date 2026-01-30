@@ -16,8 +16,10 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 
-# TODO close websocket after a period of inactivity
 ASSETS_DIR_PATH = "~/.daydream-scope/assets"
+# Connection timeout settings
+MAX_CONNECTION_DURATION_SECONDS = 3600  # Close connection after 60 minutes regardless of activity
+TIMEOUT_CHECK_INTERVAL_SECONDS = 60  # Check for timeout every 60 seconds
 
 def cleanup_session_data():
     """Clean up session-specific data when WebSocket disconnects.
@@ -207,6 +209,10 @@ class ScopeApp(fal.App, keep_alive=300):
         # Track WebRTC session ID for ICE candidate routing
         session_id = None
 
+        # Track connection start time for max duration timeout
+        import time
+        connection_start_time = time.time()
+
         async def safe_send_json(payload: dict):
             """Send JSON, handling connection errors gracefully."""
             try:
@@ -218,6 +224,19 @@ class ScopeApp(fal.App, keep_alive=300):
                 await ws.send_json(payload)
             except (RuntimeError, WebSocketDisconnect):
                 pass
+
+        async def check_max_duration_exceeded() -> bool:
+            """Check if connection has exceeded max duration. Returns True if should close."""
+            elapsed_seconds = time.time() - connection_start_time
+            if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
+                print(f"[{connection_id}] Closing due to max duration ({elapsed_seconds:.0f}s)")
+                await safe_send_json({
+                    "type": "closing",
+                    "reason": "max_duration",
+                    "elapsed_seconds": elapsed_seconds,
+                })
+                return True
+            return False
 
         async def handle_get_ice_servers(payload: dict):
             """Proxy GET /api/v1/webrtc/ice-servers"""
@@ -452,8 +471,20 @@ class ScopeApp(fal.App, keep_alive=300):
         try:
             while True:
                 try:
-                    message = await ws.receive_text()
+                    # Use timeout on receive to periodically check connection duration
+                    message = await asyncio.wait_for(
+                        ws.receive_text(),
+                        timeout=TIMEOUT_CHECK_INTERVAL_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    if await check_max_duration_exceeded():
+                        break
+                    continue
                 except RuntimeError:
+                    break
+
+                # Check duration on each message as well (in case of constant activity)
+                if await check_max_duration_exceeded():
                     break
 
                 try:
