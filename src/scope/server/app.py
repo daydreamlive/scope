@@ -227,9 +227,6 @@ async def prewarm_pipeline(pipeline_id: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup and shutdown events."""
-    # Lazy imports to avoid loading torch at CLI startup (fixes Windows DLL locking)
-    import torch
-
     from .fal_connection import FalConnectionManager
     from .pipeline_manager import PipelineManager
     from .webrtc import WebRTCManager
@@ -237,14 +234,20 @@ async def lifespan(app: FastAPI):
     # Startup
     global webrtc_manager, pipeline_manager, fal_connection_manager
 
-    # Check CUDA availability and warn if not available
-    if not torch.cuda.is_available():
-        warning_msg = (
-            "CUDA is not available on this system. "
-            "Some pipelines may not work without a CUDA-compatible GPU. "
-            "The application will start, but pipeline functionality may be limited."
-        )
-        logger.warning(warning_msg)
+    # Check CUDA availability and warn if not available (skip on macOS cloud mode)
+    if sys.platform == "darwin":
+        logger.info("Running on macOS - cloud mode only (no local GPU)")
+    else:
+        # Lazy imports to avoid loading torch at CLI startup (fixes Windows DLL locking)
+        import torch
+
+        if not torch.cuda.is_available():
+            warning_msg = (
+                "CUDA is not available on this system. "
+                "Some pipelines may not work without a CUDA-compatible GPU. "
+                "The application will start, but pipeline functionality may be limited."
+            )
+            logger.warning(warning_msg)
 
     # Clean up recording files from previous sessions (in case of crashes)
     cleanup_recording_files()
@@ -1146,15 +1149,17 @@ def is_spout_available() -> bool:
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info():
     """Get hardware information including available VRAM and Spout availability."""
-    import torch  # Lazy import to avoid loading at CLI startup
-
     try:
         vram_gb = None
 
-        if torch.cuda.is_available():
-            # Get total VRAM from the first GPU (in bytes), convert to GB
-            _, total_mem = torch.cuda.mem_get_info(0)
-            vram_gb = total_mem / (1024**3)
+        # Skip CUDA check on macOS (cloud mode only)
+        if sys.platform != "darwin":
+            import torch  # Lazy import to avoid loading at CLI startup
+
+            if torch.cuda.is_available():
+                # Get total VRAM from the first GPU (in bytes), convert to GB
+                _, total_mem = torch.cuda.mem_get_info(0)
+                vram_gb = total_mem / (1024**3)
 
         return HardwareInfoResponse(
             vram_gb=vram_gb,

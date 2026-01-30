@@ -7,9 +7,14 @@ metadata retrieval.
 
 import importlib
 import logging
+import sys
 from typing import TYPE_CHECKING
 
-import torch
+# torch is not available on macOS (cloud mode only)
+if sys.platform != "darwin":
+    import torch
+else:
+    torch = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from .interface import Pipeline
@@ -76,6 +81,8 @@ def _get_gpu_vram_gb() -> float | None:
     Returns:
         Total VRAM in GB if GPU is available, None otherwise
     """
+    if torch is None:
+        return None
     try:
         if torch.cuda.is_available():
             _, total_mem = torch.cuda.mem_get_info(0)
@@ -104,6 +111,12 @@ def _should_register_pipeline(
 # Register all available pipelines
 def _register_pipelines():
     """Register pipelines based on GPU availability and requirements."""
+    # On macOS (cloud mode), skip local pipeline registration entirely.
+    # The frontend gets pipeline list from fal.ai backend in cloud mode.
+    if sys.platform == "darwin":
+        logger.info("macOS detected - skipping local pipeline registration (cloud mode only)")
+        return
+
     # Check GPU VRAM
     vram_gb = _get_gpu_vram_gb()
 
