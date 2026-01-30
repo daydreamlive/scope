@@ -17,6 +17,7 @@ from fastapi import WebSocket
 
 
 # TODO close websocket after a period of inactivity
+ASSETS_DIR_PATH = "~/.daydream-scope/assets"
 
 def cleanup_session_data():
     """Clean up session-specific data when WebSocket disconnects.
@@ -25,13 +26,13 @@ def cleanup_session_data():
     - Assets directory (uploaded images, videos)
     - Recording files in temp directory
     """
-    # Import here to avoid circular imports and ensure scope is available
-    try:
-        from scope.server.models_config import get_assets_dir
-        from scope.server.recording import RecordingManager
+    import glob
+    import tempfile
+    from pathlib import Path
 
-        # Clean assets directory
-        assets_dir = get_assets_dir()
+    try:
+        # Clean assets directory (matches DAYDREAM_SCOPE_ASSETS_DIR set in setup)
+        assets_dir = Path(ASSETS_DIR_PATH).expanduser()
         if assets_dir.exists():
             for item in assets_dir.iterdir():
                 try:
@@ -42,11 +43,6 @@ def cleanup_session_data():
                 except Exception as e:
                     print(f"Warning: Failed to delete {item}: {e}")
             print(f"Cleaned up assets directory: {assets_dir}")
-
-        # Clean recording files
-        RecordingManager.cleanup_old_recordings("scope_recording_*")
-        RecordingManager.cleanup_old_recordings("scope_download_*")
-        print("Cleaned up recording files")
 
     except Exception as e:
         print(f"Warning: Session cleanup failed: {e}")
@@ -61,7 +57,7 @@ def cleanup_session_data():
 # fal deploy fal_app.py --auth public
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:27ed915"
+DOCKER_IMAGE = "daydreamlive/scope:87db283"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -133,7 +129,7 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
         scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
-        scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = "~/.daydream-scope/assets"
+        scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
 
         # Start the scope server in a background thread
         def start_server():
