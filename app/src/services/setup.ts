@@ -4,7 +4,7 @@ import os from 'os';
 import https from 'https';
 import { spawn, execSync } from 'child_process';
 import { SetupService } from '../types/services';
-import { getPaths, UV_DOWNLOAD_URLS, getEnhancedPath } from '../utils/config';
+import { getPaths, UV_DOWNLOAD_URLS, UV_VERSION, getEnhancedPath } from '../utils/config';
 import { logger } from '../utils/logger';
 
 export class ScopeSetupService implements SetupService {
@@ -13,27 +13,54 @@ export class ScopeSetupService implements SetupService {
     const uvExists = fs.existsSync(paths.uvBin);
     const projectExists = fs.existsSync(path.join(paths.projectRoot, 'pyproject.toml'));
 
-    // We no longer need to check for venv existence here - uv sync will handle it
-    // and will be fast if dependencies haven't changed
-    return !uvExists || !projectExists;
+    if (!uvExists || !projectExists) {
+      return true;
+    }
+
+    // Check if installed uv version matches expected version
+    if (!this.isUvVersionCorrect()) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if the installed uv version matches the expected version.
+   */
+  private isUvVersionCorrect(): boolean {
+    const paths = getPaths();
+    try {
+      const output = execSync(`"${paths.uvBin}" --version`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      // Output format: "uv 0.9.11 (hash date)"
+      const match = output.match(/^uv (\d+\.\d+\.\d+)/);
+      if (match) {
+        const installedVersion = match[1];
+        if (installedVersion !== UV_VERSION) {
+          logger.info(`uv version mismatch: installed=${installedVersion}, expected=${UV_VERSION}`);
+        }
+        return installedVersion === UV_VERSION;
+      }
+      logger.warn(`Could not parse uv version from output: ${output}`);
+      return false;
+    } catch (err) {
+      logger.error(`Failed to check uv version: ${err}`);
+      return false;
+    }
   }
 
   async checkUvInstalled(): Promise<boolean> {
-    try {
-      // Check if uv is in PATH (using enhanced PATH for macOS app launches)
-      execSync('uv --version', {
-        stdio: 'ignore',
-        env: {
-          ...process.env,
-          PATH: getEnhancedPath(),
-        },
-      });
-      return true;
-    } catch {
-      // Check if uv is in our local directory
-      const paths = getPaths();
-      return fs.existsSync(paths.uvBin);
+    const paths = getPaths();
+
+    // Check if our local uv exists and is the correct version
+    if (!fs.existsSync(paths.uvBin)) {
+      return false;
     }
+
+    return this.isUvVersionCorrect();
   }
 
   async downloadAndInstallUv(): Promise<void> {
