@@ -228,7 +228,10 @@ class FrameProcessor:
             self._log_frame_stats()
 
         if self._relay_mode:
-            # Relay mode: send frame to fal.ai
+            # Relay mode: send frame to fal.ai (only in video mode)
+            # In text mode, fal.ai generates video from prompts only - no input frames
+            if not self._video_mode:
+                return True  # Silently ignore frames in text mode
             if self.fal_manager:
                 frame_array = frame.to_ndarray(format="rgb24")
                 if self.fal_manager.send_frame_to_fal(frame_array):
@@ -646,9 +649,14 @@ class FrameProcessor:
                 if rgb_frame is not None:
                     last_frame_time = time.time()
 
+                    # Skip sending frames while paused
+                    if self.paused:
+                        continue
+
                     if self._relay_mode:
-                        # Relay mode: send Spout frames to fal.ai
-                        if self.fal_manager:
+                        # Relay mode: send Spout frames to fal.ai (only in video mode)
+                        # In text mode, fal.ai generates video from prompts only - no input frames
+                        if self._video_mode and self.fal_manager:
                             if self.fal_manager.send_frame_to_fal(rgb_frame):
                                 self._frames_to_fal += 1
                     elif self.pipeline_processors:
