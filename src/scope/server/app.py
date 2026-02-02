@@ -330,13 +330,31 @@ async def restart_server():
     the entry point, which replaces the current process and keeps terminal
     output working.
 
+    When running under the Electron app (DAYDREAM_SCOPE_MANAGED=1), the server
+    exits with code 42 to signal the managing process to respawn it. This
+    ensures proper PID tracking and prevents orphaned processes on Windows.
+
     Known limitation (Windows/Git Bash): After the server restarts and you
     press Ctrl+C, the terminal may appear to hang. The process exits correctly,
     but MinTTY's input buffer gets stuck. Press any key to get your prompt back.
     This is a quirk of how MinTTY handles process replacement and doesn't affect
     CMD, PowerShell, or the Electron app.
     """
+    # If managed by an external process (e.g., Electron), exit and let it respawn us
+    # This prevents orphaned processes on Windows where os.execv spawns a new PID
+    if os.environ.get("DAYDREAM_SCOPE_MANAGED"):
+        logger.info("Server restart requested (managed mode) - exiting for respawn...")
 
+        def do_managed_exit():
+            time.sleep(0.5)  # Give time for response to be sent
+            logger.info("Exiting with code 42 for managed respawn...")
+            os._exit(42)  # Use os._exit to terminate entire process from thread
+
+        thread = threading.Thread(target=do_managed_exit, daemon=True)
+        thread.start()
+        return {"message": "Server exiting for respawn..."}
+
+    # Standalone mode: self-restart via subprocess/os.execv
     def do_restart():
         time.sleep(0.5)  # Give time for response to be sent
 

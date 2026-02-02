@@ -1,4 +1,4 @@
-import { ArrowUpSquare, FolderOpen, Trash2 } from "lucide-react";
+import { ArrowUpSquare, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import type { InstalledPlugin } from "@/types/settings";
@@ -11,6 +11,7 @@ interface PluginsTabProps {
   onInstall: (pluginUrl: string) => void;
   onUpdate: (pluginName: string, packageSpec: string) => void;
   onDelete: (pluginName: string) => void;
+  onReload: (pluginName: string) => void;
   isLoading?: boolean;
   isInstalling?: boolean;
 }
@@ -28,6 +29,7 @@ export function PluginsTab({
   onInstall,
   onUpdate,
   onDelete,
+  onReload,
   isLoading = false,
   isInstalling = false,
 }: PluginsTabProps) {
@@ -128,6 +130,17 @@ export function PluginsTab({
                       }
                     >
                       <ArrowUpSquare className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {plugin.editable && (
+                    <Button
+                      onClick={() => onReload(plugin.name)}
+                      variant="ghost"
+                      size="icon"
+                      disabled={isInstalling}
+                      title="Reload plugin (restarts server)"
+                    >
+                      <RefreshCw className="h-4 w-4" />
                     </Button>
                   )}
                   <Button
