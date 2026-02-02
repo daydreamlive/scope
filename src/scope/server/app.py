@@ -1382,23 +1382,20 @@ def main(ctx, version: bool, reload: bool, host: str, port: int, no_browser: boo
         run_server(reload, host, port, no_browser)
 
 
-def _is_preview_enabled():
-    """Check if the DAYDREAM_SCOPE_PREVIEW feature flag is enabled."""
-    return os.environ.get("DAYDREAM_SCOPE_PREVIEW", "").lower() in ("1", "true", "yes")
-
-
-@main.command(hidden=not _is_preview_enabled())
+@main.command()
 def plugins():
     """List all installed plugins."""
+    import asyncio
+
+    from scope.core.plugins.manager import get_plugin_manager
 
     @suppress_init_output
-    def _load_plugins():
-        from scope.core.plugins import load_plugins, pm
+    def _list_plugins():
+        pm = get_plugin_manager()
+        pm.load_plugins()
+        return asyncio.run(pm.list_plugins_async())
 
-        load_plugins()
-        return pm.get_plugins()
-
-    plugin_list = _load_plugins()
+    plugin_list = _list_plugins()
 
     if not plugin_list:
         click.echo("No plugins installed.")
@@ -1406,10 +1403,17 @@ def plugins():
 
     click.echo(f"{len(plugin_list)} plugin(s) installed:\n")
 
-    # List each plugin
     for plugin in plugin_list:
-        plugin_name = plugin.__name__ if hasattr(plugin, "__name__") else str(plugin)
-        click.echo(f"  • {plugin_name}")
+        name = plugin["name"]
+        version = plugin.get("version", "unknown")
+        source = plugin.get("source", "unknown")
+        pipelines = plugin.get("pipelines", [])
+
+        click.echo(f"  {name} ({version})")
+        click.echo(f"    Source: {source}")
+        if pipelines:
+            pipeline_ids = [p["pipeline_id"] for p in pipelines]
+            click.echo(f"    Pipelines: {', '.join(pipeline_ids)}")
 
 
 @main.command()
@@ -1435,74 +1439,92 @@ def pipelines():
         click.echo(f"  • {pipeline_id}")
 
 
-@main.command(hidden=not _is_preview_enabled())
-@click.argument("packages", nargs=-1, required=False)
-@click.option("--upgrade", is_flag=True, help="Upgrade packages to the latest version")
+@main.command()
+@click.argument("package", required=False)
+@click.option("--upgrade", is_flag=True, help="Upgrade package to latest version")
 @click.option(
     "-e", "--editable", help="Install a project in editable mode from this path"
 )
-@click.option("--force-reinstall", is_flag=True, help="Force reinstall packages")
-@click.option("--no-cache-dir", is_flag=True, help="Disable the cache")
 @click.option(
     "--pre", is_flag=True, help="Include pre-release and development versions"
 )
 @click.option("--force", is_flag=True, help="Skip dependency validation")
-def install(packages, upgrade, editable, force_reinstall, no_cache_dir, pre, force):
+def install(package, upgrade, editable, pre, force):
     """Install a plugin."""
-    from ..core.plugins.dependency_validator import DependencyValidator
+    import asyncio
 
-    # Build list of packages to validate
-    packages_to_validate = list(packages) if packages else []
-    if editable:
-        packages_to_validate.append(editable)
+    from scope.core.plugins.manager import (
+        PluginDependencyError,
+        PluginInstallError,
+        PluginNameCollisionError,
+        get_plugin_manager,
+    )
 
-    # Validate before installing (unless --force)
-    if packages_to_validate and not force:
-        validator = DependencyValidator()
-        result = validator.validate_install(packages_to_validate)
+    if not package and not editable:
+        click.echo("Error: Must specify a package or use -e/--editable", err=True)
+        sys.exit(1)
 
-        if not result.is_valid:
-            click.echo("Dependency conflict detected!\n", err=True)
-            click.echo(result.error_message, err=True)
-            click.echo(
-                "\nUse --force to install anyway (may break environment)", err=True
+    # Determine what to install
+    install_package = editable if editable else package
+    is_editable = bool(editable)
+
+    @suppress_init_output
+    def _install():
+        pm = get_plugin_manager()
+        return asyncio.run(
+            pm.install_plugin_async(
+                package=install_package,
+                editable=is_editable,
+                upgrade=upgrade,
+                pre=pre,
+                force=force,
             )
-            sys.exit(1)
+        )
 
-    # Proceed with actual install
-    args = ["uv", "pip", "install", "--torch-backend", "cu128"]
-    if upgrade:
-        args.append("--upgrade")
-    if editable:
-        args += ["--editable", editable]
-    if force_reinstall:
-        args.append("--force-reinstall")
-    if no_cache_dir:
-        args.append("--no-cache-dir")
-    if pre:
-        args.append("--pre")
-    args += list(packages)
-
-    result = subprocess.run(args, capture_output=False)
-
-    if result.returncode != 0:
-        sys.exit(result.returncode)
+    try:
+        result = _install()
+        click.echo(result["message"])
+    except PluginDependencyError as e:
+        click.echo(f"Dependency error: {e}", err=True)
+        click.echo("\nUse --force to install anyway (may break environment)", err=True)
+        sys.exit(1)
+    except PluginNameCollisionError as e:
+        click.echo(f"Name collision: {e}", err=True)
+        sys.exit(1)
+    except PluginInstallError as e:
+        click.echo(f"Installation failed: {e}", err=True)
+        sys.exit(1)
 
 
-@main.command(hidden=not _is_preview_enabled())
-@click.argument("packages", nargs=-1, required=True)
-@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation")
-def uninstall(packages, yes):
+@main.command()
+@click.argument("name", required=True)
+def uninstall(name):
     """Uninstall a plugin."""
-    args = ["uv", "pip", "uninstall"]
-    args += list(packages)
-    if yes:
-        args.append("-y")
+    import asyncio
 
-    result = subprocess.run(args, capture_output=False)
+    from scope.core.plugins.manager import (
+        PluginInstallError,
+        PluginNotFoundError,
+        get_plugin_manager,
+    )
 
-    if result.returncode != 0:
-        sys.exit(result.returncode)
+    @suppress_init_output
+    def _uninstall():
+        pm = get_plugin_manager()
+        pm.load_plugins()
+        return asyncio.run(pm.uninstall_plugin_async(name=name))
+
+    try:
+        result = _uninstall()
+        click.echo(result["message"])
+        if result.get("unloaded_pipelines"):
+            click.echo(f"Unloaded pipelines: {', '.join(result['unloaded_pipelines'])}")
+    except PluginNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except PluginInstallError as e:
+        click.echo(f"Uninstall failed: {e}", err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
