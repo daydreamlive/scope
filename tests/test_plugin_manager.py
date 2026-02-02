@@ -784,3 +784,353 @@ class TestGetPluginForPipeline:
         result = pm.get_plugin_for_pipeline("unknown-pipeline")
 
         assert result is None
+
+
+class TestVenvRollback:
+    """Tests for venv rollback during plugin installation."""
+
+    def test_snapshot_capture_called_before_install(self):
+        """Verify VenvSnapshot.capture() is called before installation."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(pm, "_sync_plugins", return_value=(True, None)):
+                        with patch(
+                            "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                        ) as mock_snapshot_class:
+                            mock_snapshot = MagicMock()
+                            mock_snapshot.capture.return_value = True
+                            mock_snapshot_class.return_value = mock_snapshot
+
+                            pm._install_plugin_sync("test-package")
+
+                            mock_snapshot.capture.assert_called_once()
+
+    def test_snapshot_discard_on_success(self):
+        """Verify VenvSnapshot.discard() is called on successful install."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(pm, "_sync_plugins", return_value=(True, None)):
+                        with patch(
+                            "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                        ) as mock_snapshot_class:
+                            mock_snapshot = MagicMock()
+                            mock_snapshot.capture.return_value = True
+                            mock_snapshot_class.return_value = mock_snapshot
+
+                            pm._install_plugin_sync("test-package")
+
+                            mock_snapshot.discard.assert_called_once()
+
+    def test_snapshot_discard_on_compile_failure(self):
+        """Verify VenvSnapshot.discard() is called on compile failure."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm, "_compile_plugins", return_value=(False, "", "Compile error")
+                ):
+                    with patch(
+                        "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                    ) as mock_snapshot_class:
+                        mock_snapshot = MagicMock()
+                        mock_snapshot.capture.return_value = True
+                        mock_snapshot_class.return_value = mock_snapshot
+
+                        with pytest.raises(PluginDependencyError):
+                            pm._install_plugin_sync("test-package")
+
+                        # Snapshot should be discarded (not restored) since
+                        # no packages were installed yet
+                        mock_snapshot.discard.assert_called_once()
+                        mock_snapshot.restore.assert_not_called()
+
+    def test_snapshot_restore_on_sync_failure(self):
+        """Verify VenvSnapshot.restore() is called on sync failure."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(False, "Sync error")
+                    ):
+                        with patch(
+                            "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                        ) as mock_snapshot_class:
+                            mock_snapshot = MagicMock()
+                            mock_snapshot.capture.return_value = True
+                            mock_snapshot.restore.return_value = (True, None)
+                            mock_snapshot_class.return_value = mock_snapshot
+
+                            with pytest.raises(PluginInstallError):
+                                pm._install_plugin_sync("test-package")
+
+                            # Snapshot should be restored since packages may have
+                            # been partially installed
+                            mock_snapshot.restore.assert_called_once()
+
+    def test_rollback_plugins_file_and_venv_on_sync_failure(self):
+        """Verify both plugins.txt and venv are rolled back on sync failure."""
+        pm = PluginManager()
+
+        original_plugins = ["existing-package"]
+        with patch.object(
+            pm, "_read_plugins_file", return_value=original_plugins.copy()
+        ):
+            with patch.object(pm, "_write_plugins_file") as mock_write:
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(False, "Sync error")
+                    ):
+                        with patch(
+                            "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                        ) as mock_snapshot_class:
+                            mock_snapshot = MagicMock()
+                            mock_snapshot.capture.return_value = True
+                            mock_snapshot.restore.return_value = (True, None)
+                            mock_snapshot_class.return_value = mock_snapshot
+
+                            with pytest.raises(PluginInstallError):
+                                pm._install_plugin_sync("new-package")
+
+        # Should have been called twice: once to add, once to rollback
+        assert mock_write.call_count == 2
+        # Last call should be the rollback with original plugins
+        mock_write.assert_called_with(original_plugins)
+
+    def test_logs_warning_on_restore_failure(self):
+        """Verify warning is logged if venv restore fails."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(False, "Sync error")
+                    ):
+                        with patch(
+                            "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                        ) as mock_snapshot_class:
+                            mock_snapshot = MagicMock()
+                            mock_snapshot.capture.return_value = True
+                            mock_snapshot.restore.return_value = (
+                                False,
+                                "Restore failed",
+                            )
+                            mock_snapshot_class.return_value = mock_snapshot
+
+                            with patch(
+                                "scope.core.plugins.manager.logger"
+                            ) as mock_logger:
+                                with pytest.raises(PluginInstallError):
+                                    pm._install_plugin_sync("test-package")
+
+                                # Should log error about failed restore
+                                mock_logger.error.assert_called()
+                                error_call = str(mock_logger.error.call_args)
+                                assert "rollback" in error_call.lower()
+
+    def test_proceeds_without_rollback_if_capture_fails(self):
+        """Verify installation proceeds if snapshot capture fails."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(pm, "_sync_plugins", return_value=(True, None)):
+                        with patch(
+                            "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                        ) as mock_snapshot_class:
+                            mock_snapshot = MagicMock()
+                            mock_snapshot.capture.return_value = False  # Capture fails
+                            mock_snapshot_class.return_value = mock_snapshot
+
+                            # Should not raise, installation should proceed
+                            result = pm._install_plugin_sync("test-package")
+
+                            assert result["success"] is True
+
+    def test_no_restore_if_capture_failed_and_sync_fails(self):
+        """Verify restore is not called if capture failed and sync fails."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file"):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(False, "Sync error")
+                    ):
+                        with patch(
+                            "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                        ) as mock_snapshot_class:
+                            mock_snapshot = MagicMock()
+                            mock_snapshot.capture.return_value = False  # Capture fails
+                            mock_snapshot_class.return_value = mock_snapshot
+
+                            with pytest.raises(PluginInstallError):
+                                pm._install_plugin_sync("test-package")
+
+                            # Restore should not be called since capture failed
+                            mock_snapshot.restore.assert_not_called()
+                            # But discard should still be called for cleanup
+                            mock_snapshot.discard.assert_called_once()
+
+
+class TestEditableVenvRollback:
+    """Tests for venv rollback during editable plugin installs."""
+
+    def test_snapshot_capture_called_for_editable(self):
+        """Verify snapshot is captured before editable install."""
+        pm = PluginManager()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with patch.object(
+                pm, "_get_package_name_from_path", return_value="test-package"
+            ):
+                with patch(
+                    "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                ) as MockSnapshot:
+                    mock_instance = MockSnapshot.return_value
+                    mock_instance.capture.return_value = True
+
+                    pm._install_editable_plugin("/path/to/plugin")
+
+                    mock_instance.capture.assert_called_once()
+                    mock_instance.discard.assert_called_once()
+
+    def test_snapshot_restore_on_editable_failure(self):
+        """Verify snapshot restore is called when editable install fails."""
+        pm = PluginManager()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="Build failed"
+            )
+            with patch("scope.core.plugins.venv_snapshot.VenvSnapshot") as MockSnapshot:
+                mock_instance = MockSnapshot.return_value
+                mock_instance.capture.return_value = True
+                mock_instance.restore.return_value = (True, None)
+
+                with pytest.raises(PluginInstallError):
+                    pm._install_editable_plugin("/path/to/plugin")
+
+                mock_instance.restore.assert_called_once()
+                mock_instance.discard.assert_called_once()
+
+    def test_snapshot_discard_on_editable_success(self):
+        """Verify snapshot discard is called on successful editable install."""
+        pm = PluginManager()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with patch.object(
+                pm, "_get_package_name_from_path", return_value="test-package"
+            ):
+                with patch(
+                    "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                ) as MockSnapshot:
+                    mock_instance = MockSnapshot.return_value
+                    mock_instance.capture.return_value = True
+
+                    pm._install_editable_plugin("/path/to/plugin")
+
+                    mock_instance.discard.assert_called_once()
+                    mock_instance.restore.assert_not_called()
+
+    def test_editable_proceeds_without_rollback_if_capture_fails(self):
+        """Verify editable installation proceeds if snapshot capture fails."""
+        pm = PluginManager()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with patch.object(
+                pm, "_get_package_name_from_path", return_value="test-package"
+            ):
+                with patch(
+                    "scope.core.plugins.venv_snapshot.VenvSnapshot"
+                ) as MockSnapshot:
+                    mock_instance = MockSnapshot.return_value
+                    mock_instance.capture.return_value = False  # Capture fails
+
+                    # Should not raise, installation should proceed
+                    result = pm._install_editable_plugin("/path/to/plugin")
+
+                    assert result["success"] is True
+
+    def test_editable_no_restore_if_capture_failed_and_install_fails(self):
+        """Verify restore is not called if capture failed and editable install fails."""
+        pm = PluginManager()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="Install error"
+            )
+            with patch("scope.core.plugins.venv_snapshot.VenvSnapshot") as MockSnapshot:
+                mock_instance = MockSnapshot.return_value
+                mock_instance.capture.return_value = False  # Capture fails
+
+                with pytest.raises(PluginInstallError):
+                    pm._install_editable_plugin("/path/to/plugin")
+
+                # Restore should not be called since capture failed
+                mock_instance.restore.assert_not_called()
+                # But discard should still be called for cleanup
+                mock_instance.discard.assert_called_once()
+
+    def test_editable_logs_warning_on_restore_failure(self):
+        """Verify warning is logged if venv restore fails during editable install."""
+        pm = PluginManager()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="Install error"
+            )
+            with patch("scope.core.plugins.venv_snapshot.VenvSnapshot") as MockSnapshot:
+                mock_instance = MockSnapshot.return_value
+                mock_instance.capture.return_value = True
+                mock_instance.restore.return_value = (False, "Restore failed")
+
+                with patch("scope.core.plugins.manager.logger") as mock_logger:
+                    with pytest.raises(PluginInstallError):
+                        pm._install_editable_plugin("/path/to/plugin")
+
+                    # Should log error about failed restore
+                    mock_logger.error.assert_called()
+                    error_call = str(mock_logger.error.call_args)
+                    assert "rollback" in error_call.lower()

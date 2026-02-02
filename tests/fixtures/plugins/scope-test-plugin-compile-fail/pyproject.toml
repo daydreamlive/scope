@@ -1,0 +1,15 @@
+[project]
+name = "scope-test-plugin-compile-fail"
+version = "0.1.0"
+description = "Test plugin that fails during dependency resolution"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=99.0.0",  # Impossible version - will fail compile
+]
+
+[project.entry-points."scope"]
+test-compile-fail = "scope_test_plugin_compile_fail.plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
