@@ -1,7 +1,6 @@
 import { spawn, ChildProcessWithoutNullStreams, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { app } from 'electron';
 import { PythonProcessService } from '../types/services';
 import { getPaths, SERVER_CONFIG, getEnhancedPath, setServerPort } from '../utils/config';
 import { logger } from '../utils/logger';
@@ -10,12 +9,14 @@ import { findAvailablePort } from '../utils/port';
 export class ScopePythonProcessService implements PythonProcessService {
   private serverProcess: ChildProcessWithoutNullStreams | null = null;
   private onErrorCallback: ((error: string) => void) | null = null;
+  private intentionalStop: boolean = false;
+  private lastUsedPort: number | null = null;  // Track the port for respawns
 
   setErrorCallback(callback: (error: string) => void): void {
     this.onErrorCallback = callback;
   }
 
-  async startServer(): Promise<void> {
+  async startServer(isRespawn: boolean = false): Promise<void> {
     if (this.serverProcess) {
       logger.warn('Server process already running');
       return;
@@ -45,18 +46,26 @@ export class ScopePythonProcessService implements PythonProcessService {
       }
     }
 
-    // Find an available port (use configured port as starting point)
-    const desiredPort = SERVER_CONFIG.port;
-    logger.info(`Finding available port starting from ${desiredPort}...`);
+    let portToUse: number;
 
-    // Find an available port
-    const availablePort = await findAvailablePort(desiredPort, SERVER_CONFIG.host);
+    if (isRespawn && this.lastUsedPort !== null) {
+      // On respawn, reuse the same port - the frontend expects it
+      portToUse = this.lastUsedPort;
+      logger.info(`Respawn: reusing port ${portToUse}`);
+    } else {
+      // Initial start: find an available port
+      const desiredPort = SERVER_CONFIG.port;
+      logger.info(`Finding available port starting from ${desiredPort}...`);
+      portToUse = await findAvailablePort(desiredPort, SERVER_CONFIG.host);
 
-    // Update the server config with the actual port we're using
-    if (availablePort !== desiredPort) {
-      logger.info(`Port ${desiredPort} was busy, using port ${availablePort} instead`);
+      if (portToUse !== desiredPort) {
+        logger.info(`Port ${desiredPort} was busy, using port ${portToUse} instead`);
+      }
     }
-    setServerPort(availablePort);
+
+    // Track the port for future respawns
+    this.lastUsedPort = portToUse;
+    setServerPort(portToUse);
 
     logger.info(`Starting server with: ${uvCommand} run daydream-scope --host ${SERVER_CONFIG.host} --port ${SERVER_CONFIG.port} --no-browser`);
     logger.info(`Working directory: ${projectRoot}`);
@@ -92,6 +101,10 @@ export class ScopePythonProcessService implements PythonProcessService {
         // Use UV_PROJECT_ENVIRONMENT to use .venv from userData (writable)
         // while running source code from resources (read-only)
         UV_PROJECT_ENVIRONMENT: paths.venvPath,
+        // Signal to the Python server that its lifecycle is managed externally.
+        // When set, the server will exit with code 42 on restart instead of
+        // using os.execv, allowing us to maintain PID tracking.
+        DAYDREAM_SCOPE_MANAGED: '1',
       },
     });
 
@@ -114,24 +127,46 @@ export class ScopePythonProcessService implements PythonProcessService {
 
     child.on('close', (code, signal) => {
       logger.info(`[SERVER] closed with code ${code}, signal ${signal}`);
-      if (code !== 0 && code !== null) {
+      const wasIntentionalStop = this.intentionalStop;
+      this.serverProcess = null;
+      this.intentionalStop = false;
+
+      // Exit code 42 = server requested restart, respawn unless intentionally stopped
+      if (code === 42 && !wasIntentionalStop) {
+        logger.info('[SERVER] Server requested restart (exit code 42), respawning after delay...');
+        // Add a delay before respawning to ensure the port is fully released
+        // Windows can keep ports in TIME_WAIT state briefly after process exit
+        setTimeout(() => {
+          logger.info('[SERVER] Delay complete, starting respawn...');
+          this.startServer(true).catch((err) => {
+            logger.error('[SERVER] Failed to respawn server:', err);
+            if (this.onErrorCallback) {
+              this.onErrorCallback(`Failed to restart server: ${err.message}`);
+            }
+          });
+        }, 1000);  // 1 second delay
+        return;
+      }
+
+      // Other non-zero exit codes are errors (unless intentionally stopped)
+      if (code !== 0 && code !== null && !wasIntentionalStop) {
         const errorMsg = `Server process exited with code ${code}${signal ? ` (signal: ${signal})` : ''}${stderrBuffer ? `\n\nError output:\n${stderrBuffer}` : ''}`;
         if (this.onErrorCallback) {
           this.onErrorCallback(errorMsg);
         }
       }
-      this.serverProcess = null;
     });
 
     child.on('exit', (code, signal) => {
       logger.info(`[SERVER] exited with code ${code}, signal ${signal}`);
-      if (code !== 0 && code !== null) {
+      // Note: 'close' handler handles cleanup and respawn logic
+      // Exit code 42 means server requested restart - not an error
+      if (code !== 0 && code !== null && code !== 42 && !this.intentionalStop) {
         const errorMsg = `Server process exited with code ${code}${signal ? ` (signal: ${signal})` : ''}${stderrBuffer ? `\n\nError output:\n${stderrBuffer}` : ''}`;
         if (this.onErrorCallback) {
           this.onErrorCallback(errorMsg);
         }
       }
-      this.serverProcess = null;
     });
 
     child.on('error', (err) => {
@@ -145,6 +180,7 @@ export class ScopePythonProcessService implements PythonProcessService {
   }
 
   stopServer(): void {
+    this.intentionalStop = true;  // Mark as intentional to prevent respawn on exit code 42
     if (this.serverProcess) {
       logger.info('Stopping server...');
       const pid = this.serverProcess.pid;

@@ -20,6 +20,30 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
+const isLocalPath = (spec: string): boolean => {
+  const s = spec.trim();
+  return (
+    s.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(s) ||
+    s.startsWith("./") ||
+    s.startsWith(".\\") ||
+    s.startsWith("../") ||
+    s.startsWith("..\\") ||
+    s.startsWith("~/")
+  );
+};
+
+// Electron preload exposes scope API on window
+interface ScopeAPI {
+  browseDirectory?: (title: string) => Promise<string | null>;
+}
+
+declare global {
+  interface Window {
+    scope?: ScopeAPI;
+  }
+}
+
 export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
   const [modelsDirectory, setModelsDirectory] = useState(
@@ -81,16 +105,23 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setLogsDirectory(value);
   };
 
-  const handleBrowsePlugin = () => {
-    console.log("Browse for plugin clicked");
-    // TODO: Open file dialog via Electron IPC
+  const handleBrowseLocalPlugin = async () => {
+    if (window.scope?.browseDirectory) {
+      const path = await window.scope.browseDirectory(
+        "Select Plugin Directory"
+      );
+      if (path) setPluginInstallPath(path);
+    }
   };
 
   const handleInstallPlugin = async (packageSpec: string) => {
     setIsInstalling(true);
     isModifyingPluginsRef.current = true;
     try {
-      const response = await installPlugin({ package: packageSpec });
+      const response = await installPlugin({
+        package: packageSpec,
+        editable: isLocalPath(packageSpec),
+      });
       if (response.success) {
         const pluginName = response.plugin?.name || packageSpec;
         toast.success(`Installed ${pluginName}. Restarting server...`);
@@ -224,6 +255,24 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     }
   };
 
+  const handleReloadPlugin = async (pluginName: string) => {
+    isModifyingPluginsRef.current = true;
+    try {
+      toast.info(`Reloading ${pluginName}. Restarting server...`);
+      const oldStartTime = await restartServer();
+      await waitForServer(oldStartTime);
+      toast.success("Server restarted");
+      await fetchPlugins();
+      await refetchPipelines();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to reload plugin"
+      );
+    } finally {
+      isModifyingPluginsRef.current = false;
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[600px] p-0 gap-0">
@@ -267,10 +316,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 plugins={plugins}
                 installPath={pluginInstallPath}
                 onInstallPathChange={setPluginInstallPath}
-                onBrowse={handleBrowsePlugin}
+                onBrowse={handleBrowseLocalPlugin}
                 onInstall={handleInstallPlugin}
                 onUpdate={handleUpdatePlugin}
                 onDelete={handleDeletePlugin}
+                onReload={handleReloadPlugin}
                 isLoading={isLoadingPlugins}
                 isInstalling={isInstalling}
               />

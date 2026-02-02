@@ -87,4 +87,6 @@ contextBridge.exposeInMainWorld('scope', {
   showContextMenu: () => ipcRenderer.invoke(IPC_CHANNELS.SHOW_CONTEXT_MENU),
 
   getLogs: () => ipcRenderer.invoke(IPC_CHANNELS.GET_LOGS),
+
+  browseDirectory: (title?: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSE_DIRECTORY, title),
 });

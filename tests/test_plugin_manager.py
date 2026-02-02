@@ -430,11 +430,7 @@ class TestInstallPlugin:
                     with patch.object(
                         pm, "_sync_plugins", return_value=(True, None)
                     ) as mock_sync:
-                        with patch.object(pm, "_reload_all_plugins"):
-                            with patch.object(
-                                pm, "_list_plugins_sync", return_value=[]
-                            ):
-                                pm._install_plugin_sync("test-package")
+                        pm._install_plugin_sync("test-package")
 
         mock_compile.assert_called_once()
         mock_sync.assert_called_once_with("/tmp/resolved.txt")
@@ -445,9 +441,10 @@ class TestInstallPlugin:
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            with patch.object(pm, "_reload_all_plugins"):
-                with patch.object(pm, "_list_plugins_sync", return_value=[]):
-                    pm._install_plugin_sync("/path/to/package", editable=True)
+            with patch.object(
+                pm, "_get_package_name_from_path", return_value="test-package"
+            ):
+                pm._install_plugin_sync("/path/to/package", editable=True)
 
         args = mock_run.call_args[0][0]
         assert "--editable" in args
@@ -464,11 +461,7 @@ class TestInstallPlugin:
                     return_value=(True, "/tmp/resolved.txt", None),
                 ) as mock_compile:
                     with patch.object(pm, "_sync_plugins", return_value=(True, None)):
-                        with patch.object(pm, "_reload_all_plugins"):
-                            with patch.object(
-                                pm, "_list_plugins_sync", return_value=[]
-                            ):
-                                pm._install_plugin_sync("test-package", upgrade=True)
+                        pm._install_plugin_sync("test-package", upgrade=True)
 
         # Check that upgrade_package was passed to _compile_plugins
         mock_compile.assert_called_once_with(upgrade_package="test-package")
