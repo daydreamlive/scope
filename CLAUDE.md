@@ -74,6 +74,13 @@ Electron main process → spawns Python backend → waits for health check → l
 - **Thread Safety**: Reentrant locks protect pipeline access
 - **Pydantic Configs**: Type-safe configuration using Pydantic models
 
+### Additional Documentation
+
+This documentation can be used to understand the architecture of the project:
+
+- The `docs/api` directory contains server API reference
+- The `docs/architecture` contains architecture documents describing different systems used within the project
+
 ## Contributing Requirements
 
 - All commits must be signed off (DCO): `git commit -s`
