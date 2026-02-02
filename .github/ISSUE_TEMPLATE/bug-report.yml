@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report!
-        
+
   - type: textarea
     attributes:
       label: Summary
@@ -16,7 +16,7 @@ body:
         Please include the full output from `uv run daydream-scope` with the complete error message.
     validations:
       required: true
-      
+
   - type: input
     attributes:
       label: Platform
@@ -24,7 +24,7 @@ body:
       placeholder: e.g. macOS 14 arm64, Windows 11 x86_64, Ubuntu 20.04 amd64
     validations:
       required: true
-      
+
   - type: input
     attributes:
       label: Nvidia GPU
@@ -32,7 +32,7 @@ body:
       placeholder: e.g. NVIDIA GeForce RTX 4090, 24564 MiB
     validations:
       required: true
-      
+
   - type: input
     attributes:
       label: Scope Version
@@ -40,7 +40,7 @@ body:
       placeholder: "e.g. daydream-scope: 0.1.0a1 git commit: 4baaaec"
     validations:
       required: true
-      
+
   - type: input
     attributes:
       label: uv Version
@@ -48,7 +48,7 @@ body:
       placeholder: e.g. uv 0.8.22
     validations:
       required: false
-      
+
   - type: input
     attributes:
       label: node Version
