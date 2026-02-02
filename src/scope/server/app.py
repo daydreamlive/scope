@@ -1079,7 +1079,10 @@ async def install_plugin(
         )
         raise HTTPException(
             status_code=422,
-            detail=f"Dependency validation failed: {e}",
+            detail=(
+                f"Failed to install {install_request.package}: "
+                "dependency conflict. Check server logs for details."
+            ),
         ) from e
     except PluginNameCollisionError as e:
         logger.error(
@@ -1087,17 +1090,26 @@ async def install_plugin(
         )
         raise HTTPException(
             status_code=409,
-            detail=str(e),
+            detail=f"Plugin name collision: {install_request.package}",
         ) from e
     except PluginInstallError as e:
         logger.error(f"Plugin install failed: {install_request.package} - {e}")
         raise HTTPException(
             status_code=500,
-            detail=str(e),
+            detail=(
+                f"Failed to install {install_request.package}. "
+                "Check server logs for details."
+            ),
         ) from e
     except Exception as e:
         logger.error(f"Plugin install failed: {install_request.package} - {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Failed to install {install_request.package}. "
+                "Check server logs for details."
+            ),
+        ) from e
 
 
 @app.delete("/api/v1/plugins/{name}")
@@ -1134,17 +1146,20 @@ async def uninstall_plugin(
         logger.error(f"Plugin uninstall failed (not found): {name} - {e}")
         raise HTTPException(
             status_code=404,
-            detail=str(e),
+            detail=f"Plugin '{name}' not found",
         ) from e
     except PluginInstallError as e:
         logger.error(f"Plugin uninstall failed: {name} - {e}")
         raise HTTPException(
             status_code=500,
-            detail=str(e),
+            detail=f"Failed to uninstall {name}. Check server logs for details.",
         ) from e
     except Exception as e:
         logger.error(f"Plugin uninstall failed: {name} - {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to uninstall {name}. Check server logs for details.",
+        ) from e
 
 
 @app.post("/api/v1/plugins/{name}/reload")
@@ -1185,26 +1200,32 @@ async def reload_plugin(
         )
 
     except PluginNotFoundError as e:
+        logger.error(f"Plugin reload failed (not found): {name} - {e}")
         raise HTTPException(
             status_code=404,
-            detail=str(e),
+            detail=f"Plugin '{name}' not found",
         ) from e
     except PluginNotEditableError as e:
+        logger.error(f"Plugin reload failed (not editable): {name} - {e}")
         raise HTTPException(
             status_code=400,
-            detail=str(e),
+            detail=f"Plugin '{name}' is not installed in editable mode",
         ) from e
     except PluginInUseError as e:
+        logger.error(f"Plugin reload failed (in use): {name} - {e}")
         raise HTTPException(
             status_code=409,
             detail={
-                "message": str(e),
+                "message": f"Plugin '{name}' has loaded pipelines. Use force=true to unload them.",
                 "loaded_pipelines": e.loaded_pipelines,
             },
         ) from e
     except Exception as e:
-        logger.error(f"Error reloading plugin: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error(f"Plugin reload failed: {name} - {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reload {name}. Check server logs for details.",
+        ) from e
 
 
 @app.get("/{path:path}")

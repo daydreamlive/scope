@@ -1,0 +1,16 @@
+[project]
+name = "scope-test-plugin-sync-fail"
+version = "0.1.0"
+description = "Test plugin that fails during pip install"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.entry-points."scope"]
+test-sync-fail = "scope_test_plugin_sync_fail.plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"

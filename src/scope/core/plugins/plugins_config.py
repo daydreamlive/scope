@@ -75,3 +75,29 @@ def get_resolved_file() -> Path:
         Path: Absolute path to resolved.txt
     """
     return get_plugins_dir() / "resolved.txt"
+
+
+def get_resolved_backup_file() -> Path:
+    """
+    Get the path to resolved.txt.bak backup file.
+
+    This file is used during plugin installation rollback to restore
+    the previous resolved.txt if installation fails.
+
+    Returns:
+        Path: Absolute path to resolved.txt.bak
+    """
+    return get_plugins_dir() / "resolved.txt.bak"
+
+
+def get_freeze_backup_file() -> Path:
+    """
+    Get the path to freeze.txt file.
+
+    This file contains the output of `uv pip freeze` captured before
+    plugin installation, used to restore the venv state on failure.
+
+    Returns:
+        Path: Absolute path to freeze.txt
+    """
+    return get_plugins_dir() / "freeze.txt"

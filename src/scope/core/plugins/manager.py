@@ -716,8 +716,11 @@ class PluginManager:
         """Synchronous implementation of install_plugin.
 
         Uses compile-based resolution to ensure plugins respect project
-        constraints (e.g., torch pin).
+        constraints (e.g., torch pin). Includes freeze-based rollback to
+        restore venv state if installation fails after compile succeeds.
         """
+        from .venv_snapshot import VenvSnapshot
+
         # For editable installs, use direct pip install (local dev)
         if editable:
             return self._install_editable_plugin(package)
@@ -740,6 +743,14 @@ class PluginManager:
         # Store original for rollback
         original_plugins = plugins.copy()
 
+        # Capture venv state before installation for rollback
+        snapshot = VenvSnapshot()
+        snapshot_captured = snapshot.capture()
+        if not snapshot_captured:
+            logger.warning(
+                "Failed to capture venv snapshot, proceeding without rollback support"
+            )
+
         # Update plugins list
         if existing_idx is not None:
             plugins[existing_idx] = package  # Update specifier
@@ -755,8 +766,9 @@ class PluginManager:
         )
 
         if not success:
-            # Rollback plugins.txt on failure
+            # Rollback plugins.txt on failure (no venv changes yet)
             self._write_plugins_file(original_plugins)
+            snapshot.discard()  # Clean up snapshot files
             raise PluginDependencyError(f"Dependency resolution failed: {error}")
 
         # Install resolved packages
@@ -764,9 +776,28 @@ class PluginManager:
         success, error = self._sync_plugins(resolved_file)
 
         if not success:
-            # Rollback plugins.txt on failure
+            # Rollback plugins.txt
             self._write_plugins_file(original_plugins)
+
+            # Attempt venv rollback if we have a snapshot
+            if snapshot_captured:
+                logger.info("Attempting venv rollback from snapshot...")
+                restore_success, restore_error = snapshot.restore()
+                if restore_success:
+                    logger.info("Successfully rolled back venv state")
+                    snapshot.discard()  # Clean up backup files after successful restore
+                else:
+                    logger.error(
+                        f"Failed to rollback venv state: {restore_error}. "
+                        "Manual recovery may be required: delete .venv and run 'uv sync'"
+                    )
+            else:
+                snapshot.discard()
+
             raise PluginInstallError(f"Installation failed: {error}")
+
+        # Success - clean up snapshot files
+        snapshot.discard()
 
         # Don't try to reload plugins in-process - the server restart will
         # handle loading the new plugin with a clean slate (no caching issues)
@@ -781,7 +812,18 @@ class PluginManager:
 
         Editable installs bypass compile-based resolution since they're
         used for local development where the developer manages dependencies.
+        Still uses snapshot-based rollback to protect venv integrity.
         """
+        from .venv_snapshot import VenvSnapshot
+
+        # Capture venv state before installation for rollback
+        snapshot = VenvSnapshot()
+        snapshot_captured = snapshot.capture()
+        if not snapshot_captured:
+            logger.warning(
+                "Failed to capture venv snapshot, proceeding without rollback support"
+            )
+
         args = [
             "uv",
             "pip",
@@ -810,12 +852,28 @@ class PluginManager:
             logger.info(f"uv pip install stderr: {result.stderr}")
 
         if result.returncode != 0:
+            # Attempt venv rollback if we have a snapshot
+            if snapshot_captured:
+                logger.info("Attempting venv rollback from snapshot...")
+                restore_success, restore_error = snapshot.restore()
+                if restore_success:
+                    logger.info("Successfully rolled back venv state")
+                    snapshot.discard()
+                else:
+                    logger.error(
+                        f"Failed to rollback venv state: {restore_error}. "
+                        "Manual recovery may be required: delete .venv and run 'uv sync'"
+                    )
+            else:
+                snapshot.discard()
+
             raise PluginInstallError(
                 f"Installation failed: {result.stderr or result.stdout}"
             )
 
-        # Don't try to reload plugins in-process - the server restart will
-        # handle loading the new plugin with a clean slate (no caching issues)
+        # Success - clean up snapshot files
+        snapshot.discard()
+
         package_path = Path(package).resolve()
         package_name = self._get_package_name_from_path(package_path)
 

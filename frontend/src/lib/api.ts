@@ -479,11 +479,28 @@ export interface PluginUninstallResponse {
   unloaded_pipelines: string[];
 }
 
+// Helper to extract user-friendly error message from API response
+const extractErrorDetail = async (response: Response): Promise<string> => {
+  try {
+    const errorJson = await response.json();
+    // FastAPI HTTPException returns { detail: "message" }
+    if (errorJson.detail) {
+      return typeof errorJson.detail === "string"
+        ? errorJson.detail
+        : JSON.stringify(errorJson.detail);
+    }
+    return JSON.stringify(errorJson);
+  } catch {
+    // If JSON parsing fails, fall back to text
+    return response.statusText || "Unknown error";
+  }
+};
+
 export const listPlugins = async (): Promise<PluginListResponse> => {
   const response = await fetch("/api/v1/plugins");
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`List plugins failed: ${response.status}: ${errorText}`);
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
   }
   return response.json();
 };
@@ -497,8 +514,8 @@ export const installPlugin = async (
     body: JSON.stringify(request),
   });
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Install plugin failed: ${response.status}: ${errorText}`);
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
   }
   return response.json();
 };
@@ -510,10 +527,8 @@ export const uninstallPlugin = async (
     method: "DELETE",
   });
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Uninstall plugin failed: ${response.status}: ${errorText}`
-    );
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
   }
   return response.json();
 };
