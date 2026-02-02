@@ -6,9 +6,21 @@ declared dependencies before installation, preventing venv corruption.
 
 import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _get_torch_backend_args() -> list[str]:
+    """Return torch backend args appropriate for the current platform.
+
+    On Linux/Windows, use CUDA 12.8 backend. On Mac (darwin), omit the flag
+    entirely since there are no CUDA wheels available for Mac.
+    """
+    if sys.platform in ("linux", "win32"):
+        return ["--torch-backend", "cu128"]
+    return []
 
 
 @dataclass
@@ -67,8 +79,7 @@ class DependencyValidator:
                     "compile",
                     str(pyproject_path),
                     plugin_requirements,
-                    "--torch-backend",
-                    "cu128",
+                    *_get_torch_backend_args(),
                     "--quiet",
                 ],
                 capture_output=True,

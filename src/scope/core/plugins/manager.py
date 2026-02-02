@@ -23,6 +23,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _get_torch_backend_args() -> list[str]:
+    """Return torch backend args appropriate for the current platform.
+
+    On Linux/Windows, use CUDA 12.8 backend. On Mac (darwin), omit the flag
+    entirely since there are no CUDA wheels available for Mac.
+    """
+    if sys.platform in ("linux", "win32"):
+        return ["--torch-backend", "cu128"]
+    return []
+
+
 class PluginNotFoundError(Exception):
     """Plugin not found."""
 
@@ -122,8 +133,7 @@ class PluginManager:
             "pip",
             "compile",
             str(pyproject),
-            "--torch-backend",
-            "cu128",
+            *_get_torch_backend_args(),
             "-o",
             str(resolved_file),
         ]
@@ -160,7 +170,7 @@ class PluginManager:
         Returns:
             Tuple of (success, error_message)
         """
-        args = ["uv", "pip", "install", "--torch-backend", "cu128", "-r", resolved_file]
+        args = ["uv", "pip", "install", *_get_torch_backend_args(), "-r", resolved_file]
         logger.info(f"Running: {' '.join(args)}")
 
         env = {**os.environ, "PYTHONUTF8": "1"}
@@ -480,8 +490,7 @@ class PluginManager:
                 "pip",
                 "compile",
                 str(pyproject),
-                "--torch-backend",
-                "cu128",
+                *_get_torch_backend_args(),
                 "-o",
                 temp_resolved,
                 "--upgrade-package",
@@ -828,8 +837,7 @@ class PluginManager:
             "uv",
             "pip",
             "install",
-            "--torch-backend",
-            "cu128",
+            *_get_torch_backend_args(),
             "--editable",
             package,
         ]

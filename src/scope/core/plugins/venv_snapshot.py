@@ -18,6 +18,20 @@ from .plugins_config import (
 logger = logging.getLogger(__name__)
 
 
+def _get_torch_backend_args() -> list[str]:
+    """Return torch backend args appropriate for the current platform.
+
+    On Linux/Windows, use CUDA 12.8 backend. On Mac (darwin), omit the flag
+    entirely since there are no CUDA wheels available for Mac.
+    """
+    # Import here to avoid circular imports and ensure sys is available
+    import sys
+
+    if sys.platform in ("linux", "win32"):
+        return ["--torch-backend", "cu128"]
+    return []
+
+
 class VenvSnapshot:
     """Captures and restores venv state for rollback.
 
@@ -105,8 +119,7 @@ class VenvSnapshot:
                     "uv",
                     "pip",
                     "sync",
-                    "--torch-backend",
-                    "cu128",
+                    *_get_torch_backend_args(),
                     str(self._freeze_file),
                 ],
                 capture_output=True,
