@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Settings } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
@@ -9,6 +9,28 @@ interface HeaderProps {
 
 export function Header({ className = "" }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [initialTab, setInitialTab] = useState<"general" | "plugins">(
+    "general"
+  );
+  const [initialPluginPath, setInitialPluginPath] = useState("");
+
+  useEffect(() => {
+    if (window.scope?.onDeepLinkAction) {
+      return window.scope.onDeepLinkAction(data => {
+        if (data.action === "install-plugin" && data.package) {
+          setInitialTab("plugins");
+          setInitialPluginPath(data.package);
+          setSettingsOpen(true);
+        }
+      });
+    }
+  }, []);
+
+  const handleClose = () => {
+    setSettingsOpen(false);
+    setInitialTab("general");
+    setInitialPluginPath("");
+  };
 
   return (
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
@@ -27,7 +49,9 @@ export function Header({ className = "" }: HeaderProps) {
 
       <SettingsDialog
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={handleClose}
+        initialTab={initialTab}
+        initialPluginPath={initialPluginPath}
       />
     </header>
   );

@@ -10,6 +10,12 @@ import { ScopeElectronAppService } from './services/electronApp';
 import { logger } from './utils/logger';
 import { SERVER_CONFIG, validateConfig } from './utils/config';
 
+// Protocol scheme for deep links
+const PROTOCOL_SCHEME = 'daydream-scope';
+
+// Store pending deep link for processing after frontend loads
+let pendingDeepLink: { action: string; package: string } | null = null;
+
 // Configure electron-log for auto-updater
 log.transports.file.level = 'info';
 autoUpdater.logger = log;
@@ -164,6 +170,15 @@ let setupService: ScopeSetupService;
 let pythonProcessService: ScopePythonProcessService;
 let electronAppService: ScopeElectronAppService;
 
+// Register as default protocol client for deep links
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(PROTOCOL_SCHEME, process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
+}
+
 // Request single instance lock for Windows Jump List functionality
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -187,7 +202,72 @@ if (!gotTheLock) {
         electronAppService.showLogsWindow();
       }
     }
+
+    // Check for deep link URL in command line (Windows/Linux)
+    const deepLinkArg = commandLine.find(arg => arg.startsWith(`${PROTOCOL_SCHEME}://`));
+    if (deepLinkArg) {
+      const data = parseDeepLinkUrl(deepLinkArg);
+      if (data) {
+        if (electronAppService) {
+          electronAppService.sendDeepLinkAction(data);
+        } else {
+          pendingDeepLink = data;
+        }
+      }
+    }
   });
+
+  // Handle deep links on macOS
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    const data = parseDeepLinkUrl(url);
+    if (data) {
+      if (electronAppService) {
+        electronAppService.sendDeepLinkAction(data);
+      } else {
+        pendingDeepLink = data;
+      }
+      // Focus window
+      if (appState.mainWindow) {
+        if (appState.mainWindow.isMinimized()) appState.mainWindow.restore();
+        appState.mainWindow.focus();
+      }
+    }
+  });
+}
+
+/**
+ * Parse deep link URL and extract action and parameters
+ */
+function parseDeepLinkUrl(url: string): { action: string; package: string } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== `${PROTOCOL_SCHEME}:`) return null;
+
+    const action = parsed.hostname;
+    const packageSpec = parsed.searchParams.get('package');
+
+    if (action === 'install-plugin' && packageSpec) {
+      return { action, package: decodeURIComponent(packageSpec) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Process any pending deep link after frontend loads
+ */
+function processPendingDeepLink(): void {
+  if (pendingDeepLink && electronAppService) {
+    setTimeout(() => {
+      if (pendingDeepLink) {
+        electronAppService.sendDeepLinkAction(pendingDeepLink);
+        pendingDeepLink = null;
+      }
+    }, 500);
+  }
 }
 
 /**
@@ -444,6 +524,7 @@ async function startServer(): Promise<void> {
       appState.isServerRunning = true;
       electronAppService.sendServerStatus(true);
       electronAppService.loadFrontend();
+      processPendingDeepLink();
     } else {
       throw new Error('Server failed to start within timeout period');
     }
@@ -751,6 +832,7 @@ app.on('ready', async () => {
     // Small delay to ensure renderer has shown the loading state
     await new Promise(resolve => setTimeout(resolve, 500));
     electronAppService.loadFrontend();
+    processPendingDeepLink();
   } else {
     // Start the Python server (it will wait for server to be ready and load frontend)
     // The renderer will show ServerLoading screen while we wait
@@ -790,6 +872,7 @@ app.on('activate', async () => {
       // Wait a moment for window to be ready, then load frontend
       await electronAppService.waitForMainWindowLoad();
       electronAppService.loadFrontend();
+      processPendingDeepLink();
     } else {
       // Check if setup is needed
       appState.needsSetup = setupService.isSetupNeeded();

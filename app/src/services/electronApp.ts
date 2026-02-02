@@ -387,6 +387,10 @@ export class ScopeElectronAppService {
     this.sendIPC(IPC_CHANNELS.SERVER_ERROR, error);
   }
 
+  sendDeepLinkAction(data: { action: string; package: string }): void {
+    this.sendIPC(IPC_CHANNELS.DEEP_LINK_ACTION, data);
+  }
+
   waitForMainWindowLoad(): Promise<void> {
     return new Promise((resolve) => {
       if (!this.appState.mainWindow) {

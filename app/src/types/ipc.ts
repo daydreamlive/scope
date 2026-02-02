@@ -16,6 +16,9 @@ export const IPC_CHANNELS = {
 
   // File system
   BROWSE_DIRECTORY: 'browse-directory',
+
+  // Deep links
+  DEEP_LINK_ACTION: 'deep-link-action',
 } as const;
 
 export const SETUP_STATUS = {
