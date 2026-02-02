@@ -89,6 +89,23 @@ export function GeneralTab({
           </div>
         </div>
 
+        {/* Server URL */}
+        <div className="flex items-center gap-4">
+          <label
+            htmlFor="server-url"
+            className="text-sm font-medium text-foreground whitespace-nowrap w-32"
+          >
+            Server URL
+          </label>
+          <Input
+            id="server-url"
+            value={window.location.origin}
+            readOnly
+            className="flex-1"
+            disabled
+          />
+        </div>
+
         {/* Models Directory */}
         <div className="flex items-center gap-4">
           <label
@@ -103,6 +120,7 @@ export function GeneralTab({
             onChange={e => onModelsDirectoryChange(e.target.value)}
             placeholder="~/.daydream-scope/models"
             className="flex-1"
+            disabled
           />
         </div>
 
@@ -120,6 +138,7 @@ export function GeneralTab({
             onChange={e => onLogsDirectoryChange(e.target.value)}
             placeholder="~/.daydream-scope/logs"
             className="flex-1"
+            disabled
           />
         </div>
       </div>
