@@ -12,6 +12,7 @@ import {
   uninstallPlugin,
   restartServer,
   waitForServer,
+  getServerInfo,
 } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -66,6 +67,8 @@ export function SettingsDialog({
   const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const [version, setVersion] = useState<string>("");
+  const [gitCommit, setGitCommit] = useState<string>("");
   // Track install/update/uninstall operations to suppress spurious error toasts
   const isModifyingPluginsRef = useRef(false);
 
@@ -78,6 +81,18 @@ export function SettingsDialog({
       }
     }
   }, [open, initialTab, initialPluginPath]);
+
+  // Fetch version when dialog opens
+  useEffect(() => {
+    if (open) {
+      getServerInfo()
+        .then(info => {
+          setVersion(info.version);
+          setGitCommit(info.gitCommit);
+        })
+        .catch(err => console.error("Failed to fetch server info:", err));
+    }
+  }, [open]);
 
   const fetchPlugins = useCallback(async () => {
     setIsLoadingPlugins(true);
@@ -323,7 +338,8 @@ export function SettingsDialog({
           <div className="flex-1 min-w-0 p-4 pt-10 h-[40vh] overflow-y-auto">
             <TabsContent value="general" className="mt-0">
               <GeneralTab
-                version="0.1.0"
+                version={version}
+                gitCommit={gitCommit}
                 modelsDirectory={modelsDirectory}
                 logsDirectory={logsDirectory}
                 onModelsDirectoryChange={handleModelsDirectoryChange}

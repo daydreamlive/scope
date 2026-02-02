@@ -318,6 +318,8 @@ async def health_check():
         status="healthy",
         timestamp=datetime.now().isoformat(),
         server_start_time=server_start_time,
+        version=version("daydream-scope"),
+        git_commit=get_git_commit_hash(),
     )
 
 

@@ -31,6 +31,8 @@ class HealthResponse(BaseModel):
     server_start_time: float = Field(
         ..., description="Unix timestamp when the server started"
     )
+    version: str = Field(..., description="Server version")
+    git_commit: str = Field(..., description="Git commit hash")
 
 
 class PromptItem(BaseModel):

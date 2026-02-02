@@ -3,6 +3,7 @@ import { Input } from "../ui/input";
 
 interface GeneralTabProps {
   version: string;
+  gitCommit: string;
   modelsDirectory: string;
   logsDirectory: string;
   onModelsDirectoryChange: (value: string) => void;
@@ -12,6 +13,7 @@ interface GeneralTabProps {
 
 export function GeneralTab({
   version,
+  gitCommit,
   modelsDirectory,
   logsDirectory,
   onModelsDirectoryChange,
@@ -45,7 +47,10 @@ export function GeneralTab({
             Version
           </span>
           <div className="flex-1 flex items-center justify-end">
-            <span className="text-sm text-muted-foreground">{version}</span>
+            <span className="text-sm text-muted-foreground">
+              {version}
+              {gitCommit && ` (${gitCommit})`}
+            </span>
           </div>
         </div>
 

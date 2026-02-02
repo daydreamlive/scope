@@ -580,6 +580,28 @@ export const waitForServer = async (
   throw new Error("Server did not restart in time");
 };
 
+export interface HealthResponse {
+  status: string;
+  timestamp: string;
+  server_start_time: number;
+  version: string;
+  git_commit: string;
+}
+
+export interface ServerInfo {
+  version: string;
+  gitCommit: string;
+}
+
+export async function getServerInfo(): Promise<ServerInfo> {
+  const response = await fetch("/health");
+  if (!response.ok) {
+    throw new Error("Failed to fetch server info");
+  }
+  const data: HealthResponse = await response.json();
+  return { version: data.version, gitCommit: data.git_commit };
+}
+
 export const downloadRecording = async (sessionId: string): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");
