@@ -18,6 +18,8 @@ import { toast } from "sonner";
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
+  initialTab?: "general" | "plugins";
+  initialPluginPath?: string;
 }
 
 const isLocalPath = (spec: string): boolean => {
@@ -36,6 +38,9 @@ const isLocalPath = (spec: string): boolean => {
 // Electron preload exposes scope API on window
 interface ScopeAPI {
   browseDirectory?: (title: string) => Promise<string | null>;
+  onDeepLinkAction?: (
+    callback: (data: { action: string; package: string }) => void
+  ) => () => void;
 }
 
 declare global {
@@ -44,20 +49,35 @@ declare global {
   }
 }
 
-export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
+export function SettingsDialog({
+  open,
+  onClose,
+  initialTab = "general",
+  initialPluginPath = "",
+}: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
   );
   const [logsDirectory, setLogsDirectory] = useState("~/.daydream-scope/logs");
   const [reportBugOpen, setReportBugOpen] = useState(false);
-  const [pluginInstallPath, setPluginInstallPath] = useState("");
+  const [pluginInstallPath, setPluginInstallPath] = useState(initialPluginPath);
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
   // Track install/update/uninstall operations to suppress spurious error toasts
   const isModifyingPluginsRef = useRef(false);
+
+  // Sync state when dialog opens with initial values from props
+  useEffect(() => {
+    if (open) {
+      setActiveTab(initialTab);
+      if (initialPluginPath) {
+        setPluginInstallPath(initialPluginPath);
+      }
+    }
+  }, [open, initialTab, initialPluginPath]);
 
   const fetchPlugins = useCallback(async () => {
     setIsLoadingPlugins(true);
