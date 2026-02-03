@@ -45,7 +45,7 @@ export function SliderWithInput({
   incrementAmount = step,
   disabled = false,
   className = "",
-  labelClassName = "text-sm text-foreground w-16",
+  labelClassName = "text-sm font-medium w-16",
   debounceMs = 100,
   valueFormatter = v => v,
   inputParser = v => {

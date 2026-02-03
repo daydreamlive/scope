@@ -181,7 +181,7 @@ export function LoRAManager({
 
             <div className="flex items-center gap-2">
               <LabelWithTooltip
-                label="Strategy:"
+                label="Strategy"
                 tooltip={PARAMETER_METADATA.loraMergeStrategy.tooltip}
                 className="text-xs text-muted-foreground w-16"
               />
@@ -208,7 +208,7 @@ export function LoRAManager({
 
             <div className="flex items-center gap-2">
               <LabelWithTooltip
-                label="Scale:"
+                label="Scale"
                 tooltip={getScaleAdjustmentInfo(lora).tooltipText}
                 className="text-xs text-muted-foreground w-16"
               />
