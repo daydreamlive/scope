@@ -71,18 +71,18 @@ Plugins can be installed from three sources:
 
 ### Git (Recommended)
 
-Install directly from a Git repository:
+Install directly from a Git repository. You can paste the URL directly from your browser:
 
 ```
-git+https://github.com/user/plugin-repo.git
+https://github.com/user/plugin-repo
 ```
 
 You can also specify a branch, tag, or commit:
 
 ```
-git+https://github.com/user/plugin-repo.git@v1.0.0
-git+https://github.com/user/plugin-repo.git@main
-git+https://github.com/user/plugin-repo.git@abc1234
+https://github.com/user/plugin-repo@v1.0.0
+https://github.com/user/plugin-repo@main
+https://github.com/user/plugin-repo@abc1234
 ```
 
 ### PyPI

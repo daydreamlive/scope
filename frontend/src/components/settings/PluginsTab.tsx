@@ -21,6 +21,27 @@ const isElectron =
   typeof window !== "undefined" &&
   navigator.userAgent.toLowerCase().includes("electron");
 
+// Transform plain Git host URLs to git+ format on paste
+const transformGitUrl = (value: string): string => {
+  const trimmed = value.trim();
+
+  // Already has git+ prefix - no change needed
+  if (trimmed.startsWith("git+")) {
+    return trimmed;
+  }
+
+  // Check if it's a URL to a known git host
+  const gitHosts = ["github.com", "gitlab.com", "bitbucket.org"];
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    const isGitHost = gitHosts.some(host => trimmed.includes(host));
+    if (isGitHost) {
+      return `git+${trimmed}`;
+    }
+  }
+
+  return trimmed;
+};
+
 export function PluginsTab({
   plugins,
   installPath,
@@ -35,7 +56,7 @@ export function PluginsTab({
 }: PluginsTabProps) {
   const handleInstall = () => {
     if (installPath.trim()) {
-      onInstall(installPath.trim());
+      onInstall(transformGitUrl(installPath.trim()));
     }
   };
 
