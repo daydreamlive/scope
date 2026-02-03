@@ -125,6 +125,6 @@ class TestPluginRollbackIntegration:
             pm._install_editable_plugin(str(plugin_path))
 
         after_state = capture_venv_state()
-        assert (
-            before_state == after_state
-        ), "Venv was not restored after editable rollback"
+        assert before_state == after_state, (
+            "Venv was not restored after editable rollback"
+        )
