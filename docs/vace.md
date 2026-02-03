@@ -32,6 +32,18 @@ These features are currently supported:
 - Video-to-video (VACE V2V) editing using control videos (eg. depth, pose, scribble, optical flow, etc.) to guide generation.
 - Animate Anything (R2V + VACE V2V) where a reference image is used to define the character and style while the control video provides the structure.
 - Real-time depth estimation using the built-in `video-depth-anything` preprocessor to automatically generate depth maps from source videos. Additional preprocessors will be available via plugins in the future.
+
+### Built-in Preprocessors
+
+The following preprocessor pipelines are available for real-time VACE V2V use:
+
+| Pipeline | Description | Model Required |
+|----------|-------------|----------------|
+| `video-depth-anything` | Depth estimation for temporally consistent depth maps | Yes (~1GB VRAM) |
+| `optical-flow` | RAFT optical flow for motion visualization | No (torchvision) |
+| `scribble` | Contour/line art extraction | Yes |
+| `gray` | Grayscale conversion | No |
+
 - First Frame Last Frame (FFLF) extension mode for generating video that connects reference frames at the start and/or end.
 - Inpainting using masks to selectively regenerate regions of video while preserving others.
 
