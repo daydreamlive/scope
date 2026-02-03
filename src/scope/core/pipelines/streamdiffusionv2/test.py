@@ -65,7 +65,8 @@ for i in range(num_chunks):
 
     start = time.time()
     # output is TCHW
-    output = pipeline(video=chunk, prompts=prompts)
+    output_dict = pipeline(video=chunk, prompts=prompts)
+    output = output_dict["video"]
 
     num_output_frames, _, _, _ = output.shape
     latency = time.time() - start

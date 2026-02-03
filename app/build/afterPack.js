@@ -41,6 +41,7 @@ exports.default = async function afterPack(context) {
     { src: path.join(projectRoot, 'README.md'), dest: path.join(resourcesPath, 'README.md') },
     { src: path.join(projectRoot, 'LICENSE.md'), dest: path.join(resourcesPath, 'LICENSE.md') },
     { src: path.join(projectRoot, 'frontend', 'dist'), dest: path.join(resourcesPath, 'frontend', 'dist') },
+    { src: path.join(projectRoot, 'patches.pth'), dest: path.join(resourcesPath, 'patches.pth') },
   ];
 
   // Copy files

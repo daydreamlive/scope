@@ -154,6 +154,10 @@ class Parameters(BaseModel):
         default=None,
         description="Randomize seed on every generation. Useful for non-autoregressive models like LTX2 to get varied outputs between chunks.",
     )
+    images: list[str] | None = Field(
+        default=None,
+        description="List of reference image paths for non-VACE visual conditioning",
+    )
 
 
 class SpoutConfig(BaseModel):

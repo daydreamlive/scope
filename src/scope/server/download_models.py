@@ -6,6 +6,7 @@ import argparse
 import http
 import logging
 import os
+import re
 import shutil
 import sys
 from collections.abc import Callable
@@ -13,7 +14,11 @@ from pathlib import Path
 
 import httpx
 
-from scope.core.pipelines.artifacts import Artifact, HuggingfaceRepoArtifact
+from scope.core.pipelines.artifacts import (
+    Artifact,
+    GoogleDriveArtifact,
+    HuggingfaceRepoArtifact,
+)
 
 from .download_progress_manager import download_progress_manager
 from .models_config import ensure_models_dir
@@ -322,8 +327,156 @@ def download_artifact(artifact: Artifact, models_root: Path, pipeline_id: str) -
     """
     if isinstance(artifact, HuggingfaceRepoArtifact):
         download_hf_artifact(artifact, models_root, pipeline_id)
+    elif isinstance(artifact, GoogleDriveArtifact):
+        download_google_drive_artifact(artifact, models_root, pipeline_id)
     else:
         raise ValueError(f"Unsupported artifact type: {type(artifact)}")
+
+
+def download_google_drive_artifact(
+    artifact: GoogleDriveArtifact, models_root: Path, pipeline_id: str
+) -> None:
+    """
+    Download a Google Drive file artifact (supports large files and ZIP extraction).
+
+    Args:
+        artifact: Google Drive artifact with file_id and optional files to extract
+        models_root: Root directory where models are stored
+        pipeline_id: Pipeline ID for progress tracking
+    """
+    import zipfile
+
+    # Extract file ID from URL or use directly
+    file_id = artifact.file_id
+    if "drive.google.com" in file_id:
+        match = re.search(r"(?:/d/|id=)([a-zA-Z0-9_-]+)", file_id)
+        if not match:
+            raise ValueError(f"Could not extract file ID from URL: {artifact.file_id}")
+        file_id = match.group(1)
+
+    output_dir = models_root / (artifact.name or "")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Downloading from Google Drive (file_id: {file_id}) to: {output_dir}")
+
+    # Download to temp file
+    temp_path = output_dir / f"{file_id}.tmp"
+    _download_google_drive_raw(file_id, temp_path, pipeline_id)
+
+    # Handle the downloaded file
+    if not artifact.files:
+        # No specific files requested - just rename temp to file_id
+        dest = output_dir / file_id
+        shutil.move(str(temp_path), str(dest))
+        logger.info(f"Downloaded file to {dest}")
+        return
+
+    # Try to extract as ZIP
+    try:
+        with zipfile.ZipFile(temp_path, "r") as zf:
+            logger.info(f"Extracting ZIP archive to {output_dir}")
+            zf.extractall(output_dir)
+
+            # Find and move target files to output_dir root
+            found = set()
+            for target in artifact.files:
+                for name in zf.namelist():
+                    if name.endswith(target) and not name.startswith("__MACOSX"):
+                        src = output_dir / name
+                        dest = output_dir / target
+                        if src != dest:
+                            shutil.move(str(src), str(dest))
+                        logger.info(f"Extracted {target}")
+                        found.add(target)
+                        break
+
+            if missing := set(artifact.files) - found:
+                logger.warning(f"Files not found in ZIP: {missing}")
+
+        temp_path.unlink()
+    except zipfile.BadZipFile:
+        # Not a ZIP - treat as single file
+        if len(artifact.files) == 1:
+            dest = output_dir / artifact.files[0]
+            shutil.move(str(temp_path), str(dest))
+            logger.info(f"Downloaded file to {dest}")
+        else:
+            logger.warning(
+                f"Not a ZIP but multiple files expected, keeping as {temp_path.name}"
+            )
+
+
+def _download_google_drive_raw(file_id: str, dest_path: Path, pipeline_id: str) -> None:
+    """
+    Download a file from Google Drive, handling virus scan warnings for large files.
+
+    Uses streaming download (http_get) which handles large files properly.
+    """
+
+    def on_progress(downloaded: int) -> None:
+        if pipeline_id:
+            try:
+                download_progress_manager.update(
+                    pipeline_id,
+                    f"Google Drive ({file_id})",
+                    downloaded / 1024 / 1024,
+                    None,
+                )
+            except Exception:
+                pass
+
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+    http_get(download_url, dest_path, expected_size=None, on_progress=on_progress)
+
+    # Check if we got HTML (virus scan warning) instead of actual file
+    with open(dest_path, "rb") as f:
+        header = f.read(100)
+
+    if not header.startswith((b"<!DOCTYPE", b"<html")):
+        return  # Got actual file content
+
+    # Handle virus scan warning - need to extract real download URL from HTML form
+    logger.info("Handling Google Drive virus scan warning...")
+    dest_path.unlink()
+
+    html = httpx.get(
+        f"https://drive.google.com/uc?export=download&id={file_id}",
+        timeout=DOWNLOAD_TIMEOUT,
+        follow_redirects=True,
+    ).text
+
+    download_url = _extract_google_drive_download_url(html, file_id)
+    http_get(download_url, dest_path, expected_size=None, on_progress=on_progress)
+
+
+def _extract_google_drive_download_url(html: str, file_id: str) -> str:
+    """Extract the actual download URL from Google Drive's virus scan warning page."""
+    # Try to extract form action and build URL from form params
+    form_action = re.search(r'action="([^"]+)"', html)
+    if form_action:
+        params = {
+            "id": _extract_form_value(html, "id") or file_id,
+            "export": _extract_form_value(html, "export") or "download",
+            "confirm": _extract_form_value(html, "confirm") or "t",
+        }
+        if uuid_val := _extract_form_value(html, "uuid"):
+            params["uuid"] = uuid_val
+        return (
+            f"{form_action.group(1)}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
+        )
+
+    # Fallback: try confirm token from URL
+    if match := re.search(r"confirm=([a-zA-Z0-9_-]+)", html):
+        return f"https://drive.google.com/uc?export=download&id={file_id}&confirm={match.group(1)}"
+
+    # Last resort
+    return f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+
+
+def _extract_form_value(html: str, name: str) -> str | None:
+    """Extract a form input value by name."""
+    match = re.search(rf'name="{name}"\s+value="([^"]+)"', html)
+    return match.group(1) if match else None
 
 
 def download_hf_artifact(

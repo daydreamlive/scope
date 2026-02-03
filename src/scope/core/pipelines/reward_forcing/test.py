@@ -41,7 +41,8 @@ def generate_video(
 
             prompts = [{"text": prompt_text, "weight": 100}]
             # Reset cache on first call of each video generation
-            output = pipeline(prompts=prompts, init_cache=is_first_call)
+            output_dict = pipeline(prompts=prompts, init_cache=is_first_call)
+            output = output_dict["video"]
             is_first_call = False
 
             num_output_frames, _, _, _ = output.shape

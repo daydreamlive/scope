@@ -47,7 +47,8 @@ def main():
     for i, frame in enumerate(video_list):
         start = time.time()
         # Call pipeline with single frame
-        depth = pipeline(video=[frame])
+        output_dict = pipeline(video=[frame])
+        depth = output_dict["video"]
         latency = time.time() - start
 
         num_output_frames, _, _, _ = depth.shape

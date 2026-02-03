@@ -73,7 +73,7 @@ preview = true
 # Override cuDNN version to fix PyTorch 2.9.1 Conv3D bf16 performance regression
 # See: https://github.com/pytorch/pytorch/issues/168167
 override-dependencies = [
-    "nvidia-cudnn-cu12>=9.15",
+    "nvidia-cudnn-cu12>=9.15; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
 [tool.uv.extra-build-dependencies]

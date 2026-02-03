@@ -24,6 +24,8 @@ interface TimelinePromptEditorProps {
   interpolationMethod?: "linear" | "slerp";
   onInterpolationMethodChange?: (method: "linear" | "slerp") => void;
   promptIndex?: number;
+  defaultTemporalInterpolationMethod?: "linear" | "slerp" | null;
+  defaultSpatialInterpolationMethod?: "linear" | "slerp" | null;
 }
 
 const MAX_PROMPTS = 4;
@@ -37,7 +39,14 @@ export function TimelinePromptEditor({
   interpolationMethod = "linear",
   onInterpolationMethodChange,
   promptIndex,
+  defaultTemporalInterpolationMethod,
+  defaultSpatialInterpolationMethod,
 }: TimelinePromptEditorProps) {
+  // Derive support from null check - null means feature not supported
+  const supportsTemporalInterpolation =
+    defaultTemporalInterpolationMethod !== null;
+  const supportsSpatialInterpolation =
+    defaultSpatialInterpolationMethod !== null;
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const lastSyncedPromptIdRef = useRef<string | null>(null);
   const isInternalUpdateRef = useRef(false);
@@ -210,9 +219,9 @@ export function TimelinePromptEditor({
         </div>
 
         <div className="space-y-2">
-          {renderTransitionSettings()}
+          {supportsTemporalInterpolation && renderTransitionSettings()}
 
-          {prompts.length < 4 && (
+          {supportsSpatialInterpolation && prompts.length < 4 && (
             <div className="flex items-center justify-end gap-2">
               <Button
                 onMouseDown={e => {
@@ -266,7 +275,7 @@ export function TimelinePromptEditor({
 
         <div className="space-y-2">
           {/* Spatial Blend - only for multiple prompts */}
-          {prompts.length >= 2 && (
+          {supportsSpatialInterpolation && prompts.length >= 2 && (
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">
                 Spatial Blend:
@@ -291,10 +300,10 @@ export function TimelinePromptEditor({
             </div>
           )}
 
-          {renderTransitionSettings()}
+          {supportsTemporalInterpolation && renderTransitionSettings()}
 
           {/* Add button - Bottom row */}
-          {prompts.length < 4 && (
+          {supportsSpatialInterpolation && prompts.length < 4 && (
             <div className="flex items-center justify-end gap-2">
               <Button
                 onMouseDown={e => {

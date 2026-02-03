@@ -67,7 +67,7 @@ class ControllerVisualizerPipeline(Pipeline):
             "MouseRight": ((15, -15), (0.2, 0.2, 0.8)),  # Blue, top-right
         }
 
-    def __call__(self, **kwargs) -> torch.Tensor:
+    def __call__(self, **kwargs) -> dict:
         """Render controller input visualization.
 
         Args:
@@ -153,4 +153,4 @@ class ControllerVisualizerPipeline(Pipeline):
                 self._output[0, iy1:iy2, ix1:ix2, 1] = color[1]
                 self._output[0, iy1:iy2, ix1:ix2, 2] = color[2]
 
-        return self._output.clamp(0, 1)
+        return {"video": self._output.clamp(0, 1)}

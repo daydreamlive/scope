@@ -398,8 +398,9 @@ export interface PipelineSchemaInfo {
   default_mode: "text" | "video";
   // Prompt and temporal interpolation support
   supports_prompts: boolean;
-  default_temporal_interpolation_method: "linear" | "slerp";
-  default_temporal_interpolation_steps: number;
+  default_temporal_interpolation_method: "linear" | "slerp" | null;
+  default_temporal_interpolation_steps: number | null;
+  default_spatial_interpolation_method: "linear" | "slerp" | null;
   // Mode-specific default overrides (optional)
   mode_defaults?: Record<"text" | "video", ModeDefaults>;
   // UI capabilities
@@ -436,3 +437,31 @@ export const getPipelineSchemas =
     const result = await response.json();
     return result;
   };
+
+export const downloadRecording = async (sessionId: string): Promise<void> => {
+  if (!sessionId) {
+    throw new Error("Session ID is required to download recording");
+  }
+
+  const response = await fetch(`/api/v1/recordings/${sessionId}`, {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Download recording failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  // Get the blob and trigger download
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `recording-${new Date().toISOString().split("T")[0]}.mp4`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};

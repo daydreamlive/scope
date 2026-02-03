@@ -40,6 +40,22 @@ def __getattr__(name):
         from .controller_viz.pipeline import ControllerVisualizerPipeline
 
         return ControllerVisualizerPipeline
+    elif name == "RIFEPipeline":
+        from .rife.pipeline import RIFEPipeline
+
+        return RIFEPipeline
+    elif name == "ScribblePipeline":
+        from .scribble.pipeline import ScribblePipeline
+
+        return ScribblePipeline
+    elif name == "GrayPipeline":
+        from .gray.pipeline import GrayPipeline
+
+        return GrayPipeline
+    elif name == "OpticalFlowPipeline":
+        from .optical_flow.pipeline import OpticalFlowPipeline
+
+        return OpticalFlowPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -77,6 +93,18 @@ def __getattr__(name):
         from .video_depth_anything.schema import VideoDepthAnythingConfig
 
         return VideoDepthAnythingConfig
+    elif name == "RIFEConfig":
+        from .rife.schema import RIFEConfig
+
+        return RIFEConfig
+    elif name == "ScribbleConfig":
+        from .scribble.schema import ScribbleConfig
+
+        return ScribbleConfig
+    elif name == "GrayConfig":
+        from .gray.schema import GrayConfig
+
+        return GrayConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -91,6 +119,10 @@ __all__ = [
     "LTX2Pipeline",
     "VideoDepthAnythingPipeline",
     "ControllerVisualizerPipeline",
+    "RIFEPipeline",
+    "ScribblePipeline",
+    "GrayPipeline",
+    "OpticalFlowPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
@@ -101,4 +133,7 @@ __all__ = [
     "MemFlowConfig",
     "LTX2Config",
     "VideoDepthAnythingConfig",
+    "RIFEConfig",
+    "ScribbleConfig",
+    "GrayConfig",
 ]

@@ -358,7 +358,6 @@ class PipelineManager:
 
             # Unload pipelines that need to be unloaded
             for pipeline_id_to_unload in pipelines_to_unload:
-                logger.info(f"Unloading pipeline {pipeline_id_to_unload}")
                 self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
 
         # Load all pipelines
@@ -536,13 +535,24 @@ class PipelineManager:
             "ltx2",
             "video-depth-anything",
             "controller-viz",
+            "rife",
+            "scribble",
+            "gray",
+            "optical-flow",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
-            # Plugin pipeline - instantiate generically with load_params
+            # Plugin pipeline - use schema defaults merged with load_params
             logger.info(f"Loading plugin pipeline: {pipeline_id}")
-            load_params = load_params or {}
-            return pipeline_class(**load_params)
+            config_class = pipeline_class.get_config_class()
+            # Get defaults from schema fields
+            schema_defaults = {}
+            for name, field in config_class.model_fields.items():
+                if field.default is not None:
+                    schema_defaults[name] = field.default
+            # Merge: load_params override schema defaults
+            merged_params = {**schema_defaults, **(load_params or {})}
+            return pipeline_class(**merged_params)
 
         # Fall through to built-in pipeline initialization
         if pipeline_id == "streamdiffusionv2":
@@ -953,6 +963,67 @@ class PipelineManager:
                 dtype=torch.float32,
             )
             logger.info("ControllerVisualizer pipeline initialized")
+            return pipeline
+        elif pipeline_id == "rife":
+            from scope.core.pipelines import RIFEPipeline
+
+            # Create minimal config - RIFE pipeline handles its own model paths via artifacts
+            config = OmegaConf.create({})
+
+            # Apply load parameters (resolution, seed) to config for consistency
+            # Note: RIFE doesn't use these parameters but we apply them for consistency
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=512,
+                default_width=512,
+                default_seed=42,
+            )
+
+            pipeline = RIFEPipeline(
+                config,
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("RIFE pipeline initialized")
+            return pipeline
+        elif pipeline_id == "scribble":
+            from scope.core.pipelines import ScribblePipeline
+
+            pipeline = ScribblePipeline(
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("Scribble pipeline initialized")
+            return pipeline
+        elif pipeline_id == "gray":
+            from scope.core.pipelines import GrayPipeline
+
+            pipeline = GrayPipeline(
+                device=get_device(),
+            )
+            logger.info("Gray pipeline initialized")
+
+        elif pipeline_id == "optical-flow":
+            from scope.core.pipelines import OpticalFlowPipeline
+            from scope.core.pipelines.optical_flow.schema import OpticalFlowConfig
+
+            # Create config with schema defaults, overridden by load_params
+            params = load_params or {}
+            config = OmegaConf.create(
+                {
+                    "model_size": params.get(
+                        "model_size",
+                        OpticalFlowConfig.model_fields["model_size"].default,
+                    ),
+                }
+            )
+
+            pipeline = OpticalFlowPipeline(
+                config,
+                device=get_device(),
+            )
+            logger.info("OpticalFlow pipeline initialized")
             return pipeline
 
         else:

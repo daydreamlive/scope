@@ -767,7 +767,8 @@ def main():
             )
 
         # Generate
-        output = pipeline(**kwargs)
+        output_dict = pipeline(**kwargs)
+        output = output_dict["video"]
         is_first_chunk = False
 
         # Metrics

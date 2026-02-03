@@ -100,6 +100,7 @@ class UsageType(str, Enum):
     """Usage types for pipelines."""
 
     PREPROCESSOR = "preprocessor"
+    POSTPROCESSOR = "postprocessor"
 
 
 class ModeDefaults(BaseModel):
@@ -203,10 +204,13 @@ class BasePipelineConfig(BaseModel):
 
     # Prompt and temporal interpolation support
     supports_prompts: ClassVar[bool] = True
-    default_temporal_interpolation_method: ClassVar[Literal["linear", "slerp"]] = (
-        "slerp"
-    )
-    default_temporal_interpolation_steps: ClassVar[int] = 0
+    default_temporal_interpolation_method: ClassVar[
+        Literal["linear", "slerp"] | None
+    ] = "slerp"
+    default_temporal_interpolation_steps: ClassVar[int | None] = 0
+    default_spatial_interpolation_method: ClassVar[
+        Literal["linear", "slerp"] | None
+    ] = "linear"
 
     # Resolution settings - use field templates for consistency
     height: int = height_field()
@@ -309,6 +313,9 @@ class BasePipelineConfig(BaseModel):
         metadata["default_temporal_interpolation_steps"] = (
             cls.default_temporal_interpolation_steps
         )
+        metadata["default_spatial_interpolation_method"] = (
+            cls.default_spatial_interpolation_method
+        )
         metadata["docs_url"] = cls.docs_url
         metadata["estimated_vram_gb"] = cls.estimated_vram_gb
         # Infer requires_models from artifacts if not explicitly set
@@ -325,7 +332,8 @@ class BasePipelineConfig(BaseModel):
         metadata["modified"] = cls.modified
         metadata["supports_randomize_seed"] = cls.supports_randomize_seed
         metadata["supports_num_frames"] = cls.supports_num_frames
-        metadata["usage"] = cls.usage
+        # Convert UsageType enum values to strings for JSON serialization
+        metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults (excluding None values and the "default" flag)

@@ -17,6 +17,7 @@ class VideoDepthAnythingConfig(BasePipelineConfig):
         "for video sequences using Video-Depth-Anything Small model."
     )
     docs_url = "https://github.com/DepthAnything/Video-Depth-Anything"
+    estimated_vram_gb = 1.0
     artifacts = [
         HuggingfaceRepoArtifact(
             repo_id="depth-anything/Video-Depth-Anything-Small",

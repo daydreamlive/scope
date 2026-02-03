@@ -26,8 +26,13 @@ import type {
   VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { checkModelStatus, downloadPipelineModels } from "../lib/api";
+import {
+  checkModelStatus,
+  downloadPipelineModels,
+  downloadRecording,
+} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
+import { toast } from "sonner";
 
 // Delay before resetting video reinitialization flag (ms)
 // This allows useVideoSource to detect the flag change and trigger reinitialization
@@ -167,6 +172,7 @@ export function StreamPage() {
     stopStream,
     updateVideoTrack,
     sendParameterUpdate,
+    sessionId,
   } = useWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
@@ -614,6 +620,10 @@ export function StreamPage() {
     updateSettings({ preprocessorIds: ids });
   };
 
+  const handlePostprocessorIdsChange = (ids: string[]) => {
+    updateSettings({ postprocessorIds: ids });
+  };
+
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
     // Send VACE context scale update to backend if streaming
@@ -842,12 +852,15 @@ export function StreamPage() {
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
-      // Build pipeline chain: preprocessors + main pipeline
+      // Build pipeline chain: preprocessors + main pipeline + postprocessors
       const pipelineIds: string[] = [];
       if (settings.preprocessorIds && settings.preprocessorIds.length > 0) {
         pipelineIds.push(...settings.preprocessorIds);
       }
       pipelineIds.push(pipelineIdToUse);
+      if (settings.postprocessorIds && settings.postprocessorIds.length > 0) {
+        pipelineIds.push(...settings.postprocessorIds);
+      }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
       // Collect all missing pipelines/preprocessors
@@ -1002,6 +1015,7 @@ export function StreamPage() {
         pipeline_ids?: string[];
         first_frame_image?: string;
         last_frame_image?: string;
+        images?: string[];
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1031,24 +1045,28 @@ export function StreamPage() {
       // Pipeline chain: preprocessors + main pipeline (already built above)
       initialParameters.pipeline_ids = pipelineIds;
 
-      // VACE-specific parameters - backend will ignore if not supported
-      const vaceParams = getVaceParams(
-        settings.refImages,
-        settings.vaceContextScale
-      );
-      if ("vace_ref_images" in vaceParams) {
-        initialParameters.vace_ref_images = vaceParams.vace_ref_images;
-        initialParameters.vace_context_scale = vaceParams.vace_context_scale;
-      }
-      // Add vace_use_input_video parameter
-      if (currentMode === "video") {
-        initialParameters.vace_use_input_video =
-          settings.vaceUseInputVideo ?? false;
-      }
-
-      // Explicitly pass vace_enabled state
+      // VACE-specific parameters
       if (currentPipeline?.supportsVACE) {
+        const vaceParams = getVaceParams(
+          settings.refImages,
+          settings.vaceContextScale
+        );
+        if ("vace_ref_images" in vaceParams) {
+          initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+          initialParameters.vace_context_scale = vaceParams.vace_context_scale;
+        }
+        // Add vace_use_input_video parameter
+        if (currentMode === "video") {
+          initialParameters.vace_use_input_video =
+            settings.vaceUseInputVideo ?? false;
+        }
         initialParameters.vace_enabled = vaceEnabled;
+      } else if (
+        currentPipeline?.supportsImages &&
+        settings.refImages?.length
+      ) {
+        // Non-VACE pipelines that support images
+        initialParameters.images = settings.refImages;
       }
 
       // Add FFLF (first-frame-last-frame) parameters if set
@@ -1083,6 +1101,28 @@ export function StreamPage() {
     } catch (error) {
       console.error("Error during stream start:", error);
       return false;
+    }
+  };
+
+  const handleSaveGeneration = async () => {
+    try {
+      if (!sessionId) {
+        toast.error("No active session", {
+          description: "Please start a stream before downloading the recording",
+          duration: 5000,
+        });
+        return;
+      }
+      await downloadRecording(sessionId);
+    } catch (error) {
+      console.error("Error downloading recording:", error);
+      toast.error("Error downloading recording", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "An error occurred while downloading the recording",
+        duration: 5000,
+      });
     }
   };
 
@@ -1304,6 +1344,8 @@ export function StreamPage() {
               onVideoScaleModeToggle={() =>
                 setVideoScaleMode(prev => (prev === "fit" ? "native" : "fit"))
               }
+              isDownloading={isDownloading}
+              onSaveGeneration={handleSaveGeneration}
             />
           </div>
         </div>
@@ -1384,6 +1426,8 @@ export function StreamPage() {
             vaeTypes={pipelines?.[settings.pipelineId]?.vaeTypes}
             preprocessorIds={settings.preprocessorIds ?? []}
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
+            postprocessorIds={settings.postprocessorIds ?? []}
+            onPostprocessorIdsChange={handlePostprocessorIdsChange}
           />
         </div>
       </div>

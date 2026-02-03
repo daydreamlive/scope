@@ -100,7 +100,8 @@ while num_frames < max_output_frames:
         kwargs["vace_ref_images"] = ref_images
         kwargs["vace_context_scale"] = 1.0
 
-    output = pipeline(**kwargs)
+    output_dict = pipeline(**kwargs)
+    output = output_dict["video"]
     is_first_chunk = False
 
     num_output_frames, _, _, _ = output.shape

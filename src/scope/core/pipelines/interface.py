@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import torch
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -81,18 +80,19 @@ class Pipeline(ABC):
         return BasePipelineConfig
 
     @abstractmethod
-    def __call__(
-        self, input: torch.Tensor | list[torch.Tensor] | None = None, **kwargs
-    ) -> torch.Tensor | PipelineOutput:
+    def __call__(self, **kwargs) -> dict:
         """
         Process a chunk of video frames.
 
         Args:
-            input: A tensor in BCTHW format OR a list of frame tensors in THWC format (in [0, 255] range), or None
-            **kwargs: Additional parameters
+            **kwargs: Pipeline parameters. The input video is passed with the "video" key.
+                The video value is a list of tensors, where each tensor has shape
+                (1, H, W, C) in THWC format with values in [0, 255] range (uint8).
+                The list contains one tensor per frame. Other common parameters include
+                prompts, init_cache, etc.
 
         Returns:
-            A processed chunk tensor in THWC format and [0, 1] range,
-            OR a PipelineOutput instance containing video and optional audio.
+            A dictionary containing the processed video tensor under the "video" key.
+            The video tensor is in THWC format and [0, 1] range.
         """
         pass

@@ -54,6 +54,8 @@ export function usePipelines() {
               schema.default_temporal_interpolation_method,
             defaultTemporalInterpolationSteps:
               schema.default_temporal_interpolation_steps,
+            defaultSpatialInterpolationMethod:
+              schema.default_spatial_interpolation_method,
             docsUrl: schema.docs_url ?? undefined,
             estimatedVram: schema.estimated_vram_gb ?? undefined,
             requiresModels: schema.requires_models,

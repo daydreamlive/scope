@@ -128,7 +128,8 @@ def generate_test_video(
         )
 
         # Generate
-        output = pipeline(**kwargs)
+        output_dict = pipeline(**kwargs)
+        output = output_dict["video"]
 
         # Metrics
         num_output_frames, _, _, _ = output.shape

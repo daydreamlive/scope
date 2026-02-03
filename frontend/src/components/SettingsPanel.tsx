@@ -102,6 +102,9 @@ interface SettingsPanelProps {
   // Preprocessors
   preprocessorIds?: string[];
   onPreprocessorIdsChange?: (ids: string[]) => void;
+  // Postprocessors
+  postprocessorIds?: string[];
+  onPostprocessorIdsChange?: (ids: string[]) => void;
 }
 
 export function SettingsPanel({
@@ -152,6 +155,8 @@ export function SettingsPanel({
   vaeTypes,
   preprocessorIds = [],
   onPreprocessorIdsChange,
+  postprocessorIds = [],
+  onPostprocessorIdsChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -490,54 +495,93 @@ export function SettingsPanel({
           </div>
         )}
 
-        {/* Preprocessor Selector - shown for pipelines that support VACE */}
-        {currentPipeline?.supportsVACE && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.preprocessor.label}
-                tooltip={PARAMETER_METADATA.preprocessor.tooltip}
-                className="text-sm text-foreground"
-              />
-              <Select
-                value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
-                onValueChange={value => {
-                  if (value === "none") {
-                    onPreprocessorIdsChange?.([]);
-                  } else {
-                    onPreprocessorIdsChange?.([value]);
-                  }
-                }}
-                disabled={isStreaming || isLoading}
-              >
-                <SelectTrigger className="w-[140px] h-7">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {Object.entries(pipelines || {})
-                    .filter(([, info]) => {
-                      const isPreprocessor =
-                        info.usage?.includes("preprocessor") ?? false;
-                      if (!isPreprocessor) return false;
-                      // Filter by input mode: only show preprocessors that support the current input mode
-                      if (inputMode) {
-                        return (
-                          info.supportedModes?.includes(inputMode) ?? false
-                        );
-                      }
-                      return true;
-                    })
-                    .map(([pid]) => (
-                      <SelectItem key={pid} value={pid}>
-                        {pid}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
+        {/* Preprocessor Selector */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label={PARAMETER_METADATA.preprocessor.label}
+              tooltip={PARAMETER_METADATA.preprocessor.tooltip}
+              className="text-sm text-foreground"
+            />
+            <Select
+              value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
+              onValueChange={value => {
+                if (value === "none") {
+                  onPreprocessorIdsChange?.([]);
+                } else {
+                  onPreprocessorIdsChange?.([value]);
+                }
+              }}
+              disabled={isStreaming || isLoading}
+            >
+              <SelectTrigger className="w-[140px] h-7">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {Object.entries(pipelines || {})
+                  .filter(([, info]) => {
+                    const isPreprocessor =
+                      info.usage?.includes("preprocessor") ?? false;
+                    if (!isPreprocessor) return false;
+                    // Filter by input mode: only show preprocessors that support the current input mode
+                    if (inputMode) {
+                      return info.supportedModes?.includes(inputMode) ?? false;
+                    }
+                    return true;
+                  })
+                  .map(([pid]) => (
+                    <SelectItem key={pid} value={pid}>
+                      {pid}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </div>
-        )}
+        </div>
+
+        {/* Postprocessor Selector */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label={PARAMETER_METADATA.postprocessor.label}
+              tooltip={PARAMETER_METADATA.postprocessor.tooltip}
+              className="text-sm text-foreground"
+            />
+            <Select
+              value={postprocessorIds.length > 0 ? postprocessorIds[0] : "none"}
+              onValueChange={value => {
+                if (value === "none") {
+                  onPostprocessorIdsChange?.([]);
+                } else {
+                  onPostprocessorIdsChange?.([value]);
+                }
+              }}
+              disabled={isStreaming || isLoading}
+            >
+              <SelectTrigger className="w-[140px] h-7">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {Object.entries(pipelines || {})
+                  .filter(([, info]) => {
+                    const isPostprocessor =
+                      info.usage?.includes("postprocessor") ?? false;
+                    if (!isPostprocessor) return false;
+                    // Postprocessors run after the main pipeline, so they receive video output.
+                    // Show any postprocessor that supports video mode, regardless of current input mode.
+                    return info.supportedModes?.includes("video") ?? false;
+                  })
+                  .map(([pid]) => (
+                    <SelectItem key={pid} value={pid}>
+                      {pid}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         {/* VAE Type Selection */}
         {vaeTypes && vaeTypes.length > 0 && (
@@ -553,7 +597,7 @@ export function SettingsPanel({
                 onValueChange={value => {
                   onVaeTypeChange?.(value as VaeType);
                 }}
-                disabled={isStreaming}
+                disabled={isStreaming || isLoading}
               >
                 <SelectTrigger className="w-[140px] h-7">
                   <SelectValue />

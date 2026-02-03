@@ -193,13 +193,13 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         """Return input requirements based on current mode."""
         return prepare_for_mode(self.__class__, self.components.config, kwargs)
 
-    def __call__(self, **kwargs) -> torch.Tensor:
+    def __call__(self, **kwargs) -> dict:
         self.first_call, self.last_mode = handle_mode_transition(
             self.state, self.components.vae, self.first_call, self.last_mode, kwargs
         )
         return self._generate(**kwargs)
 
-    def _generate(self, **kwargs) -> torch.Tensor:
+    def _generate(self, **kwargs) -> dict:
         # Handle runtime LoRA scale updates before writing into state.
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:
@@ -239,4 +239,4 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         apply_mode_defaults_to_state(self.state, self.__class__, mode, kwargs)
 
         _, self.state = self.blocks(self.components, self.state)
-        return postprocess_chunk(self.state.values["output_video"])
+        return {"video": postprocess_chunk(self.state.values["output_video"])}

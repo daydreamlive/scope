@@ -34,6 +34,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
   - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
   - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
   - [MemFlow](./src/scope/core/pipelines/memflow/docs/usage.md) (text-to-video, video-to-video)
+  - Additional models including [Waypoint-1](https://github.com/daydreamlive/scope-overworld) via plugins (preview)
 - [LoRAs](./docs/lora.md) to customize concepts and styles used with autoregressive video diffusion models
 - [VACE (experimental)](./docs/vace.md) to use reference images and control videos to guide autoregressive video diffusion models
 - [API](./docs/server.md) with WebRTC real-time streaming
@@ -181,6 +182,24 @@ When you start Scope, it will automatically use Cloudflare's TURN servers and yo
 ```
 uv run daydream-scope
 ```
+
+## Environment Variables
+
+### `HF_TOKEN`
+HuggingFace access token for using Cloudflare's TURN servers. See [Firewalls](#firewalls) for details.
+
+### `RECORDING_ENABLED`
+- **Default**: `true`
+- **Description**: Enable/disable recording. When `false`, recording is disabled.
+
+### `RECORDING_MAX_LENGTH`
+- **Default**: `1h`
+- **Description**: Maximum total recording length (sum of all segments). Recording stops when reached.
+- **Format**: Supports `1h`, `30m`, `120s`, or plain seconds (e.g., `3600`)
+
+### `RECORDING_STARTUP_CLEANUP_ENABLED`
+- **Default**: `true`
+- **Description**: Enable/disable cleanup of recording files from previous sessions at startup.
 
 ## Contributing
 
