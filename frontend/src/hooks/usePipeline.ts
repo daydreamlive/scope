@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { loadPipeline, getPipelineStatus } from "../lib/api";
+import { loadPipeline as loadPipelineApi, getPipelineStatus as getPipelineStatusApi } from "../lib/api";
+import { useFalContext } from "../lib/falContext";
 import type { PipelineStatusResponse, PipelineLoadParams } from "../lib/api";
 import { toast } from "sonner";
 
@@ -10,6 +11,22 @@ interface UsePipelineOptions {
 
 export function usePipeline(options: UsePipelineOptions = {}) {
   const { pollInterval = 2000, maxTimeout = 600000 } = options;
+  const { adapter, isFalMode } = useFalContext();
+
+  // Helper functions that use fal adapter when available
+  const getPipelineStatus = useCallback(async (): Promise<PipelineStatusResponse> => {
+    if (isFalMode && adapter) {
+      return adapter.api.getPipelineStatus();
+    }
+    return getPipelineStatusApi();
+  }, [adapter, isFalMode]);
+
+  const loadPipelineRequest = useCallback(async (data: { pipeline_ids: string[]; load_params?: PipelineLoadParams | null }) => {
+    if (isFalMode && adapter) {
+      return adapter.api.loadPipeline(data);
+    }
+    return loadPipelineApi(data);
+  }, [adapter, isFalMode]);
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
@@ -71,68 +88,6 @@ export function usePipeline(options: UsePipelineOptions = {}) {
     }
   }, []);
 
-  // Start polling for status updates
-  const startPolling = useCallback(() => {
-    if (isPollingRef.current) return;
-
-    isPollingRef.current = true;
-
-    const poll = async () => {
-      if (!isPollingRef.current) return;
-
-      try {
-        const statusResponse = await getPipelineStatus();
-        setStatus(statusResponse.status);
-        setPipelineInfo(statusResponse);
-
-        if (statusResponse.status === "error") {
-          const errorMessage = statusResponse.error || "Unknown pipeline error";
-          // Show toast if we haven't shown this error yet
-          if (shownErrorRef.current !== errorMessage) {
-            toast.error("Pipeline Error", {
-              description: errorMessage,
-              duration: 8000,
-            });
-            shownErrorRef.current = errorMessage;
-          }
-          // Don't set error in state - it's shown as toast and cleared on backend
-          setError(null);
-        } else {
-          setError(null);
-          shownErrorRef.current = null; // Reset when status is not error
-        }
-
-        // Stop polling if loaded or error
-        if (
-          statusResponse.status === "loaded" ||
-          statusResponse.status === "error"
-        ) {
-          stopPolling();
-          return;
-        }
-      } catch (err) {
-        console.error("Polling error:", err);
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to get pipeline status";
-        // Show toast for polling errors
-        if (shownErrorRef.current !== errorMessage) {
-          toast.error("Pipeline Error", {
-            description: errorMessage,
-            duration: 5000,
-          });
-          shownErrorRef.current = errorMessage;
-        }
-        setError(null); // Don't persist in state
-      }
-
-      if (isPollingRef.current) {
-        pollTimeoutRef.current = setTimeout(poll, pollInterval);
-      }
-    };
-
-    poll();
-  }, [pollInterval, stopPolling]);
-
   // Load pipeline
   const triggerLoad = useCallback(
     async (
@@ -155,13 +110,10 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         shownErrorRef.current = null; // Reset error tracking when starting new load
 
         // Start the load request
-        await loadPipeline({
+        await loadPipelineRequest({
           pipeline_ids: pipelineIds,
           load_params: loadParams,
         });
-
-        // Start polling for updates
-        startPolling();
 
         // Set up timeout for the load operation
         const timeoutPromise = new Promise<boolean>((_, reject) => {
@@ -241,7 +193,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         setIsLoading(false);
       }
     },
-    [isLoading, maxTimeout, pollInterval, startPolling, stopPolling]
+    [isLoading, maxTimeout, pollInterval, stopPolling, getPipelineStatus, loadPipelineRequest]
   );
 
   // Load pipeline with proper state management
