@@ -628,3 +628,92 @@ class PluginUpdatesResponse(BaseModel):
     updates: list[PluginUpdateInfo] = Field(
         ..., description="Update info for each plugin"
     )
+
+
+# =============================================================================
+# Cloud Integration Schemas (fal.ai)
+# =============================================================================
+
+
+class CloudConnectRequest(BaseModel):
+    """Request to connect to cloud processing (fal.ai).
+
+    Credentials can be provided in the request body or via CLI args/env vars.
+    If not provided here, the server will use --cloud-app-id and --cloud-api-key
+    (or FAL_APP_ID and FAL_KEY environment variables).
+    """
+
+    app_id: str | None = Field(
+        default=None,
+        description="The cloud app ID (e.g., 'username/scope-fal'). Optional if set via CLI.",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="The cloud API key for authentication. Optional if set via CLI.",
+    )
+
+
+class CloudConnectionStats(BaseModel):
+    """Statistics for cloud connection."""
+
+    uptime_seconds: float | None = Field(
+        default=None,
+        description="How long the connection has been active",
+    )
+    webrtc_offers_sent: int = Field(
+        default=0,
+        description="Number of WebRTC offers sent (signaling)",
+    )
+    webrtc_offers_successful: int = Field(
+        default=0,
+        description="Number of successful WebRTC offers",
+    )
+    webrtc_ice_candidates_sent: int = Field(
+        default=0,
+        description="Number of ICE candidates sent",
+    )
+    api_requests_sent: int = Field(
+        default=0,
+        description="Number of API requests sent through cloud",
+    )
+    api_requests_successful: int = Field(
+        default=0,
+        description="Number of successful API requests",
+    )
+    frames_sent_to_cloud: int = Field(
+        default=0,
+        description="Number of video frames sent to cloud for processing",
+    )
+    frames_received_from_cloud: int = Field(
+        default=0,
+        description="Number of processed video frames received from cloud",
+    )
+
+
+class CloudStatusResponse(BaseModel):
+    """Response containing cloud connection status."""
+
+    connected: bool = Field(
+        ...,
+        description="Whether connected to cloud (WebSocket)",
+    )
+    webrtc_connected: bool = Field(
+        default=False,
+        description="Whether WebRTC media connection to cloud is active",
+    )
+    app_id: str | None = Field(
+        default=None,
+        description="The cloud app ID if connected",
+    )
+    connection_id: str | None = Field(
+        default=None,
+        description="Unique ID for the current WebSocket connection (for log correlation)",
+    )
+    credentials_configured: bool = Field(
+        default=False,
+        description="Whether cloud credentials are configured via CLI args or env vars",
+    )
+    stats: CloudConnectionStats | None = Field(
+        default=None,
+        description="Connection statistics (only included when connected)",
+    )
