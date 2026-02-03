@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { BookOpenText, Bug } from "lucide-react";
+import { useState, useEffect } from "react";
+import { BookOpenText, Bug, LogIn, LogOut } from "lucide-react";
 import { Button } from "./ui/button";
 import { ReportBugDialog } from "./ReportBugDialog";
+import { isAuthenticated, redirectToSignIn, clearDaydreamAPIKey } from "../lib/auth";
 
 interface HeaderProps {
   className?: string;
@@ -9,6 +10,32 @@ interface HeaderProps {
 
 export function Header({ className = "" }: HeaderProps) {
   const [reportBugOpen, setReportBugOpen] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+
+  useEffect(() => {
+    // Check authentication status on mount
+    setAuthenticated(isAuthenticated());
+
+    // Listen for auth state changes
+    const handleAuthChange = () => {
+      setAuthenticated(isAuthenticated());
+    };
+
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+
+    return () => {
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+    };
+  }, []);
+
+  const handleSignIn = () => {
+    redirectToSignIn();
+  };
+
+  const handleSignOut = () => {
+    clearDaydreamAPIKey();
+    setAuthenticated(false);
+  };
 
   return (
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
@@ -56,6 +83,27 @@ export function Header({ className = "" }: HeaderProps) {
           >
             <BookOpenText className="h-5 w-5 text-muted-foreground opacity-60" />
           </a>
+          {authenticated ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSignOut}
+              className="hover:opacity-80 transition-opacity gap-1.5"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="text-xs">Sign Out</span>
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSignIn}
+              className="hover:opacity-80 transition-opacity gap-1.5"
+            >
+              <LogIn className="h-4 w-4" />
+              <span className="text-xs">Sign In</span>
+            </Button>
+          )}
         </div>
       </div>
 

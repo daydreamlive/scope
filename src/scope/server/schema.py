@@ -506,11 +506,15 @@ class CloudConnectRequest(BaseModel):
 
     app_id: str | None = Field(
         default=None,
-        description="The cloud app ID (e.g., 'username/scope-fal'). Optional if set via CLI.",
+        description="The cloud app ID (e.g., 'username/scope-app'). Optional if set via CLI.",
     )
     api_key: str | None = Field(
         default=None,
         description="The cloud API key for authentication. Optional if set via CLI.",
+    )
+    user_id: str | None = Field(
+        default=None,
+        description="The user ID for logging purposes (from fal token).",
     )
 
 
@@ -572,9 +576,9 @@ class CloudStatusResponse(BaseModel):
     )
     credentials_configured: bool = Field(
         default=False,
-        description="Whether fal.ai credentials are configured via CLI args or env vars",
+        description="Whether cloud credentials are configured via CLI args or env vars",
     )
-    stats: FalConnectionStats | None = Field(
+    stats: CloudConnectionStats | None = Field(
         default=None,
         description="Connection statistics (only included when connected)",
     )

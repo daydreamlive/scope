@@ -2,14 +2,14 @@
  * CloudModeToggle - Backend cloud mode integration
  *
  * This component manages cloud mode through the local scope backend,
- * which then connects to cloud. This is different from the CloudProvider
+ * which then connects to fal.ai. This is different from the CloudProvider
  * which connects directly from the browser.
  *
  * When cloud mode is enabled:
- * - The local scope backend connects to cloud via WebSocket
- * - API calls (pipeline load, status) are proxied through cloud
- * - WebRTC signaling is proxied through cloud
- * - Video streams flow through the backend to cloud
+ * - The local scope backend connects to fal.ai via WebSocket
+ * - API calls (pipeline load, status) are proxied through fal
+ * - WebRTC signaling is proxied through fal
+ * - Video streams flow through the backend to fal.ai
  *
  * Credentials (app_id and api_key) are set via backend command line args.
  */
@@ -19,6 +19,7 @@ import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Cloud, CloudOff, Loader2, X, Copy, Check } from "lucide-react";
+// import { fetchCloudToken } from "../lib/auth";
 
 interface CloudStatus {
   connected: boolean;
@@ -105,10 +106,15 @@ export function CloudModeToggle({
     abortControllerRef.current = abortController;
 
     try {
+      // Fetch cloud token to get userId for backend logging
+      // const cloudTokenResponse = await fetchCloudToken();
+      // const userId = cloudTokenResponse?.userId || null;
+      const userId = "TODO";
+
       const response = await fetch("/api/v1/cloud/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ user_id: userId }),
         signal: abortController.signal,
       });
 
@@ -126,7 +132,10 @@ export function CloudModeToggle({
         try {
           await onPipelinesRefresh();
         } catch (refreshError) {
-          console.error("[CloudModeToggle] Failed to refresh pipelines:", refreshError);
+          console.error(
+            "[CloudModeToggle] Failed to refresh pipelines:",
+            refreshError
+          );
         }
       }
     } catch (e) {
@@ -184,7 +193,10 @@ export function CloudModeToggle({
         try {
           await onPipelinesRefresh();
         } catch (refreshError) {
-          console.error("[CloudModeToggle] Failed to refresh pipelines:", refreshError);
+          console.error(
+            "[CloudModeToggle] Failed to refresh pipelines:",
+            refreshError
+          );
         }
       }
     } catch (e) {
@@ -220,11 +232,7 @@ export function CloudModeToggle({
               <>
                 {isConnecting ? (
                   <div className="flex gap-2">
-                    <Button
-                      disabled
-                      className="flex-1"
-                      size="sm"
-                    >
+                    <Button disabled className="flex-1" size="sm">
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Connecting...
                     </Button>
@@ -249,14 +257,14 @@ export function CloudModeToggle({
                   </Button>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Connect to cloud for GPU inference. Cold starts may take
-                  1-2 minutes.
+                  Connect to fal.ai for cloud GPU inference. Cold starts may
+                  take 1-2 minutes.
                 </p>
               </>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Cloud mode requires --fal-app-id and --fal-api-key command line
-                arguments to be set when starting the server.
+                Cloud mode requires --cloud-app-id and --cloud-api-key command
+                line arguments to be set when starting the server.
               </p>
             )}
           </>
@@ -268,7 +276,10 @@ export function CloudModeToggle({
             {status.connection_id && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">
-                  Connection ID: <code className="bg-muted px-1 rounded">{status.connection_id}</code>
+                  Connection ID:{" "}
+                  <code className="bg-muted px-1 rounded">
+                    {status.connection_id}
+                  </code>
                 </span>
                 <Button
                   variant="ghost"

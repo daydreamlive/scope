@@ -31,6 +31,7 @@ import type {
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
+import { isAuthenticated } from "../lib/auth";
 
 // Delay before resetting video reinitialization flag (ms)
 // This allows useVideoSource to detect the flag change and trigger reinitialization
@@ -69,24 +70,37 @@ function getVaceParams(
 }
 
 export function StreamPage() {
-  // Get API functions that work in both local and fal modes
+  // Get API functions that work in both local and cloud modes
   const api = useApi();
-  const { isCloudMode, isReady: isCloudReady } = useCloudContext();
+  const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
+    useCloudContext();
 
   // Track backend cloud relay mode (local backend connected to cloud)
   const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
   // Track when cloud connection is in progress (to disable controls)
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
+  // Track authentication status for showing/hiding cloud toggle
+  const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
 
-  // Combined cloud mode: either frontend direct-to-fal or backend relay to fal
-  const isCloudMode = isCloudMode || isBackendCloudConnected;
-
-  // Show loading state while connecting to fal
+  // Listen for auth state changes
   useEffect(() => {
-    if (isCloudMode) {
-      console.log("[StreamPage] Fal mode enabled, ready:", isCloudReady);
+    const handleAuthChange = () => {
+      setIsSignedIn(isAuthenticated());
+    };
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+    return () =>
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+  }, []);
+
+  // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
+  const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // In fal mode, wait until adapter is ready
+  useEffect(() => {
+    if (isDirectCloudMode) {
+      console.log("[StreamPage] Cloud mode enabled, ready:", isCloudReady);
     }
-  }, [isCloudMode, isCloudReady]);
+  }, [isDirectCloudMode, isCloudReady]);
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelines();
@@ -190,7 +204,7 @@ export function StreamPage() {
     pipelineInfo,
   } = usePipeline();
 
-  // WebRTC for streaming (unified hook works in both local and fal modes)
+  // WebRTC for streaming (unified hook works in both local and cloud modes)
   const {
     remoteStream,
     isStreaming,
@@ -204,7 +218,8 @@ export function StreamPage() {
   } = useUnifiedWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or connecting to cloud
-  const isLoading = isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
+  const isLoading =
+    isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
 
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
@@ -1319,7 +1334,12 @@ export function StreamPage() {
                   });
                 }
               }}
-              disabled={isPipelineLoading || isConnecting || isCloudConnecting || showDownloadDialog}
+              disabled={
+                isPipelineLoading ||
+                isConnecting ||
+                isCloudConnecting ||
+                showDownloadDialog
+              }
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}
@@ -1353,12 +1373,14 @@ export function StreamPage() {
 
         {/* Right Panel - Settings */}
         <div className="w-1/5 flex flex-col gap-3">
-          <CloudModeToggle
-            onStatusChange={setIsBackendCloudConnected}
-            onConnectingChange={setIsCloudConnecting}
-            onPipelinesRefresh={handlePipelinesRefresh}
-            disabled={isStreaming}
-          />
+          {isSignedIn && (
+            <CloudModeToggle
+              onStatusChange={setIsBackendCloudConnected}
+              onConnectingChange={setIsCloudConnecting}
+              onPipelinesRefresh={handlePipelinesRefresh}
+              disabled={isStreaming}
+            />
+          )}
           <SettingsPanel
             className="flex-1 min-h-0 overflow-auto"
             pipelines={pipelines}

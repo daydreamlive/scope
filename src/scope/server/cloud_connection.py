@@ -3,9 +3,9 @@
 This module handles the connection to cloud.ai cloud for remote GPU inference.
 The connection is established when cloud mode is toggled ON and stays open
 until toggled OFF, allowing:
-1. API calls to be proxied to the fal-hosted scope backend
+1. API calls to be proxied to the cloud-hosted scope backend
 2. WebRTC media relay - video flows through the backend to cloud.ai
-3. The fal runner to stay warm and ready for requests
+3. The cloud runner to stay warm and ready for requests
 
 Architecture:
 - CloudConnectionManager is instantiated once at app startup
@@ -22,7 +22,8 @@ import json
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import numpy as np
@@ -56,9 +57,11 @@ class CloudConnectionManager:
         self._stop_event = asyncio.Event()
         # Connection ID from cloud.ai for log correlation
         self._connection_id: str | None = None
+        # User ID for log correlation (from fal token)
+        self._user_id: str | None = None
 
         # WebRTC client for media relay
-        self._webrtc_client: "CloudWebRTCClient | None" = None
+        self._webrtc_client: CloudWebRTCClient | None = None
         self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
 
         # Stats tracking
@@ -79,12 +82,15 @@ class CloudConnectionManager:
         """Check if connected to cloud."""
         return self._connected and self.ws is not None and not self.ws.closed
 
-    async def connect(self, app_id: str, api_key: str) -> None:
-        """Connect to cloud.ai cloud.
+    async def connect(
+        self, app_id: str, api_key: str, user_id: str | None = None
+    ) -> None:
+        """Connect to cloud.
 
         Args:
-            app_id: The fal app ID (e.g., "username/scope-fal")
-            api_key: The fal API key
+            app_id: The cloud app ID (e.g., "username/scope-app")
+            api_key: The cloud API key
+            user_id: Optional user ID for log correlation
 
         Raises:
             RuntimeError: If connection fails or times out
@@ -95,6 +101,7 @@ class CloudConnectionManager:
 
         self.app_id = app_id
         self.api_key = api_key
+        self._user_id = user_id
         self._stop_event.clear()
 
         # Get temporary token
@@ -112,11 +119,11 @@ class CloudConnectionManager:
                 self._session.ws_connect(ws_url),
                 timeout=30.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await self._cleanup_session()
             raise RuntimeError(
                 f"Timeout connecting to cloud WebSocket. Check that app_id '{app_id}' "
-                "is correct and the fal app is deployed."
+                "is correct and the cloud app is deployed."
             ) from None
         except Exception as e:
             await self._cleanup_session()
@@ -133,17 +140,22 @@ class CloudConnectionManager:
                 self._connection_id = data.get("connection_id")
             else:
                 raise RuntimeError(f"Unexpected message type: {msg.type}")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await self._cleanup()
             raise RuntimeError(
                 "Timeout waiting for 'ready' from cloud server. "
-                "The fal runner may be starting up (cold start can take 1-2 minutes)."
+                "The cloud runner may be starting up (cold start can take 1-2 minutes)."
             ) from None
 
-        logger.info(f"fal server ready (connection_id: {self._connection_id})")
+        logger.info(f"Cloud server ready (connection_id: {self._connection_id})")
         self._connected = True
         self._stats["connected_at"] = time.time()
         self._stats["last_activity_at"] = time.time()
+
+        # Send user_id to cloud for log correlation
+        if self._user_id:
+            await self.ws.send_json({"type": "set_user_id", "user_id": self._user_id})
+            logger.info(f"Sent user_id to cloud: {self._user_id}")
 
         # Reset stats on new connection
         self._stats["webrtc_offers_sent"] = 0
@@ -207,7 +219,7 @@ class CloudConnectionManager:
                         self.ws.receive(),
                         timeout=1.0,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
 
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -217,10 +229,10 @@ class CloudConnectionManager:
                     except json.JSONDecodeError:
                         logger.warning(f"Non-JSON message from cloud: {msg.data}")
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
-                    logger.info("fal WebSocket closed")
+                    logger.info("Cloud WebSocket closed")
                     break
                 elif msg.type == aiohttp.WSMsgType.ERROR:
-                    logger.error(f"fal WebSocket error: {self.ws.exception()}")
+                    logger.error(f"Cloud WebSocket error: {self.ws.exception()}")
                     break
 
         except Exception as e:
@@ -276,7 +288,7 @@ class CloudConnectionManager:
 
             # Wait for response
             return await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._pending_requests.pop(request_id, None)
             raise RuntimeError(f"Request timeout after {timeout}s") from None
         except Exception as e:
@@ -290,7 +302,7 @@ class CloudConnectionManager:
         body: dict | None = None,
         timeout: float = 30.0,
     ) -> dict:
-        """Make an API request through the fal WebSocket proxy.
+        """Make an API request through the Cloud WebSocket proxy.
 
         Args:
             method: HTTP method (GET, POST, PATCH, DELETE)
@@ -332,7 +344,9 @@ class CloudConnectionManager:
         self._stats["last_activity_at"] = time.time()
         response = await self.send_and_wait({"type": "get_ice_servers"})
         ice_servers = response.get("data", {})
-        logger.info(f"[CLOUD] Got {len(ice_servers.get('iceServers', []))} ICE servers from cloud")
+        logger.info(
+            f"[CLOUD] Got {len(ice_servers.get('iceServers', []))} ICE servers from cloud"
+        )
         return ice_servers
 
     async def webrtc_offer(
@@ -348,7 +362,9 @@ class CloudConnectionManager:
         """
         self._stats["webrtc_offers_sent"] += 1
         self._stats["last_activity_at"] = time.time()
-        logger.info(f"[CLOUD] Sending WebRTC offer to cloud (offer #{self._stats['webrtc_offers_sent']})")
+        logger.info(
+            f"[CLOUD] Sending WebRTC offer to cloud (offer #{self._stats['webrtc_offers_sent']})"
+        )
 
         message: dict[str, Any] = {
             "type": "offer",
@@ -357,7 +373,9 @@ class CloudConnectionManager:
         }
         if initial_parameters:
             message["initialParameters"] = initial_parameters
-            logger.info(f"[CLOUD] Offer includes initial parameters: {list(initial_parameters.keys())}")
+            logger.info(
+                f"[CLOUD] Offer includes initial parameters: {list(initial_parameters.keys())}"
+            )
 
         response = await self.send_and_wait(message, timeout=30.0)
 
@@ -368,7 +386,9 @@ class CloudConnectionManager:
         self._stats["webrtc_offers_successful"] += 1
         session_id = response.get("sessionId")
         logger.info(f"[CLOUD] WebRTC offer successful! Session ID: {session_id}")
-        logger.info(f"[CLOUD] Stats: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']} offers successful")
+        logger.info(
+            f"[CLOUD] Stats: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']} offers successful"
+        )
 
         return {
             "sdp": response.get("sdp"),
@@ -386,9 +406,13 @@ class CloudConnectionManager:
         self._stats["last_activity_at"] = time.time()
 
         if candidate:
-            logger.debug(f"[CLOUD] Sending ICE candidate to cloud for session {session_id}")
+            logger.debug(
+                f"[CLOUD] Sending ICE candidate to cloud for session {session_id}"
+            )
         else:
-            logger.info(f"[CLOUD] Sending end-of-candidates signal for session {session_id}")
+            logger.info(
+                f"[CLOUD] Sending end-of-candidates signal for session {session_id}"
+            )
 
         message = {
             "type": "icecandidate",
@@ -398,7 +422,9 @@ class CloudConnectionManager:
         await self.send_and_wait(message, timeout=10.0)
 
         if self._stats["webrtc_ice_candidates_sent"] % 5 == 0:
-            logger.info(f"[CLOUD] Sent {self._stats['webrtc_ice_candidates_sent']} ICE candidates total")
+            logger.info(
+                f"[CLOUD] Sent {self._stats['webrtc_ice_candidates_sent']} ICE candidates total"
+            )
 
     async def disconnect(self) -> None:
         """Disconnect from cloud.ai cloud."""
@@ -477,7 +503,7 @@ class CloudConnectionManager:
             self._webrtc_client = None
             logger.info("[CLOUD-RTC] WebRTC connection stopped")
 
-    def send_frame_to_fal(self, frame: "VideoFrame | np.ndarray") -> bool:
+    def send_frame_to_fal(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a video frame to cloud.ai for processing.
 
         Args:
@@ -565,6 +591,7 @@ class CloudConnectionManager:
         # Check if we got binary data (base64 encoded)
         if response.get("_base64_content"):
             import base64
+
             content = base64.b64decode(response["_base64_content"])
             logger.info(f"[CLOUD] Downloaded recording: {len(content)} bytes")
             return content
@@ -576,7 +603,9 @@ class CloudConnectionManager:
             return None
 
         # Unexpected response format
-        logger.warning(f"[CLOUD] Unexpected recording response format: {list(response.keys())}")
+        logger.warning(
+            f"[CLOUD] Unexpected recording response format: {list(response.keys())}"
+        )
         return None
 
     async def _cleanup(self) -> None:
@@ -635,24 +664,36 @@ class CloudConnectionManager:
             uptime = time.time() - self._stats["connected_at"]
 
         logger.info("=" * 50)
-        logger.info("[CLOUD] fal Connection Stats")
+        logger.info("[CLOUD] Cloud Connection Stats")
         logger.info("=" * 50)
         logger.info(f"  App ID: {self.app_id}")
         logger.info(f"  Uptime: {uptime:.1f}s")
-        logger.info(f"  WebSocket: connected")
-        logger.info(f"  WebRTC Media: {'connected' if self.webrtc_connected else 'not connected'}")
+        logger.info("  WebSocket: connected")
+        logger.info(
+            f"  WebRTC Media: {'connected' if self.webrtc_connected else 'not connected'}"
+        )
         logger.info("")
         logger.info("  Signaling Stats:")
-        logger.info(f"    WebRTC offers: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']}")
-        logger.info(f"    ICE candidates sent: {self._stats['webrtc_ice_candidates_sent']}")
-        logger.info(f"    API requests: {self._stats['api_requests_successful']}/{self._stats['api_requests_sent']}")
+        logger.info(
+            f"    WebRTC offers: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']}"
+        )
+        logger.info(
+            f"    ICE candidates sent: {self._stats['webrtc_ice_candidates_sent']}"
+        )
+        logger.info(
+            f"    API requests: {self._stats['api_requests_successful']}/{self._stats['api_requests_sent']}"
+        )
         logger.info("")
         logger.info("  Media Stats:")
         logger.info(f"    Frames sent to cloud: {self._stats['frames_sent_to_fal']}")
-        logger.info(f"    Frames received from cloud: {self._stats['frames_received_from_fal']}")
+        logger.info(
+            f"    Frames received from cloud: {self._stats['frames_received_from_fal']}"
+        )
 
         if self._webrtc_client is not None:
             rtc_stats = self._webrtc_client.get_stats()
-            logger.info(f"    WebRTC state: {rtc_stats.get('connection_state', 'unknown')}")
+            logger.info(
+                f"    WebRTC state: {rtc_stats.get('connection_state', 'unknown')}"
+            )
 
         logger.info("=" * 50)

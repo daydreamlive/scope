@@ -1,8 +1,8 @@
 /**
- * Fal.ai Context Provider
+ * Cloud Context Provider
  *
  * Provides a context for managing cloud deployment mode.
- * When FAL_WS_URL is set, all API calls and WebRTC signaling
+ * When CLOUD_WS_URL is set, all API calls and WebRTC signaling
  * go through the CloudAdapter WebSocket connection.
  */
 
@@ -10,9 +10,9 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { CloudAdapter } from "./cloudAdapter";
 
 interface FalContextValue {
-  /** Whether we're in fal mode */
+  /** Whether we're in cloud mode */
   isCloudMode: boolean;
-  /** The CloudAdapter instance (null if not in fal mode) */
+  /** The CloudAdapter instance (null if not in cloud mode) */
   adapter: CloudAdapter | null;
   /** Whether the adapter is connected and ready */
   isReady: boolean;
@@ -59,7 +59,7 @@ export function CloudProvider({ wsUrl, apiKey, children }: CloudProviderProps) {
         setIsReady(true);
         setError(null);
       })
-      .catch((err) => {
+      .catch(err => {
         console.error("[CloudProvider] Connection failed:", err);
         setError(err);
         setIsReady(false);
@@ -82,14 +82,14 @@ export function CloudProvider({ wsUrl, apiKey, children }: CloudProviderProps) {
 }
 
 /**
- * Hook to access the fal context
+ * Hook to access the cloud context
  */
 export function useCloudContext() {
   return useContext(FalContext);
 }
 
 /**
- * Hook that returns the adapter if in fal mode
+ * Hook that returns the adapter if in cloud mode
  */
 export function useCloudAdapter() {
   const { adapter, isCloudMode, isReady, error } = useCloudContext();

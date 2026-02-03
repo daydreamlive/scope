@@ -79,7 +79,7 @@ export function usePipelines() {
     try {
       setIsLoading(true);
 
-      // Use adapter if in fal mode, otherwise direct API
+      // Use adapter if in cloud mode, otherwise direct API
       const schemas =
         isCloudMode && adapter
           ? await adapter.api.getPipelineSchemas()
@@ -112,7 +112,7 @@ export function usePipelines() {
       try {
         setIsLoading(true);
 
-        // Use adapter if in fal mode, otherwise direct API
+        // Use adapter if in cloud mode, otherwise direct API
         const schemas =
           isCloudMode && adapter
             ? await adapter.api.getPipelineSchemas()
