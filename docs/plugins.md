@@ -117,4 +117,335 @@ Local plugins are installed in editable mode, meaning changes to the source code
 
 ## Developing Plugins
 
-_TBD_
+This section walks through creating a plugin with custom pipelines. For technical details of the plugin architecture, see the [architecture doc](./architecture/plugins.md). For technical details of the pipelines architecture, see the [architecture doc](./architecture/pipelines.md).
+
+### Prerequisites
+
+- Python 3.12 or newer
+- [uv](https://docs.astral.sh/uv/) package manager
+
+### Project Setup
+
+Create a new directory for your plugin:
+
+```
+my-scope-plugin/
+├── pyproject.toml
+└── my_scope_plugin/
+    ├── __init__.py
+    ├── plugin.py
+    └── pipelines/
+        ├── __init__.py
+        ├── schema.py
+        └── pipeline.py
+```
+
+#### pyproject.toml
+
+```toml
+[project]
+name = "my-scope-plugin"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[project.entry-points."scope"]
+my_scope_plugin = "my_scope_plugin.plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+```
+
+The `[project.entry-points."scope"]` section registers your plugin with Scope. The key (`my_scope_plugin`) is your plugin name, and the value points to the module containing your hook implementation.
+
+#### plugin.py
+
+```python
+from scope.core.plugins.hookspecs import hookimpl
+
+
+@hookimpl
+def register_pipelines(register):
+    from .pipelines.pipeline import MyPipeline
+
+    register(MyPipeline)
+```
+
+The `register_pipelines` hook is called when Scope loads your plugin. Call `register()` for each pipeline class you want to make available.
+
+### Creating a Text-Only Pipeline
+
+A text-only pipeline generates video without requiring input video. This is the simplest type of pipeline.
+
+#### Example: Color Generator
+
+This pipeline generates solid color frames based on a configurable color.
+
+**pipelines/schema.py:**
+
+```python
+from pydantic import Field
+
+from scope.core.pipelines.base_schema import BasePipelineConfig, ModeDefaults
+
+
+class ColorGeneratorConfig(BasePipelineConfig):
+    """Configuration for the Color Generator pipeline."""
+
+    pipeline_id = "color-generator"
+    pipeline_name = "Color Generator"
+    pipeline_description = "Generates solid color frames"
+
+    # No prompts needed
+    supports_prompts = False
+
+    # Text mode only (no video input required)
+    modes = {"text": ModeDefaults(default=True)}
+
+    # Custom parameter: the color to generate (RGB values 0-255)
+    color_r: int = Field(default=128, ge=0, le=255, description="Red component")
+    color_g: int = Field(default=128, ge=0, le=255, description="Green component")
+    color_b: int = Field(default=128, ge=0, le=255, description="Blue component")
+```
+
+**pipelines/pipeline.py:**
+
+```python
+from typing import TYPE_CHECKING
+
+import torch
+
+from scope.core.pipelines.interface import Pipeline
+
+from .schema import ColorGeneratorConfig
+
+if TYPE_CHECKING:
+    from scope.core.pipelines.base_schema import BasePipelineConfig
+
+
+class ColorGeneratorPipeline(Pipeline):
+    """Generates solid color frames."""
+
+    @classmethod
+    def get_config_class(cls) -> type["BasePipelineConfig"]:
+        return ColorGeneratorConfig
+
+    def __init__(
+        self,
+        height: int = 512,
+        width: int = 512,
+        color_r: int = 128,
+        color_g: int = 128,
+        color_b: int = 128,
+        **kwargs,
+    ):
+        self.height = height
+        self.width = width
+        # Store color as normalized float values
+        self.color = torch.tensor([color_r / 255.0, color_g / 255.0, color_b / 255.0])
+
+    def __call__(self, **kwargs) -> dict:
+        """Generate a solid color frame.
+
+        Returns:
+            Dict with "video" key containing tensor of shape (1, H, W, 3) in [0, 1] range.
+        """
+        # Create a single frame filled with our color
+        frame = self.color.view(1, 1, 1, 3).expand(1, self.height, self.width, 3)
+        return {"video": frame}
+```
+
+Key points:
+
+- **No `prepare()` method**: Text-only pipelines don't need to request input frames
+- **`modes = {"text": ModeDefaults(default=True)}`**: Declares this pipeline only supports text mode
+- **`__call__` returns `{"video": tensor}`**: The tensor must be in THWC format (frames, height, width, channels) with values in [0, 1] range
+
+### Creating a Video Input Pipeline
+
+A video input pipeline processes incoming video frames. It must implement `prepare()` to tell Scope how many input frames it needs.
+
+#### Example: Invert Colors
+
+This pipeline inverts the colors of input video frames.
+
+**pipelines/schema.py:**
+
+```python
+from scope.core.pipelines.base_schema import BasePipelineConfig, ModeDefaults
+
+
+class InvertConfig(BasePipelineConfig):
+    """Configuration for the Invert Colors pipeline."""
+
+    pipeline_id = "invert"
+    pipeline_name = "Invert Colors"
+    pipeline_description = "Inverts the colors of input video frames"
+
+    # No prompts needed
+    supports_prompts = False
+
+    # Video mode only (requires video input)
+    modes = {"video": ModeDefaults(default=True)}
+```
+
+**pipelines/pipeline.py:**
+
+```python
+from typing import TYPE_CHECKING
+
+import torch
+
+from scope.core.pipelines.interface import Pipeline, Requirements
+
+from .schema import InvertConfig
+
+if TYPE_CHECKING:
+    from scope.core.pipelines.base_schema import BasePipelineConfig
+
+
+class InvertPipeline(Pipeline):
+    """Inverts the colors of input video frames."""
+
+    @classmethod
+    def get_config_class(cls) -> type["BasePipelineConfig"]:
+        return InvertConfig
+
+    def __init__(
+        self,
+        device: torch.device | None = None,
+        **kwargs,
+    ):
+        self.device = (
+            device
+            if device is not None
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
+
+    def prepare(self, **kwargs) -> Requirements:
+        """Declare that we need 1 input frame."""
+        return Requirements(input_size=1)
+
+    def __call__(self, **kwargs) -> dict:
+        """Invert the colors of input frames.
+
+        Args:
+            video: List of input frame tensors, each (1, H, W, C) in [0, 255] range.
+
+        Returns:
+            Dict with "video" key containing inverted frames in [0, 1] range.
+        """
+        video = kwargs.get("video")
+        if video is None:
+            raise ValueError("Input video cannot be None for InvertPipeline")
+
+        # Stack frames into a single tensor: (T, H, W, C)
+        frames = torch.stack([frame.squeeze(0) for frame in video], dim=0)
+        frames = frames.to(device=self.device, dtype=torch.float32) / 255.0
+
+        # Invert: white becomes black, black becomes white
+        inverted = 1.0 - frames
+
+        return {"video": inverted.clamp(0, 1)}
+```
+
+Key points:
+
+- **`prepare()` returns `Requirements(input_size=N)`**: Tells Scope to collect N frames before calling `__call__`
+- **`modes = {"video": ModeDefaults(default=True)}`**: Declares this pipeline only supports video mode
+- **`video` parameter**: A list of tensors, one per frame, each with shape (1, H, W, C) in [0, 255] range
+- **Output normalization**: Input is [0, 255], output must be [0, 1]
+
+### Adding UI Parameters
+
+You can expose pipeline parameters in the Scope UI by adding fields to your config with `ui_field_config()`.
+
+Let's add an intensity slider to the Invert pipeline:
+
+**pipelines/schema.py:**
+
+```python
+from pydantic import Field
+
+from scope.core.pipelines.base_schema import (
+    BasePipelineConfig,
+    ModeDefaults,
+    ui_field_config,
+)
+
+
+class InvertConfig(BasePipelineConfig):
+    """Configuration for the Invert Colors pipeline."""
+
+    pipeline_id = "invert"
+    pipeline_name = "Invert Colors"
+    pipeline_description = "Inverts the colors of input video frames"
+    supports_prompts = False
+    modes = {"video": ModeDefaults(default=True)}
+
+    # Add a slider that appears in the Settings panel
+    intensity: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="How strongly to invert the colors (0 = original, 1 = fully inverted)",
+        json_schema_extra=ui_field_config(order=1),
+    )
+```
+
+**pipelines/pipeline.py:**
+
+```python
+class InvertPipeline(Pipeline):
+    """Inverts the colors of input video frames."""
+
+    @classmethod
+    def get_config_class(cls) -> type["BasePipelineConfig"]:
+        return InvertConfig
+
+    def __init__(
+        self,
+        device: torch.device | None = None,
+        intensity: float = 1.0,  # Accept the new parameter
+        **kwargs,
+    ):
+        self.device = (
+            device
+            if device is not None
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.intensity = intensity  # Store for use in __call__
+
+    def prepare(self, **kwargs) -> Requirements:
+        return Requirements(input_size=1)
+
+    def __call__(self, **kwargs) -> dict:
+        video = kwargs.get("video")
+        if video is None:
+            raise ValueError("Input video cannot be None for InvertPipeline")
+
+        frames = torch.stack([frame.squeeze(0) for frame in video], dim=0)
+        frames = frames.to(device=self.device, dtype=torch.float32) / 255.0
+
+        # Invert with intensity blending
+        inverted = 1.0 - frames
+        result = frames * (1 - self.intensity) + inverted * self.intensity
+
+        return {"video": result.clamp(0, 1)}
+```
+
+The `intensity` parameter now appears as a slider in the Settings panel when your pipeline is selected.
+
+#### ui_field_config Options
+
+| Option | Description |
+|--------|-------------|
+| `order` | Display order (lower values appear first) |
+| `modes` | Restrict to specific modes, e.g., `["video"]` |
+| `is_load_param` | If `True`, parameter is set when loading the pipeline and disabled during streaming |
+| `label` | Short label for the UI (description becomes tooltip) |
+| `category` | `"configuration"` for Settings panel (default), `"input"` for Input & Controls panel |
+
+### Testing Your Plugin
+
+Make code changes and then see the section on [reloading local plugins](#reloading-a-plugin-local-plugins-only).
