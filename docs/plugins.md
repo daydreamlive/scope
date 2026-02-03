@@ -234,15 +234,10 @@ class ColorGeneratorPipeline(Pipeline):
         self,
         height: int = 512,
         width: int = 512,
-        color_r: int = 128,
-        color_g: int = 128,
-        color_b: int = 128,
         **kwargs,
     ):
         self.height = height
         self.width = width
-        # Store color as normalized float values
-        self.color = torch.tensor([color_r / 255.0, color_g / 255.0, color_b / 255.0])
 
     def __call__(self, **kwargs) -> dict:
         """Generate a solid color frame.
@@ -250,9 +245,17 @@ class ColorGeneratorPipeline(Pipeline):
         Returns:
             Dict with "video" key containing tensor of shape (1, H, W, 3) in [0, 1] range.
         """
+        # Read runtime parameters from kwargs (with defaults)
+        color_r = kwargs.get("color_r", 128)
+        color_g = kwargs.get("color_g", 128)
+        color_b = kwargs.get("color_b", 128)
+
+        # Create color tensor from current values
+        color = torch.tensor([color_r / 255.0, color_g / 255.0, color_b / 255.0])
+
         # Create a single frame filled with our color
-        frame = self.color.view(1, 1, 1, 3).expand(1, self.height, self.width, 3)
-        return {"video": frame}
+        frame = color.view(1, 1, 1, 3).expand(1, self.height, self.width, 3)
+        return {"video": frame.clone()}
 ```
 
 Key points:
@@ -260,6 +263,7 @@ Key points:
 - **No `prepare()` method**: Text-only pipelines don't need to request input frames
 - **`modes = {"text": ModeDefaults(default=True)}`**: Declares this pipeline only supports text mode
 - **`__call__` returns `{"video": tensor}`**: The tensor must be in THWC format (frames, height, width, channels) with values in [0, 1] range
+- **Runtime parameters are read from `kwargs`**: Parameters like `color_r`, `color_g`, `color_b` are passed to `__call__()` and should be read using `kwargs.get()`
 
 ### Creating a Video Input Pipeline
 
@@ -389,7 +393,7 @@ class InvertConfig(BasePipelineConfig):
         ge=0.0,
         le=1.0,
         description="How strongly to invert the colors (0 = original, 1 = fully inverted)",
-        json_schema_extra=ui_field_config(order=1),
+        json_schema_extra=ui_field_config(order=1, label="Intensity"),
     )
 ```
 
@@ -406,7 +410,6 @@ class InvertPipeline(Pipeline):
     def __init__(
         self,
         device: torch.device | None = None,
-        intensity: float = 1.0,  # Accept the new parameter
         **kwargs,
     ):
         self.device = (
@@ -414,7 +417,6 @@ class InvertPipeline(Pipeline):
             if device is not None
             else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
-        self.intensity = intensity  # Store for use in __call__
 
     def prepare(self, **kwargs) -> Requirements:
         return Requirements(input_size=1)
@@ -424,12 +426,15 @@ class InvertPipeline(Pipeline):
         if video is None:
             raise ValueError("Input video cannot be None for InvertPipeline")
 
+        # Read runtime parameter from kwargs (with default)
+        intensity = kwargs.get("intensity", 1.0)
+
         frames = torch.stack([frame.squeeze(0) for frame in video], dim=0)
         frames = frames.to(device=self.device, dtype=torch.float32) / 255.0
 
         # Invert with intensity blending
         inverted = 1.0 - frames
-        result = frames * (1 - self.intensity) + inverted * self.intensity
+        result = frames * (1 - intensity) + inverted * intensity
 
         return {"video": result.clamp(0, 1)}
 ```
@@ -445,6 +450,27 @@ The `intensity` parameter now appears as a slider in the Settings panel when you
 | `is_load_param` | If `True`, parameter is set when loading the pipeline and disabled during streaming |
 | `label` | Short label for the UI (description becomes tooltip) |
 | `category` | `"configuration"` for Settings panel (default), `"input"` for Input & Controls panel |
+
+#### Load-time vs Runtime Parameters
+
+Parameters are handled differently depending on `is_load_param`:
+
+- **Load-time parameters** (`is_load_param=True`): Passed to `__init__()` when the pipeline loads. The UI control is disabled during streaming. Use for parameters that affect initialization (model selection, device, resolution).
+
+- **Runtime parameters** (default, `is_load_param=False`): Passed to `__call__()` as kwargs on every frame. Can be adjusted during streaming. Use for parameters that affect frame processing (colors, intensity, effects).
+
+**Important:** Runtime parameters must be read from `kwargs` in `__call__()`, not stored in `__init__()`:
+
+```python
+# Correct: Read runtime params from kwargs in __call__()
+def __call__(self, **kwargs) -> dict:
+    intensity = kwargs.get("intensity", 1.0)
+    # Use intensity...
+
+# Incorrect: Runtime params are NOT passed to __init__()
+def __init__(self, intensity: float = 1.0, **kwargs):
+    self.intensity = intensity  # This will always be the default value!
+```
 
 ### Testing Your Plugin
 
