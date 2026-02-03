@@ -645,11 +645,15 @@ class CloudConnectRequest(BaseModel):
 
     app_id: str | None = Field(
         default=None,
-        description="The cloud app ID (e.g., 'username/scope-fal'). Optional if set via CLI.",
+        description="The cloud app ID (e.g., 'username/scope-app'). Optional if set via CLI.",
     )
     api_key: str | None = Field(
         default=None,
         description="The cloud API key for authentication. Optional if set via CLI.",
+    )
+    user_id: str | None = Field(
+        default=None,
+        description="The user ID for logging purposes (from fal token).",
     )
 
 

@@ -1,6 +1,6 @@
 /**
  * Unified API hook that automatically routes requests through CloudAdapter
- * when in fal mode, or uses direct HTTP when in local mode.
+ * when in cloud mode, or uses direct HTTP when in local mode.
  */
 
 import { useCallback } from "react";
@@ -20,7 +20,7 @@ import type {
 import type { IceServersResponse, ModelStatusResponse } from "../types";
 
 /**
- * Hook that provides API functions that work in both local and fal modes.
+ * Hook that provides API functions that work in both local and cloud modes.
  *
  * In cloud mode, all requests go through the CloudAdapter WebSocket.
  * In local mode, requests go directly via HTTP fetch.
@@ -29,12 +29,13 @@ export function useApi() {
   const { adapter, isCloudMode, isReady } = useCloudContext();
 
   // Pipeline APIs
-  const getPipelineStatus = useCallback(async (): Promise<PipelineStatusResponse> => {
-    if (isCloudMode && adapter) {
-      return adapter.api.getPipelineStatus();
-    }
-    return api.getPipelineStatus();
-  }, [adapter, isCloudMode]);
+  const getPipelineStatus =
+    useCallback(async (): Promise<PipelineStatusResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getPipelineStatus();
+      }
+      return api.getPipelineStatus();
+    }, [adapter, isCloudMode]);
 
   const loadPipeline = useCallback(
     async (data: PipelineLoadRequest): Promise<{ message: string }> => {
@@ -46,12 +47,13 @@ export function useApi() {
     [adapter, isCloudMode]
   );
 
-  const getPipelineSchemas = useCallback(async (): Promise<PipelineSchemasResponse> => {
-    if (isCloudMode && adapter) {
-      return adapter.api.getPipelineSchemas();
-    }
-    return api.getPipelineSchemas();
-  }, [adapter, isCloudMode]);
+  const getPipelineSchemas =
+    useCallback(async (): Promise<PipelineSchemasResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getPipelineSchemas();
+      }
+      return api.getPipelineSchemas();
+    }, [adapter, isCloudMode]);
 
   // Model APIs
   const checkModelStatus = useCallback(
@@ -75,12 +77,13 @@ export function useApi() {
   );
 
   // Hardware APIs
-  const getHardwareInfo = useCallback(async (): Promise<HardwareInfoResponse> => {
-    if (isCloudMode && adapter) {
-      return adapter.api.getHardwareInfo();
-    }
-    return api.getHardwareInfo();
-  }, [adapter, isCloudMode]);
+  const getHardwareInfo =
+    useCallback(async (): Promise<HardwareInfoResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getHardwareInfo();
+      }
+      return api.getHardwareInfo();
+    }, [adapter, isCloudMode]);
 
   // LoRA APIs
   const listLoRAFiles = useCallback(async (): Promise<LoRAFilesResponse> => {
@@ -119,7 +122,7 @@ export function useApi() {
     return api.fetchCurrentLogs();
   }, [adapter, isCloudMode]);
 
-  // Recording - note: in fal mode, we still use direct HTTP for binary download
+  // Recording - note: in cloud mode, we still use direct HTTP for binary download
   const downloadRecording = useCallback(
     async (sessionId: string): Promise<void> => {
       // Always use direct HTTP for binary downloads
@@ -157,7 +160,9 @@ export function useApi() {
       candidates: RTCIceCandidate | RTCIceCandidate[]
     ): Promise<void> => {
       if (isCloudMode && adapter) {
-        const candidateArray = Array.isArray(candidates) ? candidates : [candidates];
+        const candidateArray = Array.isArray(candidates)
+          ? candidates
+          : [candidates];
         for (const candidate of candidateArray) {
           await adapter.sendIceCandidate(sessionId, candidate);
         }

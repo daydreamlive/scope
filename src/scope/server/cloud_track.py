@@ -1,12 +1,12 @@
-"""CloudTrack - MediaStreamTrack that relays video through fal.ai.
+"""CloudTrack - MediaStreamTrack that relays video through cloud.
 
 This track receives frames from a source (browser WebRTC or Spout),
-sends them to cloud.ai for processing, and returns the processed frames.
+sends them to cloud for processing, and returns the processed frames.
 
 Architecture:
-    Browser/Spout → CloudTrack → FrameProcessor (cloud mode) → fal.ai
-                                                                    ↓
-    Browser/Spout ← CloudTrack ← FrameProcessor (cloud mode) ← fal.ai
+    Browser/Spout → CloudTrack → FrameProcessor (cloud mode) → Cloud
+                                                                  ↓
+    Browser/Spout ← CloudTrack ← FrameProcessor (cloud mode) ← Cloud
 
 Spout integration is handled by FrameProcessor (same code as local mode).
 """
@@ -17,7 +17,8 @@ import asyncio
 import fractions
 import logging
 import time
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 from aiortc import MediaStreamTrack
@@ -34,8 +35,8 @@ class CloudTrack(MediaStreamTrack):
     """MediaStreamTrack that relays video through fal.ai for processing.
 
     This track uses FrameProcessor in cloud mode, which handles:
-    - Sending frames to cloud.ai
-    - Receiving processed frames from cloud.ai
+    - Sending frames to cloud
+    - Receiving processed frames from cloud
     - Spout input/output integration
 
     Usage:
@@ -48,7 +49,7 @@ class CloudTrack(MediaStreamTrack):
 
     def __init__(
         self,
-        cloud_manager: "CloudConnectionManager",
+        cloud_manager: CloudConnectionManager,
         fps: int = 30,
         initial_parameters: dict | None = None,
         notification_callback: Callable | None = None,
@@ -67,7 +68,7 @@ class CloudTrack(MediaStreamTrack):
         self._input_task: asyncio.Task | None = None
         self._input_running = False
 
-        # FrameProcessor handles relay to cloud.ai and Spout integration
+        # FrameProcessor handles relay to cloud and Spout integration
         self.frame_processor = None
         self._last_frame: VideoFrame | None = None
         self._started = False
@@ -75,7 +76,7 @@ class CloudTrack(MediaStreamTrack):
     def set_source_track(self, track: MediaStreamTrack) -> None:
         """Set the source track for input frames (from browser)."""
         self._source_track = track
-        logger.info("[FAL-RELAY] Source track set")
+        logger.info("[CLOUD] Source track set")
 
     async def _start(self) -> None:
         """Start the relay - called on first recv()."""
@@ -83,10 +84,10 @@ class CloudTrack(MediaStreamTrack):
             return
 
         self._started = True
-        logger.info("[FAL-RELAY] Starting fal.ai relay...")
+        logger.info("[CLOUD] Starting cloud relay...")
 
-        # Start WebRTC connection to cloud.ai with this session's parameters
-        logger.info("[FAL-RELAY] Starting WebRTC connection to cloud.ai...")
+        # Start WebRTC connection to cloud with this session's parameters
+        logger.info("[CLOUD] Starting WebRTC connection to cloud...")
         await self.cloud_manager.start_webrtc(self.initial_parameters)
 
         # Create FrameProcessor in cloud mode
@@ -105,11 +106,11 @@ class CloudTrack(MediaStreamTrack):
             self._input_running = True
             self._input_task = asyncio.create_task(self._input_loop())
 
-        logger.info("[FAL-RELAY] Relay started")
+        logger.info("[CLOUD] Relay started")
 
     async def _input_loop(self) -> None:
         """Background loop that receives frames from source and sends to cloud."""
-        logger.info("[FAL-RELAY] Input loop started")
+        logger.info("[CLOUD] Input loop started")
 
         try:
             while self._input_running and self._source_track is not None:
@@ -117,23 +118,25 @@ class CloudTrack(MediaStreamTrack):
                     # Get frame from browser
                     frame = await self._source_track.recv()
 
-                    # Send through FrameProcessor (which relays to cloud.ai)
+                    # Send through FrameProcessor (which relays to cloud)
                     if self.frame_processor:
                         self.frame_processor.put(frame)
 
                 except MediaStreamError:
-                    logger.info("[FAL-RELAY] Source track ended")
+                    logger.info("[CLOUD] Source track ended")
                     break
                 except Exception as e:
-                    logger.error(f"[FAL-RELAY] Error in input loop: {e}")
+                    logger.error(f"[CLOUD] Error in input loop: {e}")
                     break
 
         except asyncio.CancelledError:
             pass
         finally:
             self._input_running = False
-            stats = self.frame_processor.get_frame_stats() if self.frame_processor else {}
-            logger.info(f"[FAL-RELAY] Input loop ended, stats: {stats}")
+            stats = (
+                self.frame_processor.get_frame_stats() if self.frame_processor else {}
+            )
+            logger.info(f"[CLOUD] Input loop ended, stats: {stats}")
 
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
         """Override to control frame rate."""
@@ -160,7 +163,7 @@ class CloudTrack(MediaStreamTrack):
         return self.timestamp, VIDEO_TIME_BASE
 
     async def recv(self) -> VideoFrame:
-        """Return the next processed frame from cloud.ai."""
+        """Return the next processed frame from cloud."""
         # Lazy initialization
         await self._start()
 
@@ -206,18 +209,18 @@ class CloudTrack(MediaStreamTrack):
         if self.frame_processor:
             self.frame_processor.update_parameters(params)
 
-        # Also send to cloud.ai
+        # Also send to cloud
         self.cloud_manager.send_parameters_to_fal(params)
 
     def pause(self, paused: bool) -> None:
         """Pause/unpause the relay."""
         if self.frame_processor:
             self.frame_processor.paused = paused
-        logger.info(f"[FAL-RELAY] {'Paused' if paused else 'Resumed'}")
+        logger.info(f"[CLOUD] {'Paused' if paused else 'Resumed'}")
 
     async def stop(self) -> None:
         """Stop the relay and clean up."""
-        logger.info("[FAL-RELAY] Stopping...")
+        logger.info("[CLOUD] Stopping...")
 
         self._input_running = False
         self._started = False  # Reset so next session starts fresh
@@ -230,16 +233,16 @@ class CloudTrack(MediaStreamTrack):
                 pass
             self._input_task = None
 
-        # Stop FrameProcessor (handles Spout cleanup and fal callback removal)
+        # Stop FrameProcessor (handles Spout cleanup and cloud callback removal)
         if self.frame_processor:
             self.frame_processor.stop()
             stats = self.frame_processor.get_frame_stats()
-            logger.info(f"[FAL-RELAY] Stopped. Stats: {stats}")
+            logger.info(f"[CLOUD] Stopped. Stats: {stats}")
             self.frame_processor = None
         else:
-            logger.info("[FAL-RELAY] Stopped.")
+            logger.info("[CLOUD] Stopped.")
 
-        # Stop WebRTC connection to cloud.ai - next session will start fresh
+        # Stop WebRTC connection to cloud - next session will start fresh
         await self.cloud_manager.stop_webrtc()
 
     def get_stats(self) -> dict:

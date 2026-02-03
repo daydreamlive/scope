@@ -2,11 +2,11 @@
  * cloud WebSocket Adapter for Scope
  *
  * This adapter routes all API calls and WebRTC signaling through a single
- * WebSocket connection to the cloud endpoint, preventing fal from spawning
+ * WebSocket connection to the cloud endpoint, preventing cloud from spawning
  * new runner instances for each request.
  *
  * Usage:
- *   const adapter = new CloudAdapter("wss://your-fal-endpoint/ws", "your-api-key");
+ *   const adapter = new CloudAdapter("wss://your-cloud-endpoint/ws", "your-api-key");
  *   await adapter.connect();
  *
  *   // Use like regular API
@@ -22,10 +22,7 @@
  *   browser WebSocket API doesn't support custom headers.
  */
 
-import type {
-  IceServersResponse,
-  ModelStatusResponse,
-} from "../types";
+import type { IceServersResponse, ModelStatusResponse } from "../types";
 import type {
   WebRTCOfferRequest,
   WebRTCOfferResponse,
@@ -86,14 +83,14 @@ export class CloudAdapter {
   }
 
   /**
-   * Connect to the fal WebSocket endpoint
+   * Connect to the cloud WebSocket endpoint
    */
   async connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) {
       return;
     }
 
-    this.readyPromise = new Promise((resolve) => {
+    this.readyPromise = new Promise(resolve => {
       this.readyResolve = resolve;
     });
 
@@ -114,7 +111,7 @@ export class CloudAdapter {
           this.reconnectAttempts = 0;
         };
 
-        this.ws.onmessage = (event) => {
+        this.ws.onmessage = event => {
           try {
             const message = JSON.parse(event.data) as ApiResponse;
             this.handleMessage(message);
@@ -130,13 +127,17 @@ export class CloudAdapter {
           }
         };
 
-        this.ws.onerror = (error) => {
+        this.ws.onerror = error => {
           console.error("[CloudAdapter] WebSocket error:", error);
           reject(error);
         };
 
-        this.ws.onclose = (event) => {
-          console.log("[CloudAdapter] WebSocket closed:", event.code, event.reason);
+        this.ws.onclose = event => {
+          console.log(
+            "[CloudAdapter] WebSocket closed:",
+            event.code,
+            event.reason
+          );
           this.isReady = false;
           this.ws = null;
 
@@ -148,9 +149,15 @@ export class CloudAdapter {
           }
 
           // Attempt reconnect if not intentional close
-          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+          if (
+            event.code !== 1000 &&
+            this.reconnectAttempts < this.maxReconnectAttempts
+          ) {
             this.reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+            const delay = Math.min(
+              1000 * Math.pow(2, this.reconnectAttempts),
+              30000
+            );
             console.log(`[CloudAdapter] Reconnecting in ${delay}ms...`);
             setTimeout(() => this.connect(), delay);
           }
@@ -197,8 +204,15 @@ export class CloudAdapter {
       clearTimeout(pending.timeout);
       this.pendingRequests.delete(message.request_id);
 
-      if (message.type === "error" || (message.status && message.status >= 400)) {
-        pending.reject(new Error(message.error || `Request failed with status ${message.status}`));
+      if (
+        message.type === "error" ||
+        (message.status && message.status >= 400)
+      ) {
+        pending.reject(
+          new Error(
+            message.error || `Request failed with status ${message.status}`
+          )
+        );
       } else {
         pending.resolve(message);
       }
@@ -206,7 +220,11 @@ export class CloudAdapter {
     }
 
     // Handle WebRTC signaling responses (no request_id)
-    if (message.type === "answer" || message.type === "ice_servers" || message.type === "icecandidate_ack") {
+    if (
+      message.type === "answer" ||
+      message.type === "ice_servers" ||
+      message.type === "icecandidate_ack"
+    ) {
       // These are handled by specific pending requests
       return;
     }
@@ -342,7 +360,9 @@ export class CloudAdapter {
     });
 
     if (response.status && response.status >= 400) {
-      throw new Error(response.error || `API request failed with status ${response.status}`);
+      throw new Error(
+        response.error || `API request failed with status ${response.status}`
+      );
     }
 
     return response.data as T;
@@ -362,8 +382,12 @@ export class CloudAdapter {
     checkModelStatus: (pipelineId: string): Promise<ModelStatusResponse> =>
       this.apiRequest("GET", `/api/v1/models/status?pipeline_id=${pipelineId}`),
 
-    downloadPipelineModels: (pipelineId: string): Promise<{ message: string }> =>
-      this.apiRequest("POST", "/api/v1/models/download", { pipeline_id: pipelineId }),
+    downloadPipelineModels: (
+      pipelineId: string
+    ): Promise<{ message: string }> =>
+      this.apiRequest("POST", "/api/v1/models/download", {
+        pipeline_id: pipelineId,
+      }),
 
     getHardwareInfo: (): Promise<HardwareInfoResponse> =>
       this.apiRequest("GET", "/api/v1/hardware/info"),
@@ -372,7 +396,10 @@ export class CloudAdapter {
       this.apiRequest("GET", "/api/v1/lora/list"),
 
     listAssets: (type?: "image" | "video"): Promise<AssetsResponse> =>
-      this.apiRequest("GET", type ? `/api/v1/assets?type=${type}` : "/api/v1/assets"),
+      this.apiRequest(
+        "GET",
+        type ? `/api/v1/assets?type=${type}` : "/api/v1/assets"
+      ),
 
     uploadAsset: async (file: File): Promise<AssetFileInfo> => {
       // For file uploads, we need to convert to base64 and send through WebSocket
@@ -385,10 +412,14 @@ export class CloudAdapter {
         )
       );
 
-      return this.apiRequest("POST", `/api/v1/assets?filename=${encodeURIComponent(file.name)}`, {
-        _base64_content: base64,
-        _content_type: file.type,
-      });
+      return this.apiRequest(
+        "POST",
+        `/api/v1/assets?filename=${encodeURIComponent(file.name)}`,
+        {
+          _base64_content: base64,
+          _content_type: file.type,
+        }
+      );
     },
 
     fetchCurrentLogs: (): Promise<string> =>
@@ -432,7 +463,7 @@ export function useCloudAdapter(wsUrl: string | null, apiKey?: string) {
         setIsReady(true);
         setError(null);
       })
-      .catch((err) => {
+      .catch(err => {
         setError(err);
         setIsConnected(false);
         setIsReady(false);
@@ -460,7 +491,7 @@ let globalAdapter: CloudAdapter | null = null;
 
 /**
  * Initialize the global CloudAdapter instance
- * Call this once at app startup if using fal deployment
+ * Call this once at app startup if using cloud deployment
  */
 export function initCloudAdapter(wsUrl: string, apiKey?: string): CloudAdapter {
   if (globalAdapter) {
@@ -478,7 +509,7 @@ export function getCloudAdapter(): CloudAdapter | null {
 }
 
 /**
- * Check if we're running on fal (adapter is initialized)
+ * Check if we're running in cloud mode (adapter is initialized)
  */
 export function isCloudMode(): boolean {
   return globalAdapter !== null && globalAdapter !== undefined;

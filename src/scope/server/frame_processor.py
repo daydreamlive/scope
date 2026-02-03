@@ -2,11 +2,13 @@ import logging
 import queue
 import threading
 import time
+import uuid
 from typing import Any
 
 import torch
 from aiortc.mediastreams import VideoFrame
 
+from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
@@ -49,9 +51,13 @@ class FrameProcessor:
         initial_parameters: dict = None,
         notification_callback: callable = None,
         cloud_manager: "Any | None" = None,  # CloudConnectionManager for cloud mode
+        session_id: str | None = None,  # Session ID for event tracking
     ):
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
+
+        # Session ID for Kafka event tracking
+        self.session_id = session_id or str(uuid.uuid4())
 
         # Current parameters
         self.parameters = initial_parameters or {}
@@ -138,6 +144,13 @@ class FrameProcessor:
                 self.cloud_manager.add_frame_callback(self._on_frame_from_cloud)
 
             logger.info("[FRAME-PROCESSOR] Started in cloud mode")
+
+            # Publish stream_started event for relay mode
+            publish_event(
+                event_type="stream_started",
+                session_id=self.session_id,
+                metadata={"mode": "relay"},
+            )
             return
 
         # Local mode: setup pipeline chain
@@ -155,6 +168,14 @@ class FrameProcessor:
 
         logger.info(
             f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
+        )
+
+        # Publish stream_started event for local mode
+        publish_event(
+            event_type="stream_started",
+            session_id=self.session_id,
+            pipeline_ids=self.pipeline_ids,
+            metadata={"mode": "local"},
         )
 
     def stop(self, error_message: str = None):
@@ -220,6 +241,36 @@ class FrameProcessor:
                 self.notification_callback(message)
             except Exception as e:
                 logger.error(f"Error in frame processor stop callback: {e}")
+        # Publish Kafka events for stream stop
+        if error_message:
+            # Publish stream_error event
+            publish_event(
+                event_type="stream_error",
+                session_id=self.session_id,
+                pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
+                error={
+                    "message": error_message,
+                    "type": "StreamError",
+                    "recoverable": False,
+                },
+                metadata={
+                    "mode": "cloud" if self._cloud_mode else "local",
+                    "frames_in": self._frames_in,
+                    "frames_out": self._frames_out,
+                },
+            )
+
+        # Publish stream_stopped event
+        publish_event(
+            event_type="stream_stopped",
+            session_id=self.session_id,
+            pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
+            metadata={
+                "mode": "cloud" if self._cloud_mode else "local",
+                "frames_in": self._frames_in,
+                "frames_out": self._frames_out,
+            },
+        )
 
     def _get_or_create_pinned_buffer(self, shape):
         """Get or create a reusable pinned memory buffer for the given shape.

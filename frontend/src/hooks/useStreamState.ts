@@ -45,20 +45,22 @@ function getFallbackDefaults(mode?: InputMode) {
 export function useStreamState() {
   const { adapter, isCloudMode, isReady } = useCloudContext();
 
-  // Helper functions that use fal adapter when available
-  const getPipelineSchemas = useCallback(async (): Promise<PipelineSchemasResponse> => {
-    if (isCloudMode && adapter) {
-      return adapter.api.getPipelineSchemas();
-    }
-    return getPipelineSchemasApi();
-  }, [adapter, isCloudMode]);
+  // Helper functions that use cloud adapter when available
+  const getPipelineSchemas =
+    useCallback(async (): Promise<PipelineSchemasResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getPipelineSchemas();
+      }
+      return getPipelineSchemasApi();
+    }, [adapter, isCloudMode]);
 
-  const getHardwareInfo = useCallback(async (): Promise<HardwareInfoResponse> => {
-    if (isCloudMode && adapter) {
-      return adapter.api.getHardwareInfo();
-    }
-    return getHardwareInfoApi();
-  }, [adapter, isCloudMode]);
+  const getHardwareInfo =
+    useCallback(async (): Promise<HardwareInfoResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getHardwareInfo();
+      }
+      return getHardwareInfoApi();
+    }, [adapter, isCloudMode]);
 
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
@@ -210,7 +212,10 @@ export function useStreamState() {
 
       return schemas;
     } catch (error) {
-      console.error("useStreamState: Failed to refresh pipeline schemas:", error);
+      console.error(
+        "useStreamState: Failed to refresh pipeline schemas:",
+        error
+      );
       throw error;
     }
   }, [getPipelineSchemas]);
