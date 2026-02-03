@@ -140,16 +140,22 @@ class NVFP4Linear(torch.nn.Module):
         quantized_weight = QuantizedTensor.from_float(weight_2d, NVFP4_LAYOUT)
 
         # Store as nn.Parameter - this is critical for __torch_dispatch__ to work
+        # Note: QuantizedTensor stores data internally as _qdata (uint8) which is ~4x smaller
         nvfp4_linear.weight = torch.nn.Parameter(quantized_weight, requires_grad=False)
+
+        # Log actual memory usage of the quantized weight
+        if hasattr(quantized_weight, "_qdata"):
+            qdata = quantized_weight._qdata
+            logger.debug(
+                f"Quantized Linear({linear.in_features}, {linear.out_features}): "
+                f"original={weight_2d.numel() * weight_2d.element_size()} bytes, "
+                f"quantized _qdata={qdata.numel() * qdata.element_size()} bytes"
+            )
 
         if linear.bias is not None:
             nvfp4_linear.bias = torch.nn.Parameter(
                 linear.bias.data.clone().to(linear.weight.dtype)
             )
-
-        logger.debug(
-            f"Quantized Linear({linear.in_features}, {linear.out_features}) to NVFP4"
-        )
 
         return nvfp4_linear
 
@@ -213,6 +219,8 @@ def quantize_model_nvfp4(
         layer_filter: Optional function (name, module) -> bool to filter layers.
                      If None, all Linear layers are quantized.
     """
+    import gc
+
     layers_to_replace = []
     skipped_lora = []
 
@@ -241,6 +249,12 @@ def quantize_model_nvfp4(
 
     logger.info(f"Quantizing {len(layers_to_replace)} Linear layers to NVFP4")
 
+    # Log memory before quantization
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        mem_before = torch.cuda.memory_allocated() / 1024**3
+        logger.info(f"GPU memory before quantization: {mem_before:.2f} GB")
+
     for name, module in layers_to_replace:
         # Navigate to parent module
         parts = name.split(".")
@@ -248,12 +262,54 @@ def quantize_model_nvfp4(
         for part in parts[:-1]:
             parent = getattr(parent, part)
 
-        # Replace with NVFP4Linear
+        # Create NVFP4Linear from the original Linear
         nvfp4_module = NVFP4Linear.from_linear(module)
+
+        # Explicitly delete the original module's weight to free memory
+        # before replacing the module
+        del module.weight
+        if module.bias is not None:
+            del module.bias
+
+        # Replace with NVFP4Linear
         setattr(parent, parts[-1], nvfp4_module)
 
-    # Free original weights
+    # Force garbage collection and clear CUDA cache
+    gc.collect()
     torch.cuda.empty_cache()
+
+    # Log memory after quantization
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        mem_after = torch.cuda.memory_allocated() / 1024**3
+        logger.info(f"GPU memory after quantization: {mem_after:.2f} GB")
+        logger.info(f"Memory saved: {mem_before - mem_after:.2f} GB")
+
+        # Verify quantization by checking a sample layer
+        if layers_to_replace:
+            sample_name = layers_to_replace[0][0]
+            parts = sample_name.split(".")
+            sample_module = model
+            for part in parts:
+                sample_module = getattr(sample_module, part)
+
+            if isinstance(sample_module, NVFP4Linear):
+                weight = sample_module.weight
+                logger.info(
+                    f"Sample layer '{sample_name}' weight type: {type(weight).__name__}"
+                )
+                logger.info(
+                    f"  weight.shape: {weight.shape}, weight.dtype: {weight.dtype}"
+                )
+                if hasattr(weight, "_qdata"):
+                    qdata = weight._qdata
+                    logger.info(
+                        f"  _qdata.shape: {qdata.shape}, _qdata.dtype: {qdata.dtype}"
+                    )
+                    logger.info(
+                        f"  Storage: {qdata.numel() * qdata.element_size()} bytes "
+                        f"(vs {weight.shape[0] * weight.shape[1] * 2} bytes for BF16)"
+                    )
 
 
 def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
