@@ -1,19 +1,22 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { CloudModeToggle } from "../components/CloudModeToggle";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
-import { useWebRTC } from "../hooks/useWebRTC";
+import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
+import { useApi } from "../hooks/useApi";
+import { useFalContext } from "../lib/falContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -26,11 +29,6 @@ import type {
   VaeType,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import {
-  checkModelStatus,
-  downloadPipelineModels,
-  downloadRecording,
-} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -71,8 +69,27 @@ function getVaceParams(
 }
 
 export function StreamPage() {
+  // Get API functions that work in both local and fal modes
+  const api = useApi();
+  const { isFalMode, isReady: isFalReady } = useFalContext();
+
+  // Track backend cloud relay mode (local backend connected to fal.ai)
+  const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
+  // Track when cloud connection is in progress (to disable controls)
+  const [isCloudConnecting, setIsCloudConnecting] = useState(false);
+
+  // Combined cloud mode: either frontend direct-to-fal or backend relay to fal
+  const isCloudMode = isFalMode || isBackendCloudConnected;
+
+  // Show loading state while connecting to fal
+  useEffect(() => {
+    if (isFalMode) {
+      console.log("[StreamPage] Fal mode enabled, ready:", isFalReady);
+    }
+  }, [isFalMode, isFalReady]);
+
   // Fetch available pipelines dynamically
-  const { pipelines } = usePipelines();
+  const { pipelines, refreshPipelines } = usePipelines();
 
   // Helper to get default mode for a pipeline
   const getPipelineDefaultMode = (pipelineId: string): InputMode => {
@@ -86,7 +103,19 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    refreshPipelineSchemas,
+    refreshHardwareInfo,
   } = useStreamState();
+
+  // Combined refresh function for pipeline schemas, pipelines list, and hardware info
+  const handlePipelinesRefresh = useCallback(async () => {
+    // Refresh all hooks to keep them in sync when cloud mode toggles
+    await Promise.all([
+      refreshPipelineSchemas(),
+      refreshPipelines(),
+      refreshHardwareInfo(),
+    ]);
+  }, [refreshPipelineSchemas, refreshPipelines, refreshHardwareInfo]);
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -161,7 +190,7 @@ export function StreamPage() {
     pipelineInfo,
   } = usePipeline();
 
-  // WebRTC for streaming
+  // WebRTC for streaming (unified hook works in both local and fal modes)
   const {
     remoteStream,
     isStreaming,
@@ -172,10 +201,10 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
     sessionId,
-  } = useWebRTC();
+  } = useUnifiedWebRTC();
 
-  // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
-  const isLoading = isDownloading || isPipelineLoading || isConnecting;
+  // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or connecting to cloud
+  const isLoading = isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
 
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
@@ -350,12 +379,12 @@ export function StreamPage() {
     setDownloadProgress(null);
 
     try {
-      await downloadPipelineModels(pipelineId);
+      await api.downloadPipelineModels(pipelineId);
 
       // Enhanced polling with progress updates
       const checkDownloadProgress = async () => {
         try {
-          const status = await checkModelStatus(pipelineId);
+          const status = await api.checkModelStatus(pipelineId);
 
           // Update progress state
           if (status.progress) {
@@ -851,7 +880,7 @@ export function StreamPage() {
         const pipelineInfo = pipelines?.[pipelineId];
         if (pipelineInfo?.requiresModels) {
           try {
-            const status = await checkModelStatus(pipelineId);
+            const status = await api.checkModelStatus(pipelineId);
             if (!status.downloaded) {
               missingPipelines.push(pipelineId);
             }
@@ -1084,7 +1113,7 @@ export function StreamPage() {
         });
         return;
       }
-      await downloadRecording(sessionId);
+      await api.downloadRecording(sessionId);
     } catch (error) {
       console.error("Error downloading recording:", error);
       toast.error("Error downloading recording", {
@@ -1162,6 +1191,7 @@ export function StreamPage() {
             onRefImagesChange={handleRefImagesChange}
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
+            isCloudConnecting={isCloudConnecting}
             supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
             firstFrameImage={settings.firstFrameImage}
             onFirstFrameImageChange={handleFirstFrameImageChange}
@@ -1182,6 +1212,7 @@ export function StreamPage() {
               remoteStream={remoteStream}
               isPipelineLoading={isPipelineLoading}
               isConnecting={isConnecting}
+              isCloudConnecting={isCloudConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
               isDownloading={isDownloading}
@@ -1288,7 +1319,7 @@ export function StreamPage() {
                   });
                 }
               }}
-              disabled={isPipelineLoading || isConnecting || showDownloadDialog}
+              disabled={isPipelineLoading || isConnecting || isCloudConnecting || showDownloadDialog}
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}
@@ -1321,9 +1352,15 @@ export function StreamPage() {
         </div>
 
         {/* Right Panel - Settings */}
-        <div className="w-1/5">
+        <div className="w-1/5 flex flex-col gap-3">
+          <CloudModeToggle
+            onStatusChange={setIsBackendCloudConnected}
+            onConnectingChange={setIsCloudConnecting}
+            onPipelinesRefresh={handlePipelinesRefresh}
+            disabled={isStreaming}
+          />
           <SettingsPanel
-            className="h-full"
+            className="flex-1 min-h-0 overflow-auto"
             pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
@@ -1390,6 +1427,7 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
+            isFalMode={isCloudMode}
           />
         </div>
       </div>
