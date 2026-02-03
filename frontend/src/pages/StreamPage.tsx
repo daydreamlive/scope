@@ -16,7 +16,7 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
 import { useApi } from "../hooks/useApi";
-import { useFalContext } from "../lib/falContext";
+import { useCloudContext } from "../lib/cloudContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -71,7 +71,7 @@ function getVaceParams(
 export function StreamPage() {
   // Get API functions that work in both local and fal modes
   const api = useApi();
-  const { isFalMode, isReady: isFalReady } = useFalContext();
+  const { isCloudMode, isReady: isCloudReady } = useCloudContext();
 
   // Track backend cloud relay mode (local backend connected to cloud)
   const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
@@ -79,14 +79,14 @@ export function StreamPage() {
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
 
   // Combined cloud mode: either frontend direct-to-fal or backend relay to fal
-  const isCloudMode = isFalMode || isBackendCloudConnected;
+  const isCloudMode = isCloudMode || isBackendCloudConnected;
 
   // Show loading state while connecting to fal
   useEffect(() => {
-    if (isFalMode) {
-      console.log("[StreamPage] Fal mode enabled, ready:", isFalReady);
+    if (isCloudMode) {
+      console.log("[StreamPage] Fal mode enabled, ready:", isCloudReady);
     }
-  }, [isFalMode, isFalReady]);
+  }, [isCloudMode, isCloudReady]);
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelines();
@@ -1427,7 +1427,7 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
-            isFalMode={isCloudMode}
+            isCloudMode={isCloudMode}
           />
         </div>
       </div>
