@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from .cloud_connection import CloudConnectionManager
     from .pipeline_manager import PipelineManager
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
@@ -53,6 +54,8 @@ from .recording import (
 from .schema import (
     AssetFileInfo,
     AssetsResponse,
+    CloudConnectRequest,
+    CloudStatusResponse,
     HardwareInfoResponse,
     HealthResponse,
     IceCandidateRequest,
@@ -209,6 +212,8 @@ webrtc_manager = None
 pipeline_manager = None
 # Server startup timestamp for detecting restarts
 server_start_time = time.time()
+# Global cloud connection manager instance
+cloud_connection_manager = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -228,11 +233,12 @@ async def lifespan(app: FastAPI):
     # Lazy imports to avoid loading torch at CLI startup (fixes Windows DLL locking)
     import torch
 
+    from .cloud_connection import CloudConnectionManager
     from .pipeline_manager import PipelineManager
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager
+    global webrtc_manager, pipeline_manager, fal_connection_manager
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -270,6 +276,9 @@ async def lifespan(app: FastAPI):
     webrtc_manager = WebRTCManager()
     logger.info("WebRTC manager initialized")
 
+    cloud_connection_manager = CloudConnectionManager()
+    logger.info("fal connection manager initialized")
+
     yield
 
     # Shutdown
@@ -283,6 +292,11 @@ async def lifespan(app: FastAPI):
         pipeline_manager.unload_all_pipelines()
         logger.info("Pipeline manager shutdown complete")
 
+    if fal_connection_manager and fal_connection_manager.is_connected:
+        logger.info("Shutting down fal connection...")
+        await fal_connection_manager.disconnect()
+        logger.info("fal connection shutdown complete")
+
 
 def get_webrtc_manager() -> "WebRTCManager":
     """Dependency to get WebRTC manager instance."""
@@ -292,6 +306,11 @@ def get_webrtc_manager() -> "WebRTCManager":
 def get_pipeline_manager() -> "PipelineManager":
     """Dependency to get pipeline manager instance."""
     return pipeline_manager
+
+
+def get_cloud_connection_manager() -> "CloudConnectionManager":
+    """Dependency to get fal connection manager instance."""
+    return fal_connection_manager
 
 
 app = FastAPI(
@@ -427,14 +446,14 @@ async def root():
 async def load_pipeline(
     request: PipelineLoadRequest,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Load one or more pipelines."""
-    try:
-        # Convert pydantic model to dict for pipeline manager
-        load_params_dict = None
-        if request.load_params:
-            load_params_dict = request.load_params
+    """Load one or more pipelines.
 
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
+    try:
         # Get pipeline IDs to load
         pipeline_ids = request.pipeline_ids
         if not pipeline_ids:
@@ -443,11 +462,39 @@ async def load_pipeline(
                 detail="pipeline_ids must be provided and cannot be empty",
             )
 
-        # Start loading in background without blocking
+        # Convert pydantic model to dict for pipeline manager
+        load_params_dict = None
+        if request.load_params:
+            load_params_dict = request.load_params.model_dump()
+
+        # If connected to fal, proxy the request
+        if cloud_manager.is_connected:
+            logger.info(f"Proxying pipeline load to fal: {pipeline_ids}")
+            body = {"pipeline_ids": pipeline_ids}
+            if load_params_dict:
+                body["load_params"] = load_params_dict
+            response = await cloud_manager.api_request(
+                method="POST",
+                path="/api/v1/pipeline/load",
+                body=body,
+                timeout=60.0,  # Pipeline loading can take a while
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Pipeline load failed on fal"),
+                )
+            return response.get(
+                "data", {"message": "Pipeline loading initiated on fal"}
+            )
+
+        # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(pipeline_ids, load_params_dict)
         )
         return {"message": "Pipeline loading initiated successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error loading pipeline: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -456,18 +503,41 @@ async def load_pipeline(
 @app.get("/api/v1/pipeline/status", response_model=PipelineStatusResponse)
 async def get_pipeline_status(
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Get current pipeline status."""
+    """Get current pipeline status.
+
+    In cloud mode (when connected to fal), this proxies the request to the
+    fal-hosted scope backend.
+    """
     try:
+        # If connected to fal, proxy the request
+        if cloud_manager.is_connected:
+            response = await cloud_manager.api_request(
+                method="GET",
+                path="/api/v1/pipeline/status",
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Pipeline status failed on fal"),
+                )
+            return PipelineStatusResponse(**response.get("data", {}))
+
+        # Local mode
         status_info = await pipeline_manager.get_status_info_async()
         return PipelineStatusResponse(**status_info)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting pipeline status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/v1/pipelines/schemas", response_model=PipelineSchemasResponse)
-async def get_pipeline_schemas():
+async def get_pipeline_schemas(
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Get configuration schemas and defaults for all available pipelines.
 
     Returns the output of each pipeline's get_schema_with_metadata() method,
@@ -479,7 +549,29 @@ async def get_pipeline_schemas():
     - config_schema: Full JSON schema with defaults
 
     The frontend should use this as the source of truth for parameter defaults.
+
+    In cloud mode (when connected to fal), this proxies the request to the
+    fal-hosted scope backend to get the available pipelines there.
     """
+    # If connected to fal, proxy the request to get fal's available pipelines
+    if cloud_manager.is_connected:
+        logger.info("Proxying pipeline schemas request to fal")
+        response = await cloud_manager.api_request(
+            method="GET",
+            path="/api/v1/pipelines/schemas",
+            timeout=30.0,
+        )
+        if response.get("status", 200) >= 400:
+            raise HTTPException(
+                status_code=response.get("status", 500),
+                detail=response.get("error", "Failed to get pipeline schemas from fal"),
+            )
+        # Return the fal response data directly
+        return PipelineSchemasResponse(
+            pipelines=response.get("data", {}).get("pipelines", {})
+        )
+
+    # Local mode: get schemas from local registry
     from scope.core.pipelines.registry import PipelineRegistry
 
     pipelines: dict = {}
@@ -498,10 +590,27 @@ async def get_pipeline_schemas():
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Return ICE server configuration for frontend WebRTC connection."""
-    ice_servers = []
+    """Return ICE server configuration for frontend WebRTC connection.
 
+    In cloud mode, this returns the ICE servers from the fal-hosted scope backend.
+    """
+    # If connected to fal, get ICE servers from fal
+    if cloud_manager.is_connected:
+        try:
+            cloud_ice_servers = await cloud_manager.webrtc_get_ice_servers()
+            return IceServersResponse(
+                iceServers=[
+                    IceServerConfig(**server)
+                    for server in cloud_ice_servers.get("iceServers", [])
+                ]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get ICE servers from fal, using local: {e}")
+
+    # Local mode or fallback
+    ice_servers = []
     for server in webrtc_manager.rtc_config.iceServers:
         ice_servers.append(
             IceServerConfig(
@@ -519,10 +628,27 @@ async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Handle WebRTC offer and return answer."""
+    """Handle WebRTC offer and return answer.
+
+    In cloud mode, video flows through the backend to fal.ai:
+        Browser → Backend (WebRTC) → fal.ai (WebRTC) → Backend → Browser
+
+    This enables:
+    - Spout input to be forwarded to fal.ai
+    - Full control over the video pipeline on the backend
+    - Local backend can record/manipulate frames
+    """
     try:
-        # Ensure pipeline is loaded before proceeding
+        # If connected to fal, use relay mode (video flows through backend)
+        if cloud_manager.is_connected:
+            logger.info(
+                "[CLOUD] Using relay mode - video will flow through backend to fal.ai"
+            )
+            return await webrtc_manager.handle_offer_with_cloud(request, cloud_manager)
+
+        # Local mode: ensure pipeline is loaded before proceeding
         status_info = await pipeline_manager.get_status_info_async()
         if status_info["status"] != "loaded":
             raise HTTPException(
@@ -532,6 +658,8 @@ async def handle_webrtc_offer(
 
         return await webrtc_manager.handle_offer(request, pipeline_manager)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -549,10 +677,16 @@ async def add_ice_candidate(
 
     This endpoint follows the Trickle ICE pattern, allowing clients to send
     ICE candidates as they are discovered.
+
+    Note: In cloud mode, the browser still connects to the LOCAL backend via WebRTC.
+    The backend then relays frames to/from fal.ai via a separate WebRTC connection.
+    So browser ICE candidates always go to the local WebRTC session.
     """
     # TODO: Validate that the Content-Type is 'application/trickle-ice-sdpfrag'
     # At the moment FastAPI defaults to validating that it is 'application/json'
     try:
+        # Always add ICE candidates to the local session
+        # (In cloud mode, browser connects to local backend, not directly to fal)
         for candidate_init in candidate_request.candidates:
             await webrtc_manager.add_ice_candidate(
                 session_id=session_id,
@@ -561,9 +695,9 @@ async def add_ice_candidate(
                 sdp_mline_index=candidate_init.sdpMLineIndex,
             )
 
-            logger.debug(
-                f"Added {len(candidate_request.candidates)} ICE candidates to session {session_id}"
-            )
+        logger.debug(
+            f"Added {len(candidate_request.candidates)} ICE candidates to session {session_id}"
+        )
 
         # Return 204 No Content on success
         return Response(status_code=204)
@@ -581,12 +715,50 @@ async def download_recording(
     session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Download the recording file for the specified session.
     This will finalize the current recording and create a copy for download,
-    then continue recording with a new file."""
+    then continue recording with a new file.
+
+    In cloud mode, this proxies the download request to fal.ai.
+    """
     try:
-        # Get the session by ID
+        # If cloud mode is active, proxy to fal.ai
+        if cloud_manager.is_connected:
+            logger.info(f"[CLOUD] Downloading recording for session {session_id}")
+
+            # Use the fal.ai session ID if we have an active WebRTC connection
+            cloud_session_id = cloud_manager.cloud_session_id
+            if not cloud_session_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No active fal.ai session for recording download",
+                )
+
+            # Download from fal.ai
+            content = await cloud_manager.download_recording(cloud_session_id)
+            if not content:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Recording not available from fal.ai",
+                )
+
+            # Generate filename with datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording-{timestamp}.mp4"
+
+            # Return as streaming response
+            return Response(
+                content=content,
+                media_type="video/mp4",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(len(content)),
+                },
+            )
+
+        # Local mode: use local recording manager
         session = webrtc_manager.get_session(session_id)
         if not session:
             raise HTTPException(
@@ -691,8 +863,12 @@ async def list_lora_files():
 @app.get("/api/v1/assets", response_model=AssetsResponse)
 async def list_assets(
     type: str | None = Query(None, description="Filter by asset type (image, video)"),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """List available asset files in the assets directory and its subdirectories."""
+    """List available asset files in the assets directory and its subdirectories.
+
+    When cloud mode is active, lists assets from the fal.ai server instead.
+    """
 
     def process_asset_file(
         file_path: Path, assets_dir: Path, asset_type: str
@@ -714,6 +890,39 @@ async def list_assets(
         )
 
     try:
+        # If cloud mode is active, proxy to fal.ai
+        if cloud_manager.is_connected:
+            logger.info("[CLOUD] Fetching assets list from fal.ai")
+            path = "/api/v1/assets"
+            if type:
+                path = f"{path}?type={type}"
+
+            response = await cloud_manager.api_request(
+                method="GET",
+                path=path,
+                timeout=30.0,
+            )
+
+            # Parse response data
+            data = response.get("data", {})
+            assets_data = data.get("assets", [])
+
+            asset_files = [
+                AssetFileInfo(
+                    name=a.get("name", ""),
+                    path=a.get("path", ""),
+                    size_mb=a.get("size_mb", 0),
+                    folder=a.get("folder"),
+                    type=a.get("type", "image"),
+                    created_at=a.get("created_at", 0),
+                )
+                for a in assets_data
+            ]
+
+            logger.info(f"[CLOUD] Found {len(asset_files)} assets on fal.ai")
+            return AssetsResponse(assets=asset_files)
+
+        # Local mode: list local assets
         assets_dir = get_assets_dir()
         asset_files: list[AssetFileInfo] = []
 
@@ -747,8 +956,17 @@ async def list_assets(
 
 
 @app.post("/api/v1/assets", response_model=AssetFileInfo)
-async def upload_asset(request: Request, filename: str = Query(...)):
-    """Upload an asset file (image or video) to the assets directory."""
+async def upload_asset(
+    request: Request,
+    filename: str = Query(...),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Upload an asset file (image or video) to the assets directory.
+
+    When cloud mode is active, the file is uploaded to the fal.ai server instead.
+    """
+    import base64
+
     try:
         # Validate file type - support both images and videos
         allowed_image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -762,15 +980,26 @@ async def upload_asset(request: Request, filename: str = Query(...)):
                 detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
             )
 
-        # Determine asset type
+        # Determine asset type and content type
         if file_extension in allowed_image_extensions:
             asset_type = "image"
+            content_type_map = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+                ".bmp": "image/bmp",
+            }
         else:
             asset_type = "video"
-
-        # Ensure assets directory exists
-        assets_dir = get_assets_dir()
-        assets_dir.mkdir(parents=True, exist_ok=True)
+            content_type_map = {
+                ".mp4": "video/mp4",
+                ".avi": "video/x-msvideo",
+                ".mov": "video/quicktime",
+                ".mkv": "video/x-matroska",
+                ".webm": "video/webm",
+            }
+        content_type = content_type_map.get(file_extension, "application/octet-stream")
 
         # Read file content from request body
         content = await request.body()
@@ -782,6 +1011,55 @@ async def upload_asset(request: Request, filename: str = Query(...)):
                 status_code=400,
                 detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
             )
+
+        # If cloud mode is active, upload to fal.ai AND save locally for thumbnails
+        if cloud_manager.is_connected:
+            # TODO need a unique directory for each user so that they can't see each other's assets or just make sure we clean the dir for each websocket connection
+            logger.info(
+                f"upload_asset: Uploading {asset_type} to fal.ai and locally: {filename}"
+            )
+
+            # Also save locally for thumbnail serving
+            assets_dir = get_assets_dir()
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            local_file_path = assets_dir / filename
+            local_file_path.write_bytes(content)
+            logger.info(
+                f"upload_asset: Saved local copy for thumbnails: {local_file_path}"
+            )
+
+            # Base64 encode the content for JSON transport to fal.ai
+            base64_content = base64.b64encode(content).decode("utf-8")
+
+            # Send to fal.ai via WebSocket proxy
+            response = await cloud_manager.api_request(
+                method="POST",
+                path=f"/api/v1/assets?filename={filename}",
+                body={
+                    "_base64_content": base64_content,
+                    "_content_type": content_type,
+                },
+                timeout=60.0,  # Longer timeout for uploads
+            )
+
+            # Extract data from response - this is the fal.ai path
+            data = response.get("data", {})
+            fal_path = data.get("path", "")
+            logger.info(f"upload_asset: Uploaded to fal.ai: {fal_path}")
+
+            # Return the fal.ai path (which fal.ai will use for processing)
+            return AssetFileInfo(
+                name=data.get("name", filename),
+                path=fal_path,  # Use fal.ai path for parameters sent to cloud
+                size_mb=data.get("size_mb", round(len(content) / (1024 * 1024), 2)),
+                folder=data.get("folder"),
+                type=data.get("type", asset_type),
+                created_at=data.get("created_at", time.time()),
+            )
+
+        # Local mode: save to local assets directory
+        assets_dir = get_assets_dir()
+        assets_dir.mkdir(parents=True, exist_ok=True)
 
         # Save file to assets directory
         file_path = assets_dir / filename
@@ -814,10 +1092,25 @@ async def upload_asset(request: Request, filename: str = Query(...)):
 
 @app.get("/api/v1/assets/{asset_path:path}")
 async def serve_asset(asset_path: str):
-    """Serve an asset file (for thumbnails/previews)."""
+    """Serve an asset file (for thumbnails/previews).
+
+    Handles both relative paths and absolute paths (e.g., from fal.ai).
+    For absolute paths, extracts the filename and serves from local assets.
+    """
     try:
         assets_dir = get_assets_dir()
-        file_path = assets_dir / asset_path
+
+        # Handle absolute paths (e.g., from fal.ai: /root/.daydream-scope/assets/filename.png)
+        # Extract just the filename to serve from local cache
+        if asset_path.startswith("/") or asset_path.startswith("root/"):
+            # Extract just the filename
+            filename = Path(asset_path).name
+            file_path = assets_dir / filename
+            logger.debug(
+                f"serve_asset: Extracted filename '{filename}' from absolute path"
+            )
+        else:
+            file_path = assets_dir / asset_path
 
         # Security check: ensure the path is within assets directory
         try:
@@ -857,9 +1150,27 @@ async def serve_asset(asset_path: str):
 
 
 @app.get("/api/v1/models/status")
-async def get_model_status(pipeline_id: str):
+async def get_model_status(
+    pipeline_id: str,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Check if models for a pipeline are downloaded and get download progress."""
     try:
+        # If connected to fal, proxy the request to fal backend
+        if cloud_manager.is_connected:
+            logger.info(f"Proxying model status check to fal: {pipeline_id}")
+            response = await cloud_manager.api_request(
+                method="GET",
+                path=f"/api/v1/models/status?pipeline_id={pipeline_id}",
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Model status check failed on fal"),
+                )
+            return response.get("data", {"downloaded": True, "progress": None})
+
+        # Local mode: check local files
         progress = download_progress_manager.get_progress(pipeline_id)
 
         # If download is in progress, always report as not downloaded
@@ -875,13 +1186,18 @@ async def get_model_status(pipeline_id: str):
             progress = None
 
         return {"downloaded": downloaded, "progress": progress}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error checking model status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/v1/models/download")
-async def download_pipeline_models(request: DownloadModelsRequest):
+async def download_pipeline_models(
+    request: DownloadModelsRequest,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Download models for a specific pipeline."""
     try:
         if not request.pipeline_id:
@@ -889,7 +1205,25 @@ async def download_pipeline_models(request: DownloadModelsRequest):
 
         pipeline_id = request.pipeline_id
 
-        # Check if download already in progress
+        # If connected to fal, proxy the download request to fal backend
+        if cloud_manager.is_connected:
+            logger.info(f"Proxying model download to fal: {pipeline_id}")
+            response = await cloud_manager.api_request(
+                method="POST",
+                path="/api/v1/models/download",
+                body={"pipeline_id": pipeline_id},
+                timeout=60.0,  # Model downloads can take a while to start
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get("error", "Model download failed on fal"),
+                )
+            return response.get(
+                "data", {"message": f"Model download started on fal for {pipeline_id}"}
+            )
+
+        # Local mode: check if download already in progress
         existing_progress = download_progress_manager.get_progress(pipeline_id)
         if existing_progress and existing_progress.get("is_downloading"):
             raise HTTPException(
@@ -928,11 +1262,41 @@ def is_spout_available() -> bool:
 
 
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
-async def get_hardware_info():
-    """Get hardware information including available VRAM and Spout availability."""
-    import torch  # Lazy import to avoid loading at CLI startup
+async def get_hardware_info(
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Get hardware information including available VRAM and Spout availability.
 
+    In cloud mode (when connected to fal), this proxies the request to the
+    fal-hosted scope backend to get the cloud GPU's hardware info.
+    """
     try:
+        # If connected to fal, proxy the request to get fal's hardware info
+        if cloud_manager.is_connected:
+            logger.info("Proxying hardware info request to fal")
+            response = await cloud_manager.api_request(
+                method="GET",
+                path="/api/v1/hardware/info",
+                timeout=30.0,
+            )
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 500),
+                    detail=response.get(
+                        "error", "Failed to get hardware info from fal"
+                    ),
+                )
+            data = response.get("data", {})
+            # Use cloud VRAM, but LOCAL Spout availability
+            # (Spout frames flow through local backend to cloud, so local Spout support matters)
+            return HardwareInfoResponse(
+                vram_gb=data.get("vram_gb"),
+                spout_available=is_spout_available(),
+            )
+
+        # Local mode: get local hardware info
+        import torch  # Lazy import to avoid loading at CLI startup
+
         vram_gb = None
 
         if torch.cuda.is_available():
@@ -944,6 +1308,8 @@ async def get_hardware_info():
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1230,6 +1596,117 @@ async def reload_plugin(
         ) from e
 
 
+# =============================================================================
+# Cloud Integration Endpoints (fal.ai)
+# =============================================================================
+
+
+# TODO disconnect from cloud if browser is closed
+@app.post("/api/v1/cloud/connect", response_model=CloudStatusResponse)
+async def connect_to_cloud(
+    request: CloudConnectRequest,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Connect to cloud (fal.ai) for remote GPU inference.
+
+    This establishes a WebSocket connection to the cloud runner,
+    which stays open until disconnect is called. Once connected:
+    - Pipeline loading is proxied to the cloud-hosted scope backend
+    - Video from the browser flows through the backend to cloud
+    - The cloud runner stays warm and ready for video processing
+
+    Credentials can be provided in the request body or via CLI args:
+    --cloud-app-id and --cloud-api-key (or FAL_APP_ID/FAL_KEY env vars).
+
+    Note: The connection may take 1-2 minutes on cold start while the
+    cloud runner initializes.
+
+    Architecture:
+        Browser → Backend (WebRTC) → cloud (WebRTC) → Backend → Browser
+        Spout → Backend → cloud (WebRTC) → Backend → Spout/Browser
+    """
+    try:
+        # Use request body credentials if provided, otherwise fall back to CLI/env
+        app_id = request.app_id or os.environ.get("SCOPE_CLOUD_APP_ID")
+        api_key = request.api_key or os.environ.get("SCOPE_CLOUD_API_KEY")
+
+        if not app_id:
+            raise HTTPException(
+                status_code=400,
+                detail="cloud credentials not configured. Use --cloud-app-id and --cloud-api-key CLI args, "
+                "or FAL_APP_ID and FAL_KEY environment variables.",
+            )
+
+        logger.info(f"Connecting to cloud: {app_id}")
+        await cloud_manager.connect(app_id, api_key)
+
+        credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
+        return CloudStatusResponse(
+            connected=True,
+            webrtc_connected=False,
+            app_id=app_id,
+            credentials_configured=credentials_configured,
+        )
+    except Exception as e:
+        logger.error(f"Error connecting to cloud: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/cloud/disconnect", response_model=CloudStatusResponse)
+async def disconnect_from_cloud(
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Disconnect from cloud.
+
+    This closes the WebSocket and WebRTC connections to cloud, returning
+    to local GPU processing mode. Any in-progress operations will be interrupted.
+    """
+    try:
+        await cloud_manager.disconnect()
+        credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
+        return CloudStatusResponse(
+            connected=False,
+            webrtc_connected=False,
+            app_id=None,
+            credentials_configured=credentials_configured,
+        )
+    except Exception as e:
+        logger.error(f"Error disconnecting from cloud: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/cloud/status", response_model=CloudStatusResponse)
+async def get_cloud_status(
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Get current cloud connection status."""
+    status = cloud_manager.get_status()
+    # Check if credentials are configured via CLI/env
+    credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
+    return CloudStatusResponse(**status, credentials_configured=credentials_configured)
+
+
+@app.get("/api/v1/cloud/stats")
+async def get_cloud_stats(
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Get detailed cloud connection statistics.
+
+    Returns connection stats including:
+    - Uptime
+    - WebRTC offers sent/successful
+    - ICE candidates sent
+    - API requests sent/successful
+
+    Also prints stats to the server log for debugging.
+    """
+    # Print stats to log
+    cloud_manager.print_stats()
+
+    # Return full status with stats
+    return cloud_manager.get_status()
+
+
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
@@ -1370,12 +1847,39 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     is_flag=True,
     help="Do not automatically open a browser window after the server starts",
 )
+@click.option(
+    "--cloud-app-id",
+    default="Daydream/scope-app/ws",
+    envvar="FAL_APP_ID",
+    help="fal.ai app ID for cloud mode (e.g., 'username/scope-fal')",
+)
+@click.option(
+    "--cloud-api-key",
+    default=None,
+    envvar="FAL_API_KEY",
+    help="fal.ai API key for cloud mode",
+)
 @click.pass_context
-def main(ctx, version: bool, reload: bool, host: str, port: int, no_browser: bool):
+def main(
+    ctx,
+    version: bool,
+    reload: bool,
+    host: str,
+    port: int,
+    no_browser: bool,
+    cloud_app_id: str | None,
+    cloud_api_key: str | None,
+):
     # Handle version flag
     if version:
         print_version_info()
         sys.exit(0)
+
+    # Store fal credentials in environment for app access
+    if cloud_app_id:
+        os.environ["SCOPE_CLOUD_APP_ID"] = cloud_app_id
+    if cloud_api_key:
+        os.environ["SCOPE_CLOUD_API_KEY"] = cloud_api_key
 
     # If no subcommand was invoked, run the server
     if ctx.invoked_subcommand is None:
