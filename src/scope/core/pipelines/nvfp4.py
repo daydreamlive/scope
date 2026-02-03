@@ -37,6 +37,30 @@ logger = logging.getLogger(__name__)
 # Minimum SM version for NVFP4 hardware acceleration
 MIN_SM_VERSION = (10, 0)  # Blackwell
 
+
+class WeightProxy:
+    """Proxy object that provides .dtype, .device, and .shape for PEFT compatibility.
+
+    PEFT's LoRA layers access base_layer.weight.dtype to determine input casting.
+    This proxy provides that interface without requiring actual weight tensors.
+    """
+
+    def __init__(
+        self,
+        dtype: torch.dtype,
+        device: torch.device | None,
+        shape: tuple[int, int],
+    ):
+        self.dtype = dtype
+        self.device = device
+        self.shape = shape
+
+    def __repr__(self) -> str:
+        return (
+            f"WeightProxy(dtype={self.dtype}, device={self.device}, shape={self.shape})"
+        )
+
+
 # Layout name for comfy-kitchen's NVFP4 layout
 NVFP4_LAYOUT = "TensorCoreNVFP4Layout"
 
@@ -84,6 +108,9 @@ class NVFP4Linear(torch.nn.Module):
 
     This module stores weights as comfy-kitchen QuantizedTensor which
     automatically dispatches to optimized NVFP4 kernels during matmul.
+
+    For compatibility with PEFT/LoRA, this class provides a .weight property
+    that returns metadata about the quantized weights (dtype, device, shape).
     """
 
     def __init__(
@@ -92,6 +119,7 @@ class NVFP4Linear(torch.nn.Module):
         out_features: int,
         bias: bool = True,
         device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         self.in_features = in_features
@@ -101,10 +129,28 @@ class NVFP4Linear(torch.nn.Module):
         # We store it as a regular attribute, not a parameter
         self._quantized_weight = None
 
+        # Store original dtype for PEFT compatibility
+        # PEFT's LoRA layer accesses .weight.dtype to cast inputs
+        self._weight_dtype = dtype or torch.bfloat16
+        self._weight_device = device
+
         if bias:
             self.bias = torch.nn.Parameter(torch.zeros(out_features, device=device))
         else:
             self.register_parameter("bias", None)
+
+    @property
+    def weight(self) -> WeightProxy:
+        """Return a proxy object that provides .dtype and .device for PEFT compatibility.
+
+        PEFT's LoRA layers access base_layer.weight.dtype to determine input casting.
+        This proxy provides that interface without dequantizing the weights.
+        """
+        return WeightProxy(
+            dtype=self._weight_dtype,
+            device=self._weight_device,
+            shape=(self.out_features, self.in_features),
+        )
 
     @classmethod
     def from_linear(cls, linear: torch.nn.Linear) -> NVFP4Linear:
@@ -116,7 +162,12 @@ class NVFP4Linear(torch.nn.Module):
             out_features=linear.out_features,
             bias=linear.bias is not None,
             device=linear.weight.device,
+            dtype=linear.weight.dtype,
         )
+
+        # Store original weight properties for PEFT compatibility
+        nvfp4_linear._weight_dtype = linear.weight.dtype
+        nvfp4_linear._weight_device = linear.weight.device
 
         # Quantize weight to NVFP4 using comfy-kitchen
         # Weight shape is (out_features, in_features)
@@ -178,11 +229,29 @@ def quantize_model_nvfp4(
                      If None, all Linear layers are quantized.
     """
     layers_to_replace = []
+    skipped_lora = []
 
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
+            # Always skip LoRA adapter layers regardless of filter
+            # PEFT uses lora_A and lora_B as ModuleDict containers
+            # Check both original case and lowercase for safety
+            if (
+                "lora_A" in name
+                or "lora_B" in name
+                or "lora_a" in name.lower()
+                or "lora_b" in name.lower()
+                or ".lora_" in name.lower()
+            ):
+                skipped_lora.append(name)
+                continue
+
             if layer_filter is None or layer_filter(name, module):
                 layers_to_replace.append((name, module))
+
+    if skipped_lora:
+        logger.info(f"Skipped {len(skipped_lora)} LoRA adapter layers")
+        logger.debug(f"Skipped LoRA layers: {skipped_lora[:5]}...")
 
     logger.info(f"Quantizing {len(layers_to_replace)} Linear layers to NVFP4")
 
@@ -212,6 +281,7 @@ def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
     - Embedding layers
     - Layer norms
     - Final output projections (often need full precision)
+    - LoRA adapter layers (lora_A, lora_B) - these must stay as nn.Linear for PEFT
 
     Args:
         name: Full module name path
@@ -225,6 +295,11 @@ def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
         return False
 
     name_lower = name.lower()
+
+    # Skip LoRA adapter layers - PEFT requires these to be standard nn.Linear
+    # LoRA layers are named like: base_layer.lora_A.default, base_layer.lora_B.default
+    if "lora_a" in name_lower or "lora_b" in name_lower:
+        return False
 
     # Skip embedding and output layers
     skip_patterns = [
@@ -289,6 +364,7 @@ def wan_transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
     - Text/time embeddings
     - Head output projection
     - Normalization layers
+    - LoRA adapter layers (lora_A, lora_B) - these must stay as nn.Linear for PEFT
 
     Args:
         name: Full module name path
@@ -302,6 +378,11 @@ def wan_transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
         return False
 
     name_lower = name.lower()
+
+    # Skip LoRA adapter layers - PEFT requires these to be standard nn.Linear
+    # LoRA layers are named like: base_layer.lora_A.default, base_layer.lora_B.default
+    if "lora_a" in name_lower or "lora_b" in name_lower:
+        return False
 
     # Skip embedding layers
     skip_patterns = [
@@ -319,7 +400,7 @@ def wan_transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
 
     # Include attention layers in blocks
     if "blocks" in name_lower:
-        # Self-attention projections
+        # Self-attention projections (but not LoRA wrappers)
         if any(
             p in name_lower
             for p in ["self_attn.q", "self_attn.k", "self_attn.v", "self_attn.o"]
