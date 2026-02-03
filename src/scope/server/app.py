@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
+from .kafka_publisher import (
+    KafkaPublisher,
+    is_kafka_enabled,
+    set_kafka_publisher,
+)
 from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
@@ -210,6 +215,8 @@ webrtc_manager = None
 pipeline_manager = None
 # Global cloud connection manager instance
 cloud_connection_manager = None
+# Global Kafka publisher instance (optional, initialized if credentials are present)
+kafka_publisher = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -233,7 +240,7 @@ async def lifespan(app: FastAPI):
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager, cloud_connection_manager
+    global webrtc_manager, pipeline_manager, cloud_connection_manager, kafka_publisher
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -276,6 +283,16 @@ async def lifespan(app: FastAPI):
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
 
+    # Initialize Kafka publisher if credentials are configured
+    if is_kafka_enabled():
+        kafka_publisher = KafkaPublisher()
+        if await kafka_publisher.start():
+            set_kafka_publisher(kafka_publisher)
+            logger.info("Kafka publisher initialized")
+        else:
+            kafka_publisher = None
+            logger.warning("Kafka publisher failed to start")
+
     yield
 
     # Shutdown
@@ -293,6 +310,12 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down cloud connection...")
         await cloud_connection_manager.disconnect()
         logger.info("Cloud connection shutdown complete")
+
+    if kafka_publisher:
+        logger.info("Shutting down Kafka publisher...")
+        await kafka_publisher.stop()
+        set_kafka_publisher(None)
+        logger.info("Kafka publisher shutdown complete")
 
 
 def get_webrtc_manager() -> "WebRTCManager":
@@ -1308,8 +1331,8 @@ async def connect_to_cloud(
                 "or FAL_APP_ID and FAL_API_KEY environment variables.",
             )
 
-        logger.info(f"Connecting to cloud: {app_id}")
-        await cloud_manager.connect(app_id, api_key)
+        logger.info(f"Connecting to cloud: {app_id} (user_id: {request.user_id})")
+        await cloud_manager.connect(app_id, api_key, request.user_id)
 
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
@@ -1520,7 +1543,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 )
 @click.option(
     "--cloud-app-id",
-    default="Daydream/scope-relay-test/ws",
+    default="Daydream/scope-app--staging/ws",
     envvar="FAL_APP_ID",
     help="fal.ai app ID for cloud mode (e.g., 'username/scope-fal')",
 )

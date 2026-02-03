@@ -57,6 +57,8 @@ class CloudConnectionManager:
         self._stop_event = asyncio.Event()
         # Connection ID for log correlation
         self._connection_id: str | None = None
+        # User ID for log correlation (from fal token)
+        self._user_id: str | None = None
 
         # WebRTC client for media relay
         self._webrtc_client: CloudWebRTCClient | None = None
@@ -80,12 +82,13 @@ class CloudConnectionManager:
         """Check if connected to cloud."""
         return self._connected and self.ws is not None and not self.ws.closed
 
-    async def connect(self, app_id: str, api_key: str) -> None:
+    async def connect(self, app_id: str, api_key: str, user_id: str | None = None) -> None:
         """Connect to cloud.
 
         Args:
             app_id: The cloud app ID (e.g., "username/scope-app")
             api_key: The cloud API key
+            user_id: Optional user ID for log correlation (from fal token)
 
         Raises:
             RuntimeError: If connection fails or times out
@@ -96,6 +99,7 @@ class CloudConnectionManager:
 
         self.app_id = app_id
         self.api_key = api_key
+        self._user_id = user_id
         self._stop_event.clear()
 
         # Get temporary token
@@ -145,6 +149,11 @@ class CloudConnectionManager:
         self._connected = True
         self._stats["connected_at"] = time.time()
         self._stats["last_activity_at"] = time.time()
+
+        # Send user_id to fal for log correlation
+        if self._user_id:
+            await self.ws.send_json({"type": "set_user_id", "user_id": self._user_id})
+            logger.info(f"Sent user_id to cloud: {self._user_id}")
 
         # Reset stats on new connection
         self._stats["webrtc_offers_sent"] = 0

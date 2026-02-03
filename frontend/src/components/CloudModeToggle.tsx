@@ -19,6 +19,7 @@ import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Cloud, CloudOff, Loader2, X, Copy, Check } from "lucide-react";
+// import { fetchCloudToken } from "../lib/auth";
 
 interface CloudStatus {
   connected: boolean;
@@ -105,10 +106,15 @@ export function CloudModeToggle({
     abortControllerRef.current = abortController;
 
     try {
+      // Fetch cloud token to get userId for backend logging
+      // const cloudTokenResponse = await fetchCloudToken();
+      // const userId = cloudTokenResponse?.userId || null;
+      const userId = "TODO";
+
       const response = await fetch("/api/v1/cloud/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ user_id: userId }),
         signal: abortController.signal,
       });
 

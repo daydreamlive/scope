@@ -9,11 +9,128 @@ Based on:
 - https://github.com/fal-ai-community/fal-demos/blob/main/fal_demos/video/yolo_webcam_webrtc/yolo.py
 """
 
+import json
+import logging
+import os
 import shutil
+import time
+import uuid
+from typing import Any
 
 import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
+
+class KafkaPublisher:
+    """Async Kafka event publisher for fal.ai websocket events."""
+
+    def __init__(self):
+        self._producer = None
+        self._started = False
+        self._topic = None
+
+    async def start(self) -> bool:
+        """Start the Kafka producer."""
+        # Read env vars at runtime (they may not be available at module load time on fal.ai)
+        bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+        self._topic = os.getenv("KAFKA_TOPIC", "network_events")
+        sasl_username = os.getenv("KAFKA_SASL_USERNAME")
+        sasl_password = os.getenv("KAFKA_SASL_PASSWORD")
+        
+        print(f"[Kafka] Starting publisher (KAFKA_BOOTSTRAP_SERVERS={bootstrap_servers})")
+        if not bootstrap_servers:
+            print("[Kafka] Not configured, event publishing disabled")
+            return False
+
+        try:
+            from aiokafka import AIOKafkaProducer
+
+            config = {
+                "bootstrap_servers": bootstrap_servers,
+                "value_serializer": lambda v: json.dumps(v).encode("utf-8"),
+                "key_serializer": lambda k: k.encode("utf-8") if k else None,
+            }
+
+            if sasl_username and sasl_password:
+                import ssl
+                ssl_context = ssl.create_default_context()
+                config.update({
+                    "security_protocol": "SASL_SSL",
+                    "sasl_mechanism": "PLAIN",
+                    "sasl_plain_username": sasl_username,
+                    "sasl_plain_password": sasl_password,
+                    "ssl_context": ssl_context,
+                })
+
+            self._producer = AIOKafkaProducer(**config)
+            await self._producer.start()
+            self._started = True
+            print(f"[Kafka] ✅ Publisher started, topic: {self._topic}")
+            return True
+
+        except ImportError:
+            print("[Kafka] ⚠️ aiokafka not installed, Kafka disabled")
+            return False
+        except Exception as e:
+            print(f"[Kafka] ❌ Failed to start producer: {e}")
+            return False
+
+    async def stop(self):
+        """Stop the Kafka producer."""
+        if self._producer and self._started:
+            try:
+                await self._producer.stop()
+                print("[Kafka] Publisher stopped")
+            except Exception as e:
+                print(f"[Kafka] Error stopping producer: {e}")
+            finally:
+                self._started = False
+                self._producer = None
+
+    async def publish(
+        self,
+        event_type: str,
+        user_id: str | None = None,
+        connection_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Publish an event to Kafka."""
+        if not self._started or not self._producer:
+            return False
+
+        event_id = str(uuid.uuid4())
+        timestamp_ms = str(int(time.time() * 1000))
+
+        data: dict[str, Any] = {"event_type": event_type}
+        if user_id:
+            data["user_id"] = user_id
+        if connection_id:
+            data["connection_id"] = connection_id
+        if metadata:
+            data.update(metadata)
+
+        event = {
+            "id": event_id,
+            "type": "scope_stream_trace",
+            "timestamp": timestamp_ms,
+            "data": data,
+        }
+
+        try:
+            await self._producer.send_and_wait(self._topic, value=event, key=event_id)
+            print(f"[Kafka] ✅ Published event: {event_type} (user={user_id}, conn={connection_id})")
+            return True
+        except Exception as e:
+            print(f"[Kafka] ❌ Failed to publish event {event_type}: {e}")
+            return False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started
+
+
+# Global Kafka publisher instance
+kafka_publisher: KafkaPublisher | None = None
 
 
 ASSETS_DIR_PATH = "~/.daydream-scope/assets"
@@ -59,7 +176,7 @@ def cleanup_session_data():
 # fal deploy fal_app.py --auth public
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:87db283"
+DOCKER_IMAGE = "daydreamlive/scope:5de3158"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -96,6 +213,7 @@ class ScopeApp(fal.App, keep_alive=300):
     requirements = [
         "requests",
         "httpx",  # For async HTTP requests
+        "aiokafka",  # For Kafka event publishing
     ]
 
     auth_mode = "public"
@@ -132,6 +250,18 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
+
+        # Install kafka extra dependencies
+        print("Installing daydream-scope[kafka]...")
+        try:
+            subprocess.run(
+                ["uv", "pip", "install", "daydream-scope[kafka]"],
+                check=True,
+                env=scope_env,
+            )
+            print("✅ daydream-scope[kafka] installed")
+        except Exception as e:
+            logger.warning(f"Failed to install daydream-scope[kafka]: {e}")
 
         # Start the scope server in a background thread
         def start_server():
@@ -197,11 +327,26 @@ class ScopeApp(fal.App, keep_alive=300):
         logger = logging.getLogger(__name__)
         SCOPE_BASE_URL = "http://localhost:8000"
 
+        # Initialize Kafka publisher if not already done
+        global kafka_publisher
+        if kafka_publisher is None:
+            kafka_publisher = KafkaPublisher()
+            await kafka_publisher.start()
+
         await ws.accept()
 
         # Generate a unique connection ID for this WebSocket session
         connection_id = str(uuid.uuid4())[:8]  # Short ID for readability in logs
-        print(f"[{connection_id}] ✅ WebSocket connection accepted")
+        # User ID for log correlation (set via set_user_id message)
+        user_id = None
+
+        def log_prefix() -> str:
+            """Get log prefix - uses user_id if set, otherwise connection_id."""
+            if user_id:
+                return f"{user_id}:{connection_id}"
+            return connection_id
+
+        print(f"[{log_prefix()}] ✅ WebSocket connection accepted")
 
         # Send ready message with connection_id
         await ws.send_json({"type": "ready", "connection_id": connection_id})
@@ -210,7 +355,6 @@ class ScopeApp(fal.App, keep_alive=300):
         session_id = None
 
         # Track connection start time for max duration timeout
-        import time
         connection_start_time = time.time()
 
         async def safe_send_json(payload: dict):
@@ -229,7 +373,7 @@ class ScopeApp(fal.App, keep_alive=300):
             """Check if connection has exceeded max duration. Returns True if should close."""
             elapsed_seconds = time.time() - connection_start_time
             if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
-                print(f"[{connection_id}] Closing due to max duration ({elapsed_seconds:.0f}s)")
+                print(f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)")
                 await safe_send_json({
                     "type": "closing",
                     "reason": "max_duration",
@@ -451,10 +595,22 @@ class ScopeApp(fal.App, keep_alive=300):
 
         async def handle_message(payload: dict) -> dict | None:
             """Route message to appropriate handler based on type."""
+            nonlocal user_id
             msg_type = payload.get("type")
             request_id = payload.get("request_id")
 
-            if msg_type == "get_ice_servers":
+            if msg_type == "set_user_id":
+                user_id = payload.get("user_id")
+                print(f"[{log_prefix()}] User ID set")
+                # Publish websocket connected event with user_id
+                if kafka_publisher and kafka_publisher.is_running:
+                    await kafka_publisher.publish(
+                        event_type="websocket_connected",
+                        user_id=user_id,
+                        connection_id=connection_id,
+                    )
+                return {"type": "user_id_set", "user_id": user_id}
+            elif msg_type == "get_ice_servers":
                 return await handle_get_ice_servers(payload)
             elif msg_type == "offer":
                 return await handle_offer(payload)
@@ -501,14 +657,23 @@ class ScopeApp(fal.App, keep_alive=300):
                     await safe_send_json(response)
 
         except WebSocketDisconnect:
-            print(f"[{connection_id}] WebSocket disconnected")
+            print(f"[{log_prefix()}] WebSocket disconnected")
         except Exception as e:
-            logger.error(f"[{connection_id}] WebSocket error: {e}")
+            logger.error(f"[{log_prefix()}] WebSocket error: {e}")
             await safe_send_json({"type": "error", "error": str(e)})
         finally:
+            # Publish websocket disconnected event
+            if kafka_publisher and kafka_publisher.is_running:
+                elapsed_seconds = time.time() - connection_start_time
+                await kafka_publisher.publish(
+                    event_type="websocket_disconnected",
+                    user_id=user_id,
+                    connection_id=connection_id,
+                    metadata={"duration_seconds": round(elapsed_seconds, 2)},
+                )
             # Clean up session data to prevent data leakage between users
             cleanup_session_data()
-            print(f"[{connection_id}] WebSocket connection closed, session data cleaned up")
+            print(f"[{log_prefix()}] WebSocket connection closed, session data cleaned up")
 
 
 # Deployment:

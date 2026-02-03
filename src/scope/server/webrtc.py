@@ -20,6 +20,7 @@ from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
 from .credentials import get_turn_credentials
+from .kafka_publisher import publish_event_async
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
@@ -182,6 +183,7 @@ class WebRTCManager:
                 pipeline_manager,
                 initial_parameters=initial_parameters,
                 notification_callback=notification_sender.call,
+                session_id=session.id,
             )
             session.video_track = video_track
 
@@ -296,6 +298,15 @@ class WebRTCManager:
             # Create answer
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
+
+            # Publish session_created event
+            pipeline_ids = initial_parameters.get("pipeline_ids")
+            await publish_event_async(
+                event_type="session_created",
+                session_id=session.id,
+                pipeline_ids=pipeline_ids if pipeline_ids else None,
+                metadata={"mode": "local"},
+            )
 
             return {
                 "sdp": pc.localDescription.sdp,
@@ -417,6 +428,15 @@ class WebRTCManager:
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
 
+            # Publish session_created event for relay mode
+            pipeline_ids = initial_parameters.get("pipeline_ids")
+            await publish_event_async(
+                event_type="session_created",
+                session_id=session.id,
+                pipeline_ids=pipeline_ids if pipeline_ids else None,
+                metadata={"mode": "relay"},
+            )
+
             return {
                 "sdp": pc.localDescription.sdp,
                 "type": pc.localDescription.type,
@@ -440,6 +460,12 @@ class WebRTCManager:
                 await session.recording_manager.delete_recording()
 
             await session.close()
+
+            # Publish session_closed event
+            await publish_event_async(
+                event_type="session_closed",
+                session_id=session_id,
+            )
         else:
             logger.warning(f"Attempted to remove non-existent session: {session_id}")
 
