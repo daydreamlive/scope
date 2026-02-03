@@ -1,5 +1,5 @@
-# ruff: noqa: ANN001, ANN201, ERA001, N803, N806
-"""NVFP4 (E2M1) quantization utilities for LTX2 transformer using comfy-kitchen.
+# ruff: noqa: ANN001, ANN201
+"""NVFP4 (E2M1) quantization utilities using comfy-kitchen.
 
 This module provides NVFP4 quantization for transformer weights using the
 comfy-kitchen library, which provides optimized CUDA kernels for Blackwell GPUs.
@@ -9,7 +9,7 @@ NVFP4 uses a two-level scaling approach:
 - Block scaling: Local scale factors for 16-element blocks
 
 Memory Benefits:
-- Transformer weights: ~45GB (BF16) → ~12GB (NVFP4)
+- ~4x memory reduction for transformer weights
 - Activations remain in BF16 (still the main memory bottleneck)
 
 Performance:
@@ -28,11 +28,11 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 
-logger = logging.getLogger("scope.core.pipelines.ltx2.nvfp4")
+logger = logging.getLogger(__name__)
 
 # Minimum SM version for NVFP4 hardware acceleration
 MIN_SM_VERSION = (10, 0)  # Blackwell
@@ -52,17 +52,27 @@ def check_nvfp4_support() -> tuple[bool, str]:
 
     cap = torch.cuda.get_device_capability()
     if cap < MIN_SM_VERSION:
-        return False, f"Requires SM >= {MIN_SM_VERSION[0]}.{MIN_SM_VERSION[1]} (Blackwell), current: SM {cap[0]}.{cap[1]}"
+        return (
+            False,
+            f"Requires SM >= {MIN_SM_VERSION[0]}.{MIN_SM_VERSION[1]} (Blackwell), "
+            f"current: SM {cap[0]}.{cap[1]}",
+        )
 
     # Check if comfy-kitchen is available
     try:
         import comfy_kitchen  # noqa: F401
     except ImportError:
-        return False, "comfy-kitchen package not installed. Install with: pip install comfy-kitchen[cublas]"
+        return (
+            False,
+            "comfy-kitchen package not installed. Install with: pip install comfy-kitchen[cublas]",
+        )
 
     # Check if QuantizedTensor and NVFP4 layout are available
     try:
-        from comfy_kitchen.tensor import QuantizedTensor, TensorCoreNVFP4Layout  # noqa: F401
+        from comfy_kitchen.tensor import (  # noqa: F401
+            QuantizedTensor,
+            TensorCoreNVFP4Layout,
+        )
     except ImportError:
         return False, "comfy-kitchen QuantizedTensor not available"
 
@@ -97,7 +107,7 @@ class NVFP4Linear(torch.nn.Module):
             self.register_parameter("bias", None)
 
     @classmethod
-    def from_linear(cls, linear: torch.nn.Linear) -> "NVFP4Linear":
+    def from_linear(cls, linear: torch.nn.Linear) -> NVFP4Linear:
         """Create NVFP4Linear from a standard Linear layer."""
         from comfy_kitchen.tensor import QuantizedTensor
 
@@ -261,6 +271,71 @@ def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
     block_patterns = ["block", "layer", "transformer"]
     for pattern in block_patterns:
         if pattern in name_lower:
+            return True
+
+    return False
+
+
+def wan_transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
+    """Filter function specifically for Wan 2.1 transformer models.
+
+    Quantizes layers in CausalWanAttentionBlock:
+    - Self-attention: q, k, v, o projections
+    - Cross-attention: q, k, v, o projections (and k_img, v_img for I2V)
+    - FFN: Linear layers in the feed-forward network
+
+    Excludes:
+    - Patch embedding (Conv3d, not Linear anyway)
+    - Text/time embeddings
+    - Head output projection
+    - Normalization layers
+
+    Args:
+        name: Full module name path
+        module: The module instance
+
+    Returns:
+        True if the layer should be quantized
+    """
+    # Skip if not a Linear layer
+    if not isinstance(module, torch.nn.Linear):
+        return False
+
+    name_lower = name.lower()
+
+    # Skip embedding layers
+    skip_patterns = [
+        "patch_embedding",
+        "text_embedding",
+        "time_embedding",
+        "time_projection",
+        "img_emb",  # CLIP image embedding for I2V
+        "head.head",  # Final output head
+        "modulation",  # Modulation parameters
+    ]
+    for pattern in skip_patterns:
+        if pattern in name_lower:
+            return False
+
+    # Include attention layers in blocks
+    if "blocks" in name_lower:
+        # Self-attention projections
+        if any(
+            p in name_lower
+            for p in ["self_attn.q", "self_attn.k", "self_attn.v", "self_attn.o"]
+        ):
+            return True
+        # Cross-attention projections
+        if any(
+            p in name_lower
+            for p in ["cross_attn.q", "cross_attn.k", "cross_attn.v", "cross_attn.o"]
+        ):
+            return True
+        # I2V cross-attention image projections
+        if any(p in name_lower for p in ["k_img", "v_img"]):
+            return True
+        # FFN layers
+        if "ffn" in name_lower:
             return True
 
     return False

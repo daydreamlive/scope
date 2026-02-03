@@ -3,7 +3,6 @@ from dataclasses import replace
 from enum import Enum
 
 import torch
-
 from ltx_core.loader.primitives import LoraPathStrengthAndSDOps
 from ltx_core.loader.registry import DummyRegistry, Registry
 from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder as Builder
@@ -119,16 +118,22 @@ class ModelLedger:
         # Resolve quantization type from new parameter or legacy fp8transformer flag
         if quantization is not None:
             self.quantization = QuantizationType(quantization)
-            logger.info(f"ModelLedger quantization set to: {self.quantization} (from '{quantization}')")
+            logger.info(
+                f"ModelLedger quantization set to: {self.quantization} (from '{quantization}')"
+            )
         elif fp8transformer:
             self.quantization = QuantizationType.FP8
-            logger.info("ModelLedger quantization set to: FP8 (from fp8transformer=True)")
+            logger.info(
+                "ModelLedger quantization set to: FP8 (from fp8transformer=True)"
+            )
         else:
             self.quantization = QuantizationType.NONE
             logger.info("ModelLedger quantization set to: NONE")
 
         # Keep fp8transformer for backwards compatibility
-        self.fp8transformer = fp8transformer or (self.quantization == QuantizationType.FP8)
+        self.fp8transformer = fp8transformer or (
+            self.quantization == QuantizationType.FP8
+        )
 
         self.build_model_builders()
 
@@ -219,19 +224,25 @@ class ModelLedger:
                 module_ops=(UPCAST_DURING_INFERENCE,),
                 model_sd_ops=LTXV_MODEL_COMFY_RENAMING_WITH_TRANSFORMER_LINEAR_DOWNCAST_MAP,
             )
-            return X0Model(fp8_builder.build(device=self._target_device())).to(self.device).eval()
+            return (
+                X0Model(fp8_builder.build(device=self._target_device()))
+                .to(self.device)
+                .eval()
+            )
 
         elif self.quantization == QuantizationType.NVFP4:
             # NVFP4 quantization: build in BF16 first, then quantize to NVFP4
             import traceback
+
             try:
-                from ltx_core.loader.nvfp4_quantize import (
+                # Use shared NVFP4 module from scope.core.pipelines
+                from scope.core.pipelines.nvfp4 import (
                     check_nvfp4_support,
                     quantize_model_nvfp4,
                     transformer_block_filter,
                 )
             except Exception as e:
-                logger.error(f"Failed to import nvfp4_quantize: {e}")
+                logger.error(f"Failed to import nvfp4 module: {e}")
                 logger.error(traceback.format_exc())
                 raise
 
@@ -243,7 +254,9 @@ class ModelLedger:
 
             # Build model in BF16 first
             model = X0Model(
-                self.transformer_builder.build(device=self._target_device(), dtype=self.dtype)
+                self.transformer_builder.build(
+                    device=self._target_device(), dtype=self.dtype
+                )
             ).to(self.device)
 
             # Quantize transformer blocks to NVFP4
@@ -260,7 +273,11 @@ class ModelLedger:
         else:
             # No quantization (full precision BF16)
             return (
-                X0Model(self.transformer_builder.build(device=self._target_device(), dtype=self.dtype))
+                X0Model(
+                    self.transformer_builder.build(
+                        device=self._target_device(), dtype=self.dtype
+                    )
+                )
                 .to(self.device)
                 .eval()
             )
@@ -271,7 +288,13 @@ class ModelLedger:
                 "Video decoder not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
 
-        return self.vae_decoder_builder.build(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
+        return (
+            self.vae_decoder_builder.build(
+                device=self._target_device(), dtype=self.dtype
+            )
+            .to(self.device)
+            .eval()
+        )
 
     def video_encoder(self) -> VideoEncoder:
         if not hasattr(self, "vae_encoder_builder"):
@@ -279,7 +302,13 @@ class ModelLedger:
                 "Video encoder not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
 
-        return self.vae_encoder_builder.build(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
+        return (
+            self.vae_encoder_builder.build(
+                device=self._target_device(), dtype=self.dtype
+            )
+            .to(self.device)
+            .eval()
+        )
 
     def text_encoder(self) -> AVGemmaTextEncoderModel:
         if not hasattr(self, "text_encoder_builder"):
@@ -288,7 +317,13 @@ class ModelLedger:
                 "ModelLedger constructor."
             )
 
-        return self.text_encoder_builder.build(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
+        return (
+            self.text_encoder_builder.build(
+                device=self._target_device(), dtype=self.dtype
+            )
+            .to(self.device)
+            .eval()
+        )
 
     def audio_decoder(self) -> AudioDecoder:
         if not hasattr(self, "audio_decoder_builder"):
@@ -296,7 +331,13 @@ class ModelLedger:
                 "Audio decoder not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
 
-        return self.audio_decoder_builder.build(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
+        return (
+            self.audio_decoder_builder.build(
+                device=self._target_device(), dtype=self.dtype
+            )
+            .to(self.device)
+            .eval()
+        )
 
     def vocoder(self) -> Vocoder:
         if not hasattr(self, "vocoder_builder"):
@@ -304,10 +345,20 @@ class ModelLedger:
                 "Vocoder not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
 
-        return self.vocoder_builder.build(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
+        return (
+            self.vocoder_builder.build(device=self._target_device(), dtype=self.dtype)
+            .to(self.device)
+            .eval()
+        )
 
     def spatial_upsampler(self) -> LatentUpsampler:
         if not hasattr(self, "upsampler_builder"):
-            raise ValueError("Upsampler not initialized. Please provide upsampler path to the ModelLedger constructor.")
+            raise ValueError(
+                "Upsampler not initialized. Please provide upsampler path to the ModelLedger constructor."
+            )
 
-        return self.upsampler_builder.build(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
+        return (
+            self.upsampler_builder.build(device=self._target_device(), dtype=self.dtype)
+            .to(self.device)
+            .eval()
+        )
