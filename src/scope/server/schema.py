@@ -492,30 +492,30 @@ class AssetsResponse(BaseModel):
 
 
 # =============================================================================
-# fal.ai Cloud Integration Schemas
+# Cloud Integration Schemas
 # =============================================================================
 
 
-class FalConnectRequest(BaseModel):
-    """Request to connect to fal.ai cloud.
+class CloudConnectRequest(BaseModel):
+    """Request to connect to cloud.
 
     Credentials can be provided in the request body or via CLI args/env vars.
-    If not provided here, the server will use --fal-app-id and --fal-api-key
+    If not provided here, the server will use --cloud-app-id and --cloud-api-key
     (or FAL_APP_ID and FAL_API_KEY environment variables).
     """
 
     app_id: str | None = Field(
         default=None,
-        description="The fal app ID (e.g., 'username/scope-fal'). Optional if set via CLI.",
+        description="The cloud app ID (e.g., 'username/scope-fal'). Optional if set via CLI.",
     )
     api_key: str | None = Field(
         default=None,
-        description="The fal API key for authentication. Optional if set via CLI.",
+        description="The cloud API key for authentication. Optional if set via CLI.",
     )
 
 
-class FalConnectionStats(BaseModel):
-    """Statistics for fal.ai connection."""
+class CloudConnectionStats(BaseModel):
+    """Statistics for cloud connection."""
 
     uptime_seconds: float | None = Field(
         default=None,
@@ -535,36 +535,36 @@ class FalConnectionStats(BaseModel):
     )
     api_requests_sent: int = Field(
         default=0,
-        description="Number of API requests sent through fal",
+        description="Number of API requests sent through cloud",
     )
     api_requests_successful: int = Field(
         default=0,
         description="Number of successful API requests",
     )
-    frames_sent_to_fal: int = Field(
+    frames_sent_to_cloud: int = Field(
         default=0,
-        description="Number of video frames sent to fal.ai for processing",
+        description="Number of video frames sent to cloud for processing",
     )
-    frames_received_from_fal: int = Field(
+    frames_received_from_cloud: int = Field(
         default=0,
-        description="Number of processed video frames received from fal.ai",
+        description="Number of processed video frames received from cloud",
     )
 
 
-class FalStatusResponse(BaseModel):
-    """Response containing fal.ai connection status."""
+class CloudStatusResponse(BaseModel):
+    """Response containing cloud connection status."""
 
     connected: bool = Field(
         ...,
-        description="Whether connected to fal.ai cloud (WebSocket)",
+        description="Whether connected to cloud (WebSocket)",
     )
     webrtc_connected: bool = Field(
         default=False,
-        description="Whether WebRTC media connection to fal.ai is active",
+        description="Whether WebRTC media connection to cloud is active",
     )
     app_id: str | None = Field(
         default=None,
-        description="The fal app ID if connected",
+        description="The cloud app ID if connected",
     )
     connection_id: str | None = Field(
         default=None,
