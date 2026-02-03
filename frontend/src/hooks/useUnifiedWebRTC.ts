@@ -1,4 +1,10 @@
+/**
+ * Unified WebRTC hook that automatically uses the right implementation
+ * based on whether we're in fal mode or local mode.
+ */
+
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useCloudContext } from "../lib/cloudContext";
 import {
   sendWebRTCOffer,
   sendIceCandidates,
@@ -25,18 +31,20 @@ interface InitialParameters {
   last_frame_image?: string;
 }
 
-interface UseWebRTCOptions {
+interface UseUnifiedWebRTCOptions {
   /** Callback function called when the stream stops on the backend */
   onStreamStop?: () => void;
 }
 
 /**
- * Hook for managing WebRTC connections and streaming.
+ * Unified WebRTC hook that works in both local and fal modes.
  *
- * Automatically handles stream stop notifications from the backend
- * and updates the UI state accordingly.
+ * In local mode, uses direct HTTP for signaling.
+ * In cloud mode, uses the CloudAdapter WebSocket for signaling.
  */
-export function useWebRTC(options?: UseWebRTCOptions) {
+export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
+  const { adapter, isCloudMode } = useCloudContext();
+
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] =
     useState<RTCPeerConnectionState>("new");
@@ -49,6 +57,62 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   const sessionIdRef = useRef<string | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidate[]>([]);
 
+  // Helper to get ICE servers
+  const fetchIceServers = useCallback(async (): Promise<RTCConfiguration> => {
+    try {
+      console.log("[UnifiedWebRTC] Fetching ICE servers...");
+      let iceServersResponse;
+
+      if (isCloudMode && adapter) {
+        iceServersResponse = await adapter.getIceServers();
+      } else {
+        iceServersResponse = await getIceServers();
+      }
+
+      console.log(
+        `[UnifiedWebRTC] Using ${iceServersResponse.iceServers.length} ICE servers`
+      );
+      return { iceServers: iceServersResponse.iceServers };
+    } catch (error) {
+      console.warn(
+        "[UnifiedWebRTC] Failed to fetch ICE servers, using default STUN:",
+        error
+      );
+      return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+    }
+  }, [adapter, isCloudMode]);
+
+  // Helper to send SDP offer
+  const sendOffer = useCallback(
+    async (
+      sdp: string,
+      type: string,
+      initialParameters?: InitialParameters
+    ) => {
+      if (isCloudMode && adapter) {
+        return adapter.sendOffer(sdp, type, initialParameters);
+      }
+      return sendWebRTCOffer({
+        sdp,
+        type,
+        initialParameters,
+      });
+    },
+    [adapter, isCloudMode]
+  );
+
+  // Helper to send ICE candidate
+  const sendIceCandidate = useCallback(
+    async (sessionId: string, candidate: RTCIceCandidate) => {
+      if (isCloudMode && adapter) {
+        await adapter.sendIceCandidate(sessionId, candidate);
+      } else {
+        await sendIceCandidates(sessionId, candidate);
+      }
+    },
+    [adapter, isCloudMode]
+  );
+
   const startStream = useCallback(
     async (initialParameters?: InitialParameters, stream?: MediaStream) => {
       if (isConnecting || peerConnectionRef.current) return;
@@ -58,34 +122,16 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       try {
         currentStreamRef.current = stream || null;
 
-        // Fetch ICE servers from backend
-        console.log("Fetching ICE servers from backend...");
-        let config: RTCConfiguration;
-        try {
-          const iceServersResponse = await getIceServers();
-          config = {
-            iceServers: iceServersResponse.iceServers,
-          };
-          console.log(
-            `Using ${iceServersResponse.iceServers.length} ICE servers from backend`
-          );
-        } catch (error) {
-          console.warn(
-            "Failed to fetch ICE servers from backend, using default STUN:",
-            error
-          );
-          // Fallback to default STUN server
-          config = {
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-          };
-        }
+        // Fetch ICE servers
+        const config = await fetchIceServers();
 
         const pc = new RTCPeerConnection(config);
         peerConnectionRef.current = pc;
 
         // Log peer connection configuration
-        console.log("[WebRTC] Created RTCPeerConnection with config:", {
-          iceServers: config.iceServers?.map(s => ({
+        console.log("[UnifiedWebRTC] Created RTCPeerConnection with config:", {
+          mode: isCloudMode ? "FAL (frontend direct)" : "LOCAL (backend)",
+          iceServers: config.iceServers?.map((s: RTCIceServer) => ({
             urls: s.urls,
             hasCredentials: !!(s.username && s.credential),
           })),
@@ -98,23 +144,22 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         dataChannelRef.current = dataChannel;
 
         dataChannel.onopen = () => {
-          console.log("Data channel opened");
+          console.log("[UnifiedWebRTC] Data channel opened");
         };
 
-        dataChannel.onmessage = event => {
-          console.log("Data channel message received:", event.data);
+        dataChannel.onmessage = (event) => {
+          console.log("[UnifiedWebRTC] Data channel message:", event.data);
 
           try {
             const data = JSON.parse(event.data);
 
             // Handle stream stop notification from backend
             if (data.type === "stream_stopped") {
-              console.log("Stream stopped by backend, updating UI");
+              console.log("[UnifiedWebRTC] Stream stopped by backend");
               setIsStreaming(false);
               setIsConnecting(false);
               setRemoteStream(null);
 
-              // Show error toast if there's an error message
               if (data.error_message) {
                 toast.error("Stream Error", {
                   description: data.error_message,
@@ -122,66 +167,64 @@ export function useWebRTC(options?: UseWebRTCOptions) {
                 });
               }
 
-              // Close the peer connection to clean up
               if (peerConnectionRef.current) {
                 peerConnectionRef.current.close();
                 peerConnectionRef.current = null;
               }
-              // Notify parent component
-              if (options?.onStreamStop) {
-                options.onStreamStop();
-              }
+
+              options?.onStreamStop?.();
             }
           } catch (error) {
-            console.error("Failed to parse data channel message:", error);
+            console.error(
+              "[UnifiedWebRTC] Failed to parse data channel message:",
+              error
+            );
           }
         };
 
-        dataChannel.onerror = error => {
-          console.error("Data channel error:", error);
+        dataChannel.onerror = (error) => {
+          console.error("[UnifiedWebRTC] Data channel error:", error);
         };
 
-        // Add video track for sending to server only if stream is provided
+        // Add video track for sending to server
         let transceiver: RTCRtpTransceiver | undefined;
         if (stream) {
-          stream.getTracks().forEach(track => {
+          stream.getTracks().forEach((track) => {
             if (track.kind === "video") {
-              console.log("Adding video track for sending");
+              console.log("[UnifiedWebRTC] Adding video track for sending");
               const sender = pc.addTrack(track, stream);
-              transceiver = pc.getTransceivers().find(t => t.sender === sender);
+              transceiver = pc.getTransceivers().find((t) => t.sender === sender);
             }
           });
         } else {
           console.log(
-            "No video stream provided - adding video transceiver for no-input pipelines"
+            "[UnifiedWebRTC] No video stream - adding transceiver for no-input pipeline"
           );
-          // For no-video-input pipelines, add a video transceiver to establish proper WebRTC connection
           transceiver = pc.addTransceiver("video");
         }
 
-        // Force VP8-only to match aiortc's reliable codec support
-        // This prevents codec mismatch issues with VP9/AV1/H264
+        // Force VP8-only for aiortc compatibility
         if (transceiver) {
           const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
           const vp8Codecs = codecs.filter(
-            c => c.mimeType.toLowerCase() === "video/vp8"
+            (c) => c.mimeType.toLowerCase() === "video/vp8"
           );
           if (vp8Codecs.length > 0) {
             transceiver.setCodecPreferences(vp8Codecs);
-            console.log("Forced VP8-only codec for aiortc compatibility");
+            console.log("[UnifiedWebRTC] Forced VP8-only codec");
           }
         }
 
-        // Named event handlers
-        const onTrack = (evt: RTCTrackEvent) => {
+        // Event handlers
+        pc.ontrack = (evt: RTCTrackEvent) => {
           if (evt.streams && evt.streams[0]) {
-            console.log("Setting remote stream:", evt.streams[0]);
+            console.log("[UnifiedWebRTC] Setting remote stream");
             setRemoteStream(evt.streams[0]);
           }
         };
 
-        const onConnectionStateChange = () => {
-          console.log("[WebRTC] Connection state changed:", pc.connectionState);
+        pc.onconnectionstatechange = () => {
+          console.log("[UnifiedWebRTC] Connection state:", pc.connectionState);
           setConnectionState(pc.connectionState);
 
           if (pc.connectionState === "connected") {
@@ -189,36 +232,37 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             setIsStreaming(true);
 
             // Log detailed connection info
-            console.log("[WebRTC] ========== CONNECTION ESTABLISHED ==========");
-            console.log("[WebRTC] Session ID:", sessionIdRef.current);
+            console.log("[UnifiedWebRTC] ========== CONNECTION ESTABLISHED ==========");
+            console.log("[UnifiedWebRTC] Mode:", isCloudMode ? "FAL (frontend → fal.ai)" : "LOCAL (frontend → backend)");
+            console.log("[UnifiedWebRTC] Session ID:", sessionIdRef.current);
 
-            // Log the actual negotiated codec for verification
+            // Log negotiated codec
             const senders = pc.getSenders();
-            const videoSender = senders.find(s => s.track?.kind === "video");
+            const videoSender = senders.find((s) => s.track?.kind === "video");
             if (videoSender) {
               const params = videoSender.getParameters();
               const codec = params.codecs?.[0];
               if (codec) {
-                console.log(`[WebRTC] Negotiated video codec: ${codec.mimeType}`);
+                console.log(`[UnifiedWebRTC] Negotiated codec: ${codec.mimeType}`);
               }
             }
 
             // Log remote description info
             if (pc.remoteDescription) {
               const sdpLines = pc.remoteDescription.sdp.split("\n");
-              const originLine = sdpLines.find(l => l.startsWith("o="));
-              const connectionLine = sdpLines.find(l => l.startsWith("c="));
-              console.log("[WebRTC] Remote SDP origin:", originLine);
-              console.log("[WebRTC] Remote SDP connection:", connectionLine);
+              const originLine = sdpLines.find((l: string) => l.startsWith("o="));
+              const connectionLine = sdpLines.find((l: string) => l.startsWith("c="));
+              console.log("[UnifiedWebRTC] Remote SDP origin:", originLine);
+              console.log("[UnifiedWebRTC] Remote SDP connection:", connectionLine);
             }
 
             // Get connection stats after a short delay
             setTimeout(async () => {
               try {
                 const stats = await pc.getStats();
-                stats.forEach(report => {
+                stats.forEach((report) => {
                   if (report.type === "candidate-pair" && report.state === "succeeded") {
-                    console.log("[WebRTC] Active candidate pair:", {
+                    console.log("[UnifiedWebRTC] Active candidate pair:", {
                       localCandidateId: report.localCandidateId,
                       remoteCandidateId: report.remoteCandidateId,
                       bytesSent: report.bytesSent,
@@ -226,15 +270,7 @@ export function useWebRTC(options?: UseWebRTCOptions) {
                     });
                   }
                   if (report.type === "remote-candidate") {
-                    console.log("[WebRTC] Remote candidate:", {
-                      address: report.address,
-                      port: report.port,
-                      protocol: report.protocol,
-                      candidateType: report.candidateType,
-                    });
-                  }
-                  if (report.type === "local-candidate") {
-                    console.log("[WebRTC] Local candidate:", {
+                    console.log("[UnifiedWebRTC] Remote candidate:", {
                       address: report.address,
                       port: report.port,
                       protocol: report.protocol,
@@ -243,11 +279,11 @@ export function useWebRTC(options?: UseWebRTCOptions) {
                   }
                 });
               } catch (e) {
-                console.warn("[WebRTC] Failed to get stats:", e);
+                console.warn("[UnifiedWebRTC] Failed to get stats:", e);
               }
             }, 1000);
 
-            console.log("[WebRTC] ==============================================");
+            console.log("[UnifiedWebRTC] ==============================================");
           } else if (
             pc.connectionState === "disconnected" ||
             pc.connectionState === "failed"
@@ -257,78 +293,67 @@ export function useWebRTC(options?: UseWebRTCOptions) {
           }
         };
 
-        const onIceConnectionStateChange = () => {
-          console.log("[WebRTC] ICE connection state:", pc.iceConnectionState);
-          if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
-            console.log("[WebRTC] ICE connection successful - media can now flow");
-          }
+        pc.oniceconnectionstatechange = () => {
+          console.log("[UnifiedWebRTC] ICE state:", pc.iceConnectionState);
         };
 
-        const onIceCandidate = async ({
-          candidate,
-        }: RTCPeerConnectionIceEvent) => {
+        pc.onicecandidate = async ({ candidate }: RTCPeerConnectionIceEvent) => {
           if (candidate) {
-            console.log("ICE candidate:", candidate);
+            console.log("[UnifiedWebRTC] ICE candidate generated");
 
-            // Trickle ICE: Send candidate to server immediately
             if (sessionIdRef.current) {
               try {
-                await sendIceCandidates(sessionIdRef.current, candidate);
-                console.log("Sent ICE candidate to server");
+                await sendIceCandidate(sessionIdRef.current, candidate);
+                console.log("[UnifiedWebRTC] Sent ICE candidate");
               } catch (error) {
-                console.error("Failed to send ICE candidate:", error);
+                console.error("[UnifiedWebRTC] Failed to send ICE candidate:", error);
               }
             } else {
-              console.log("Session ID not available yet, queuing candidate");
+              console.log("[UnifiedWebRTC] Queuing ICE candidate (no session ID yet)");
               queuedCandidatesRef.current.push(candidate);
             }
           } else {
-            console.log("ICE gathering complete");
+            console.log("[UnifiedWebRTC] ICE gathering complete");
           }
         };
 
-        // Attach event handlers
-        pc.ontrack = onTrack;
-        pc.onconnectionstatechange = onConnectionStateChange;
-        pc.oniceconnectionstatechange = onIceConnectionStateChange;
-        pc.onicecandidate = onIceCandidate;
-
-        // Create offer and start ICE gathering
+        // Create and send offer
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // Trickle ICE: Send offer immediately without waiting for ICE gathering
-        console.log("Sending offer to server");
+        console.log("[UnifiedWebRTC] Sending offer");
         try {
-          const answer = await sendWebRTCOffer({
-            sdp: pc.localDescription!.sdp,
-            type: pc.localDescription!.type,
-            initialParameters,
-          });
+          const answer = await sendOffer(
+            pc.localDescription!.sdp,
+            pc.localDescription!.type,
+            initialParameters
+          );
 
-          console.log("[WebRTC] Received server answer");
-
-          // Store session ID for sending candidates
+          console.log("[UnifiedWebRTC] Received answer, sessionId:", answer.sessionId);
           sessionIdRef.current = answer.sessionId;
-          console.log("[WebRTC] Session ID:", answer.sessionId);
 
           // Parse the SDP to show where we're connecting
           const sdpLines = answer.sdp.split("\n");
           const originLine = sdpLines.find((l: string) => l.startsWith("o="));
           const sessionName = sdpLines.find((l: string) => l.startsWith("s="));
-          console.log("[WebRTC] Server SDP origin:", originLine);
-          console.log("[WebRTC] Server SDP session:", sessionName);
+          console.log("[UnifiedWebRTC] Server SDP origin:", originLine);
+          console.log("[UnifiedWebRTC] Server SDP session:", sessionName);
+          console.log("[UnifiedWebRTC] Stream target:", isCloudMode ? "fal.ai cloud" : "local backend");
 
-          // Flush any queued ICE candidates
+          // Flush queued ICE candidates
           if (queuedCandidatesRef.current.length > 0) {
-            try {
-              await sendIceCandidates(
-                sessionIdRef.current,
-                queuedCandidatesRef.current
-              );
-              console.log("Sent queued ICE candidates to server");
-            } catch (error) {
-              console.error("Failed to send queued ICE candidates:", error);
+            console.log(
+              `[UnifiedWebRTC] Flushing ${queuedCandidatesRef.current.length} queued candidates`
+            );
+            for (const candidate of queuedCandidatesRef.current) {
+              try {
+                await sendIceCandidate(sessionIdRef.current, candidate);
+              } catch (error) {
+                console.error(
+                  "[UnifiedWebRTC] Failed to send queued candidate:",
+                  error
+                );
+              }
             }
             queuedCandidatesRef.current = [];
           }
@@ -338,15 +363,21 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             type: answer.type as RTCSdpType,
           });
         } catch (error) {
-          console.error("Error in offer/answer exchange:", error);
+          console.error("[UnifiedWebRTC] Offer/answer exchange failed:", error);
           setIsConnecting(false);
         }
       } catch (error) {
-        console.error("Failed to start stream:", error);
+        console.error("[UnifiedWebRTC] Failed to start stream:", error);
         setIsConnecting(false);
       }
     },
-    [isConnecting, options]
+    [
+      isConnecting,
+      options,
+      fetchIceServers,
+      sendOffer,
+      sendIceCandidate,
+    ]
   );
 
   const updateVideoTrack = useCallback(
@@ -355,26 +386,25 @@ export function useWebRTC(options?: UseWebRTCOptions) {
         try {
           const videoTrack = newStream.getVideoTracks()[0];
           if (!videoTrack) {
-            console.error("No video track found in new stream");
+            console.error("[UnifiedWebRTC] No video track in new stream");
             return false;
           }
 
           const sender = peerConnectionRef.current
             .getSenders()
-            .find(s => s.track?.kind === "video");
+            .find((s) => s.track?.kind === "video");
 
           if (sender) {
-            console.log("Replacing video track");
+            console.log("[UnifiedWebRTC] Replacing video track");
             await sender.replaceTrack(videoTrack);
             currentStreamRef.current = newStream;
-            console.log("Video track replaced successfully");
             return true;
           } else {
-            console.error("No video sender found in peer connection");
+            console.error("[UnifiedWebRTC] No video sender found");
             return false;
           }
         } catch (error) {
-          console.error("Failed to replace video track:", error);
+          console.error("[UnifiedWebRTC] Failed to replace track:", error);
           return false;
         }
       }
@@ -404,14 +434,12 @@ export function useWebRTC(options?: UseWebRTCOptions) {
       images?: string[];
       first_frame_image?: string;
       last_frame_image?: string;
-      [key: string]: unknown;
     }) => {
       if (
         dataChannelRef.current &&
         dataChannelRef.current.readyState === "open"
       ) {
         try {
-          // Filter out undefined/null parameters
           const filteredParams: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(params)) {
             if (value !== undefined && value !== null) {
@@ -421,34 +449,26 @@ export function useWebRTC(options?: UseWebRTCOptions) {
 
           const message = JSON.stringify(filteredParams);
           dataChannelRef.current.send(message);
-          console.log("Sent parameter update:", filteredParams);
+          console.log("[UnifiedWebRTC] Sent parameter update:", filteredParams);
         } catch (error) {
-          console.error("Failed to send parameter update:", error);
+          console.error("[UnifiedWebRTC] Failed to send parameter update:", error);
         }
       } else {
-        console.warn("Data channel not available for parameter update");
+        console.warn("[UnifiedWebRTC] Data channel not available");
       }
     },
     []
   );
 
   const stopStream = useCallback(() => {
-    // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
 
-    // Clear data channel reference
     dataChannelRef.current = null;
-
-    // Clear current stream reference (but don't stop it - that's handled by useLocalVideo)
     currentStreamRef.current = null;
-
-    // Clear session ID
     sessionIdRef.current = null;
-
-    // Clear any queued ICE candidates
     queuedCandidatesRef.current = [];
 
     setRemoteStream(null);

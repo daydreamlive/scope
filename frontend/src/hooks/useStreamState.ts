@@ -8,11 +8,12 @@ import type {
   InputMode,
 } from "../types";
 import {
-  getHardwareInfo,
-  getPipelineSchemas,
+  getHardwareInfo as getHardwareInfoApi,
+  getPipelineSchemas as getPipelineSchemasApi,
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
+import { useCloudContext } from "../lib/cloudContext";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
@@ -42,6 +43,23 @@ function getFallbackDefaults(mode?: InputMode) {
 }
 
 export function useStreamState() {
+  const { adapter, isCloudMode, isReady } = useCloudContext();
+
+  // Helper functions that use fal adapter when available
+  const getPipelineSchemas = useCallback(async (): Promise<PipelineSchemasResponse> => {
+    if (isCloudMode && adapter) {
+      return adapter.api.getPipelineSchemas();
+    }
+    return getPipelineSchemasApi();
+  }, [adapter, isCloudMode]);
+
+  const getHardwareInfo = useCallback(async (): Promise<HardwareInfoResponse> => {
+    if (isCloudMode && adapter) {
+      return adapter.api.getHardwareInfo();
+    }
+    return getHardwareInfoApi();
+  }, [adapter, isCloudMode]);
+
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
     gpu: 0,
@@ -163,8 +181,59 @@ export function useStreamState() {
     null
   );
 
+  // Function to refresh pipeline schemas (can be called externally)
+  const refreshPipelineSchemas = useCallback(async () => {
+    try {
+      const schemas = await getPipelineSchemas();
+      setPipelineSchemas(schemas);
+
+      // Check if the current pipeline is still available
+      // If not, switch to the first available pipeline
+      const availablePipelines = Object.keys(schemas.pipelines);
+
+      setSettings(prev => {
+        if (
+          !availablePipelines.includes(prev.pipelineId) &&
+          availablePipelines.length > 0
+        ) {
+          const firstPipelineId = availablePipelines[0] as PipelineId;
+          const firstPipelineSchema = schemas.pipelines[firstPipelineId];
+
+          return {
+            ...prev,
+            pipelineId: firstPipelineId,
+            inputMode: firstPipelineSchema.default_mode,
+          };
+        }
+        return prev;
+      });
+
+      return schemas;
+    } catch (error) {
+      console.error("useStreamState: Failed to refresh pipeline schemas:", error);
+      throw error;
+    }
+  }, [getPipelineSchemas]);
+
+  // Function to refresh hardware info (can be called externally)
+  const refreshHardwareInfo = useCallback(async () => {
+    try {
+      const hardware = await getHardwareInfo();
+      setHardwareInfo(hardware);
+      return hardware;
+    } catch (error) {
+      console.error("useStreamState: Failed to refresh hardware info:", error);
+      throw error;
+    }
+  }, [getHardwareInfo]);
+
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
+    // In cloud mode, wait until adapter is ready
+    if (isCloudMode && !isReady) {
+      return;
+    }
+
     const fetchInitialData = async () => {
       try {
         const [schemasResult, hardwareResult] = await Promise.allSettled([
@@ -214,7 +283,7 @@ export function useStreamState() {
     };
 
     fetchInitialData();
-  }, []);
+  }, [isCloudMode, isReady, getPipelineSchemas, getHardwareInfo]);
 
   // Update inputMode when schemas load or pipeline changes
   // This sets the correct default mode for the pipeline
@@ -320,5 +389,7 @@ export function useStreamState() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    refreshPipelineSchemas,
+    refreshHardwareInfo,
   };
 }

@@ -15,6 +15,8 @@ import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { useApi } from "../hooks/useApi";
+import { useCloudContext } from "../lib/cloudContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -66,14 +68,25 @@ function getVaceParams(
 }
 
 export function StreamPage() {
-  // Get API functions that work in both local and fal modes
+  // Get API functions that work in both local and cloud modes
+  const api = useApi();
+  const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
+    useCloudContext();
+
   // Track backend cloud relay mode (local backend connected to cloud)
   const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
   // Track when cloud connection is in progress (to disable controls)
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
 
-  // Cloud mode: backend relay to cloud (fal.ai)
-  const isCloudMode = isBackendCloudConnected;
+  // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
+  const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // Show loading state while connecting to cloud
+  useEffect(() => {
+    if (isCloudMode) {
+      console.log("[StreamPage] Cloud mode enabled, ready:", isCloudReady);
+    }
+  }, [isCloudMode, isCloudReady]);
 
   // Fetch available pipelines dynamically
   const { pipelines } = usePipelinesContext();
