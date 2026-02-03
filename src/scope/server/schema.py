@@ -489,3 +489,92 @@ class AssetsResponse(BaseModel):
     """Response containing all discoverable asset files."""
 
     assets: list[AssetFileInfo]
+
+
+# =============================================================================
+# fal.ai Cloud Integration Schemas
+# =============================================================================
+
+
+class FalConnectRequest(BaseModel):
+    """Request to connect to fal.ai cloud.
+
+    Credentials can be provided in the request body or via CLI args/env vars.
+    If not provided here, the server will use --fal-app-id and --fal-api-key
+    (or FAL_APP_ID and FAL_API_KEY environment variables).
+    """
+
+    app_id: str | None = Field(
+        default=None,
+        description="The fal app ID (e.g., 'username/scope-fal'). Optional if set via CLI.",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="The fal API key for authentication. Optional if set via CLI.",
+    )
+
+
+class FalConnectionStats(BaseModel):
+    """Statistics for fal.ai connection."""
+
+    uptime_seconds: float | None = Field(
+        default=None,
+        description="How long the connection has been active",
+    )
+    webrtc_offers_sent: int = Field(
+        default=0,
+        description="Number of WebRTC offers sent (signaling)",
+    )
+    webrtc_offers_successful: int = Field(
+        default=0,
+        description="Number of successful WebRTC offers",
+    )
+    webrtc_ice_candidates_sent: int = Field(
+        default=0,
+        description="Number of ICE candidates sent",
+    )
+    api_requests_sent: int = Field(
+        default=0,
+        description="Number of API requests sent through fal",
+    )
+    api_requests_successful: int = Field(
+        default=0,
+        description="Number of successful API requests",
+    )
+    frames_sent_to_fal: int = Field(
+        default=0,
+        description="Number of video frames sent to fal.ai for processing",
+    )
+    frames_received_from_fal: int = Field(
+        default=0,
+        description="Number of processed video frames received from fal.ai",
+    )
+
+
+class FalStatusResponse(BaseModel):
+    """Response containing fal.ai connection status."""
+
+    connected: bool = Field(
+        ...,
+        description="Whether connected to fal.ai cloud (WebSocket)",
+    )
+    webrtc_connected: bool = Field(
+        default=False,
+        description="Whether WebRTC media connection to fal.ai is active",
+    )
+    app_id: str | None = Field(
+        default=None,
+        description="The fal app ID if connected",
+    )
+    connection_id: str | None = Field(
+        default=None,
+        description="Unique ID for the current WebSocket connection (for log correlation)",
+    )
+    credentials_configured: bool = Field(
+        default=False,
+        description="Whether fal.ai credentials are configured via CLI args or env vars",
+    )
+    stats: FalConnectionStats | None = Field(
+        default=None,
+        description="Connection statistics (only included when connected)",
+    )
