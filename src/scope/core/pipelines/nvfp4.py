@@ -37,30 +37,6 @@ logger = logging.getLogger(__name__)
 # Minimum SM version for NVFP4 hardware acceleration
 MIN_SM_VERSION = (10, 0)  # Blackwell
 
-
-class WeightProxy:
-    """Proxy object that provides .dtype, .device, and .shape for PEFT compatibility.
-
-    PEFT's LoRA layers access base_layer.weight.dtype to determine input casting.
-    This proxy provides that interface without requiring actual weight tensors.
-    """
-
-    def __init__(
-        self,
-        dtype: torch.dtype,
-        device: torch.device | None,
-        shape: tuple[int, int],
-    ):
-        self.dtype = dtype
-        self.device = device
-        self.shape = shape
-
-    def __repr__(self) -> str:
-        return (
-            f"WeightProxy(dtype={self.dtype}, device={self.device}, shape={self.shape})"
-        )
-
-
 # Layout name for comfy-kitchen's NVFP4 layout
 NVFP4_LAYOUT = "TensorCoreNVFP4Layout"
 
@@ -109,8 +85,12 @@ class NVFP4Linear(torch.nn.Module):
     This module stores weights as comfy-kitchen QuantizedTensor which
     automatically dispatches to optimized NVFP4 kernels during matmul.
 
-    For compatibility with PEFT/LoRA, this class provides a .weight property
-    that returns metadata about the quantized weights (dtype, device, shape).
+    The weight is stored as an nn.Parameter containing a QuantizedTensor,
+    which enables the __torch_dispatch__ mechanism to route F.linear calls
+    to optimized NVFP4 kernels.
+
+    For compatibility with PEFT/LoRA, this class stores the original dtype
+    so LoRA adapters can properly cast inputs.
     """
 
     def __init__(
@@ -125,32 +105,20 @@ class NVFP4Linear(torch.nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        # Weight will be set via from_linear
-        # We store it as a regular attribute, not a parameter
-        self._quantized_weight = None
-
-        # Store original dtype for PEFT compatibility
+        # Store original dtype for PEFT compatibility and input quantization
         # PEFT's LoRA layer accesses .weight.dtype to cast inputs
-        self._weight_dtype = dtype or torch.bfloat16
-        self._weight_device = device
+        self._orig_dtype = dtype or torch.bfloat16
+        self._layout_type = NVFP4_LAYOUT
+
+        # Weight will be set via from_linear as a Parameter containing QuantizedTensor
+        self.register_parameter("weight", None)
 
         if bias:
-            self.bias = torch.nn.Parameter(torch.zeros(out_features, device=device))
+            self.bias = torch.nn.Parameter(
+                torch.zeros(out_features, device=device, dtype=dtype or torch.bfloat16)
+            )
         else:
             self.register_parameter("bias", None)
-
-    @property
-    def weight(self) -> WeightProxy:
-        """Return a proxy object that provides .dtype and .device for PEFT compatibility.
-
-        PEFT's LoRA layers access base_layer.weight.dtype to determine input casting.
-        This proxy provides that interface without dequantizing the weights.
-        """
-        return WeightProxy(
-            dtype=self._weight_dtype,
-            device=self._weight_device,
-            shape=(self.out_features, self.in_features),
-        )
 
     @classmethod
     def from_linear(cls, linear: torch.nn.Linear) -> NVFP4Linear:
@@ -165,20 +133,19 @@ class NVFP4Linear(torch.nn.Module):
             dtype=linear.weight.dtype,
         )
 
-        # Store original weight properties for PEFT compatibility
-        nvfp4_linear._weight_dtype = linear.weight.dtype
-        nvfp4_linear._weight_device = linear.weight.device
-
         # Quantize weight to NVFP4 using comfy-kitchen
         # Weight shape is (out_features, in_features)
-        # from_float takes a string layout name, not the class
+        # from_float takes a string layout name
         weight_2d = linear.weight.data
-        nvfp4_linear._quantized_weight = QuantizedTensor.from_float(
-            weight_2d, NVFP4_LAYOUT
-        )
+        quantized_weight = QuantizedTensor.from_float(weight_2d, NVFP4_LAYOUT)
+
+        # Store as nn.Parameter - this is critical for __torch_dispatch__ to work
+        nvfp4_linear.weight = torch.nn.Parameter(quantized_weight, requires_grad=False)
 
         if linear.bias is not None:
-            nvfp4_linear.bias = torch.nn.Parameter(linear.bias.data.clone())
+            nvfp4_linear.bias = torch.nn.Parameter(
+                linear.bias.data.clone().to(linear.weight.dtype)
+            )
 
         logger.debug(
             f"Quantized Linear({linear.in_features}, {linear.out_features}) to NVFP4"
@@ -191,25 +158,43 @@ class NVFP4Linear(torch.nn.Module):
 
         comfy-kitchen's QuantizedTensor automatically dispatches to
         optimized NVFP4 kernels when both operands support it.
+
+        Following ComfyUI's approach:
+        1. Reshape 3D input to 2D for quantization
+        2. Quantize input to NVFP4
+        3. Call F.linear - __torch_dispatch__ routes to scaled_mm_nvfp4
+        4. Reshape output back to original dimensions
         """
         from comfy_kitchen.tensor import QuantizedTensor
 
-        # Handle batched input
+        # Handle batched input - reshape 3D to 2D
         orig_shape = x.shape
-        if x.dim() > 2:
-            x = x.view(-1, x.shape[-1])
+        reshaped_3d = x.dim() == 3
 
-        # Quantize input to NVFP4 for hardware-accelerated matmul
-        # from_float takes a string layout name
-        x_qt = QuantizedTensor.from_float(x, NVFP4_LAYOUT)
+        if reshaped_3d:
+            x = x.reshape(-1, orig_shape[2])
 
-        # Perform quantized linear operation
-        # comfy-kitchen intercepts F.linear and dispatches to scaled_mm_nvfp4
-        out = torch.nn.functional.linear(x_qt, self._quantized_weight, self.bias)
+        # Only quantize 2D tensors
+        if x.dim() == 2:
+            # Quantize input to NVFP4 for hardware-accelerated matmul
+            x_qt = QuantizedTensor.from_float(x, self._layout_type)
+
+            # Perform quantized linear operation
+            # comfy-kitchen's __torch_dispatch__ intercepts F.linear and
+            # dispatches to scaled_mm_nvfp4 when both operands are QuantizedTensor
+            out = torch.nn.functional.linear(x_qt, self.weight, self.bias)
+        else:
+            # Fallback for non-2D tensors - dequantize weight
+            weight_dq = (
+                self.weight.dequantize()
+                if hasattr(self.weight, "dequantize")
+                else self.weight
+            )
+            out = torch.nn.functional.linear(x, weight_dq, self.bias)
 
         # Restore batch dimensions
-        if len(orig_shape) > 2:
-            out = out.view(*orig_shape[:-1], -1)
+        if reshaped_3d:
+            out = out.reshape(orig_shape[0], orig_shape[1], self.weight.shape[0])
 
         return out
 
@@ -235,14 +220,15 @@ def quantize_model_nvfp4(
         if isinstance(module, torch.nn.Linear):
             # Always skip LoRA adapter layers regardless of filter
             # PEFT uses lora_A and lora_B as ModuleDict containers
-            # Check both original case and lowercase for safety
-            if (
-                "lora_A" in name
-                or "lora_B" in name
-                or "lora_a" in name.lower()
-                or "lora_b" in name.lower()
-                or ".lora_" in name.lower()
-            ):
+            # The full path looks like: blocks.0.self_attn.q.lora_A.default
+            # Also skip lora_embedding_A/B and any lora_ prefixed modules
+            name_parts = name.split(".")
+            is_lora_layer = any(
+                part.startswith("lora_") or part in ("lora_A", "lora_B")
+                for part in name_parts
+            )
+
+            if is_lora_layer:
                 skipped_lora.append(name)
                 continue
 
@@ -297,8 +283,13 @@ def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
     name_lower = name.lower()
 
     # Skip LoRA adapter layers - PEFT requires these to be standard nn.Linear
-    # LoRA layers are named like: base_layer.lora_A.default, base_layer.lora_B.default
-    if "lora_a" in name_lower or "lora_b" in name_lower:
+    # LoRA layers are named like: blocks.0.self_attn.q.lora_A.default
+    name_parts = name.split(".")
+    is_lora_layer = any(
+        part.lower().startswith("lora_") or part in ("lora_A", "lora_B")
+        for part in name_parts
+    )
+    if is_lora_layer:
         return False
 
     # Skip embedding and output layers
@@ -380,8 +371,13 @@ def wan_transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
     name_lower = name.lower()
 
     # Skip LoRA adapter layers - PEFT requires these to be standard nn.Linear
-    # LoRA layers are named like: base_layer.lora_A.default, base_layer.lora_B.default
-    if "lora_a" in name_lower or "lora_b" in name_lower:
+    # LoRA layers are named like: blocks.0.self_attn.q.lora_A.default
+    name_parts = name.split(".")
+    is_lora_layer = any(
+        part.lower().startswith("lora_") or part in ("lora_A", "lora_B")
+        for part in name_parts
+    )
+    if is_lora_layer:
         return False
 
     # Skip embedding layers
