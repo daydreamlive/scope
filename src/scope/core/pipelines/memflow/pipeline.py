@@ -131,6 +131,31 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
             )
 
             print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
+
+        elif quantization == Quantization.NVFP4:
+            # NVFP4 quantization: build in BF16 first, then quantize to NVFP4
+            # Requires Blackwell GPU (SM >= 10.0) and comfy-kitchen package
+            from ..nvfp4 import (
+                check_nvfp4_support,
+                quantize_model_nvfp4,
+                wan_transformer_block_filter,
+            )
+
+            supported, reason = check_nvfp4_support()
+            if not supported:
+                raise RuntimeError(f"NVFP4 quantization not supported: {reason}")
+
+            # Move to device in BF16 first
+            generator = generator.to(device=device, dtype=dtype)
+
+            start = time.time()
+            # Quantize transformer blocks to NVFP4
+            # Use Wan-specific filter to target attention and FFN layers
+            quantize_model_nvfp4(
+                generator.model, layer_filter=wan_transformer_block_filter
+            )
+            print(f"Quantized diffusion model to NVFP4 in {time.time() - start:.3f}s")
+
         else:
             generator = generator.to(device=device, dtype=dtype)
 

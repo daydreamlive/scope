@@ -177,6 +177,34 @@ class VACEEnabledPipeline:
                     logger.info(
                         f"_init_vace: Quantized VACE to FP8 in {time.time() - start:.3f}s"
                     )
+
+                elif quantization == Quantization.NVFP4:
+                    logger.info(
+                        "_init_vace: Quantizing VACE components to NVFP4 (matching base model)..."
+                    )
+                    start = time.time()
+
+                    from ...nvfp4 import (
+                        check_nvfp4_support,
+                        quantize_model_nvfp4,
+                        wan_transformer_block_filter,
+                    )
+
+                    supported, reason = check_nvfp4_support()
+                    if not supported:
+                        logger.warning(
+                            f"_init_vace: NVFP4 not supported ({reason}), skipping VACE quantization"
+                        )
+                    else:
+                        # Quantize VACE blocks (attention and FFN layers)
+                        quantize_model_nvfp4(
+                            vace_wrapped_model.vace_blocks,
+                            layer_filter=wan_transformer_block_filter,
+                        )
+                        logger.info(
+                            f"_init_vace: Quantized VACE to NVFP4 in {time.time() - start:.3f}s"
+                        )
+
             except ImportError:
                 logger.warning(
                     "_init_vace: Could not import Quantization, skipping quantization check"
