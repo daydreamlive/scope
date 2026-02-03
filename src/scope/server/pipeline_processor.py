@@ -450,12 +450,12 @@ class PipelineProcessor:
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
 
-            num_frames = output.shape[0]
+            num_frames = video_output.shape[0]
 
             # Normalize to [0, 255] and convert to uint8
             # Keep frames on GPU - frame_processor handles CPU transfer for streaming
-            output = (
-                (output * 255.0)
+            video_output = (
+                (video_output * 255.0)
                 .clamp(0, 255)
                 .to(dtype=torch.uint8)
                 .contiguous()
@@ -463,7 +463,11 @@ class PipelineProcessor:
             )
 
             # Pass audio to callback if available
-            if audio_output is not None and audio_sample_rate is not None and self.audio_callback:
+            if (
+                audio_output is not None
+                and audio_sample_rate is not None
+                and self.audio_callback
+            ):
                 try:
                     # Move audio to CPU and keep as float for WebRTC encoding
                     audio_cpu = audio_output.detach().cpu()
