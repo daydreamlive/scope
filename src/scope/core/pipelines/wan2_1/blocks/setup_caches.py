@@ -164,6 +164,19 @@ class SetupCachesBlock(ModularPipelineBlocks):
             components.config.vae_spatial_downsample_factor
             * components.config.patch_embedding_spatial_downsample_factor
         )
+
+        # Validate height/width before computing frame_seq_length
+        if block_state.height is None or block_state.height < scale_size:
+            raise ValueError(
+                f"Invalid height: {block_state.height}. Must be >= {scale_size}. "
+                "Check that height is set in the pipeline config."
+            )
+        if block_state.width is None or block_state.width < scale_size:
+            raise ValueError(
+                f"Invalid width: {block_state.width}. Must be >= {scale_size}. "
+                "Check that width is set in the pipeline config."
+            )
+
         frame_seq_length = (block_state.height // scale_size) * (
             block_state.width // scale_size
         )
