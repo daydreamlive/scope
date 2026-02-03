@@ -372,6 +372,28 @@ class LTX2Pipeline(Pipeline):
         )
         # audio_tensor shape: (channels, samples) - typically (2, N) for stereo at 24kHz
 
+        # Pad audio to match video duration for WebRTC streaming synchronization
+        # The audio VAE's causal decoder produces slightly fewer samples than expected
+        # (~45ms shorter for 33 frames at 24fps). For file export this is handled by
+        # the container, but for streaming we need explicit padding.
+        video_duration = num_frames / frame_rate
+        expected_audio_samples = int(video_duration * AUDIO_SAMPLE_RATE)
+        actual_audio_samples = audio_tensor.shape[1]
+
+        if actual_audio_samples < expected_audio_samples:
+            padding_samples = expected_audio_samples - actual_audio_samples
+            padding = torch.zeros(
+                audio_tensor.shape[0],
+                padding_samples,
+                dtype=audio_tensor.dtype,
+                device=audio_tensor.device,
+            )
+            audio_tensor = torch.cat([audio_tensor, padding], dim=1)
+            logger.debug(
+                f"Padded audio from {actual_audio_samples} to {expected_audio_samples} samples "
+                f"(+{padding_samples} samples, +{padding_samples / AUDIO_SAMPLE_RATE * 1000:.1f}ms)"
+            )
+
         return PipelineOutput(
             video=video_tensor,
             audio=audio_tensor,
