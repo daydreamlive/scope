@@ -79,6 +79,8 @@ The easiest way to get started with Scope is to download the latest version of t
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) which is needed to run the server and [Node.js](https://nodejs.org/en/download) which is needed to build the frontend.
 
+`uv` v0.9.11 is recommended right now because the desktop app uses this version and because plugin management has issues with [dependency management](https://github.com/astral-sh/uv/pull/17053) in newer versions of `uv` which will be addressed in the future.
+
 > [!IMPORTANT]
 > If you are using Windows, install [Microsoft Visual C++ Redistributable (vcredist)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
 
