@@ -104,6 +104,18 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 default=None,
                 description="Input frames for VACE conditioning (if present, indicates video input is enabled)",
             ),
+            InputParam(
+                "global_end_index",
+                type_hint=int | None,
+                default=None,
+                description="Existing global end index for cache",
+            ),
+            InputParam(
+                "local_end_index",
+                type_hint=int | None,
+                default=None,
+                description="Existing local end index for cache",
+            ),
         ]
 
     @property
@@ -123,6 +135,16 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 "current_start_frame",
                 type_hint=int,
                 description="Current starting frame index for current block",
+            ),
+            OutputParam(
+                "global_end_index",
+                type_hint=int,
+                description="Global end index for cache",
+            ),
+            OutputParam(
+                "local_end_index",
+                type_hint=int,
+                description="Local end index for cache",
             ),
         ]
 
@@ -172,6 +194,25 @@ class SetupCachesBlock(ModularPipelineBlocks):
         generator_dtype = generator_param.dtype
         generator_device = generator_param.device
 
+        # Ensure indices are always initialized (they may come from previous state or need initialization)
+        if not hasattr(block_state, "global_end_index") or block_state.global_end_index is None:
+            block_state.global_end_index = 0
+        if not hasattr(block_state, "local_end_index") or block_state.local_end_index is None:
+            block_state.local_end_index = 0
+
+        # Always configure generator with cache parameters (they may not persist between calls)
+        sink_size = getattr(components.generator.model, "sink_size", 0)
+        if hasattr(components.generator.model, "config"):
+            sink_size = getattr(
+                components.generator.model.config, "sink_size", sink_size
+            )
+
+        components.generator.set_cache_config(
+            sink_size=sink_size,
+            frame_seq_length=frame_seq_length,
+            max_attention_size=components.config.local_attn_size * frame_seq_length,
+        )
+
         if init_cache or block_state.kv_cache is None:
             for block in components.generator.model.blocks:
                 block.self_attn.local_attn_size = -1
@@ -198,6 +239,10 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 frame_seq_length=frame_seq_length,
                 kv_cache_existing=block_state.kv_cache,
             )
+
+            # Reset indices when cache is initialized
+            block_state.global_end_index = 0
+            block_state.local_end_index = 0
 
         # If the conditioning embeds change we need to reinitialize the crossattn cache
         # During transitions, this updates cross-attn cache without full KV cache reset

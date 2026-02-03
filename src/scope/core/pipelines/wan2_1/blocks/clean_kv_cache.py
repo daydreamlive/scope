@@ -61,9 +61,16 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
                 description="Initialized cross-attention cache",
             ),
             InputParam(
-                "kv_bank",
-                type_hint=list[dict],
-                description="Initialized KV memory bank",
+                "global_end_index",
+                required=True,
+                type_hint=int,
+                description="Global end index for cache",
+            ),
+            InputParam(
+                "local_end_index",
+                required=True,
+                type_hint=int,
+                description="Local end index for cache",
             ),
             InputParam(
                 "height", required=True, type_hint=int, description="Height of video"
@@ -81,7 +88,18 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
 
     @property
     def intermediate_outputs(self) -> list[OutputParam]:
-        return []
+        return [
+            OutputParam(
+                "global_end_index",
+                type_hint=int,
+                description="Updated global end index",
+            ),
+            OutputParam(
+                "local_end_index",
+                type_hint=int,
+                description="Updated local end index",
+            ),
+        ]
 
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
@@ -95,15 +113,6 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             block_state.width // scale_size
         )
 
-        record_interval = getattr(components.config, "record_interval", None)
-        if (
-            record_interval is not None
-            and block_state.current_start_frame % (3 * record_interval) == 0
-        ):
-            update_bank = True
-        else:
-            update_bank = False
-
         generator_param = next(components.generator.parameters())
 
         _, num_frames, _, _, _ = block_state.latents.shape
@@ -113,32 +122,33 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
         # After denoising the KV cache will contain keys/values computed from the noisy input at the final timestep.
         # We want to update the generator with the key/values computed from the final "clean" latent (no noise) which
         # corresponds with timestep = 0.
-        # The multiplication by 0 gives us timestep = 0 and is included to illustrate that we could also multiply by
-        # a different value (typically a context_noise param).
         context_timestep = (
             torch.ones(
                 [1, num_frames],
                 device=generator_param.device,
-                dtype=generator_param.dtype,
+                dtype=torch.int64,
             )
             * 0
         )
 
-        # Run the generator with the clean latent at timestep = 0 to update the KV cache
+        # Run the generator with the clean latent at timestep = 0, UPDATE cache
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
-        components.generator(
+        _, _, new_global_end_index, new_local_end_index = components.generator(
             noisy_image_or_video=block_state.latents,
             conditional_dict=conditional_dict,
             timestep=context_timestep,
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
-            kv_bank=block_state.kv_bank,
-            update_bank=update_bank,
-            q_bank=False,
-            update_cache=True,
+            global_end_index=block_state.global_end_index,
+            local_end_index=block_state.local_end_index,
             current_start=block_state.current_start_frame * frame_seq_length,
             current_end=current_end_frame * frame_seq_length,
+            update_cache=True,
         )
+
+        # Update indices in block_state
+        block_state.global_end_index = new_global_end_index
+        block_state.local_end_index = new_local_end_index
 
         self.set_block_state(state, block_state)
         return components, state

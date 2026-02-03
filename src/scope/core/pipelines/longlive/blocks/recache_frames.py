@@ -59,9 +59,16 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 description="Initialized cross-attention cache",
             ),
             InputParam(
-                "kv_bank",
-                type_hint=list[dict],
-                description="Initialized KV memory bank",
+                "global_end_index",
+                required=True,
+                type_hint=int,
+                description="Global end index for cache",
+            ),
+            InputParam(
+                "local_end_index",
+                required=True,
+                type_hint=int,
+                description="Local end index for cache",
             ),
             InputParam(
                 "height", required=True, type_hint=int, description="Height of video"
@@ -100,6 +107,16 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 "recache_buffer",
                 type_hint=torch.Tensor,
                 description="Sliding window of recache frames",
+            ),
+            OutputParam(
+                "global_end_index",
+                type_hint=int,
+                description="Updated global end index",
+            ),
+            OutputParam(
+                "local_end_index",
+                type_hint=int,
+                description="Updated local end index",
             ),
         ]
 
@@ -158,7 +175,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 local_attn_size=components.config.local_attn_size,
                 frame_seq_length=frame_seq_length,
                 kv_cache_existing=block_state.kv_cache,
-                reset_indices=False,
+                zero_cache=False,
             )
 
         # Get the number of frames to recache (min of what we've generated and buffer size)
@@ -193,22 +210,22 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         )
 
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
-        # When global_sink is True: sink_recache_after_switch=False (preserve sink tokens)
-        # When global_sink is False: sink_recache_after_switch=True (recache writes to sink positions)
-        components.generator(
+        # Run generator to recache historical frames
+        _, _, new_global_end_index, new_local_end_index = components.generator(
             noisy_image_or_video=recache_frames,
             conditional_dict=conditional_dict,
             timestep=context_timestep,
             kv_cache=block_state.kv_cache,
             crossattn_cache=block_state.crossattn_cache,
-            kv_bank=block_state.kv_bank,
-            update_bank=False,
-            q_bank=True,
-            update_cache=True,
-            is_recache=True,
+            global_end_index=block_state.global_end_index,
+            local_end_index=block_state.local_end_index,
             current_start=recache_start * frame_seq_length,
-            sink_recache_after_switch=not global_sink,
+            current_end=block_state.current_start_frame * frame_seq_length,
+            update_cache=True,
         )
+
+        block_state.global_end_index = new_global_end_index
+        block_state.local_end_index = new_local_end_index
 
         block_state.crossattn_cache = initialize_crossattn_cache(
             generator=components.generator,

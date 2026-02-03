@@ -45,12 +45,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=int,
                 description="Width of the video",
             ),
-            InputParam(
-                "kv_cache_attention_bias",
-                default=1.0,
-                type_hint=float,
-                description="Controls how much to rely on past frames in the cache during generation",
-            ),
             # The following should be converted to intermediate inputs to denote that they can come from other blocks
             # and can be modified since they are also listed under intermediate outputs. They are included as inputs for now
             # because of what seems to be a bug where intermediate inputs cannot be simplify accessed in block state via
@@ -97,9 +91,16 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="Initialized cross-attention cache",
             ),
             InputParam(
-                "kv_bank",
-                type_hint=list[dict],
-                description="Initialized KV memory bank",
+                "global_end_index",
+                required=True,
+                type_hint=int,
+                description="Global end index for cache",
+            ),
+            InputParam(
+                "local_end_index",
+                required=True,
+                type_hint=int,
+                description="Local end index for cache",
             ),
             InputParam(
                 "generator",
@@ -167,11 +168,6 @@ class DenoiseBlock(ModularPipelineBlocks):
 
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
-            if index == 0:
-                q_bank = True
-            else:
-                q_bank = False
-
             timestep = (
                 torch.ones(
                     [batch_size, num_frames],
@@ -181,23 +177,23 @@ class DenoiseBlock(ModularPipelineBlocks):
                 * current_timestep
             )
 
-            if index < len(denoising_step_list) - 1:
-                _, denoised_pred = components.generator(
-                    noisy_image_or_video=noise,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=block_state.kv_cache,
-                    crossattn_cache=block_state.crossattn_cache,
-                    kv_bank=block_state.kv_bank,
-                    update_bank=False,
-                    q_bank=q_bank,
-                    current_start=start_frame * frame_seq_length,
-                    current_end=end_frame * frame_seq_length,
-                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
-                    vace_context=block_state.vace_context,
-                    vace_context_scale=block_state.vace_context_scale,
-                )
+            # Generator call - never update cache during denoising
+            _, denoised_pred, _, _ = components.generator(
+                noisy_image_or_video=noise,
+                conditional_dict=conditional_dict,
+                timestep=timestep,
+                kv_cache=block_state.kv_cache,
+                crossattn_cache=block_state.crossattn_cache,
+                global_end_index=block_state.global_end_index,
+                local_end_index=block_state.local_end_index,
+                current_start=start_frame * frame_seq_length,
+                current_end=end_frame * frame_seq_length,
+                update_cache=False,
+                vace_context=block_state.vace_context,
+                vace_context_scale=block_state.vace_context_scale,
+            )
 
+            if index < len(denoising_step_list) - 1:
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
                 flattened_pred = denoised_pred.flatten(0, 1)
@@ -217,22 +213,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                         dtype=torch.long,
                     ),
                 ).unflatten(0, denoised_pred.shape[:2])
-            else:
-                _, denoised_pred = components.generator(
-                    noisy_image_or_video=noise,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=block_state.kv_cache,
-                    crossattn_cache=block_state.crossattn_cache,
-                    kv_bank=block_state.kv_bank,
-                    update_bank=False,
-                    q_bank=q_bank,
-                    current_start=start_frame * frame_seq_length,
-                    current_end=end_frame * frame_seq_length,
-                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
-                    vace_context=block_state.vace_context,
-                    vace_context_scale=block_state.vace_context_scale,
-                )
 
         block_state.latents = denoised_pred
 
