@@ -33,11 +33,11 @@ class _SpoutFrame:
 
 
 class FrameProcessor:
-    """Processes video frames through pipelines or fal.ai cloud relay.
+    """Processes video frames through pipelines or cloud relay.
 
     Supports two modes:
     1. Local mode: Frames processed through local GPU pipelines
-    2. Relay mode: Frames sent to fal.ai for cloud processing
+    2. Cloud mode: Frames sent to cloud for processing
 
     Spout integration works in both modes.
     """
@@ -48,10 +48,10 @@ class FrameProcessor:
         max_parameter_queue_size: int = 8,
         initial_parameters: dict = None,
         notification_callback: callable = None,
-        fal_manager: "Any | None" = None,  # FalConnectionManager for relay mode
+        cloud_manager: "Any | None" = None,  # CloudConnectionManager for cloud mode
     ):
         self.pipeline_manager = pipeline_manager
-        self.fal_manager = fal_manager
+        self.cloud_manager = cloud_manager
 
         # Current parameters
         self.parameters = initial_parameters or {}
@@ -67,11 +67,11 @@ class FrameProcessor:
         self._pinned_buffer_cache = {}
         self._pinned_buffer_lock = threading.Lock()
 
-        # Relay mode: send frames to fal.ai instead of local processing
-        self._relay_mode = fal_manager is not None
-        self._fal_output_queue: queue.Queue = queue.Queue(maxsize=2)
-        self._frames_to_fal = 0
-        self._frames_from_fal = 0
+        # Cloud mode: send frames to cloud instead of local processing
+        self._cloud_mode = cloud_manager is not None
+        self._cloud_output_queue: queue.Queue = queue.Queue(maxsize=2)
+        self._frames_to_cloud = 0
+        self._frames_from_cloud = 0
 
         # Spout integration (works in both local and relay modes)
         self.spout_sender = None
@@ -125,19 +125,19 @@ class FrameProcessor:
         # Reset frame counters on start
         self._frames_in = 0
         self._frames_out = 0
-        self._frames_to_fal = 0
-        self._frames_from_fal = 0
+        self._frames_to_cloud = 0
+        self._frames_from_cloud = 0
         self._last_stats_time = time.time()
 
-        if self._relay_mode:
-            # Relay mode: frames go to fal.ai instead of local pipelines
-            logger.info("[FRAME-PROCESSOR] Starting in RELAY mode (fal.ai cloud)")
+        if self._cloud_mode:
+            # Cloud mode: frames go to cloud instead of local pipelines
+            logger.info("[FRAME-PROCESSOR] Starting in CLOUD mode")
 
-            # Register callback to receive frames from fal.ai
-            if self.fal_manager:
-                self.fal_manager.add_frame_callback(self._on_frame_from_fal)
+            # Register callback to receive frames from cloud
+            if self.cloud_manager:
+                self.cloud_manager.add_frame_callback(self._on_frame_from_cloud)
 
-            logger.info("[FRAME-PROCESSOR] Started in relay mode")
+            logger.info("[FRAME-PROCESSOR] Started in cloud mode")
             return
 
         # Local mode: setup pipeline chain
@@ -195,16 +195,16 @@ class FrameProcessor:
                 logger.error(f"Error releasing Spout receiver: {e}")
             self.spout_receiver = None
 
-        # Clean up fal.ai callback in relay mode
-        if self._relay_mode and self.fal_manager:
-            self.fal_manager.remove_frame_callback(self._on_frame_from_fal)
+        # Clean up cloud callback in cloud mode
+        if self._cloud_mode and self.cloud_manager:
+            self.cloud_manager.remove_frame_callback(self._on_frame_from_cloud)
 
         # Log final frame stats
-        if self._relay_mode:
+        if self._cloud_mode:
             logger.info(
-                f"[FRAME-PROCESSOR] Stopped (relay mode). "
-                f"Frames: in={self._frames_in}, to_fal={self._frames_to_fal}, "
-                f"from_fal={self._frames_from_fal}, out={self._frames_out}"
+                f"[FRAME-PROCESSOR] Stopped (cloud mode). "
+                f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
+                f"from_cloud={self._frames_from_cloud}, out={self._frames_out}"
             )
         else:
             logger.info(
@@ -244,18 +244,18 @@ class FrameProcessor:
         if self._frames_in % 100 == 0:
             self._log_frame_stats()
 
-        if self._relay_mode:
-            # Relay mode: send frame to fal.ai (only in video mode)
-            # In text mode, fal.ai generates video from prompts only - no input frames
+        if self._cloud_mode:
+            # Cloud mode: send frame to cloud (only in video mode)
+            # In text mode, cloud generates video from prompts only - no input frames
             if not self._video_mode:
                 return True  # Silently ignore frames in text mode
-            if self.fal_manager:
+            if self.cloud_manager:
                 frame_array = frame.to_ndarray(format="rgb24")
-                if self.fal_manager.send_frame_to_fal(frame_array):
-                    self._frames_to_fal += 1
+                if self.cloud_manager.send_frame_to_cloud(frame_array):
+                    self._frames_to_cloud += 1
                     return True
                 else:
-                    logger.debug("[FRAME-PROCESSOR] Failed to send frame to fal.ai")
+                    logger.debug("[FRAME-PROCESSOR] Failed to send frame to cloud")
                     return False
             return False
 
@@ -295,10 +295,10 @@ class FrameProcessor:
         # Get frame based on mode
         frame: torch.Tensor | None = None
 
-        if self._relay_mode:
-            # Relay mode: get frame from fal.ai output queue
+        if self._cloud_mode:
+            # Cloud mode: get frame from cloud output queue
             try:
-                frame_np = self._fal_output_queue.get_nowait()
+                frame_np = self._cloud_output_queue.get_nowait()
                 frame = torch.from_numpy(frame_np)
             except queue.Empty:
                 return None
@@ -338,24 +338,24 @@ class FrameProcessor:
 
         return frame
 
-    def _on_frame_from_fal(self, frame: "VideoFrame") -> None:
-        """Callback when a processed frame is received from fal.ai (relay mode)."""
-        self._frames_from_fal += 1
+    def _on_frame_from_cloud(self, frame: "VideoFrame") -> None:
+        """Callback when a processed frame is received from cloud (cloud mode)."""
+        self._frames_from_cloud += 1
 
         try:
             # Convert to numpy and queue for output
             frame_np = frame.to_ndarray(format="rgb24")
             try:
-                self._fal_output_queue.put_nowait(frame_np)
+                self._cloud_output_queue.put_nowait(frame_np)
             except queue.Full:
                 # Drop oldest frame to make room
                 try:
-                    self._fal_output_queue.get_nowait()
-                    self._fal_output_queue.put_nowait(frame_np)
+                    self._cloud_output_queue.get_nowait()
+                    self._cloud_output_queue.put_nowait(frame_np)
                 except queue.Empty:
                     pass
         except Exception as e:
-            logger.error(f"[FRAME-PROCESSOR] Error processing frame from fal: {e}")
+            logger.error(f"[FRAME-PROCESSOR] Error processing frame from cloud: {e}")
 
     def get_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS.
@@ -379,11 +379,11 @@ class FrameProcessor:
             fps_in = self._frames_in / elapsed if self._frames_in > 0 else 0
             fps_out = self._frames_out / elapsed if self._frames_out > 0 else 0
 
-            if self._relay_mode:
+            if self._cloud_mode:
                 logger.info(
-                    f"[FRAME-PROCESSOR] RELAY MODE | "
-                    f"Frames: in={self._frames_in}, to_fal={self._frames_to_fal}, "
-                    f"from_fal={self._frames_from_fal}, out={self._frames_out} | "
+                    f"[FRAME-PROCESSOR] CLOUD MODE | "
+                    f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
+                    f"from_cloud={self._frames_from_cloud}, out={self._frames_out} | "
                     f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out"
                 )
             else:
@@ -407,12 +407,12 @@ class FrameProcessor:
             "pipeline_fps": self.get_fps(),
             "spout_receiver_enabled": self.spout_receiver_enabled,
             "spout_sender_enabled": self.spout_sender_enabled,
-            "relay_mode": self._relay_mode,
+            "cloud_mode": self._cloud_mode,
         }
 
-        if self._relay_mode:
-            stats["frames_to_fal"] = self._frames_to_fal
-            stats["frames_from_fal"] = self._frames_from_fal
+        if self._cloud_mode:
+            stats["frames_to_cloud"] = self._frames_to_cloud
+            stats["frames_from_cloud"] = self._frames_from_cloud
 
         return stats
 
@@ -682,12 +682,12 @@ class FrameProcessor:
                     if self.paused:
                         continue
 
-                    if self._relay_mode:
-                        # Relay mode: send Spout frames to fal.ai (only in video mode)
-                        # In text mode, fal.ai generates video from prompts only - no input frames
-                        if self._video_mode and self.fal_manager:
-                            if self.fal_manager.send_frame_to_fal(rgb_frame):
-                                self._frames_to_fal += 1
+                    if self._cloud_mode:
+                        # Cloud mode: send Spout frames to cloud (only in video mode)
+                        # In text mode, cloud generates video from prompts only - no input frames
+                        if self._video_mode and self.cloud_manager:
+                            if self.cloud_manager.send_frame_to_cloud(rgb_frame):
+                                self._frames_to_cloud += 1
                     elif self.pipeline_processors:
                         # Local mode: put into first processor's input queue
                         first_processor = self.pipeline_processors[0]

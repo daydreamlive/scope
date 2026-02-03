@@ -1,17 +1,17 @@
-"""FalConnectionManager - manages WebSocket connection to fal.ai at app level.
+"""CloudConnectionManager - manages WebSocket connection to cloud at app level.
 
-This module handles the connection to fal.ai cloud for remote GPU inference.
+This module handles the connection to cloud for remote GPU inference.
 The connection is established when cloud mode is toggled ON and stays open
 until toggled OFF, allowing:
-1. API calls to be proxied to the fal-hosted scope backend
-2. WebRTC media relay - video flows through the backend to fal.ai
-3. The fal runner to stay warm and ready for requests
+1. API calls to be proxied to the cloud-hosted scope backend
+2. WebRTC media relay - video flows through the backend to cloud
+3. The cloud runner to stay warm and ready for requests
 
 Architecture:
-- FalConnectionManager is instantiated once at app startup
-- When connect() is called, it opens a WebSocket to fal and waits for "ready"
-- When start_webrtc() is called, it establishes a WebRTC connection to fal.ai
-- Video frames flow: Browser/Spout → Backend → fal.ai → Backend → Browser/Spout
+- CloudConnectionManager is instantiated once at app startup
+- When connect() is called, it opens a WebSocket to cloud and waits for "ready"
+- When start_webrtc() is called, it establishes a WebRTC connection to cloud
+- Video frames flow: Browser/Spout → Backend → Cloud → Backend → Browser/Spout
 - When disconnect() is called, both WebSocket and WebRTC are closed
 """
 
@@ -22,22 +22,23 @@ import json
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import numpy as np
 from av import VideoFrame
 
 if TYPE_CHECKING:
-    from .fal_webrtc_client import FalWebRTCClient
+    from .cloud_webrtc_client import CloudWebRTCClient
 
 logger = logging.getLogger(__name__)
 
 TOKEN_EXPIRATION_SECONDS = 120
 
 
-class FalConnectionManager:
-    """Manages the WebSocket connection to fal.ai cloud.
+class CloudConnectionManager:
+    """Manages the WebSocket connection to cloud.
 
     This is a singleton-style manager that handles:
     - WebSocket connection lifecycle (connect on cloud mode ON, disconnect on OFF)
@@ -54,11 +55,11 @@ class FalConnectionManager:
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._connected = False
         self._stop_event = asyncio.Event()
-        # Connection ID from fal.ai for log correlation
+        # Connection ID for log correlation
         self._connection_id: str | None = None
 
         # WebRTC client for media relay
-        self._webrtc_client: "FalWebRTCClient | None" = None
+        self._webrtc_client: CloudWebRTCClient | None = None
         self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
 
         # Stats tracking
@@ -70,27 +71,27 @@ class FalConnectionManager:
             "api_requests_successful": 0,
             "connected_at": None,
             "last_activity_at": None,
-            "frames_sent_to_fal": 0,
-            "frames_received_from_fal": 0,
+            "frames_sent_to_cloud": 0,
+            "frames_received_from_cloud": 0,
         }
 
     @property
     def is_connected(self) -> bool:
-        """Check if connected to fal."""
+        """Check if connected to cloud."""
         return self._connected and self.ws is not None and not self.ws.closed
 
     async def connect(self, app_id: str, api_key: str) -> None:
-        """Connect to fal.ai cloud.
+        """Connect to cloud.
 
         Args:
-            app_id: The fal app ID (e.g., "username/scope-fal")
-            api_key: The fal API key
+            app_id: The cloud app ID (e.g., "username/scope-app")
+            api_key: The cloud API key
 
         Raises:
             RuntimeError: If connection fails or times out
         """
         if self.is_connected:
-            logger.info("Already connected to fal, disconnecting first")
+            logger.info("Already connected to cloud, disconnecting first")
             await self.disconnect()
 
         self.app_id = app_id
@@ -103,7 +104,7 @@ class FalConnectionManager:
 
         # Build WebSocket URL
         ws_url = self._build_ws_url(token)
-        logger.info(f"Connecting to fal WebSocket: {ws_url.split('?')[0]}...")
+        logger.info(f"Connecting to cloud WebSocket: {ws_url.split('?')[0]}...")
 
         # Create session and connect
         self._session = aiohttp.ClientSession()
@@ -112,15 +113,15 @@ class FalConnectionManager:
                 self._session.ws_connect(ws_url),
                 timeout=30.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await self._cleanup_session()
             raise RuntimeError(
-                f"Timeout connecting to fal WebSocket. Check that app_id '{app_id}' "
-                "is correct and the fal app is deployed."
+                f"Timeout connecting to cloud WebSocket. Check that app_id '{app_id}' "
+                "is correct and the cloud app is deployed."
             ) from None
         except Exception as e:
             await self._cleanup_session()
-            raise RuntimeError(f"Failed to connect to fal WebSocket: {e}") from e
+            raise RuntimeError(f"Failed to connect to cloud WebSocket: {e}") from e
 
         # Wait for "ready" message
         try:
@@ -133,14 +134,14 @@ class FalConnectionManager:
                 self._connection_id = data.get("connection_id")
             else:
                 raise RuntimeError(f"Unexpected message type: {msg.type}")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await self._cleanup()
             raise RuntimeError(
-                "Timeout waiting for 'ready' from fal server. "
-                "The fal runner may be starting up (cold start can take 1-2 minutes)."
+                "Timeout waiting for 'ready' from cloud server. "
+                "The cloud runner may be starting up (cold start can take 1-2 minutes)."
             ) from None
 
-        logger.info(f"fal server ready (connection_id: {self._connection_id})")
+        logger.info(f"Cloud server ready (connection_id: {self._connection_id})")
         self._connected = True
         self._stats["connected_at"] = time.time()
         self._stats["last_activity_at"] = time.time()
@@ -207,7 +208,7 @@ class FalConnectionManager:
                         self.ws.receive(),
                         timeout=1.0,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
 
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -215,12 +216,12 @@ class FalConnectionManager:
                         data = json.loads(msg.data)
                         await self._handle_message(data)
                     except json.JSONDecodeError:
-                        logger.warning(f"Non-JSON message from fal: {msg.data}")
+                        logger.warning(f"Non-JSON message from cloud: {msg.data}")
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
-                    logger.info("fal WebSocket closed")
+                    logger.info("Cloud WebSocket closed")
                     break
                 elif msg.type == aiohttp.WSMsgType.ERROR:
-                    logger.error(f"fal WebSocket error: {self.ws.exception()}")
+                    logger.error(f"Cloud WebSocket error: {self.ws.exception()}")
                     break
 
         except Exception as e:
@@ -260,7 +261,7 @@ class FalConnectionManager:
             RuntimeError: If not connected or request times out
         """
         if not self.is_connected:
-            raise RuntimeError("Not connected to fal")
+            raise RuntimeError("Not connected to cloud")
 
         # Add request_id for correlation
         request_id = str(uuid.uuid4())
@@ -276,7 +277,7 @@ class FalConnectionManager:
 
             # Wait for response
             return await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._pending_requests.pop(request_id, None)
             raise RuntimeError(f"Request timeout after {timeout}s") from None
         except Exception as e:
@@ -290,7 +291,7 @@ class FalConnectionManager:
         body: dict | None = None,
         timeout: float = 30.0,
     ) -> dict:
-        """Make an API request through the fal WebSocket proxy.
+        """Make an API request through the cloud WebSocket proxy.
 
         Args:
             method: HTTP method (GET, POST, PATCH, DELETE)
@@ -327,12 +328,14 @@ class FalConnectionManager:
         return response
 
     async def webrtc_get_ice_servers(self) -> dict:
-        """Get ICE servers from fal-hosted scope backend."""
-        logger.info("[CLOUD] Fetching ICE servers from fal")
+        """Get ICE servers from cloud-hosted scope backend."""
+        logger.info("[CLOUD] Fetching ICE servers from cloud")
         self._stats["last_activity_at"] = time.time()
         response = await self.send_and_wait({"type": "get_ice_servers"})
         ice_servers = response.get("data", {})
-        logger.info(f"[CLOUD] Got {len(ice_servers.get('iceServers', []))} ICE servers from fal")
+        logger.info(
+            f"[CLOUD] Got {len(ice_servers.get('iceServers', []))} ICE servers from cloud"
+        )
         return ice_servers
 
     async def webrtc_offer(
@@ -341,14 +344,16 @@ class FalConnectionManager:
         sdp_type: str = "offer",
         initial_parameters: dict | None = None,
     ) -> dict:
-        """Send WebRTC offer to fal-hosted scope backend.
+        """Send WebRTC offer to cloud-hosted scope backend.
 
         Returns:
             Dict with "sdp", "sdp_type", and "sessionId"
         """
         self._stats["webrtc_offers_sent"] += 1
         self._stats["last_activity_at"] = time.time()
-        logger.info(f"[CLOUD] Sending WebRTC offer to fal (offer #{self._stats['webrtc_offers_sent']})")
+        logger.info(
+            f"[CLOUD] Sending WebRTC offer to cloud (offer #{self._stats['webrtc_offers_sent']})"
+        )
 
         message: dict[str, Any] = {
             "type": "offer",
@@ -357,7 +362,9 @@ class FalConnectionManager:
         }
         if initial_parameters:
             message["initialParameters"] = initial_parameters
-            logger.info(f"[CLOUD] Offer includes initial parameters: {list(initial_parameters.keys())}")
+            logger.info(
+                f"[CLOUD] Offer includes initial parameters: {list(initial_parameters.keys())}"
+            )
 
         response = await self.send_and_wait(message, timeout=30.0)
 
@@ -368,7 +375,9 @@ class FalConnectionManager:
         self._stats["webrtc_offers_successful"] += 1
         session_id = response.get("sessionId")
         logger.info(f"[CLOUD] WebRTC offer successful! Session ID: {session_id}")
-        logger.info(f"[CLOUD] Stats: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']} offers successful")
+        logger.info(
+            f"[CLOUD] Stats: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']} offers successful"
+        )
 
         return {
             "sdp": response.get("sdp"),
@@ -381,14 +390,18 @@ class FalConnectionManager:
         session_id: str,
         candidate: dict | None,
     ) -> None:
-        """Send ICE candidate to fal-hosted scope backend."""
+        """Send ICE candidate to cloud-hosted scope backend."""
         self._stats["webrtc_ice_candidates_sent"] += 1
         self._stats["last_activity_at"] = time.time()
 
         if candidate:
-            logger.debug(f"[CLOUD] Sending ICE candidate to fal for session {session_id}")
+            logger.debug(
+                f"[CLOUD] Sending ICE candidate to cloud for session {session_id}"
+            )
         else:
-            logger.info(f"[CLOUD] Sending end-of-candidates signal for session {session_id}")
+            logger.info(
+                f"[CLOUD] Sending end-of-candidates signal for session {session_id}"
+            )
 
         message = {
             "type": "icecandidate",
@@ -398,10 +411,12 @@ class FalConnectionManager:
         await self.send_and_wait(message, timeout=10.0)
 
         if self._stats["webrtc_ice_candidates_sent"] % 5 == 0:
-            logger.info(f"[CLOUD] Sent {self._stats['webrtc_ice_candidates_sent']} ICE candidates total")
+            logger.info(
+                f"[CLOUD] Sent {self._stats['webrtc_ice_candidates_sent']} ICE candidates total"
+            )
 
     async def disconnect(self) -> None:
-        """Disconnect from fal.ai cloud."""
+        """Disconnect from cloud."""
         self._stop_event.set()
         self._connected = False
         self._connection_id = None
@@ -412,7 +427,7 @@ class FalConnectionManager:
         # Cancel pending requests
         for request_id, future in self._pending_requests.items():
             if not future.done():
-                future.set_exception(RuntimeError("Disconnected from fal"))
+                future.set_exception(RuntimeError("Disconnected from cloud"))
         self._pending_requests.clear()
 
         # Cancel receive task
@@ -425,41 +440,41 @@ class FalConnectionManager:
             self._receive_task = None
 
         await self._cleanup()
-        logger.info("Disconnected from fal")
+        logger.info("Disconnected from cloud")
 
     # =========================================================================
-    # WebRTC Media Relay - Video flows through backend to fal.ai
+    # WebRTC Media Relay - Video flows through backend to cloud
     # =========================================================================
 
     @property
     def webrtc_connected(self) -> bool:
-        """Check if WebRTC connection to fal.ai is established."""
+        """Check if WebRTC connection to cloud is established."""
         return self._webrtc_client is not None and self._webrtc_client.is_connected
 
     async def start_webrtc(self, initial_parameters: dict | None = None) -> None:
-        """Start WebRTC connection to fal.ai for media relay.
+        """Start WebRTC connection to cloud for media relay.
 
-        This establishes a WebRTC peer connection FROM the backend TO fal.ai,
+        This establishes a WebRTC peer connection FROM the backend TO cloud,
         allowing video frames to flow through the backend.
 
         Args:
             initial_parameters: Initial pipeline parameters (prompts, etc.)
         """
         if not self.is_connected:
-            raise RuntimeError("Must be connected to fal.ai WebSocket first")
+            raise RuntimeError("Must be connected to cloud WebSocket first")
 
         if self._webrtc_client is not None:
             logger.info("[CLOUD-RTC] WebRTC already active, stopping first")
             await self.stop_webrtc()
 
         # Import here to avoid circular imports
-        from .fal_webrtc_client import FalWebRTCClient
+        from .cloud_webrtc_client import CloudWebRTCClient
 
-        logger.info("[CLOUD-RTC] Starting WebRTC connection to fal.ai...")
-        self._webrtc_client = FalWebRTCClient(self)
+        logger.info("[CLOUD-RTC] Starting WebRTC connection to cloud...")
+        self._webrtc_client = CloudWebRTCClient(self)
 
         # Register frame callback to update stats and forward to subscribers
-        self._webrtc_client.output_handler.add_callback(self._on_frame_from_fal)
+        self._webrtc_client.output_handler.add_callback(self._on_frame_from_cloud)
 
         try:
             await self._webrtc_client.connect(initial_parameters)
@@ -470,15 +485,15 @@ class FalConnectionManager:
             raise
 
     async def stop_webrtc(self) -> None:
-        """Stop the WebRTC connection to fal.ai."""
+        """Stop the WebRTC connection to cloud."""
         if self._webrtc_client is not None:
             logger.info("[CLOUD-RTC] Stopping WebRTC connection...")
             await self._webrtc_client.disconnect()
             self._webrtc_client = None
             logger.info("[CLOUD-RTC] WebRTC connection stopped")
 
-    def send_frame_to_fal(self, frame: "VideoFrame | np.ndarray") -> bool:
-        """Send a video frame to fal.ai for processing.
+    def send_frame_to_cloud(self, frame: VideoFrame | np.ndarray) -> bool:
+        """Send a video frame to cloud for processing.
 
         Args:
             frame: VideoFrame or numpy array (RGB24 format)
@@ -491,11 +506,11 @@ class FalConnectionManager:
 
         success = self._webrtc_client.send_frame(frame)
         if success:
-            self._stats["frames_sent_to_fal"] += 1
+            self._stats["frames_sent_to_cloud"] += 1
         return success
 
-    def send_parameters_to_fal(self, params: dict) -> None:
-        """Send parameter update to fal.ai via WebRTC data channel.
+    def send_parameters_to_cloud(self, params: dict) -> None:
+        """Send parameter update to cloud via WebRTC data channel.
 
         Args:
             params: Parameters to send (prompts, noise_scale, etc.)
@@ -506,7 +521,7 @@ class FalConnectionManager:
             logger.warning("[CLOUD-RTC] Cannot send parameters - WebRTC not connected")
 
     def add_frame_callback(self, callback: Callable[[VideoFrame], None]) -> None:
-        """Register a callback to receive processed frames from fal.ai.
+        """Register a callback to receive processed frames from cloud.
 
         Args:
             callback: Function to call with each processed VideoFrame
@@ -518,9 +533,9 @@ class FalConnectionManager:
         if callback in self._frame_callbacks:
             self._frame_callbacks.remove(callback)
 
-    def _on_frame_from_fal(self, frame: VideoFrame) -> None:
-        """Handle frames received from fal.ai."""
-        self._stats["frames_received_from_fal"] += 1
+    def _on_frame_from_cloud(self, frame: VideoFrame) -> None:
+        """Handle frames received from cloud."""
+        self._stats["frames_received_from_cloud"] += 1
 
         # Forward to all registered callbacks
         for callback in self._frame_callbacks:
@@ -530,28 +545,28 @@ class FalConnectionManager:
                 logger.error(f"[CLOUD-RTC] Error in frame callback: {e}")
 
     @property
-    def fal_session_id(self) -> str | None:
-        """Get the current fal.ai WebRTC session ID."""
+    def cloud_session_id(self) -> str | None:
+        """Get the current cloud WebRTC session ID."""
         if self._webrtc_client is not None:
             return self._webrtc_client.session_id
         return None
 
     async def download_recording(self, session_id: str | None = None) -> bytes | None:
-        """Download a recording from fal.ai.
+        """Download a recording from cloud.
 
         Args:
-            session_id: The fal.ai session ID. If None, uses the current session.
+            session_id: The cloud session ID. If None, uses the current session.
 
         Returns:
             The recording file bytes, or None if not available.
         """
         if not self.is_connected:
-            raise RuntimeError("Not connected to fal.ai")
+            raise RuntimeError("Not connected to cloud")
 
         # Use provided session ID or fall back to current
-        target_session_id = session_id or self.fal_session_id
+        target_session_id = session_id or self.cloud_session_id
         if not target_session_id:
-            raise RuntimeError("No fal.ai session ID available")
+            raise RuntimeError("No cloud session ID available")
 
         logger.info(f"[CLOUD] Downloading recording for session: {target_session_id}")
 
@@ -565,6 +580,7 @@ class FalConnectionManager:
         # Check if we got binary data (base64 encoded)
         if response.get("_base64_content"):
             import base64
+
             content = base64.b64decode(response["_base64_content"])
             logger.info(f"[CLOUD] Downloaded recording: {len(content)} bytes")
             return content
@@ -576,7 +592,9 @@ class FalConnectionManager:
             return None
 
         # Unexpected response format
-        logger.warning(f"[CLOUD] Unexpected recording response format: {list(response.keys())}")
+        logger.warning(
+            f"[CLOUD] Unexpected recording response format: {list(response.keys())}"
+        )
         return None
 
     async def _cleanup(self) -> None:
@@ -614,8 +632,8 @@ class FalConnectionManager:
                 "webrtc_ice_candidates_sent": self._stats["webrtc_ice_candidates_sent"],
                 "api_requests_sent": self._stats["api_requests_sent"],
                 "api_requests_successful": self._stats["api_requests_successful"],
-                "frames_sent_to_fal": self._stats["frames_sent_to_fal"],
-                "frames_received_from_fal": self._stats["frames_received_from_fal"],
+                "frames_sent_to_cloud": self._stats["frames_sent_to_cloud"],
+                "frames_received_from_cloud": self._stats["frames_received_from_cloud"],
             }
 
             # Include WebRTC client stats if available
@@ -627,7 +645,7 @@ class FalConnectionManager:
     def print_stats(self) -> None:
         """Print current stats to logger."""
         if not self.is_connected:
-            logger.info("[CLOUD] Not connected to fal")
+            logger.info("[CLOUD] Not connected to cloud")
             return
 
         uptime = 0
@@ -635,24 +653,36 @@ class FalConnectionManager:
             uptime = time.time() - self._stats["connected_at"]
 
         logger.info("=" * 50)
-        logger.info("[CLOUD] fal Connection Stats")
+        logger.info("[CLOUD] Cloud Connection Stats")
         logger.info("=" * 50)
         logger.info(f"  App ID: {self.app_id}")
         logger.info(f"  Uptime: {uptime:.1f}s")
-        logger.info(f"  WebSocket: connected")
-        logger.info(f"  WebRTC Media: {'connected' if self.webrtc_connected else 'not connected'}")
+        logger.info("  WebSocket: connected")
+        logger.info(
+            f"  WebRTC Media: {'connected' if self.webrtc_connected else 'not connected'}"
+        )
         logger.info("")
         logger.info("  Signaling Stats:")
-        logger.info(f"    WebRTC offers: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']}")
-        logger.info(f"    ICE candidates sent: {self._stats['webrtc_ice_candidates_sent']}")
-        logger.info(f"    API requests: {self._stats['api_requests_successful']}/{self._stats['api_requests_sent']}")
+        logger.info(
+            f"    WebRTC offers: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']}"
+        )
+        logger.info(
+            f"    ICE candidates sent: {self._stats['webrtc_ice_candidates_sent']}"
+        )
+        logger.info(
+            f"    API requests: {self._stats['api_requests_successful']}/{self._stats['api_requests_sent']}"
+        )
         logger.info("")
         logger.info("  Media Stats:")
-        logger.info(f"    Frames sent to fal: {self._stats['frames_sent_to_fal']}")
-        logger.info(f"    Frames received from fal: {self._stats['frames_received_from_fal']}")
+        logger.info(f"    Frames sent to cloud: {self._stats['frames_sent_to_cloud']}")
+        logger.info(
+            f"    Frames received from cloud: {self._stats['frames_received_from_cloud']}"
+        )
 
         if self._webrtc_client is not None:
             rtc_stats = self._webrtc_client.get_stats()
-            logger.info(f"    WebRTC state: {rtc_stats.get('connection_state', 'unknown')}")
+            logger.info(
+                f"    WebRTC state: {rtc_stats.get('connection_state', 'unknown')}"
+            )
 
         logger.info("=" * 50)

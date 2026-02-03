@@ -1,12 +1,12 @@
 /**
- * fal.ai WebSocket Adapter for Scope
+ * Cloud WebSocket Adapter for Scope
  *
  * This adapter routes all API calls and WebRTC signaling through a single
- * WebSocket connection to the fal.ai endpoint, preventing fal from spawning
+ * WebSocket connection to the cloud endpoint, preventing cloud from spawning
  * new runner instances for each request.
  *
  * Usage:
- *   const adapter = new FalAdapter("wss://your-fal-endpoint/ws", "your-api-key");
+ *   const adapter = new CloudAdapter("wss://your-cloud-endpoint/ws", "your-api-key");
  *   await adapter.connect();
  *
  *   // Use like regular API
@@ -22,10 +22,7 @@
  *   browser WebSocket API doesn't support custom headers.
  */
 
-import type {
-  IceServersResponse,
-  ModelStatusResponse,
-} from "../types";
+import type { IceServersResponse, ModelStatusResponse } from "../types";
 import type {
   WebRTCOfferRequest,
   WebRTCOfferResponse,
@@ -59,7 +56,7 @@ interface PendingRequest {
   timeout: ReturnType<typeof setTimeout>;
 }
 
-export class FalAdapter {
+export class CloudAdapter {
   private ws: WebSocket | null = null;
   private wsUrl: string;
   private apiKey: string | null = null;
@@ -76,9 +73,9 @@ export class FalAdapter {
   private currentSessionId: string | null = null;
 
   /**
-   * Create a FalAdapter instance.
-   * @param wsUrl - WebSocket URL for the fal.ai endpoint
-   * @param apiKey - Optional fal.ai API key for authentication
+   * Create a CloudAdapter instance.
+   * @param wsUrl - WebSocket URL for the cloud endpoint
+   * @param apiKey - Optional API key for authentication
    */
   constructor(wsUrl: string, apiKey?: string) {
     this.wsUrl = wsUrl;
@@ -86,14 +83,14 @@ export class FalAdapter {
   }
 
   /**
-   * Connect to the fal WebSocket endpoint
+   * Connect to the cloud WebSocket endpoint
    */
   async connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) {
       return;
     }
 
-    this.readyPromise = new Promise((resolve) => {
+    this.readyPromise = new Promise(resolve => {
       this.readyResolve = resolve;
     });
 
@@ -110,11 +107,11 @@ export class FalAdapter {
         this.ws = new WebSocket(url);
 
         this.ws.onopen = () => {
-          console.log("[FalAdapter] WebSocket connected");
+          console.log("[CloudAdapter] WebSocket connected");
           this.reconnectAttempts = 0;
         };
 
-        this.ws.onmessage = (event) => {
+        this.ws.onmessage = event => {
           try {
             const message = JSON.parse(event.data) as ApiResponse;
             this.handleMessage(message);
@@ -126,17 +123,21 @@ export class FalAdapter {
               resolve();
             }
           } catch (error) {
-            console.error("[FalAdapter] Failed to parse message:", error);
+            console.error("[CloudAdapter] Failed to parse message:", error);
           }
         };
 
-        this.ws.onerror = (error) => {
-          console.error("[FalAdapter] WebSocket error:", error);
+        this.ws.onerror = error => {
+          console.error("[CloudAdapter] WebSocket error:", error);
           reject(error);
         };
 
-        this.ws.onclose = (event) => {
-          console.log("[FalAdapter] WebSocket closed:", event.code, event.reason);
+        this.ws.onclose = event => {
+          console.log(
+            "[CloudAdapter] WebSocket closed:",
+            event.code,
+            event.reason
+          );
           this.isReady = false;
           this.ws = null;
 
@@ -148,10 +149,16 @@ export class FalAdapter {
           }
 
           // Attempt reconnect if not intentional close
-          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+          if (
+            event.code !== 1000 &&
+            this.reconnectAttempts < this.maxReconnectAttempts
+          ) {
             this.reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-            console.log(`[FalAdapter] Reconnecting in ${delay}ms...`);
+            const delay = Math.min(
+              1000 * Math.pow(2, this.reconnectAttempts),
+              30000
+            );
+            console.log(`[CloudAdapter] Reconnecting in ${delay}ms...`);
             setTimeout(() => this.connect(), delay);
           }
         };
@@ -197,8 +204,15 @@ export class FalAdapter {
       clearTimeout(pending.timeout);
       this.pendingRequests.delete(message.request_id);
 
-      if (message.type === "error" || (message.status && message.status >= 400)) {
-        pending.reject(new Error(message.error || `Request failed with status ${message.status}`));
+      if (
+        message.type === "error" ||
+        (message.status && message.status >= 400)
+      ) {
+        pending.reject(
+          new Error(
+            message.error || `Request failed with status ${message.status}`
+          )
+        );
       } else {
         pending.resolve(message);
       }
@@ -206,7 +220,11 @@ export class FalAdapter {
     }
 
     // Handle WebRTC signaling responses (no request_id)
-    if (message.type === "answer" || message.type === "ice_servers" || message.type === "icecandidate_ack") {
+    if (
+      message.type === "answer" ||
+      message.type === "ice_servers" ||
+      message.type === "icecandidate_ack"
+    ) {
       // These are handled by specific pending requests
       return;
     }
@@ -216,7 +234,7 @@ export class FalAdapter {
       try {
         handler(message);
       } catch (error) {
-        console.error("[FalAdapter] Message handler error:", error);
+        console.error("[CloudAdapter] Message handler error:", error);
       }
     }
   }
@@ -342,7 +360,9 @@ export class FalAdapter {
     });
 
     if (response.status && response.status >= 400) {
-      throw new Error(response.error || `API request failed with status ${response.status}`);
+      throw new Error(
+        response.error || `API request failed with status ${response.status}`
+      );
     }
 
     return response.data as T;
@@ -362,8 +382,12 @@ export class FalAdapter {
     checkModelStatus: (pipelineId: string): Promise<ModelStatusResponse> =>
       this.apiRequest("GET", `/api/v1/models/status?pipeline_id=${pipelineId}`),
 
-    downloadPipelineModels: (pipelineId: string): Promise<{ message: string }> =>
-      this.apiRequest("POST", "/api/v1/models/download", { pipeline_id: pipelineId }),
+    downloadPipelineModels: (
+      pipelineId: string
+    ): Promise<{ message: string }> =>
+      this.apiRequest("POST", "/api/v1/models/download", {
+        pipeline_id: pipelineId,
+      }),
 
     getHardwareInfo: (): Promise<HardwareInfoResponse> =>
       this.apiRequest("GET", "/api/v1/hardware/info"),
@@ -372,7 +396,10 @@ export class FalAdapter {
       this.apiRequest("GET", "/api/v1/lora/list"),
 
     listAssets: (type?: "image" | "video"): Promise<AssetsResponse> =>
-      this.apiRequest("GET", type ? `/api/v1/assets?type=${type}` : "/api/v1/assets"),
+      this.apiRequest(
+        "GET",
+        type ? `/api/v1/assets?type=${type}` : "/api/v1/assets"
+      ),
 
     uploadAsset: async (file: File): Promise<AssetFileInfo> => {
       // For file uploads, we need to convert to base64 and send through WebSocket
@@ -385,10 +412,14 @@ export class FalAdapter {
         )
       );
 
-      return this.apiRequest("POST", `/api/v1/assets?filename=${encodeURIComponent(file.name)}`, {
-        _base64_content: base64,
-        _content_type: file.type,
-      });
+      return this.apiRequest(
+        "POST",
+        `/api/v1/assets?filename=${encodeURIComponent(file.name)}`,
+        {
+          _base64_content: base64,
+          _content_type: file.type,
+        }
+      );
     },
 
     fetchCurrentLogs: (): Promise<string> =>
@@ -406,13 +437,13 @@ export class FalAdapter {
 import { useState, useEffect, useRef, useCallback } from "react";
 
 /**
- * React hook for using the FalAdapter
+ * React hook for using the CloudAdapter
  */
-export function useFalAdapter(wsUrl: string | null, apiKey?: string) {
+export function useCloudAdapter(wsUrl: string | null, apiKey?: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const adapterRef = useRef<FalAdapter | null>(null);
+  const adapterRef = useRef<CloudAdapter | null>(null);
 
   useEffect(() => {
     if (!wsUrl) {
@@ -422,7 +453,7 @@ export function useFalAdapter(wsUrl: string | null, apiKey?: string) {
       return;
     }
 
-    const adapter = new FalAdapter(wsUrl, apiKey);
+    const adapter = new CloudAdapter(wsUrl, apiKey);
     adapterRef.current = adapter;
 
     adapter
@@ -432,7 +463,7 @@ export function useFalAdapter(wsUrl: string | null, apiKey?: string) {
         setIsReady(true);
         setError(null);
       })
-      .catch((err) => {
+      .catch(err => {
         setError(err);
         setIsConnected(false);
         setIsReady(false);
@@ -456,30 +487,30 @@ export function useFalAdapter(wsUrl: string | null, apiKey?: string) {
 
 // ==================== Global Instance ====================
 
-let globalAdapter: FalAdapter | null = null;
+let globalAdapter: CloudAdapter | null = null;
 
 /**
- * Initialize the global FalAdapter instance
- * Call this once at app startup if using fal deployment
+ * Initialize the global CloudAdapter instance
+ * Call this once at app startup if using cloud deployment
  */
-export function initFalAdapter(wsUrl: string, apiKey?: string): FalAdapter {
+export function initCloudAdapter(wsUrl: string, apiKey?: string): CloudAdapter {
   if (globalAdapter) {
     globalAdapter.disconnect();
   }
-  globalAdapter = new FalAdapter(wsUrl, apiKey);
+  globalAdapter = new CloudAdapter(wsUrl, apiKey);
   return globalAdapter;
 }
 
 /**
- * Get the global FalAdapter instance
+ * Get the global CloudAdapter instance
  */
-export function getFalAdapter(): FalAdapter | null {
+export function getCloudAdapter(): CloudAdapter | null {
   return globalAdapter;
 }
 
 /**
- * Check if we're running on fal (adapter is initialized)
+ * Check if we're running in cloud mode (adapter is initialized)
  */
-export function isFalMode(): boolean {
+export function isCloudMode(): boolean {
   return globalAdapter !== null && globalAdapter !== undefined;
 }

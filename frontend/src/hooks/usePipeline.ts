@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { loadPipeline as loadPipelineApi, getPipelineStatus as getPipelineStatusApi } from "../lib/api";
-import { useFalContext } from "../lib/falContext";
+import {
+  loadPipeline as loadPipelineApi,
+  getPipelineStatus as getPipelineStatusApi,
+} from "../lib/api";
+import { useCloudContext } from "../lib/cloudContext";
 import type { PipelineStatusResponse, PipelineLoadParams } from "../lib/api";
 import { toast } from "sonner";
 
@@ -11,22 +14,29 @@ interface UsePipelineOptions {
 
 export function usePipeline(options: UsePipelineOptions = {}) {
   const { pollInterval = 2000, maxTimeout = 600000 } = options;
-  const { adapter, isFalMode } = useFalContext();
+  const { adapter, isCloudMode } = useCloudContext();
 
-  // Helper functions that use fal adapter when available
-  const getPipelineStatus = useCallback(async (): Promise<PipelineStatusResponse> => {
-    if (isFalMode && adapter) {
-      return adapter.api.getPipelineStatus();
-    }
-    return getPipelineStatusApi();
-  }, [adapter, isFalMode]);
+  // Helper functions that use cloud adapter when available
+  const getPipelineStatus =
+    useCallback(async (): Promise<PipelineStatusResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getPipelineStatus();
+      }
+      return getPipelineStatusApi();
+    }, [adapter, isCloudMode]);
 
-  const loadPipelineRequest = useCallback(async (data: { pipeline_ids: string[]; load_params?: PipelineLoadParams | null }) => {
-    if (isFalMode && adapter) {
-      return adapter.api.loadPipeline(data);
-    }
-    return loadPipelineApi(data);
-  }, [adapter, isFalMode]);
+  const loadPipelineRequest = useCallback(
+    async (data: {
+      pipeline_ids: string[];
+      load_params?: PipelineLoadParams | null;
+    }) => {
+      if (isCloudMode && adapter) {
+        return adapter.api.loadPipeline(data);
+      }
+      return loadPipelineApi(data);
+    },
+    [adapter, isCloudMode]
+  );
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
@@ -193,7 +203,14 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         setIsLoading(false);
       }
     },
-    [isLoading, maxTimeout, pollInterval, stopPolling, getPipelineStatus, loadPipelineRequest]
+    [
+      isLoading,
+      maxTimeout,
+      pollInterval,
+      stopPolling,
+      getPipelineStatus,
+      loadPipelineRequest,
+    ]
   );
 
   // Load pipeline with proper state management

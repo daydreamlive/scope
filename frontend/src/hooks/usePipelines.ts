@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { getPipelineSchemas } from "../lib/api";
-import { useFalContext } from "../lib/falContext";
+import { useCloudContext } from "../lib/cloudContext";
 import type { InputMode, PipelineInfo } from "../types";
 
 export function usePipelines() {
-  const { adapter, isFalMode, isReady } = useFalContext();
+  const { adapter, isCloudMode, isReady } = useCloudContext();
 
   const [pipelines, setPipelines] = useState<Record<
     string,
@@ -79,9 +79,9 @@ export function usePipelines() {
     try {
       setIsLoading(true);
 
-      // Use adapter if in fal mode, otherwise direct API
+      // Use adapter if in cloud mode, otherwise direct API
       const schemas =
-        isFalMode && adapter
+        isCloudMode && adapter
           ? await adapter.api.getPipelineSchemas()
           : await getPipelineSchemas();
 
@@ -98,11 +98,11 @@ export function usePipelines() {
     } finally {
       setIsLoading(false);
     }
-  }, [adapter, isFalMode, transformSchemas]);
+  }, [adapter, isCloudMode, transformSchemas]);
 
   useEffect(() => {
-    // In fal mode, wait until adapter is ready
-    if (isFalMode && !isReady) {
+    // In cloud mode, wait until adapter is ready
+    if (isCloudMode && !isReady) {
       return;
     }
 
@@ -112,9 +112,9 @@ export function usePipelines() {
       try {
         setIsLoading(true);
 
-        // Use adapter if in fal mode, otherwise direct API
+        // Use adapter if in cloud mode, otherwise direct API
         const schemas =
-          isFalMode && adapter
+          isCloudMode && adapter
             ? await adapter.api.getPipelineSchemas()
             : await getPipelineSchemas();
 
@@ -141,7 +141,7 @@ export function usePipelines() {
     return () => {
       mounted = false;
     };
-  }, [adapter, isFalMode, isReady, transformSchemas]);
+  }, [adapter, isCloudMode, isReady, transformSchemas]);
 
   return { pipelines, isLoading, error, refreshPipelines };
 }

@@ -1,10 +1,10 @@
 /**
  * Unified WebRTC hook that automatically uses the right implementation
- * based on whether we're in fal mode or local mode.
+ * based on whether we're in cloud mode or local mode.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useFalContext } from "../lib/falContext";
+import { useCloudContext } from "../lib/cloudContext";
 import {
   sendWebRTCOffer,
   sendIceCandidates,
@@ -37,13 +37,13 @@ interface UseUnifiedWebRTCOptions {
 }
 
 /**
- * Unified WebRTC hook that works in both local and fal modes.
+ * Unified WebRTC hook that works in both local and cloud modes.
  *
  * In local mode, uses direct HTTP for signaling.
- * In fal mode, uses the FalAdapter WebSocket for signaling.
+ * In cloud mode, uses the CloudAdapter WebSocket for signaling.
  */
 export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
-  const { adapter, isFalMode } = useFalContext();
+  const { adapter, isCloudMode } = useCloudContext();
 
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] =
@@ -63,7 +63,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       console.log("[UnifiedWebRTC] Fetching ICE servers...");
       let iceServersResponse;
 
-      if (isFalMode && adapter) {
+      if (isCloudMode && adapter) {
         iceServersResponse = await adapter.getIceServers();
       } else {
         iceServersResponse = await getIceServers();
@@ -80,7 +80,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       );
       return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
     }
-  }, [adapter, isFalMode]);
+  }, [adapter, isCloudMode]);
 
   // Helper to send SDP offer
   const sendOffer = useCallback(
@@ -89,7 +89,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       type: string,
       initialParameters?: InitialParameters
     ) => {
-      if (isFalMode && adapter) {
+      if (isCloudMode && adapter) {
         return adapter.sendOffer(sdp, type, initialParameters);
       }
       return sendWebRTCOffer({
@@ -98,19 +98,19 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         initialParameters,
       });
     },
-    [adapter, isFalMode]
+    [adapter, isCloudMode]
   );
 
   // Helper to send ICE candidate
   const sendIceCandidate = useCallback(
     async (sessionId: string, candidate: RTCIceCandidate) => {
-      if (isFalMode && adapter) {
+      if (isCloudMode && adapter) {
         await adapter.sendIceCandidate(sessionId, candidate);
       } else {
         await sendIceCandidates(sessionId, candidate);
       }
     },
-    [adapter, isFalMode]
+    [adapter, isCloudMode]
   );
 
   const startStream = useCallback(
@@ -130,7 +130,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
         // Log peer connection configuration
         console.log("[UnifiedWebRTC] Created RTCPeerConnection with config:", {
-          mode: isFalMode ? "FAL (frontend direct)" : "LOCAL (backend)",
+          mode: isCloudMode ? "CLOUD (frontend direct)" : "LOCAL (backend)",
           iceServers: config.iceServers?.map((s: RTCIceServer) => ({
             urls: s.urls,
             hasCredentials: !!(s.username && s.credential),
@@ -147,7 +147,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           console.log("[UnifiedWebRTC] Data channel opened");
         };
 
-        dataChannel.onmessage = (event) => {
+        dataChannel.onmessage = event => {
           console.log("[UnifiedWebRTC] Data channel message:", event.data);
 
           try {
@@ -182,18 +182,18 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           }
         };
 
-        dataChannel.onerror = (error) => {
+        dataChannel.onerror = error => {
           console.error("[UnifiedWebRTC] Data channel error:", error);
         };
 
         // Add video track for sending to server
         let transceiver: RTCRtpTransceiver | undefined;
         if (stream) {
-          stream.getTracks().forEach((track) => {
+          stream.getTracks().forEach(track => {
             if (track.kind === "video") {
               console.log("[UnifiedWebRTC] Adding video track for sending");
               const sender = pc.addTrack(track, stream);
-              transceiver = pc.getTransceivers().find((t) => t.sender === sender);
+              transceiver = pc.getTransceivers().find(t => t.sender === sender);
             }
           });
         } else {
@@ -207,7 +207,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         if (transceiver) {
           const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
           const vp8Codecs = codecs.filter(
-            (c) => c.mimeType.toLowerCase() === "video/vp8"
+            c => c.mimeType.toLowerCase() === "video/vp8"
           );
           if (vp8Codecs.length > 0) {
             transceiver.setCodecPreferences(vp8Codecs);
@@ -232,36 +232,55 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             setIsStreaming(true);
 
             // Log detailed connection info
-            console.log("[UnifiedWebRTC] ========== CONNECTION ESTABLISHED ==========");
-            console.log("[UnifiedWebRTC] Mode:", isFalMode ? "FAL (frontend → fal.ai)" : "LOCAL (frontend → backend)");
+            console.log(
+              "[UnifiedWebRTC] ========== CONNECTION ESTABLISHED =========="
+            );
+            console.log(
+              "[UnifiedWebRTC] Mode:",
+              isCloudMode
+                ? "CLOUD (frontend → fal.ai)"
+                : "LOCAL (frontend → backend)"
+            );
             console.log("[UnifiedWebRTC] Session ID:", sessionIdRef.current);
 
             // Log negotiated codec
             const senders = pc.getSenders();
-            const videoSender = senders.find((s) => s.track?.kind === "video");
+            const videoSender = senders.find(s => s.track?.kind === "video");
             if (videoSender) {
               const params = videoSender.getParameters();
               const codec = params.codecs?.[0];
               if (codec) {
-                console.log(`[UnifiedWebRTC] Negotiated codec: ${codec.mimeType}`);
+                console.log(
+                  `[UnifiedWebRTC] Negotiated codec: ${codec.mimeType}`
+                );
               }
             }
 
             // Log remote description info
             if (pc.remoteDescription) {
               const sdpLines = pc.remoteDescription.sdp.split("\n");
-              const originLine = sdpLines.find((l: string) => l.startsWith("o="));
-              const connectionLine = sdpLines.find((l: string) => l.startsWith("c="));
+              const originLine = sdpLines.find((l: string) =>
+                l.startsWith("o=")
+              );
+              const connectionLine = sdpLines.find((l: string) =>
+                l.startsWith("c=")
+              );
               console.log("[UnifiedWebRTC] Remote SDP origin:", originLine);
-              console.log("[UnifiedWebRTC] Remote SDP connection:", connectionLine);
+              console.log(
+                "[UnifiedWebRTC] Remote SDP connection:",
+                connectionLine
+              );
             }
 
             // Get connection stats after a short delay
             setTimeout(async () => {
               try {
                 const stats = await pc.getStats();
-                stats.forEach((report) => {
-                  if (report.type === "candidate-pair" && report.state === "succeeded") {
+                stats.forEach(report => {
+                  if (
+                    report.type === "candidate-pair" &&
+                    report.state === "succeeded"
+                  ) {
                     console.log("[UnifiedWebRTC] Active candidate pair:", {
                       localCandidateId: report.localCandidateId,
                       remoteCandidateId: report.remoteCandidateId,
@@ -283,7 +302,9 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
               }
             }, 1000);
 
-            console.log("[UnifiedWebRTC] ==============================================");
+            console.log(
+              "[UnifiedWebRTC] =============================================="
+            );
           } else if (
             pc.connectionState === "disconnected" ||
             pc.connectionState === "failed"
@@ -297,7 +318,9 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           console.log("[UnifiedWebRTC] ICE state:", pc.iceConnectionState);
         };
 
-        pc.onicecandidate = async ({ candidate }: RTCPeerConnectionIceEvent) => {
+        pc.onicecandidate = async ({
+          candidate,
+        }: RTCPeerConnectionIceEvent) => {
           if (candidate) {
             console.log("[UnifiedWebRTC] ICE candidate generated");
 
@@ -306,10 +329,15 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
                 await sendIceCandidate(sessionIdRef.current, candidate);
                 console.log("[UnifiedWebRTC] Sent ICE candidate");
               } catch (error) {
-                console.error("[UnifiedWebRTC] Failed to send ICE candidate:", error);
+                console.error(
+                  "[UnifiedWebRTC] Failed to send ICE candidate:",
+                  error
+                );
               }
             } else {
-              console.log("[UnifiedWebRTC] Queuing ICE candidate (no session ID yet)");
+              console.log(
+                "[UnifiedWebRTC] Queuing ICE candidate (no session ID yet)"
+              );
               queuedCandidatesRef.current.push(candidate);
             }
           } else {
@@ -329,7 +357,10 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             initialParameters
           );
 
-          console.log("[UnifiedWebRTC] Received answer, sessionId:", answer.sessionId);
+          console.log(
+            "[UnifiedWebRTC] Received answer, sessionId:",
+            answer.sessionId
+          );
           sessionIdRef.current = answer.sessionId;
 
           // Parse the SDP to show where we're connecting
@@ -338,7 +369,10 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           const sessionName = sdpLines.find((l: string) => l.startsWith("s="));
           console.log("[UnifiedWebRTC] Server SDP origin:", originLine);
           console.log("[UnifiedWebRTC] Server SDP session:", sessionName);
-          console.log("[UnifiedWebRTC] Stream target:", isFalMode ? "fal.ai cloud" : "local backend");
+          console.log(
+            "[UnifiedWebRTC] Stream target:",
+            isCloudMode ? "cloud backend" : "local backend"
+          );
 
           // Flush queued ICE candidates
           if (queuedCandidatesRef.current.length > 0) {
@@ -371,13 +405,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         setIsConnecting(false);
       }
     },
-    [
-      isConnecting,
-      options,
-      fetchIceServers,
-      sendOffer,
-      sendIceCandidate,
-    ]
+    [isConnecting, options, fetchIceServers, sendOffer, sendIceCandidate]
   );
 
   const updateVideoTrack = useCallback(
@@ -392,7 +420,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
           const sender = peerConnectionRef.current
             .getSenders()
-            .find((s) => s.track?.kind === "video");
+            .find(s => s.track?.kind === "video");
 
           if (sender) {
             console.log("[UnifiedWebRTC] Replacing video track");
@@ -451,7 +479,10 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           dataChannelRef.current.send(message);
           console.log("[UnifiedWebRTC] Sent parameter update:", filteredParams);
         } catch (error) {
-          console.error("[UnifiedWebRTC] Failed to send parameter update:", error);
+          console.error(
+            "[UnifiedWebRTC] Failed to send parameter update:",
+            error
+          );
         }
       } else {
         console.warn("[UnifiedWebRTC] Data channel not available");

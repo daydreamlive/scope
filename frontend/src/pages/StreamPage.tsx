@@ -16,7 +16,7 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelines } from "../hooks/usePipelines";
 import { useApi } from "../hooks/useApi";
-import { useFalContext } from "../lib/falContext";
+import { useCloudContext } from "../lib/cloudContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -69,24 +69,25 @@ function getVaceParams(
 }
 
 export function StreamPage() {
-  // Get API functions that work in both local and fal modes
+  // Get API functions that work in both local and cloud modes
   const api = useApi();
-  const { isFalMode, isReady: isFalReady } = useFalContext();
+  const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
+    useCloudContext();
 
-  // Track backend cloud relay mode (local backend connected to fal.ai)
+  // Track backend cloud relay mode (local backend connected to cloud)
   const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
   // Track when cloud connection is in progress (to disable controls)
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
 
-  // Combined cloud mode: either frontend direct-to-fal or backend relay to fal
-  const isCloudMode = isFalMode || isBackendCloudConnected;
+  // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
+  const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
 
-  // Show loading state while connecting to fal
+  // Show loading state while connecting to cloud
   useEffect(() => {
-    if (isFalMode) {
-      console.log("[StreamPage] Fal mode enabled, ready:", isFalReady);
+    if (isDirectCloudMode) {
+      console.log("[StreamPage] Cloud mode enabled, ready:", isCloudReady);
     }
-  }, [isFalMode, isFalReady]);
+  }, [isDirectCloudMode, isCloudReady]);
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelines();
@@ -204,7 +205,8 @@ export function StreamPage() {
   } = useUnifiedWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or connecting to cloud
-  const isLoading = isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
+  const isLoading =
+    isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
 
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
@@ -1319,7 +1321,12 @@ export function StreamPage() {
                   });
                 }
               }}
-              disabled={isPipelineLoading || isConnecting || isCloudConnecting || showDownloadDialog}
+              disabled={
+                isPipelineLoading ||
+                isConnecting ||
+                isCloudConnecting ||
+                showDownloadDialog
+              }
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}
@@ -1427,7 +1434,7 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
-            isFalMode={isCloudMode}
+            isCloudMode={isCloudMode}
           />
         </div>
       </div>

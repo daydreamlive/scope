@@ -13,7 +13,7 @@ import {
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
-import { useFalContext } from "../lib/falContext";
+import { useCloudContext } from "../lib/cloudContext";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
@@ -45,22 +45,24 @@ function getFallbackDefaults(mode?: InputMode) {
 }
 
 export function useStreamState() {
-  const { adapter, isFalMode, isReady } = useFalContext();
+  const { adapter, isCloudMode, isReady } = useCloudContext();
 
-  // Helper functions that use fal adapter when available
-  const getPipelineSchemas = useCallback(async (): Promise<PipelineSchemasResponse> => {
-    if (isFalMode && adapter) {
-      return adapter.api.getPipelineSchemas();
-    }
-    return getPipelineSchemasApi();
-  }, [adapter, isFalMode]);
+  // Helper functions that use cloud adapter when available
+  const getPipelineSchemas =
+    useCallback(async (): Promise<PipelineSchemasResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getPipelineSchemas();
+      }
+      return getPipelineSchemasApi();
+    }, [adapter, isCloudMode]);
 
-  const getHardwareInfo = useCallback(async (): Promise<HardwareInfoResponse> => {
-    if (isFalMode && adapter) {
-      return adapter.api.getHardwareInfo();
-    }
-    return getHardwareInfoApi();
-  }, [adapter, isFalMode]);
+  const getHardwareInfo =
+    useCallback(async (): Promise<HardwareInfoResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getHardwareInfo();
+      }
+      return getHardwareInfoApi();
+    }, [adapter, isCloudMode]);
 
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
@@ -214,7 +216,10 @@ export function useStreamState() {
 
       return schemas;
     } catch (error) {
-      console.error("useStreamState: Failed to refresh pipeline schemas:", error);
+      console.error(
+        "useStreamState: Failed to refresh pipeline schemas:",
+        error
+      );
       throw error;
     }
   }, [getPipelineSchemas]);
@@ -234,7 +239,7 @@ export function useStreamState() {
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
     // In fal mode, wait until adapter is ready
-    if (isFalMode && !isReady) {
+    if (isCloudMode && !isReady) {
       return;
     }
 
@@ -287,7 +292,7 @@ export function useStreamState() {
     };
 
     fetchInitialData();
-  }, [isFalMode, isReady, getPipelineSchemas, getHardwareInfo]);
+  }, [isCloudMode, isReady, getPipelineSchemas, getHardwareInfo]);
 
   // Update inputMode when schemas load or pipeline changes
   // This sets the correct default mode for the pipeline

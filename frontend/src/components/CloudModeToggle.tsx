@@ -2,7 +2,7 @@
  * CloudModeToggle - Backend cloud mode integration
  *
  * This component manages cloud mode through the local scope backend,
- * which then connects to fal.ai. This is different from the FalProvider
+ * which then connects to fal.ai. This is different from the CloudProvider
  * which connects directly from the browser.
  *
  * When cloud mode is enabled:
@@ -73,7 +73,7 @@ export function CloudModeToggle({
   // Poll status on mount and periodically
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await fetch("/api/v1/fal/status");
+      const response = await fetch("/api/v1/cloud/status");
       if (response.ok) {
         const data = await response.json();
         setStatus(data);
@@ -105,7 +105,7 @@ export function CloudModeToggle({
     abortControllerRef.current = abortController;
 
     try {
-      const response = await fetch("/api/v1/fal/connect", {
+      const response = await fetch("/api/v1/cloud/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -126,7 +126,10 @@ export function CloudModeToggle({
         try {
           await onPipelinesRefresh();
         } catch (refreshError) {
-          console.error("[CloudModeToggle] Failed to refresh pipelines:", refreshError);
+          console.error(
+            "[CloudModeToggle] Failed to refresh pipelines:",
+            refreshError
+          );
         }
       }
     } catch (e) {
@@ -153,7 +156,7 @@ export function CloudModeToggle({
 
     // Also call disconnect to clean up any partial connection state on the backend
     try {
-      await fetch("/api/v1/fal/disconnect", { method: "POST" });
+      await fetch("/api/v1/cloud/disconnect", { method: "POST" });
       await fetchStatus();
     } catch (e) {
       console.error("[CloudModeToggle] Failed to cleanup after cancel:", e);
@@ -166,7 +169,7 @@ export function CloudModeToggle({
     setError(null);
 
     try {
-      const response = await fetch("/api/v1/fal/disconnect", {
+      const response = await fetch("/api/v1/cloud/disconnect", {
         method: "POST",
       });
 
@@ -184,7 +187,10 @@ export function CloudModeToggle({
         try {
           await onPipelinesRefresh();
         } catch (refreshError) {
-          console.error("[CloudModeToggle] Failed to refresh pipelines:", refreshError);
+          console.error(
+            "[CloudModeToggle] Failed to refresh pipelines:",
+            refreshError
+          );
         }
       }
     } catch (e) {
@@ -220,11 +226,7 @@ export function CloudModeToggle({
               <>
                 {isConnecting ? (
                   <div className="flex gap-2">
-                    <Button
-                      disabled
-                      className="flex-1"
-                      size="sm"
-                    >
+                    <Button disabled className="flex-1" size="sm">
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Connecting...
                     </Button>
@@ -249,14 +251,14 @@ export function CloudModeToggle({
                   </Button>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Connect to fal.ai for cloud GPU inference. Cold starts may take
-                  1-2 minutes.
+                  Connect to fal.ai for cloud GPU inference. Cold starts may
+                  take 1-2 minutes.
                 </p>
               </>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Cloud mode requires --fal-app-id and --fal-api-key command line
-                arguments to be set when starting the server.
+                Cloud mode requires --cloud-app-id and --cloud-api-key command
+                line arguments to be set when starting the server.
               </p>
             )}
           </>
@@ -268,7 +270,10 @@ export function CloudModeToggle({
             {status.connection_id && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">
-                  Connection ID: <code className="bg-muted px-1 rounded">{status.connection_id}</code>
+                  Connection ID:{" "}
+                  <code className="bg-muted px-1 rounded">
+                    {status.connection_id}
+                  </code>
                 </span>
                 <Button
                   variant="ghost"

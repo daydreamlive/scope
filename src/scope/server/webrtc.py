@@ -3,7 +3,9 @@ import json
 import logging
 import os
 import uuid
-from typing import Any
+
+# Type checking imports
+from typing import TYPE_CHECKING, Any
 
 from aiortc import (
     MediaStreamTrack,
@@ -18,16 +20,13 @@ from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
 from .credentials import get_turn_credentials
-from .fal_relay_track import FalRelayTrack
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
 from .tracks import VideoProcessingTrack
 
-# Type checking imports
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .fal_connection import FalConnectionManager
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -310,24 +309,27 @@ class WebRTCManager:
                 await self.remove_session(session.id)
             raise
 
-    async def handle_offer_with_relay(
-        self, request: WebRTCOfferRequest, fal_manager: "FalConnectionManager"
+    async def handle_offer_with_cloud(
+        self, request: WebRTCOfferRequest, cloud_manager: "CloudConnectionManager"
     ) -> dict[str, Any]:
         """
-        Handle WebRTC offer and relay video through fal.ai for processing.
+        Handle WebRTC offer and relay video through cloud for processing.
 
-        This creates a FalRelayTrack that:
+        This creates a CloudTrack that:
         1. Receives video from the browser
-        2. Sends it to fal.ai for processing
+        2. Sends it to cloud for processing
         3. Returns processed frames to the browser
 
         Args:
             request: WebRTC offer request
-            fal_manager: The FalConnectionManager for fal.ai connection
+            cloud_manager: The CloudConnectionManager for cloud connection
 
         Returns:
             Dictionary containing SDP answer
         """
+        # Import here to avoid circular imports at module level
+        from .cloud_track import CloudTrack
+
         try:
             # Extract initial parameters from offer
             initial_parameters = {}
@@ -335,23 +337,23 @@ class WebRTCManager:
                 initial_parameters = request.initialParameters.model_dump(
                     exclude_none=True
                 )
-            logger.info(f"[FAL-RELAY] Received offer with parameters: {initial_parameters}")
+            logger.info(f"[CLOUD] Received offer with parameters: {initial_parameters}")
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
             session = Session(pc)
             self.sessions[session.id] = session
 
-            # Create FalRelayTrack instead of VideoProcessingTrack
-            relay_track = FalRelayTrack(
-                fal_manager=fal_manager,
+            # Create CloudTrack instead of VideoProcessingTrack
+            cloud_track = CloudTrack(
+                cloud_manager=cloud_manager,
                 initial_parameters=initial_parameters,
             )
-            session.video_track = relay_track
+            session.video_track = cloud_track
 
             # Create a MediaRelay for the output
             relay = MediaRelay()
-            relayed_track = relay.subscribe(relay_track)
+            relayed_track = relay.subscribe(cloud_track)
 
             # Add the relayed track to WebRTC connection
             pc.addTrack(relayed_track)
@@ -359,51 +361,53 @@ class WebRTCManager:
             # Store relay for cleanup
             session.relay = relay
 
-            logger.info(f"[FAL-RELAY] Created session: {session.id}")
+            logger.info(f"[CLOUD] Created session: {session.id}")
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
-                logger.info(f"[FAL-RELAY] Track received: {track.kind} for session {session.id}")
+                logger.info(
+                    f"[CLOUD] Track received: {track.kind} for session {session.id}"
+                )
                 if track.kind == "video":
                     # Set the browser's video track as the source for the relay
-                    relay_track.set_source_track(track)
+                    cloud_track.set_source_track(track)
 
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
                 logger.info(
-                    f"[FAL-RELAY] Connection state: {pc.connectionState} for session {session.id}"
+                    f"[CLOUD] Connection state: {pc.connectionState} for session {session.id}"
                 )
                 if pc.connectionState in ["closed", "failed"]:
-                    # Stop the relay track
-                    if hasattr(relay_track, "stop"):
-                        await relay_track.stop()
+                    # Stop the cloud track
+                    if hasattr(cloud_track, "stop"):
+                        await cloud_track.stop()
                     await self.remove_session(session.id)
 
             @pc.on("iceconnectionstatechange")
             async def on_iceconnectionstatechange():
                 logger.info(
-                    f"[FAL-RELAY] ICE state: {pc.iceConnectionState} for session {session.id}"
+                    f"[CLOUD] ICE state: {pc.iceConnectionState} for session {session.id}"
                 )
 
             # Handle data channel for parameter updates
             @pc.on("datachannel")
             def on_data_channel(data_channel):
-                logger.info(f"[FAL-RELAY] Data channel: {data_channel.label}")
+                logger.info(f"[CLOUD] Data channel: {data_channel.label}")
                 session.data_channel = data_channel
 
                 @data_channel.on("message")
                 def on_data_channel_message(message):
                     try:
                         data = json.loads(message)
-                        logger.info(f"[FAL-RELAY] Parameter update: {data}")
+                        logger.info(f"[CLOUD] Parameter update: {data}")
 
-                        # Forward parameters to fal.ai
-                        relay_track.update_parameters(data)
+                        # Forward parameters to cloud
+                        cloud_track.update_parameters(data)
 
                     except json.JSONDecodeError as e:
-                        logger.error(f"[FAL-RELAY] Failed to parse message: {e}")
+                        logger.error(f"[CLOUD] Failed to parse message: {e}")
                     except Exception as e:
-                        logger.error(f"[FAL-RELAY] Error handling message: {e}")
+                        logger.error(f"[CLOUD] Error handling message: {e}")
 
             # Set remote description (the offer)
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
@@ -420,7 +424,7 @@ class WebRTCManager:
             }
 
         except Exception as e:
-            logger.error(f"[FAL-RELAY] Error handling offer: {e}")
+            logger.error(f"[CLOUD] Error handling offer: {e}")
             if "session" in locals():
                 await self.remove_session(session.id)
             raise

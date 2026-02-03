@@ -1,33 +1,31 @@
-"""FalWebRTCClient - WebRTC client that connects to fal.ai as a peer.
+"""CloudWebRTCClient - WebRTC client that connects to cloud as a peer.
 
-This module creates a WebRTC connection FROM the local backend TO fal.ai,
+This module creates a WebRTC connection FROM the local backend TO cloud,
 allowing video frames to flow through the backend:
 
-    Browser/Spout → Local Backend → fal.ai → Local Backend → Browser/Spout
+    Browser/Spout → Local Backend → Cloud → Local Backend → Browser/Spout
 
 This enables:
-1. Spout input to be forwarded to fal.ai for processing
+1. Spout input to be forwarded to cloud for processing
 2. Full control over the video pipeline on the backend
-3. Ability to record/manipulate frames before/after fal processing
+3. Ability to record/manipulate frames before/after cloud processing
 """
 
 from __future__ import annotations
 
 import asyncio
-import fractions
 import logging
 import time
-import uuid
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
-from aiortc.contrib.media import MediaRelay
-from aiortc.mediastreams import MediaStreamTrack, VIDEO_TIME_BASE
+from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc.mediastreams import VIDEO_TIME_BASE, MediaStreamTrack
 from av import VideoFrame
 
 if TYPE_CHECKING:
-    from .fal_connection import FalConnectionManager
+    from .cloud_connection import CloudConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,7 @@ logger = logging.getLogger(__name__)
 class FrameInputTrack(MediaStreamTrack):
     """A MediaStreamTrack that receives frames from a queue/callback.
 
-    This track is used to send frames TO fal.ai. Frames can come from:
+    This track is used to send frames TO cloud. Frames can come from:
     - Browser WebRTC connection (relayed through backend)
     - Spout receiver
     - Any other frame source
@@ -52,14 +50,14 @@ class FrameInputTrack(MediaStreamTrack):
         self._last_pts = 0
 
     async def recv(self) -> VideoFrame:
-        """Get the next frame to send to fal.ai."""
+        """Get the next frame to send to cloud."""
         if self._start_time is None:
             self._start_time = time.time()
 
         # Wait for a frame with timeout
         try:
             frame = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Return a black frame if no input
             frame = self._create_black_frame()
 
@@ -76,7 +74,7 @@ class FrameInputTrack(MediaStreamTrack):
         return frame
 
     def put_frame(self, frame: VideoFrame | np.ndarray) -> bool:
-        """Add a frame to be sent to fal.ai.
+        """Add a frame to be sent to cloud.
 
         Args:
             frame: VideoFrame or numpy array (RGB24 format)
@@ -100,9 +98,9 @@ class FrameInputTrack(MediaStreamTrack):
 
 
 class FrameOutputHandler:
-    """Handles frames received FROM fal.ai.
+    """Handles frames received FROM cloud.
 
-    Processed frames from fal.ai are passed to registered callbacks,
+    Processed frames from cloud are passed to registered callbacks,
     which can send them to:
     - Browser WebRTC connection
     - Spout sender
@@ -124,7 +122,7 @@ class FrameOutputHandler:
             self._callbacks.remove(callback)
 
     def handle_frame(self, frame: VideoFrame):
-        """Called when a frame is received from fal.ai."""
+        """Called when a frame is received from cloud."""
         self._frame_count += 1
         self._last_frame = frame
 
@@ -143,25 +141,25 @@ class FrameOutputHandler:
         return self._last_frame
 
 
-class FalWebRTCClient:
-    """WebRTC client that connects to fal.ai for remote processing.
+class CloudWebRTCClient:
+    """WebRTC client that connects to cloud for remote processing.
 
-    This establishes a WebRTC peer connection to the fal.ai runner,
+    This establishes a WebRTC peer connection to the cloud runner,
     allowing video frames to be sent for processing and received back.
 
     Usage:
-        client = FalWebRTCClient(fal_connection_manager)
+        client = CloudWebRTCClient(cloud_connection_manager)
         await client.connect()
 
-        # Send frames to fal.ai
+        # Send frames to cloud
         client.input_track.put_frame(frame)
 
         # Receive processed frames
         client.output_handler.add_callback(my_callback)
     """
 
-    def __init__(self, fal_manager: "FalConnectionManager"):
-        self.fal_manager = fal_manager
+    def __init__(self, cloud_manager: CloudConnectionManager):
+        self.cloud_manager = cloud_manager
         self.pc: RTCPeerConnection | None = None
         self.input_track: FrameInputTrack | None = None
         self.output_handler = FrameOutputHandler()
@@ -187,29 +185,29 @@ class FalWebRTCClient:
         return self._session_id
 
     async def connect(self, initial_parameters: dict | None = None) -> None:
-        """Establish WebRTC connection to fal.ai.
+        """Establish WebRTC connection to cloud.
 
         Args:
             initial_parameters: Initial pipeline parameters to send with the offer
         """
-        if not self.fal_manager.is_connected:
-            raise RuntimeError("FalConnectionManager not connected to fal.ai")
+        if not self.cloud_manager.is_connected:
+            raise RuntimeError("CloudConnectionManager not connected to cloud")
 
         if self.is_connected:
             logger.info("Already connected, disconnecting first")
             await self.disconnect()
 
-        logger.info("[FAL-RTC] Creating WebRTC connection to fal.ai...")
+        logger.info("[CLOUD-RTC] Creating WebRTC connection to cloud...")
 
-        # Get ICE servers from fal
-        ice_response = await self.fal_manager.webrtc_get_ice_servers()
+        # Get ICE servers from cloud
+        ice_response = await self.cloud_manager.webrtc_get_ice_servers()
         ice_servers = ice_response.get("data", {}).get("iceServers", [])
 
         # Create peer connection
         config = {"iceServers": ice_servers} if ice_servers else {}
         self.pc = RTCPeerConnection(config)
 
-        # Create input track for sending frames to fal
+        # Create input track for sending frames to cloud
         self.input_track = FrameInputTrack(fps=30)
         self.pc.addTrack(self.input_track)
 
@@ -218,20 +216,18 @@ class FalWebRTCClient:
 
         @self._data_channel.on("open")
         def on_dc_open():
-            logger.info("[FAL-RTC] Data channel opened")
+            logger.info("[CLOUD-RTC] Data channel opened")
 
         @self._data_channel.on("message")
         def on_dc_message(message):
-            logger.debug(f"[FAL-RTC] Data channel message: {message}")
+            logger.debug(f"[CLOUD-RTC] Data channel message: {message}")
 
-        # Handle incoming track (processed frames from fal)
+        # Handle incoming track (processed frames from cloud)
         @self.pc.on("track")
         async def on_track(track: MediaStreamTrack):
-            logger.info(f"[FAL-RTC] Received track: {track.kind}")
+            logger.info(f"[CLOUD-RTC] Received track: {track.kind}")
             if track.kind == "video":
-                self._receive_task = asyncio.create_task(
-                    self._receive_frames(track)
-                )
+                self._receive_task = asyncio.create_task(self._receive_frames(track))
                 # Request keyframe immediately to avoid VP8 decode errors
                 # PLI (Picture Loss Indication) tells remote to send an I-frame
                 asyncio.create_task(self._request_keyframe())
@@ -240,42 +236,42 @@ class FalWebRTCClient:
         @self.pc.on("connectionstatechange")
         async def on_connection_state_change():
             state = self.pc.connectionState
-            logger.info(f"[FAL-RTC] Connection state: {state}")
+            logger.info(f"[CLOUD-RTC] Connection state: {state}")
             self._stats["connection_state"] = state
 
             if state == "connected":
                 self._connected = True
                 self._stats["connected_at"] = time.time()
-                logger.info("[FAL-RTC] WebRTC connected to fal.ai")
+                logger.info("[CLOUD-RTC] WebRTC connected to cloud")
             elif state in ("disconnected", "failed", "closed"):
                 self._connected = False
 
         @self.pc.on("icecandidate")
         async def on_ice_candidate(candidate):
             if candidate:
-                logger.debug(f"[FAL-RTC] Local ICE candidate: {candidate.candidate}")
-                # Send to fal via WebSocket
+                logger.debug(f"[CLOUD-RTC] Local ICE candidate: {candidate.candidate}")
+                # Send to cloud via WebSocket
                 if self._session_id:
                     try:
-                        await self.fal_manager.webrtc_ice_candidate(
+                        await self.cloud_manager.webrtc_ice_candidate(
                             self._session_id,
                             {
                                 "candidate": candidate.candidate,
                                 "sdpMid": candidate.sdpMid,
                                 "sdpMLineIndex": candidate.sdpMLineIndex,
-                            }
+                            },
                         )
                     except Exception as e:
-                        logger.error(f"[FAL-RTC] Failed to send ICE candidate: {e}")
+                        logger.error(f"[CLOUD-RTC] Failed to send ICE candidate: {e}")
 
         # Create offer
         offer = await self.pc.createOffer()
         await self.pc.setLocalDescription(offer)
 
-        logger.info("[FAL-RTC] Sending offer to fal.ai...")
+        logger.info("[CLOUD-RTC] Sending offer to cloud...")
 
         # Send offer through WebSocket
-        response = await self.fal_manager.webrtc_offer(
+        response = await self.cloud_manager.webrtc_offer(
             sdp=self.pc.localDescription.sdp,
             sdp_type=self.pc.localDescription.type,
             initial_parameters=initial_parameters,
@@ -288,7 +284,7 @@ class FalWebRTCClient:
         answer_sdp = response.get("sdp")
         answer_type = response.get("sdp_type", "answer")
 
-        logger.info(f"[FAL-RTC] Received answer, session: {self._session_id}")
+        logger.info(f"[CLOUD-RTC] Received answer, session: {self._session_id}")
 
         # Set remote description
         answer = RTCSessionDescription(sdp=answer_sdp, type=answer_type)
@@ -301,13 +297,13 @@ class FalWebRTCClient:
             await asyncio.sleep(0.1)
 
         if not self._connected:
-            raise RuntimeError(f"WebRTC connection to fal.ai timed out after {timeout}s")
+            raise RuntimeError(f"WebRTC connection to cloud timed out after {timeout}s")
 
-        logger.info("[FAL-RTC] Connection established successfully")
+        logger.info("[CLOUD-RTC] Connection established successfully")
 
     async def _receive_frames(self, track: MediaStreamTrack):
-        """Background task to receive frames from fal.ai."""
-        logger.info("[FAL-RTC] Starting frame receive loop")
+        """Background task to receive frames from cloud."""
+        logger.info("[CLOUD-RTC] Starting frame receive loop")
 
         try:
             while True:
@@ -317,7 +313,7 @@ class FalWebRTCClient:
 
                     if self._stats["frames_received"] % 100 == 0:
                         logger.debug(
-                            f"[FAL-RTC] Received {self._stats['frames_received']} frames"
+                            f"[CLOUD-RTC] Received {self._stats['frames_received']} frames"
                         )
 
                     # Pass to output handler
@@ -325,16 +321,16 @@ class FalWebRTCClient:
 
                 except Exception as e:
                     if "MediaStreamError" in str(type(e)):
-                        logger.info("[FAL-RTC] Track ended")
+                        logger.info("[CLOUD-RTC] Track ended")
                         break
-                    logger.error(f"[FAL-RTC] Error receiving frame: {e}")
+                    logger.error(f"[CLOUD-RTC] Error receiving frame: {e}")
                     break
 
         except asyncio.CancelledError:
-            logger.info("[FAL-RTC] Frame receive loop cancelled")
+            logger.info("[CLOUD-RTC] Frame receive loop cancelled")
         finally:
             logger.info(
-                f"[FAL-RTC] Frame receive loop ended, "
+                f"[CLOUD-RTC] Frame receive loop ended, "
                 f"total frames: {self._stats['frames_received']}"
             )
 
@@ -352,12 +348,12 @@ class FalWebRTCClient:
                 try:
                     # Access internal PLI method from aiortc
                     await receiver._send_rtcp_pli()
-                    logger.info("[FAL-RTC] Sent PLI (keyframe request)")
+                    logger.info("[CLOUD-RTC] Sent PLI (keyframe request)")
                 except Exception as e:
-                    logger.debug(f"[FAL-RTC] Could not send PLI: {e}")
+                    logger.debug(f"[CLOUD-RTC] Could not send PLI: {e}")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
-        """Send a frame to fal.ai for processing.
+        """Send a frame to cloud for processing.
 
         Args:
             frame: VideoFrame or numpy array (RGB24)
@@ -374,17 +370,18 @@ class FalWebRTCClient:
         return success
 
     def send_parameters(self, params: dict):
-        """Send parameter update to fal.ai via data channel."""
+        """Send parameter update to cloud via data channel."""
         if self._data_channel and self._data_channel.readyState == "open":
             import json
+
             self._data_channel.send(json.dumps(params))
-            logger.debug(f"[FAL-RTC] Sent parameters: {params}")
+            logger.debug(f"[CLOUD-RTC] Sent parameters: {params}")
         else:
-            logger.warning("[FAL-RTC] Data channel not ready for parameters")
+            logger.warning("[CLOUD-RTC] Data channel not ready for parameters")
 
     async def disconnect(self):
-        """Close the WebRTC connection to fal.ai."""
-        logger.info("[FAL-RTC] Disconnecting from fal.ai...")
+        """Close the WebRTC connection to cloud."""
+        logger.info("[CLOUD-RTC] Disconnecting from cloud...")
 
         self._connected = False
 
@@ -404,7 +401,7 @@ class FalWebRTCClient:
         self._data_channel = None
         self._session_id = None
 
-        logger.info("[FAL-RTC] Disconnected")
+        logger.info("[CLOUD-RTC] Disconnected")
 
     def get_stats(self) -> dict:
         """Get connection statistics."""
