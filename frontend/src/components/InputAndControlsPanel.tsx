@@ -258,7 +258,7 @@ export function InputAndControlsPanel({
               /* Spout Receiver Configuration */
               <div className="flex items-center gap-3">
                 <LabelWithTooltip
-                  label="Sender Name:"
+                  label="Sender Name"
                   tooltip="The name of the sender to receive video from Spout-compatible apps like TouchDesigner, Resolume, OBS. Leave empty to receive from any sender."
                   className="text-xs text-muted-foreground whitespace-nowrap"
                 />

@@ -345,7 +345,7 @@ export function SettingsPanel({
             <LabelWithTooltip
               label={PARAMETER_METADATA.preprocessor.label}
               tooltip={PARAMETER_METADATA.preprocessor.tooltip}
-              className="text-sm text-foreground"
+              className="text-sm font-medium"
             />
             <Select
               value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
@@ -389,7 +389,7 @@ export function SettingsPanel({
             <LabelWithTooltip
               label={PARAMETER_METADATA.postprocessor.label}
               tooltip={PARAMETER_METADATA.postprocessor.tooltip}
-              className="text-sm text-foreground"
+              className="text-sm font-medium"
             />
             <Select
               value={postprocessorIds.length > 0 ? postprocessorIds[0] : "none"}
@@ -602,7 +602,7 @@ export function SettingsPanel({
                       </div>
                       <div className="flex items-center gap-2">
                         <LabelWithTooltip
-                          label="Scale:"
+                          label="Scale"
                           tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
                           className="text-xs text-muted-foreground w-16"
                         />
@@ -651,7 +651,7 @@ export function SettingsPanel({
                           <LabelWithTooltip
                             label={PARAMETER_METADATA.height.label}
                             tooltip={PARAMETER_METADATA.height.tooltip}
-                            className="text-sm text-foreground w-14"
+                            className="text-sm font-medium w-14"
                           />
                           <div
                             className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${heightError ? "border-red-500" : ""}`}
@@ -705,7 +705,7 @@ export function SettingsPanel({
                           <LabelWithTooltip
                             label={PARAMETER_METADATA.width.label}
                             tooltip={PARAMETER_METADATA.width.tooltip}
-                            className="text-sm text-foreground w-14"
+                            className="text-sm font-medium w-14"
                           />
                           <div
                             className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${widthError ? "border-red-500" : ""}`}
@@ -789,7 +789,7 @@ export function SettingsPanel({
                           max={1.0}
                           step={0.01}
                           incrementAmount={0.01}
-                          labelClassName="text-sm text-foreground w-20"
+                          labelClassName="text-sm font-medium w-20"
                           valueFormatter={
                             kvCacheAttentionBiasSlider.formatValue
                           }
@@ -801,7 +801,7 @@ export function SettingsPanel({
                         <LabelWithTooltip
                           label={PARAMETER_METADATA.manageCache.label}
                           tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                          className="text-sm text-foreground"
+                          className="text-sm font-medium"
                         />
                         <Toggle
                           pressed={manageCache}
@@ -818,7 +818,7 @@ export function SettingsPanel({
                         <LabelWithTooltip
                           label={PARAMETER_METADATA.resetCache.label}
                           tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                          className="text-sm text-foreground"
+                          className="text-sm font-medium"
                         />
                         <Button
                           type="button"
@@ -855,7 +855,7 @@ export function SettingsPanel({
                         <LabelWithTooltip
                           label={PARAMETER_METADATA.noiseController.label}
                           tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                          className="text-sm text-foreground"
+                          className="text-sm font-medium"
                         />
                         <Toggle
                           pressed={noiseController}
@@ -883,7 +883,7 @@ export function SettingsPanel({
                       step={0.01}
                       incrementAmount={0.01}
                       disabled={noiseController}
-                      labelClassName="text-sm text-foreground w-20"
+                      labelClassName="text-sm font-medium w-20"
                       valueFormatter={noiseScaleSlider.formatValue}
                       inputParser={v => parseFloat(v) || 0.0}
                     />
@@ -900,7 +900,7 @@ export function SettingsPanel({
                         <LabelWithTooltip
                           label={PARAMETER_METADATA.quantization.label}
                           tooltip={PARAMETER_METADATA.quantization.tooltip}
-                          className="text-sm text-foreground"
+                          className="text-sm font-medium"
                         />
                         <Select
                           value={quantization || "none"}
@@ -944,7 +944,7 @@ export function SettingsPanel({
               <LabelWithTooltip
                 label={PARAMETER_METADATA.spoutSender.label}
                 tooltip={PARAMETER_METADATA.spoutSender.tooltip}
-                className="text-sm text-foreground"
+                className="text-sm font-medium"
               />
               <Toggle
                 pressed={spoutSender?.enabled ?? false}
@@ -965,7 +965,7 @@ export function SettingsPanel({
             {spoutSender?.enabled && (
               <div className="flex items-center gap-3">
                 <LabelWithTooltip
-                  label="Sender Name:"
+                  label="Sender Name"
                   tooltip="The name of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS."
                   className="text-xs text-muted-foreground whitespace-nowrap"
                 />

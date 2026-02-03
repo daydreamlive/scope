@@ -136,7 +136,7 @@ export function DenoisingStepsSlider({
         <LabelWithTooltip
           label="Denoising Step List"
           tooltip={tooltip}
-          className="text-sm text-foreground"
+          className="text-sm font-medium"
         />
         <div className="flex items-center gap-2">
           <Button
@@ -170,7 +170,8 @@ export function DenoisingStepsSlider({
         {localValue.map((stepValue, index) => (
           <SliderWithInput
             key={index}
-            label={`Step ${index + 1}:`}
+            label={`Step ${index + 1}`}
+            labelClassName="text-xs text-muted-foreground w-12"
             value={stepValue}
             onValueChange={value => handleStepValueChange(index, value)}
             onValueCommit={value => handleStepCommit(index, value)}

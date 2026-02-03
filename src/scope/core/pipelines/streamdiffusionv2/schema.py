@@ -68,7 +68,7 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     vae_type: VaeType = Field(
         default=VaeType.WAN,
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
-        json_schema_extra=ui_field_config(order=3, is_load_param=True, label="VAE:"),
+        json_schema_extra=ui_field_config(order=3, is_load_param=True, label="VAE"),
     )
     height: int = Field(
         default=512,

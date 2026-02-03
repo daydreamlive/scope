@@ -185,7 +185,7 @@ export function SchemaComplexField({
             </div>
             <div className="flex items-center gap-2">
               <LabelWithTooltip
-                label="Scale:"
+                label="Scale"
                 tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
                 className="text-xs text-muted-foreground w-16"
               />
@@ -240,7 +240,7 @@ export function SchemaComplexField({
                 <LabelWithTooltip
                   label={PARAMETER_METADATA.height.label}
                   tooltip={PARAMETER_METADATA.height.tooltip}
-                  className="text-sm text-foreground w-14"
+                  className="text-sm font-medium w-14"
                 />
                 <div
                   className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${ctx.heightError ? "border-red-500" : ""}`}
@@ -286,7 +286,7 @@ export function SchemaComplexField({
                 <LabelWithTooltip
                   label={PARAMETER_METADATA.width.label}
                   tooltip={PARAMETER_METADATA.width.tooltip}
-                  className="text-sm text-foreground w-14"
+                  className="text-sm font-medium w-14"
                 />
                 <div
                   className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${ctx.widthError ? "border-red-500" : ""}`}
@@ -359,7 +359,7 @@ export function SchemaComplexField({
                 max={1.0}
                 step={0.01}
                 incrementAmount={0.01}
-                labelClassName="text-sm text-foreground w-20"
+                labelClassName="text-sm font-medium w-20"
                 valueFormatter={ctx.kvCacheAttentionBiasSlider.formatValue}
                 inputParser={v => parseFloat(v) || 1.0}
               />
@@ -368,7 +368,7 @@ export function SchemaComplexField({
               <LabelWithTooltip
                 label={PARAMETER_METADATA.manageCache.label}
                 tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                className="text-sm text-foreground"
+                className="text-sm font-medium"
               />
               <Toggle
                 pressed={ctx.manageCache ?? true}
@@ -384,7 +384,7 @@ export function SchemaComplexField({
               <LabelWithTooltip
                 label={PARAMETER_METADATA.resetCache.label}
                 tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                className="text-sm text-foreground"
+                className="text-sm font-medium"
               />
               <Button
                 type="button"
@@ -428,7 +428,7 @@ export function SchemaComplexField({
               <LabelWithTooltip
                 label={PARAMETER_METADATA.noiseController.label}
                 tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                className="text-sm text-foreground"
+                className="text-sm font-medium"
               />
               <Toggle
                 pressed={ctx.noiseController ?? true}
@@ -454,7 +454,7 @@ export function SchemaComplexField({
               step={0.01}
               incrementAmount={0.01}
               disabled={ctx.noiseController}
-              labelClassName="text-sm text-foreground w-20"
+              labelClassName="text-sm font-medium w-20"
               valueFormatter={ctx.noiseScaleSlider.formatValue}
               inputParser={v => parseFloat(v) || 0.0}
             />
@@ -475,7 +475,7 @@ export function SchemaComplexField({
               <LabelWithTooltip
                 label={PARAMETER_METADATA.quantization.label}
                 tooltip={PARAMETER_METADATA.quantization.tooltip}
-                className="text-sm text-foreground"
+                className="text-sm font-medium"
               />
               <Select
                 value={ctx.quantization ?? "none"}

@@ -66,7 +66,7 @@ export function TextField({
         <LabelWithTooltip
           label={displayLabel}
           tooltip={displayTooltip}
-          className="text-sm text-foreground"
+          className="text-sm font-medium"
         />
         <Input
           type="text"
@@ -109,7 +109,7 @@ export function NumberField({
     const v = parseInt(e.target.value, 10);
     if (!Number.isNaN(v)) onChange(v);
   };
-  const labelText = `${displayLabel}:`;
+  const labelText = displayLabel;
   const isLongLabel = labelText.length > 20;
   const stepper = (
     <div
@@ -162,8 +162,8 @@ export function NumberField({
           tooltip={displayTooltip}
           className={
             isLongLabel
-              ? "text-sm text-foreground"
-              : "text-sm text-foreground w-14 shrink-0"
+              ? "text-sm font-medium"
+              : "text-sm font-medium w-14 shrink-0"
           }
         />
         {stepper}
@@ -202,7 +202,7 @@ export function SliderField({
       max={max}
       step={step}
       incrementAmount={incrementAmount}
-      labelClassName="text-sm text-foreground w-14 shrink-0"
+      labelClassName="text-sm font-medium w-14 shrink-0"
       valueFormatter={isFloat ? (v: number) => v : (v: number) => Math.round(v)}
       inputParser={
         isFloat
@@ -275,7 +275,7 @@ export function EnumField({
         <LabelWithTooltip
           label={displayLabel}
           tooltip={displayTooltip}
-          className="text-sm text-foreground"
+          className="text-sm font-medium"
         />
         <Select
           value={String(value ?? prop.default ?? "")}
