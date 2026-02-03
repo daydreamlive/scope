@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import torch
 
 from ..interface import Pipeline, PipelineOutput
-from ..process import postprocess_chunk
 from .schema import LTX2Config
 
 if TYPE_CHECKING:
@@ -112,13 +111,17 @@ class LTX2Pipeline(Pipeline):
         checkpoint_path = getattr(config, "checkpoint_path", None)
         if checkpoint_path is None:
             from ....server.models_config import get_models_dir
+
             models_dir = get_models_dir()
             # checkpoint_path should point to the .safetensors file, not the directory
-            checkpoint_path = str(models_dir / "LTX-2" / "ltx-2-19b-distilled.safetensors")
+            checkpoint_path = str(
+                models_dir / "LTX-2" / "ltx-2-19b-distilled.safetensors"
+            )
 
         gemma_root = getattr(config, "gemma_root", None)
         if gemma_root is None:
             from ....server.models_config import get_models_dir
+
             models_dir = get_models_dir()
             gemma_root = str(models_dir / "gemma-3-12b-it")
 
@@ -203,7 +206,9 @@ class LTX2Pipeline(Pipeline):
 
         # Log quantization status
         if self._quantization == "nvfp4":
-            logger.info("NVFP4 quantization: enabled (Blackwell GPU SM >= 10.0, comfy-kitchen)")
+            logger.info(
+                "NVFP4 quantization: enabled (Blackwell GPU SM >= 10.0, comfy-kitchen)"
+            )
             logger.info(
                 "NVFP4 provides ~4x memory reduction for transformer weights (~12GB). "
                 "Using comfy-kitchen for hardware-accelerated matmul. "
@@ -228,7 +233,7 @@ class LTX2Pipeline(Pipeline):
         # - Stage 2: Upsample to full resolution (1024x1536) with distilled LoRA
         # See: https://github.com/Lightricks/LTX-2/blob/main/packages/ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages.py
 
-    def __call__(self, **kwargs) -> PipelineOutput:
+    def __call__(self, **kwargs) -> dict:
         """Generate video and audio from text prompt.
 
         Args:
@@ -239,16 +244,18 @@ class LTX2Pipeline(Pipeline):
                 - frame_rate: Frame rate for video (overrides config)
 
         Returns:
-            PipelineOutput containing:
+            Dictionary with "video" key containing PipelineOutput:
                 - video: Generated video tensor in THWC format [0, 1] range
                 - audio: Generated audio tensor in (channels, samples) format
                 - audio_sample_rate: Audio sample rate (24000 Hz)
         """
-        return self._generate(**kwargs)
+        return {"video": self._generate(**kwargs)}
 
     @torch.inference_mode()
     def _generate(self, **kwargs) -> PipelineOutput:
         """Internal generation method."""
+        import random
+
         from ltx_core.components.diffusion_steps import EulerDiffusionStep
         from ltx_core.components.noisers import GaussianNoiser
         from ltx_core.model.audio_vae import decode_audio as vae_decode_audio
@@ -260,13 +267,10 @@ class LTX2Pipeline(Pipeline):
             DISTILLED_SIGMA_VALUES,
         )
         from ltx_pipelines.utils.helpers import (
-            cleanup_memory,
             denoise_audio_video,
             euler_denoising_loop,
             simple_denoising_func,
         )
-
-        import random
 
         # Extract parameters
         prompts = kwargs.get("prompts", [{"text": "a beautiful sunset", "weight": 1.0}])
@@ -344,9 +348,7 @@ class LTX2Pipeline(Pipeline):
 
         # Use tiling for VAE decoding to reduce memory usage
         decoded_video = vae_decode_video(
-            video_state.latent,
-            self._cached_video_decoder,
-            self.tiling_config
+            video_state.latent, self._cached_video_decoder, self.tiling_config
         )
 
         # Convert decoded video iterator to tensor and postprocess
@@ -366,9 +368,7 @@ class LTX2Pipeline(Pipeline):
         # https://github.com/Lightricks/LTX-2/blob/main/packages/ltx-pipelines/src/ltx_pipelines/distilled.py
         logger.info("Decoding audio from latents")
         audio_tensor = vae_decode_audio(
-            audio_state.latent,
-            self._cached_audio_decoder,
-            self._cached_vocoder
+            audio_state.latent, self._cached_audio_decoder, self._cached_vocoder
         )
         # audio_tensor shape: (channels, samples) - typically (2, N) for stereo at 24kHz
 
