@@ -1,5 +1,6 @@
 """Base interface for all pipelines."""
 
+import torch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
