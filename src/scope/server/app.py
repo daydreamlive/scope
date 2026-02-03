@@ -1508,7 +1508,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 )
 @click.option(
     "--fal-app-id",
-    default="Daydream/scope-app/ws",
+    default="Daydream/scope-app--prod/ws",
     envvar="FAL_APP_ID",
     help="fal.ai app ID for cloud mode (e.g., 'username/scope-fal')",
 )

@@ -57,7 +57,7 @@ def cleanup_session_data():
 # fal deploy fal_app.py --auth public
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:87db283"
+DOCKER_IMAGE = "daydreamlive/scope:750502f"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
