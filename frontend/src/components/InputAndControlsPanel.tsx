@@ -76,6 +76,8 @@ interface InputAndControlsPanelProps {
   onRefImagesChange?: (images: string[]) => void;
   onSendHints?: (imagePaths: string[]) => void;
   isDownloading?: boolean;
+  // Whether cloud connection is in progress (disables controls that interact with server)
+  isCloudConnecting?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
   // FFLF (First-Frame-Last-Frame) extension mode
@@ -140,6 +142,7 @@ export function InputAndControlsPanel({
   onRefImagesChange,
   onSendHints,
   isDownloading = false,
+  isCloudConnecting = false,
   supportsImages = false,
   firstFrameImage,
   onFirstFrameImageChange,
@@ -337,7 +340,7 @@ export function InputAndControlsPanel({
             <ImageManager
               images={refImages}
               onImagesChange={onRefImagesChange || (() => {})}
-              disabled={isDownloading}
+              disabled={isDownloading || isCloudConnecting}
               maxImages={1}
               singleColumn={false}
               label={
@@ -358,7 +361,7 @@ export function InputAndControlsPanel({
                     e.preventDefault();
                     onSendHints(refImages.filter(img => img));
                   }}
-                  disabled={isDownloading || !isStreaming}
+                  disabled={isDownloading || isCloudConnecting || !isStreaming}
                   size="sm"
                   className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   title={
@@ -392,7 +395,7 @@ export function InputAndControlsPanel({
                   onImagesChange={images => {
                     onFirstFrameImageChange?.(images[0] || undefined);
                   }}
-                  disabled={isDownloading}
+                  disabled={isDownloading || isCloudConnecting}
                   maxImages={1}
                   label="First Frame"
                   hideLabel
@@ -407,7 +410,7 @@ export function InputAndControlsPanel({
                   onImagesChange={images => {
                     onLastFrameImageChange?.(images[0] || undefined);
                   }}
-                  disabled={isDownloading}
+                  disabled={isDownloading || isCloudConnecting}
                   maxImages={1}
                   label="Last Frame"
                   hideLabel
@@ -451,6 +454,7 @@ export function InputAndControlsPanel({
                     }}
                     disabled={
                       isDownloading ||
+                      isCloudConnecting ||
                       !isStreaming ||
                       (!firstFrameImage && !lastFrameImage)
                     }
