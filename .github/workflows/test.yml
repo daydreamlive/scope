@@ -26,6 +26,7 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          version: "0.9.11"
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -58,6 +59,7 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          version: "0.9.11"
 
       - name: Install dependencies
         run: uv sync --group dev
