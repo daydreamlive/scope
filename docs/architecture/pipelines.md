@@ -231,6 +231,44 @@ class LongLiveConfig(BasePipelineConfig):
 
 The `default=True` flag marks which mode is selected initially. Mode-specific defaults override base defaults when the user switches modes.
 
+### Preprocessors and Postprocessors
+
+Pipelines can be declared as preprocessors or postprocessors using the `usage` class variable. These specialized pipelines process video before or after the main generation pipeline.
+
+**Declaring usage type:**
+
+```python
+from scope.core.pipelines.base_schema import BasePipelineConfig, ModeDefaults, UsageType
+
+class MyPreprocessorConfig(BasePipelineConfig):
+    pipeline_id = "my-preprocessor"
+    pipeline_name = "My Preprocessor"
+    usage = [UsageType.PREPROCESSOR]  # Makes it available as a preprocessor
+
+    modes = {"video": ModeDefaults(default=True)}
+```
+
+**Available usage types:**
+
+| Type | Purpose | UI Location |
+|------|---------|-------------|
+| `UsageType.PREPROCESSOR` | Process input video before main pipeline | Preprocessor dropdown |
+| `UsageType.POSTPROCESSOR` | Process output video after main pipeline | Postprocessor dropdown |
+| (empty list) | Standard pipeline | Main pipeline selector |
+
+**Common characteristics of pre/postprocessors:**
+
+- Use `modes = {"video": ModeDefaults(default=True)}` since video input is required
+- Implement `prepare()` returning `Requirements(input_size=N)` to declare frame requirements
+- Typically lightweight with minimal or no model dependencies
+
+**Examples:**
+
+| Pipeline | Type | Location | Description |
+|----------|------|----------|-------------|
+| Gray | Preprocessor | `src/scope/core/pipelines/gray/` | Converts frames to grayscale, no model required |
+| RIFE | Postprocessor | `src/scope/core/pipelines/rife/` | Frame interpolation for smoother output |
+
 ---
 
 ## Configuration Schemas
