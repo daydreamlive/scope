@@ -138,6 +138,7 @@ export function StreamPage() {
   const [currentDownloadPipeline, setCurrentDownloadPipeline] = useState<
     string | null
   >(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -361,6 +362,18 @@ export function StreamPage() {
             setDownloadProgress(status.progress);
           }
 
+          // Check for download error
+          if (status.progress?.error) {
+            const errorMessage = status.progress.error;
+            console.error("Download failed:", errorMessage);
+            toast.error(errorMessage);
+            setIsDownloading(false);
+            setDownloadProgress(null);
+            setDownloadError(errorMessage);
+            setCurrentDownloadPipeline(null);
+            return;
+          }
+
           if (status.downloaded) {
             // Download complete for this pipeline
             // Remove it from the list
@@ -463,6 +476,7 @@ export function StreamPage() {
     if (pipelinesNeedingModels.length === 0) return;
 
     setIsDownloading(true);
+    setDownloadError(null);
     setShowDownloadDialog(true); // Keep dialog open to show progress
 
     // Start downloading the first pipeline in the list
@@ -475,6 +489,7 @@ export function StreamPage() {
     setShowDownloadDialog(false);
     setPipelinesNeedingModels([]);
     setCurrentDownloadPipeline(null);
+    setDownloadError(null);
 
     // When user cancels, no stream or timeline has started yet, so nothing to clean up
     // Just close the dialog and return early without any state changes
@@ -1428,6 +1443,7 @@ export function StreamPage() {
           onDownload={handleDownloadModels}
           isDownloading={isDownloading}
           progress={downloadProgress}
+          error={downloadError}
         />
       )}
     </div>
