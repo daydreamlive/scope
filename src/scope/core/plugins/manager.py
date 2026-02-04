@@ -443,7 +443,20 @@ class PluginManager:
                 except Exception as e:
                     logger.warning(f"Error getting plugin info for {dist}: {e}")
 
-        return plugins
+        # Deduplicate by normalized package name.
+        # When duplicates exist (e.g., stale dist-info), prefer editable/local.
+        seen: dict[str, dict[str, Any]] = {}
+        for plugin in plugins:
+            normalized = self._normalize_package_name(plugin["name"])
+            existing = seen.get(normalized)
+            if existing is None:
+                seen[normalized] = plugin
+            elif plugin["editable"] and not existing["editable"]:
+                seen[normalized] = plugin
+            elif plugin["source"] == "local" and existing["source"] != "local":
+                seen[normalized] = plugin
+
+        return list(seen.values())
 
     def _check_plugin_update(
         self, name: str, package_spec: str | None = None
@@ -825,6 +838,24 @@ class PluginManager:
         """
         from .venv_snapshot import VenvSnapshot
 
+        # Resolve package name early so we can clean up plugins.txt
+        package_path = Path(package).resolve()
+        package_name = self._get_package_name_from_path(package_path)
+        normalized_name = self._normalize_package_name(package_name)
+
+        # Remove any existing entry for this package from plugins.txt
+        # (e.g., a prior git/PyPI install) to avoid stale entries
+        plugins = self._read_plugins_file()
+        new_plugins = [
+            p
+            for p in plugins
+            if self._normalize_package_name(self._extract_package_name(p))
+            != normalized_name
+        ]
+        if len(new_plugins) != len(plugins):
+            self._write_plugins_file(new_plugins)
+            logger.info(f"Removed existing entry for {package_name} from plugins.txt")
+
         # Capture venv state before installation for rollback
         snapshot = VenvSnapshot()
         snapshot_captured = snapshot.capture()
@@ -881,9 +912,6 @@ class PluginManager:
 
         # Success - clean up snapshot files
         snapshot.discard()
-
-        package_path = Path(package).resolve()
-        package_name = self._get_package_name_from_path(package_path)
 
         return {
             "success": True,
