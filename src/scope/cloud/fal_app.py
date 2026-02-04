@@ -10,7 +10,6 @@ Based on:
 """
 
 import json
-import logging
 import os
 import shutil
 import time
@@ -20,6 +19,7 @@ from typing import Any
 import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
+
 
 class KafkaPublisher:
     """Async Kafka event publisher for fal.ai websocket events."""
@@ -36,8 +36,10 @@ class KafkaPublisher:
         self._topic = os.getenv("KAFKA_TOPIC", "network_events")
         sasl_username = os.getenv("KAFKA_SASL_USERNAME")
         sasl_password = os.getenv("KAFKA_SASL_PASSWORD")
-        
-        print(f"[Kafka] Starting publisher (KAFKA_BOOTSTRAP_SERVERS={bootstrap_servers})")
+
+        print(
+            f"[Kafka] Starting publisher (KAFKA_BOOTSTRAP_SERVERS={bootstrap_servers})"
+        )
         if not bootstrap_servers:
             print("[Kafka] Not configured, event publishing disabled")
             return False
@@ -53,14 +55,17 @@ class KafkaPublisher:
 
             if sasl_username and sasl_password:
                 import ssl
+
                 ssl_context = ssl.create_default_context()
-                config.update({
-                    "security_protocol": "SASL_SSL",
-                    "sasl_mechanism": "PLAIN",
-                    "sasl_plain_username": sasl_username,
-                    "sasl_plain_password": sasl_password,
-                    "ssl_context": ssl_context,
-                })
+                config.update(
+                    {
+                        "security_protocol": "SASL_SSL",
+                        "sasl_mechanism": "PLAIN",
+                        "sasl_plain_username": sasl_username,
+                        "sasl_plain_password": sasl_password,
+                        "ssl_context": ssl_context,
+                    }
+                )
 
             self._producer = AIOKafkaProducer(**config)
             await self._producer.start()
@@ -121,8 +126,11 @@ kafka_publisher: KafkaPublisher | None = None
 
 ASSETS_DIR_PATH = "~/.daydream-scope/assets"
 # Connection timeout settings
-MAX_CONNECTION_DURATION_SECONDS = 3600  # Close connection after 60 minutes regardless of activity
+MAX_CONNECTION_DURATION_SECONDS = (
+    3600  # Close connection after 60 minutes regardless of activity
+)
 TIMEOUT_CHECK_INTERVAL_SECONDS = 60  # Check for timeout every 60 seconds
+
 
 def cleanup_session_data():
     """Clean up session-specific data when WebSocket disconnects.
@@ -131,8 +139,6 @@ def cleanup_session_data():
     - Assets directory (uploaded images, videos)
     - Recording files in temp directory
     """
-    import glob
-    import tempfile
     from pathlib import Path
 
     try:
@@ -208,13 +214,11 @@ class ScopeApp(fal.App, keep_alive=300):
         """
         Start the Scope backend server as a background process.
         """
-        import logging
         import os
         import subprocess
         import threading
         import time
 
-        logger = logging.getLogger(__name__)
         print("Starting Scope container setup...")
 
         # Verify GPU is available
@@ -224,7 +228,7 @@ class ScopeApp(fal.App, keep_alive=300):
             )
             print(f"GPU Status:\n{result.stdout}")
         except Exception as e:
-            logger.error(f"GPU check failed: {e}")
+            print(f"GPU check failed: {e}")
             raise
 
         # Environment for scope
@@ -247,19 +251,28 @@ class ScopeApp(fal.App, keep_alive=300):
             )
             print("✅ daydream-scope[kafka] installed")
         except Exception as e:
-            logger.warning(f"Failed to install daydream-scope[kafka]: {e}")
+            print(f"Failed to install daydream-scope[kafka]: {e}")
 
         # Start the scope server in a background thread
         def start_server():
             print("Starting Scope server...")
             try:
                 subprocess.run(
-                    ["uv", "run", "daydream-scope", "--no-browser", "--host", "0.0.0.0", "--port", "8000"],
+                    [
+                        "uv",
+                        "run",
+                        "daydream-scope",
+                        "--no-browser",
+                        "--host",
+                        "0.0.0.0",
+                        "--port",
+                        "8000",
+                    ],
                     check=True,
                     env=scope_env,
                 )
             except Exception as e:
-                logger.error(f"Failed to start Scope server: {e}")
+                print(f"Failed to start Scope server: {e}")
                 raise
 
         server_thread = threading.Thread(target=start_server, daemon=True)
@@ -282,7 +295,7 @@ class ScopeApp(fal.App, keep_alive=300):
                 pass
             time.sleep(2)
         else:
-            logger.warning(
+            print(
                 f"Scope server health check timed out after {max_wait}s, continuing anyway..."
             )
 
@@ -304,13 +317,11 @@ class ScopeApp(fal.App, keep_alive=300):
         """
         import asyncio
         import json
-        import logging
         import uuid
 
         import httpx
         from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-        logger = logging.getLogger(__name__)
         SCOPE_BASE_URL = "http://localhost:8000"
 
         # Initialize Kafka publisher if not already done
@@ -359,12 +370,16 @@ class ScopeApp(fal.App, keep_alive=300):
             """Check if connection has exceeded max duration. Returns True if should close."""
             elapsed_seconds = time.time() - connection_start_time
             if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
-                print(f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)")
-                await safe_send_json({
-                    "type": "closing",
-                    "reason": "max_duration",
-                    "elapsed_seconds": elapsed_seconds,
-                })
+                print(
+                    f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)"
+                )
+                await safe_send_json(
+                    {
+                        "type": "closing",
+                        "reason": "max_duration",
+                        "elapsed_seconds": elapsed_seconds,
+                    }
+                )
                 return True
             return False
 
@@ -434,7 +449,11 @@ class ScopeApp(fal.App, keep_alive=300):
 
             if candidate is None:
                 # End of candidates signal
-                return {"type": "icecandidate_ack", "request_id": request_id, "status": "end_of_candidates"}
+                return {
+                    "type": "icecandidate_ack",
+                    "request_id": request_id,
+                    "status": "end_of_candidates",
+                }
 
             async with httpx.AsyncClient() as client:
                 response = await client.patch(
@@ -452,7 +471,11 @@ class ScopeApp(fal.App, keep_alive=300):
                 )
 
                 if response.status_code == 204:
-                    return {"type": "icecandidate_ack", "request_id": request_id, "status": "ok"}
+                    return {
+                        "type": "icecandidate_ack",
+                        "request_id": request_id,
+                        "status": "ok",
+                    }
                 else:
                     return {
                         "type": "error",
@@ -488,9 +511,7 @@ class ScopeApp(fal.App, keep_alive=300):
                 try:
                     # Check if this is a base64-encoded file upload
                     is_binary_upload = (
-                        body
-                        and isinstance(body, dict)
-                        and "_base64_content" in body
+                        body and isinstance(body, dict) and "_base64_content" in body
                     )
 
                     if method == "GET":
@@ -536,7 +557,12 @@ class ScopeApp(fal.App, keep_alive=300):
                     content_type = response.headers.get("content-type", "")
                     is_binary_response = any(
                         ct in content_type
-                        for ct in ["video/", "audio/", "application/octet-stream", "image/"]
+                        for ct in [
+                            "video/",
+                            "audio/",
+                            "application/octet-stream",
+                            "image/",
+                        ]
                     )
 
                     if is_binary_response and response.status_code == 200:
@@ -588,7 +614,9 @@ class ScopeApp(fal.App, keep_alive=300):
 
             # Reject all messages until user_id is set (except set_user_id itself)
             if user_id is None and msg_type != "set_user_id":
-                print(f"[{connection_id}] Rejecting message type '{msg_type}' - user_id not set yet")
+                print(
+                    f"[{connection_id}] Rejecting message type '{msg_type}' - user_id not set yet"
+                )
                 return None
 
             if msg_type == "set_user_id":
@@ -596,10 +624,13 @@ class ScopeApp(fal.App, keep_alive=300):
                 print(f"[{log_prefix()}] User ID set")
                 # Publish websocket connected event with user_id
                 if kafka_publisher and kafka_publisher.is_running:
-                    await kafka_publisher.publish("websocket_connected", {
-                        "user_id": user_id,
-                        "connection_id": connection_id,
-                    })
+                    await kafka_publisher.publish(
+                        "websocket_connected",
+                        {
+                            "user_id": user_id,
+                            "connection_id": connection_id,
+                        },
+                    )
                 return {"type": "user_id_set", "user_id": user_id}
             elif msg_type == "get_ice_servers":
                 return await handle_get_ice_servers(payload)
@@ -612,7 +643,11 @@ class ScopeApp(fal.App, keep_alive=300):
             elif msg_type == "ping":
                 return {"type": "pong", "request_id": request_id}
             else:
-                return {"type": "error", "request_id": request_id, "error": f"Unknown message type: {msg_type}"}
+                return {
+                    "type": "error",
+                    "request_id": request_id,
+                    "error": f"Unknown message type: {msg_type}",
+                }
 
         # Main message loop
         try:
@@ -620,10 +655,9 @@ class ScopeApp(fal.App, keep_alive=300):
                 try:
                     # Use timeout on receive to periodically check connection duration
                     message = await asyncio.wait_for(
-                        ws.receive_text(),
-                        timeout=TIMEOUT_CHECK_INTERVAL_SECONDS
+                        ws.receive_text(), timeout=TIMEOUT_CHECK_INTERVAL_SECONDS
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     if await check_max_duration_exceeded():
                         break
                     continue
@@ -650,23 +684,28 @@ class ScopeApp(fal.App, keep_alive=300):
         except WebSocketDisconnect:
             print(f"[{log_prefix()}] WebSocket disconnected")
         except Exception as e:
-            logger.error(f"[{log_prefix()}] WebSocket error: {e}")
+            print(f"[{log_prefix()}] WebSocket error: {e}")
             await safe_send_json({"type": "error", "error": str(e)})
         finally:
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
                 elapsed_seconds = end_time - connection_start_time
-                await kafka_publisher.publish("websocket_disconnected", {
-                    "user_id": user_id,
-                    "connection_id": connection_id,
-                    "duration_seconds": round(elapsed_seconds, 2),
-                    "start_time": connection_start_time * 1000,
-                    "end_time": end_time * 1000,
-                })
+                await kafka_publisher.publish(
+                    "websocket_disconnected",
+                    {
+                        "user_id": user_id,
+                        "connection_id": connection_id,
+                        "duration_seconds": round(elapsed_seconds, 2),
+                        "start_time": connection_start_time * 1000,
+                        "end_time": end_time * 1000,
+                    },
+                )
             # Clean up session data to prevent data leakage between users
             cleanup_session_data()
-            print(f"[{log_prefix()}] WebSocket connection closed, session data cleaned up")
+            print(
+                f"[{log_prefix()}] WebSocket connection closed, session data cleaned up"
+            )
 
 
 # Deployment:

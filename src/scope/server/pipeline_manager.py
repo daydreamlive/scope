@@ -377,8 +377,7 @@ class PipelineManager:
             # This handles cases where a previous pipeline failed to load (status=ERROR/NOT_LOADED)
             # but its status entry was never cleaned up because it wasn't in _pipelines
             stale_status_ids = [
-                pid for pid in self._pipeline_statuses.keys()
-                if pid not in pipeline_ids
+                pid for pid in self._pipeline_statuses.keys() if pid not in pipeline_ids
             ]
             for stale_id in stale_status_ids:
                 del self._pipeline_statuses[stale_id]

@@ -189,7 +189,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             setIsStreaming(true);
 
             // Log detailed connection info
-            console.log("[WebRTC] ========== CONNECTION ESTABLISHED ==========");
+            console.log(
+              "[WebRTC] ========== CONNECTION ESTABLISHED =========="
+            );
             console.log("[WebRTC] Session ID:", sessionIdRef.current);
 
             // Log the actual negotiated codec for verification
@@ -199,7 +201,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
               const params = videoSender.getParameters();
               const codec = params.codecs?.[0];
               if (codec) {
-                console.log(`[WebRTC] Negotiated video codec: ${codec.mimeType}`);
+                console.log(
+                  `[WebRTC] Negotiated video codec: ${codec.mimeType}`
+                );
               }
             }
 
@@ -217,7 +221,10 @@ export function useWebRTC(options?: UseWebRTCOptions) {
               try {
                 const stats = await pc.getStats();
                 stats.forEach(report => {
-                  if (report.type === "candidate-pair" && report.state === "succeeded") {
+                  if (
+                    report.type === "candidate-pair" &&
+                    report.state === "succeeded"
+                  ) {
                     console.log("[WebRTC] Active candidate pair:", {
                       localCandidateId: report.localCandidateId,
                       remoteCandidateId: report.remoteCandidateId,
@@ -247,7 +254,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
               }
             }, 1000);
 
-            console.log("[WebRTC] ==============================================");
+            console.log(
+              "[WebRTC] =============================================="
+            );
           } else if (
             pc.connectionState === "disconnected" ||
             pc.connectionState === "failed"
@@ -259,8 +268,13 @@ export function useWebRTC(options?: UseWebRTCOptions) {
 
         const onIceConnectionStateChange = () => {
           console.log("[WebRTC] ICE connection state:", pc.iceConnectionState);
-          if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
-            console.log("[WebRTC] ICE connection successful - media can now flow");
+          if (
+            pc.iceConnectionState === "connected" ||
+            pc.iceConnectionState === "completed"
+          ) {
+            console.log(
+              "[WebRTC] ICE connection successful - media can now flow"
+            );
           }
         };
 

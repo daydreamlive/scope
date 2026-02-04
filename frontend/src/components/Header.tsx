@@ -118,7 +118,10 @@ export function Header({
         cloudDisabled={cloudDisabled}
       />
 
-      <ReportBugDialog open={reportBugOpen} onClose={() => setReportBugOpen(false)} />
+      <ReportBugDialog
+        open={reportBugOpen}
+        onClose={() => setReportBugOpen(false)}
+      />
     </header>
   );
 }

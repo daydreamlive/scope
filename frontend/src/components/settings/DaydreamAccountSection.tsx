@@ -141,7 +141,10 @@ export function DaydreamAccountSection({
         try {
           await onPipelinesRefresh();
         } catch (refreshError) {
-          console.error("[DaydreamAccountSection] Failed to refresh pipelines:", refreshError);
+          console.error(
+            "[DaydreamAccountSection] Failed to refresh pipelines:",
+            refreshError
+          );
         }
       }
     } catch (e) {
@@ -168,7 +171,10 @@ export function DaydreamAccountSection({
       await fetch("/api/v1/cloud/disconnect", { method: "POST" });
       await fetchStatus();
     } catch (e) {
-      console.error("[DaydreamAccountSection] Failed to cleanup after cancel:", e);
+      console.error(
+        "[DaydreamAccountSection] Failed to cleanup after cancel:",
+        e
+      );
     }
 
     setIsConnecting(false);
@@ -196,7 +202,10 @@ export function DaydreamAccountSection({
         try {
           await onPipelinesRefresh();
         } catch (refreshError) {
-          console.error("[DaydreamAccountSection] Failed to refresh pipelines:", refreshError);
+          console.error(
+            "[DaydreamAccountSection] Failed to refresh pipelines:",
+            refreshError
+          );
         }
       }
     } catch (e) {
@@ -253,11 +262,7 @@ export function DaydreamAccountSection({
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Signed in</span>
             <div className="flex gap-2">
-              <Button
-                onClick={handleSignOut}
-                variant="outline"
-                size="sm"
-              >
+              <Button onClick={handleSignOut} variant="outline" size="sm">
                 Log out
               </Button>
             </div>
@@ -274,7 +279,9 @@ export function DaydreamAccountSection({
                 {isConnecting ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Connecting...</span>
+                    <span className="text-xs text-muted-foreground">
+                      Connecting...
+                    </span>
                     <Button
                       onClick={handleCancel}
                       variant="ghost"
@@ -288,7 +295,9 @@ export function DaydreamAccountSection({
                 ) : isDisconnecting ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Disconnecting...</span>
+                    <span className="text-xs text-muted-foreground">
+                      Disconnecting...
+                    </span>
                   </div>
                 ) : (
                   <Switch
@@ -327,13 +336,12 @@ export function DaydreamAccountSection({
                 </div>
               )}
 
-              {error && (
-                <p className="text-xs text-destructive">{error}</p>
-              )}
+              {error && <p className="text-xs text-destructive">{error}</p>}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground pt-2 border-t border-border">
-              Cloud mode requires the server to be started with cloud credentials configured.
+              Cloud mode requires the server to be started with cloud
+              credentials configured.
             </p>
           )}
         </div>

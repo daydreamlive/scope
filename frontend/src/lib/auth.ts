@@ -9,9 +9,11 @@ function getRedirectUrl(): string {
   return "http://localhost:8000";
 }
 
-const DAYDREAM_AUTH_URL = `https://app.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
-// const DAYDREAM_AUTH_URL = `https://streamdiffusion-git-mh-signin.preview.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
-const DAYDREAM_API_BASE = (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.monster";
+// const DAYDREAM_AUTH_URL = `https://app.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
+const DAYDREAM_AUTH_URL = `https://streamdiffusion-git-mh-signin.preview.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
+const DAYDREAM_API_BASE =
+  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
+  "https://api.daydream.monster";
 const API_KEY_STORAGE_KEY = "daydream_api_key";
 const USER_ID_STORAGE_KEY = "daydream_user_id";
 
@@ -26,7 +28,7 @@ export function getDaydreamAPIKey(): string | null {
   }
 
   // Fall back to environment variable if available
-  const envKey = (import.meta as any).env?.VITE_DAYDREAM_API_KEY;
+  const envKey = import.meta.env.VITE_DAYDREAM_API_KEY as string | undefined;
   return envKey || null;
 }
 
@@ -84,10 +86,10 @@ export async function exchangeTokenForAPIKey(token: string): Promise<string> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      "name": "scope",
+      name: "scope",
     }),
   });
 

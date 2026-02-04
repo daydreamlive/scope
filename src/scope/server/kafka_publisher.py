@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -144,8 +143,8 @@ class KafkaPublisher:
         if not self._started or not self._producer:
             return False
 
-        import uuid
         import time
+        import uuid
 
         # Generate a unique ID for this event (used as Kafka key)
         event_id = str(uuid.uuid4())
@@ -180,7 +179,9 @@ class KafkaPublisher:
             # Use event ID as key (matching Go format)
             key = event_id
             await self._producer.send_and_wait(KAFKA_TOPIC, value=event, key=key)
-            logger.info(f"Published Kafka event: {event_type} (id={event_id}, session={session_id})")
+            logger.info(
+                f"Published Kafka event: {event_type} (id={event_id}, session={session_id})"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to publish Kafka event {event_type}: {e}")
@@ -217,7 +218,7 @@ class KafkaPublisher:
 
             # Schedule the async publish in the main event loop
             try:
-                future = asyncio.run_coroutine_threadsafe(
+                asyncio.run_coroutine_threadsafe(
                     self.publish_async(
                         event_type=event_type,
                         session_id=session_id,

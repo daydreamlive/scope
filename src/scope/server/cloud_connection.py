@@ -402,7 +402,7 @@ class CloudConnectionManager:
         await self.stop_webrtc()
 
         # Cancel pending requests
-        for request_id, future in self._pending_requests.items():
+        for _request_id, future in self._pending_requests.items():
             if not future.done():
                 future.set_exception(RuntimeError("Disconnected from cloud"))
         self._pending_requests.clear()
