@@ -31,10 +31,10 @@ SERVER_URL = "http://localhost:8000"
 DEFAULT_PIPELINE = "longlive"
 
 # Asset paths (tests skip gracefully if missing)
-LORA = "path/to/a/lora.safetensors"
-TEST_VIDEO = "path/to/test_video.mp4"
-VACE_CONDITIONING_VIDEO = "path/to/depth_video.mp4"
-MASK_VIDEO = "path/to/mask_video.mp4"
+LORA = r"C:\Users\ryanf\.daydream-scope\models\lora\lora\output\model_245889_dissolve_imgvid\dissolve-000064.safetensors"
+TEST_VIDEO = r"frontend\public\assets\test.mp4"
+VACE_CONDITIONING_VIDEO = r"controlnet_test\control_frames_depth.mp4"
+MASK_VIDEO = r"src\scope\core\pipelines\longlive\vace_tests\static_mask_half_white_half_black.mp4"
 
 # =============================================================================
 # Test Definitions
