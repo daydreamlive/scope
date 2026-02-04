@@ -154,6 +154,20 @@ class LTX2Config(BasePipelineConfig):
         ),
     )
 
+    # Force low-VRAM mode for initialization
+    # When enabled, uses streaming quantization which builds the transformer on CPU
+    # and quantizes layer-by-layer to minimize peak GPU memory during init.
+    # Automatically enabled when GPU has < 40GB free VRAM.
+    # Set to True to force this mode even on high-VRAM GPUs (for testing).
+    low_vram_init: bool = Field(
+        default=False,
+        description=(
+            "Force low-VRAM initialization mode. Uses streaming quantization "
+            "to keep peak GPU memory under 10GB during init. Slower but required "
+            "for GPUs with < 40GB VRAM. Auto-detected if not set."
+        ),
+    )
+
     # Prefetch blocks for weight streaming
     # Number of blocks to prefetch ahead using async CUDA transfers.
     # Higher values hide more transfer latency but use more GPU memory.

@@ -112,6 +112,7 @@ class ModelLedger:
         fp8transformer: bool = False,
         quantization: str | None = None,
         ffn_chunk_size: int | None = DEFAULT_FFN_CHUNK_SIZE,
+        low_vram_init: bool = False,
     ):
         self.dtype = dtype
         self.device = device
@@ -121,6 +122,7 @@ class ModelLedger:
         self.loras = loras or ()
         self.registry = registry or DummyRegistry()
         self.ffn_chunk_size = ffn_chunk_size
+        self.low_vram_init = low_vram_init
 
         # Resolve quantization type from new parameter or legacy fp8transformer flag
         if quantization is not None:
@@ -320,17 +322,22 @@ class ModelLedger:
             # For GPUs with < 40GB, use streaming quantization to avoid OOM
             import torch
 
-            low_vram_mode = False
+            low_vram_mode = self.low_vram_init  # Respect explicit config
             if torch.cuda.is_available():
                 free_mem = torch.cuda.mem_get_info()[0] / 1024**3
                 total_mem = torch.cuda.mem_get_info()[1] / 1024**3
                 # Transformer needs ~35GB in BF16 before quantization
                 # If we have less than 40GB free, use low-VRAM mode
-                if free_mem < 40:
+                if free_mem < 40 or total_mem < 40:
                     low_vram_mode = True
                     logger.info(
-                        f"Low VRAM mode: {free_mem:.1f}GB free of {total_mem:.1f}GB total. "
+                        f"Low VRAM mode (auto-detected): {free_mem:.1f}GB free of {total_mem:.1f}GB total. "
                         "Using streaming quantization to avoid OOM."
+                    )
+                elif self.low_vram_init:
+                    logger.info(
+                        f"Low VRAM mode (forced via config): {free_mem:.1f}GB free of {total_mem:.1f}GB total. "
+                        "Using streaming quantization."
                     )
 
             if low_vram_mode:

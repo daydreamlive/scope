@@ -162,6 +162,7 @@ class LTX2Pipeline(Pipeline):
             f"ffn_chunk_size={ffn_chunk_size}"
         )
         try:
+            low_vram_init = getattr(config, "low_vram_init", False)
             self.model_ledger = ModelLedger(
                 dtype=self.dtype,
                 device=self.device,
@@ -172,6 +173,7 @@ class LTX2Pipeline(Pipeline):
                 # Use default DummyRegistry - don't cache state dicts in RAM
                 quantization=quantization_value,
                 ffn_chunk_size=ffn_chunk_size,
+                low_vram_init=low_vram_init,
             )
         except Exception as e:
             logger.error(f"Failed to initialize ModelLedger: {e}")
