@@ -1,4 +1,10 @@
-import { AlertCircle, Download, Loader2, RotateCcw } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  Loader2,
+  RotateCcw,
+  Settings,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -21,6 +27,7 @@ interface DownloadDialogProps {
   isDownloading?: boolean;
   progress?: DownloadProgress | null;
   error?: string | null;
+  onOpenSettings?: (tab: string) => void;
 }
 
 export function DownloadDialog({
@@ -33,6 +40,7 @@ export function DownloadDialog({
   isDownloading = false,
   progress = null,
   error = null,
+  onOpenSettings,
 }: DownloadDialogProps) {
   if (pipelineIds.length === 0) return null;
 
@@ -142,7 +150,21 @@ export function DownloadDialog({
           <div className="rounded border border-destructive/50 bg-destructive/10 p-3">
             <div className="flex items-start gap-2">
               <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
-              <p className="text-sm text-destructive">{error}</p>
+              <div className="space-y-2">
+                <p className="text-sm text-destructive">{error}</p>
+                {error.toLowerCase().includes("authentication") &&
+                  onOpenSettings && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onOpenSettings("api-keys")}
+                      className="gap-1.5"
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                      Open Settings &gt; API Keys
+                    </Button>
+                  )}
+              </div>
             </div>
           </div>
         )}

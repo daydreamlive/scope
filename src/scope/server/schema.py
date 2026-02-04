@@ -628,3 +628,36 @@ class PluginUpdatesResponse(BaseModel):
     updates: list[PluginUpdateInfo] = Field(
         ..., description="Update info for each plugin"
     )
+
+
+# API Key management schemas
+
+
+class ApiKeyInfo(BaseModel):
+    """Status info for a single API key service."""
+
+    id: str
+    name: str
+    description: str
+    is_set: bool
+    source: str | None  # "env_var", "stored", or None
+    env_var: str | None  # e.g. "HF_TOKEN"
+    key_url: str | None  # URL where user can create a key
+
+
+class ApiKeysListResponse(BaseModel):
+    keys: list[ApiKeyInfo]
+
+
+class ApiKeySetRequest(BaseModel):
+    value: str = Field(..., min_length=1)
+
+
+class ApiKeySetResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class ApiKeyDeleteResponse(BaseModel):
+    success: bool
+    message: str

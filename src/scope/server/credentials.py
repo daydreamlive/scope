@@ -48,7 +48,9 @@ def get_cloudflare_turn_credentials(
         Exception: If the request to the credential server fails.
     """
     if hf_token is None:
-        hf_token = os.getenv("HF_TOKEN")
+        from huggingface_hub import get_token
+
+        hf_token = get_token()
     if hf_token:
         return httpx.get(
             CLOUDFLARE_FASTRTC_TURN_URL,
@@ -119,7 +121,9 @@ async def get_cloudflare_turn_credentials_async(
         client = async_httpx_client
 
     if hf_token is None:
-        hf_token = os.getenv("HF_TOKEN", "").strip()
+        from huggingface_hub import get_token
+
+        hf_token = (get_token() or "").strip()
     if hf_token:
         async with httpx.AsyncClient() as client:
             response = await client.get(

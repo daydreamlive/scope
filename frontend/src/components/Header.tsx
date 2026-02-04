@@ -5,14 +5,29 @@ import { SettingsDialog } from "./SettingsDialog";
 
 interface HeaderProps {
   className?: string;
+  openSettingsTab?: string | null;
+  onSettingsTabOpened?: () => void;
 }
 
-export function Header({ className = "" }: HeaderProps) {
+export function Header({
+  className = "",
+  openSettingsTab,
+  onSettingsTabOpened,
+}: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [initialTab, setInitialTab] = useState<"general" | "plugins">(
-    "general"
-  );
+  const [initialTab, setInitialTab] = useState<
+    "general" | "api-keys" | "plugins"
+  >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
+
+  // React to external requests to open a specific settings tab
+  useEffect(() => {
+    if (openSettingsTab) {
+      setInitialTab(openSettingsTab as "general" | "api-keys" | "plugins");
+      setSettingsOpen(true);
+      onSettingsTabOpened?.();
+    }
+  }, [openSettingsTab, onSettingsTabOpened]);
 
   useEffect(() => {
     if (window.scope?.onDeepLinkAction) {

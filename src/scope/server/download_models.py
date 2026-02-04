@@ -5,7 +5,6 @@ Cross-platform model downloader
 import argparse
 import http
 import logging
-import os
 import re
 import shutil
 import sys
@@ -130,7 +129,9 @@ def http_get(
         )
 
     headers = {}
-    token = os.environ.get("HF_TOKEN")
+    from huggingface_hub import get_token as _get_hf_token
+
+    token = _get_hf_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
 

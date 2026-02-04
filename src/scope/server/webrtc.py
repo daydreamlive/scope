@@ -389,7 +389,9 @@ class WebRTCManager:
 def create_rtc_config() -> RTCConfiguration:
     """Setup RTCConfiguration with TURN credentials if available."""
     try:
-        hf_token = os.getenv("HF_TOKEN")
+        from huggingface_hub import get_token
+
+        hf_token = get_token()
         twilio_account_sid = os.getenv("TWILIO_ACCOUNT_SID")
         twilio_auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 
