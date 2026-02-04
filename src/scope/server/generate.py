@@ -235,7 +235,6 @@ def generate_video_stream(
         for chunk_idx in range(num_chunks):
             start_frame = chunk_idx * chunk_size
             end_frame = min(start_frame + chunk_size, request.num_frames)
-            actual_frames = end_frame - start_frame
 
             gc.collect()
             if torch.cuda.is_available():
@@ -271,10 +270,6 @@ def generate_video_stream(
                 f"Chunk {chunk_idx + 1}/{num_chunks}: "
                 f"{num_output_frames} frames, latency={chunk_latency:.2f}s, fps={chunk_fps:.2f}"
             )
-
-            # Trim padding from output
-            if chunk_output.shape[0] > actual_frames:
-                chunk_output = chunk_output[:actual_frames]
 
             output_chunks.append(chunk_output.detach().cpu())
 
