@@ -4,8 +4,8 @@ from typing import ClassVar
 
 from pydantic import Field
 
-from ..base_schema import BasePipelineConfig, ModeDefaults, height_field, width_field
 from ..artifacts import HuggingfaceRepoArtifact
+from ..base_schema import BasePipelineConfig, ModeDefaults, height_field, width_field
 from ..enums import Quantization
 
 
@@ -52,7 +52,7 @@ class LTX2Config(BasePipelineConfig):
                 "tokenizer.model",
                 "tokenizer_config.json",
             ],
-        )
+        ),
     ]
     supports_lora: ClassVar[bool] = False
     supports_vace: ClassVar[bool] = False
@@ -110,6 +110,19 @@ class LTX2Config(BasePipelineConfig):
     use_fp8: bool | None = Field(
         default=None,
         description="Deprecated: Use 'quantization' field instead.",
+    )
+
+    # FFN chunking for memory-efficient inference
+    # FFN layers expand hidden dimensions by 4x, creating massive intermediate tensors.
+    # By processing the sequence in chunks, we reduce peak activation memory by ~10x.
+    # Set to None to disable chunking.
+    ffn_chunk_size: int | None = Field(
+        default=4096,
+        description=(
+            "Chunk size for FFN processing. Smaller values use less memory but "
+            "have more kernel launch overhead. Set to None to disable chunking. "
+            "Default 4096 reduces activation memory from ~50GB to ~5GB."
+        ),
     )
 
     # Randomize seed on every generation

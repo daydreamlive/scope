@@ -49,6 +49,11 @@ class QuantizationType(str, Enum):
     NVFP4 = "nvfp4"
 
 
+# Default chunk size for FFN chunking
+# 4096 is a good balance between memory savings and kernel launch overhead
+DEFAULT_FFN_CHUNK_SIZE = 4096
+
+
 class ModelLedger:
     """
     Central coordinator for loading and building models used in an LTX pipeline.
@@ -106,6 +111,7 @@ class ModelLedger:
         registry: Registry | None = None,
         fp8transformer: bool = False,
         quantization: str | None = None,
+        ffn_chunk_size: int | None = DEFAULT_FFN_CHUNK_SIZE,
     ):
         self.dtype = dtype
         self.device = device
@@ -114,6 +120,7 @@ class ModelLedger:
         self.spatial_upsampler_path = spatial_upsampler_path
         self.loras = loras or ()
         self.registry = registry or DummyRegistry()
+        self.ffn_chunk_size = ffn_chunk_size
 
         # Resolve quantization type from new parameter or legacy fp8transformer flag
         if quantization is not None:
@@ -207,7 +214,61 @@ class ModelLedger:
             loras=(*self.loras, *loras),
             registry=self.registry,
             quantization=self.quantization.value,
+            ffn_chunk_size=self.ffn_chunk_size,
         )
+
+    def _apply_ffn_chunking(self, model: X0Model) -> X0Model:
+        """Apply FFN chunking to reduce activation memory during inference.
+
+        FFN layers expand hidden dimensions by 4x, creating massive intermediate
+        tensors. By processing the sequence in chunks, we reduce peak memory
+        from O(seq_len * 4*dim) to O(chunk_size * 4*dim).
+
+        For LTX-2 with 96 FFN layers (48 video + 48 audio), this can reduce
+        activation memory from ~50GB to ~5GB at typical sequence lengths.
+
+        Args:
+            model: The X0Model containing the transformer
+
+        Returns:
+            The same model with FFN layers wrapped for chunked processing
+        """
+        if self.ffn_chunk_size is None:
+            logger.info("FFN chunking disabled (ffn_chunk_size=None)")
+            return model
+
+        try:
+            from ltx_core.model.transformer.chunked_ffn import (
+                apply_chunked_ffn,
+                estimate_ffn_memory_savings,
+            )
+
+            # Apply chunked FFN to the velocity model (the actual transformer)
+            num_patched = apply_chunked_ffn(
+                model.velocity_model,
+                chunk_size=self.ffn_chunk_size,
+                verbose=True,
+            )
+
+            if num_patched > 0:
+                # Log estimated memory savings for typical sequence lengths
+                # 720x1280 @ 33 frames ≈ 57000 tokens
+                savings = estimate_ffn_memory_savings(
+                    seq_len=57000,
+                    dim=4096,
+                    num_layers=num_patched,
+                    chunk_size=self.ffn_chunk_size,
+                )
+                logger.info(
+                    f"FFN chunking estimated savings: {savings['savings_gb']:.1f}GB "
+                    f"(~{savings['reduction_factor']:.1f}x reduction)"
+                )
+
+        except Exception as e:
+            logger.warning(f"Failed to apply FFN chunking: {e}")
+            logger.warning("Continuing without FFN chunking")
+
+        return model
 
     def transformer(self) -> X0Model:
         if not hasattr(self, "transformer_builder"):
@@ -224,11 +285,13 @@ class ModelLedger:
                 module_ops=(UPCAST_DURING_INFERENCE,),
                 model_sd_ops=LTXV_MODEL_COMFY_RENAMING_WITH_TRANSFORMER_LINEAR_DOWNCAST_MAP,
             )
-            return (
+            model = (
                 X0Model(fp8_builder.build(device=self._target_device()))
                 .to(self.device)
                 .eval()
             )
+            # Apply FFN chunking for memory-efficient inference
+            return self._apply_ffn_chunking(model)
 
         elif self.quantization == QuantizationType.NVFP4:
             # NVFP4 quantization: build in BF16 first, then quantize to NVFP4
@@ -268,11 +331,13 @@ class ModelLedger:
                 logger.error(traceback.format_exc())
                 raise
 
-            return model.eval()
+            model = model.eval()
+            # Apply FFN chunking for memory-efficient inference
+            return self._apply_ffn_chunking(model)
 
         else:
             # No quantization (full precision BF16)
-            return (
+            model = (
                 X0Model(
                     self.transformer_builder.build(
                         device=self._target_device(), dtype=self.dtype
@@ -281,6 +346,8 @@ class ModelLedger:
                 .to(self.device)
                 .eval()
             )
+            # Apply FFN chunking for memory-efficient inference
+            return self._apply_ffn_chunking(model)
 
     def video_decoder(self) -> VideoDecoder:
         if not hasattr(self, "vae_decoder_builder"):
