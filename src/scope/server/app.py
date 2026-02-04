@@ -481,7 +481,9 @@ async def get_pipeline_schemas():
     The frontend should use this as the source of truth for parameter defaults.
     """
     from scope.core.pipelines.registry import PipelineRegistry
+    from scope.core.plugins import get_plugin_manager
 
+    plugin_manager = get_plugin_manager()
     pipelines: dict = {}
 
     for pipeline_id in PipelineRegistry.list_pipelines():
@@ -490,6 +492,9 @@ async def get_pipeline_schemas():
             # get_schema_with_metadata() includes supported_modes, default_mode,
             # and mode_defaults directly from the config class
             schema_data = config_class.get_schema_with_metadata()
+            schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
+                pipeline_id
+            )
             pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)

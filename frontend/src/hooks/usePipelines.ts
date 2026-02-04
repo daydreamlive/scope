@@ -52,6 +52,7 @@ export function usePipelines() {
           recommendedQuantizationVramThreshold:
             schema.recommended_quantization_vram_threshold ?? undefined,
           modified: schema.modified,
+          pluginName: schema.plugin_name ?? undefined,
           supportsControllerInput,
           supportsImages,
           configSchema: schema.config_schema,

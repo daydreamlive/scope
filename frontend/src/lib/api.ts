@@ -422,6 +422,7 @@ export interface PipelineSchemaInfo {
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
+  plugin_name: string | null;
 }
 
 export interface PipelineSchemasResponse {
