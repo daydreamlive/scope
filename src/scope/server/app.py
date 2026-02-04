@@ -1037,7 +1037,6 @@ async def upload_asset(
 
         # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:
-            # TODO need a unique directory for each user so that they can't see each other's assets or just make sure we clean the dir for each websocket connection
             logger.info(
                 f"upload_asset: Uploading {asset_type} to cloud and locally: {filename}"
             )
