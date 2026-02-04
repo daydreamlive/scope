@@ -295,6 +295,7 @@ class ModelLedger:
 
         elif self.quantization == QuantizationType.NVFP4:
             # NVFP4 quantization: build in BF16 first, then quantize to NVFP4
+            import gc
             import traceback
 
             try:
@@ -315,21 +316,72 @@ class ModelLedger:
 
             logger.info("Building transformer with NVFP4 quantization...")
 
-            # Build model in BF16 first
-            model = X0Model(
-                self.transformer_builder.build(
-                    device=self._target_device(), dtype=self.dtype
-                )
-            ).to(self.device)
+            # Check available VRAM to decide build strategy
+            # For GPUs with < 40GB, use streaming quantization to avoid OOM
+            import torch
 
-            # Quantize transformer blocks to NVFP4
-            logger.info("Quantizing transformer blocks to NVFP4...")
-            try:
-                quantize_model_nvfp4(model, layer_filter=transformer_block_filter)
-            except Exception as e:
-                logger.error(f"Failed to quantize model to NVFP4: {e}")
-                logger.error(traceback.format_exc())
-                raise
+            low_vram_mode = False
+            if torch.cuda.is_available():
+                free_mem = torch.cuda.mem_get_info()[0] / 1024**3
+                total_mem = torch.cuda.mem_get_info()[1] / 1024**3
+                # Transformer needs ~35GB in BF16 before quantization
+                # If we have less than 40GB free, use low-VRAM mode
+                if free_mem < 40:
+                    low_vram_mode = True
+                    logger.info(
+                        f"Low VRAM mode: {free_mem:.1f}GB free of {total_mem:.1f}GB total. "
+                        "Using streaming quantization to avoid OOM."
+                    )
+
+            if low_vram_mode:
+                # Streaming quantization: build on CPU, quantize block-by-block on GPU
+                # This keeps peak VRAM usage low by only having one block on GPU at a time
+                logger.info("Building transformer on CPU for streaming quantization...")
+                model = X0Model(
+                    self.transformer_builder.build(
+                        device=torch.device("cpu"), dtype=self.dtype
+                    )
+                )
+
+                # Quantize using streaming mode - moves blocks to GPU one at a time
+                logger.info(
+                    "Quantizing transformer blocks to NVFP4 (streaming mode)..."
+                )
+                try:
+                    quantize_model_nvfp4(
+                        model,
+                        layer_filter=transformer_block_filter,
+                        streaming=True,  # Enable streaming quantization
+                        target_device=self.device,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to quantize model to NVFP4: {e}")
+                    logger.error(traceback.format_exc())
+                    raise
+
+                # Move the final quantized model to GPU
+                logger.info("Moving quantized model to GPU...")
+                model = model.to(self.device)
+
+                # Force cleanup after quantization
+                gc.collect()
+                torch.cuda.empty_cache()
+            else:
+                # Standard path: build directly on GPU
+                model = X0Model(
+                    self.transformer_builder.build(
+                        device=self._target_device(), dtype=self.dtype
+                    )
+                ).to(self.device)
+
+                # Quantize transformer blocks to NVFP4
+                logger.info("Quantizing transformer blocks to NVFP4...")
+                try:
+                    quantize_model_nvfp4(model, layer_filter=transformer_block_filter)
+                except Exception as e:
+                    logger.error(f"Failed to quantize model to NVFP4: {e}")
+                    logger.error(traceback.format_exc())
+                    raise
 
             model = model.eval()
             # Apply FFN chunking for memory-efficient inference

@@ -202,17 +202,33 @@ class LTX2Pipeline(Pipeline):
                 )
 
         logger.info("Loading and caching models in VRAM...")
-        logger.info("  - Loading text encoder (~20GB)...")
+
+        # Check if we need to be memory-efficient during init
+        # On GPUs with < 48GB VRAM, we need to offload text encoder before loading transformer
+        # to avoid OOM during the BF16 -> quantized conversion
+        offload_text_encoder = getattr(config, "offload_text_encoder", True)
+        import gc
+
+        logger.info("  - Loading text encoder (~25GB)...")
         self._cached_text_encoder = self.model_ledger.text_encoder()
         log_gpu_memory("text encoder")
+
+        # Offload text encoder to CPU BEFORE loading transformer to avoid OOM
+        # The transformer temporarily needs ~35GB during BF16 build before quantization
+        # With text encoder (25GB) + transformer (35GB) = 60GB peak, which exceeds 32GB
+        if offload_text_encoder:
+            logger.info("  - Offloading text encoder to CPU before transformer load...")
+            self._cached_text_encoder.to("cpu")
+            self._text_encoder_offloaded = True
+            gc.collect()
+            torch.cuda.empty_cache()
+            log_gpu_memory("text encoder offloaded")
 
         logger.info("  - Loading transformer...")
         self._cached_transformer = self.model_ledger.transformer()
         log_gpu_memory("transformer")
 
         # Force garbage collection after transformer to free any temporary tensors
-        import gc
-
         gc.collect()
         torch.cuda.empty_cache()
         log_gpu_memory("GC after transformer")
@@ -310,6 +326,7 @@ class LTX2Pipeline(Pipeline):
     @torch.inference_mode()
     def _generate(self, **kwargs) -> PipelineOutput:
         """Internal generation method."""
+        import gc
         import random
 
         from ltx_core.components.diffusion_steps import EulerDiffusionStep
@@ -351,10 +368,45 @@ class LTX2Pipeline(Pipeline):
         noiser = GaussianNoiser(generator=generator)
         stepper = EulerDiffusionStep()
 
-        # Encode text prompt using cached text encoder
-        logger.info(f"Encoding prompt: {prompt_text}")
-        context_p = encode_text(self._cached_text_encoder, prompts=[prompt_text])[0]
-        video_context, audio_context = context_p
+        # Check if we can reuse cached prompt encoding
+        offload_text_encoder = getattr(self.config, "offload_text_encoder", True)
+        cached_prompt = getattr(self, "_cached_prompt_text", None)
+
+        if cached_prompt == prompt_text and hasattr(self, "_cached_context"):
+            # Reuse cached encoding - no need to load text encoder
+            video_context, audio_context = self._cached_context
+            logger.debug("Reusing cached prompt encoding")
+        else:
+            # Prompt changed - need to re-encode
+            logger.info(f"Encoding prompt: {prompt_text}")
+
+            # Check if text encoder needs to be loaded back to GPU
+            if offload_text_encoder and getattr(self, "_text_encoder_offloaded", False):
+                logger.info("Loading text encoder back to GPU for encoding...")
+                self._cached_text_encoder.to(self.device)
+                self._text_encoder_offloaded = False
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+
+            context_p = encode_text(self._cached_text_encoder, prompts=[prompt_text])[0]
+            video_context, audio_context = context_p
+
+            # Cache the encoded prompt
+            self._cached_prompt_text = prompt_text
+            self._cached_context = (video_context, audio_context)
+
+            # Offload text encoder to CPU to free VRAM for transformer
+            if offload_text_encoder:
+                logger.info("Offloading text encoder to CPU to free VRAM...")
+                self._cached_text_encoder.to("cpu")
+                self._text_encoder_offloaded = True
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    allocated = torch.cuda.memory_allocated() / 1024**3
+                    logger.info(
+                        f"GPU memory after text encoder offload: {allocated:.2f}GB"
+                    )
 
         # Use cached transformer for generation
         sigmas = torch.Tensor(DISTILLED_SIGMA_VALUES).to(self.device)

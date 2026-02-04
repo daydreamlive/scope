@@ -225,6 +225,8 @@ class NVFP4Linear(torch.nn.Module):
 def quantize_model_nvfp4(
     model: torch.nn.Module,
     layer_filter: Callable[[str, torch.nn.Module], bool] | None = None,
+    streaming: bool = False,
+    target_device: torch.device | None = None,
 ) -> None:
     """Quantize Linear layers in a model to NVFP4 in-place.
 
@@ -239,6 +241,12 @@ def quantize_model_nvfp4(
         model: PyTorch model to quantize
         layer_filter: Optional function (name, module) -> bool to filter layers.
                      If None, all Linear layers are quantized.
+        streaming: If True, use streaming quantization mode for low-VRAM GPUs.
+                  In this mode, each layer is moved to GPU, quantized, then the
+                  original is freed before the next layer. This keeps peak VRAM
+                  usage low but is slower.
+        target_device: Target device for quantization (only used in streaming mode).
+                      Defaults to cuda:0 if available.
     """
     import gc
 
@@ -273,6 +281,17 @@ def quantize_model_nvfp4(
     num_layers = len(layer_names_to_replace)
     logger.info(f"Quantizing {num_layers} Linear layers to NVFP4")
 
+    # Set up target device for streaming mode
+    if streaming and target_device is None:
+        target_device = (
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        )
+
+    if streaming:
+        logger.info(
+            f"Using streaming quantization mode (target device: {target_device})"
+        )
+
     # Log memory before quantization - ensure clean state first
     mem_before = 0.0
     if torch.cuda.is_available():
@@ -302,33 +321,68 @@ def quantize_model_nvfp4(
             logger.warning(f"Layer {name} is no longer nn.Linear, skipping")
             continue
 
-        # Create NVFP4Linear from the original Linear
-        # from_linear() creates new quantized weights, does NOT keep reference to original
-        nvfp4_module = NVFP4Linear.from_linear(module)
+        if streaming:
+            # Streaming mode: move layer to GPU, quantize, move back to CPU
+            # This keeps peak VRAM usage low
+            original_device = module.weight.device
 
-        # Replace in the model - this removes the model's reference to original module
-        setattr(parent, parts[-1], nvfp4_module)
+            # Move to GPU for quantization (NVFP4 kernels need CUDA)
+            if original_device != target_device:
+                module = module.to(target_device)
+                # Update the reference in the model
+                setattr(parent, parts[-1], module)
 
-        # Explicitly clear the original module's weight data to force CUDA memory release
-        # This is necessary because 'module' still holds a reference until end of iteration
-        if module.weight is not None:
-            module.weight.data = torch.empty(0, device="cpu", dtype=torch.float32)
-        if module.bias is not None:
-            module.bias.data = torch.empty(0, device="cpu", dtype=torch.float32)
+            # Create NVFP4Linear from the GPU-resident Linear
+            nvfp4_module = NVFP4Linear.from_linear(module)
 
-        # Delete local reference - now module can be garbage collected
-        del module
+            # Move quantized module back to CPU to free GPU memory
+            nvfp4_module = nvfp4_module.to("cpu")
 
-        # Periodic cleanup to prevent memory fragmentation
-        # More frequent cleanup (every 25 layers) for better memory behavior
-        if (i + 1) % 25 == 0:
+            # Replace in the model
+            setattr(parent, parts[-1], nvfp4_module)
+
+            # Clear original module
+            if module.weight is not None:
+                module.weight.data = torch.empty(0, device="cpu", dtype=torch.float32)
+            if module.bias is not None:
+                module.bias.data = torch.empty(0, device="cpu", dtype=torch.float32)
+            del module
+
+            # Aggressive cleanup in streaming mode
             gc.collect()
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        else:
+            # Standard mode: quantize in-place on GPU
+            # Create NVFP4Linear from the original Linear
+            # from_linear() creates new quantized weights, does NOT keep reference to original
+            nvfp4_module = NVFP4Linear.from_linear(module)
+
+            # Replace in the model - this removes the model's reference to original module
+            setattr(parent, parts[-1], nvfp4_module)
+
+            # Explicitly clear the original module's weight data to force CUDA memory release
+            # This is necessary because 'module' still holds a reference until end of iteration
+            if module.weight is not None:
+                module.weight.data = torch.empty(0, device="cpu", dtype=torch.float32)
+            if module.bias is not None:
+                module.bias.data = torch.empty(0, device="cpu", dtype=torch.float32)
+
+            # Delete local reference - now module can be garbage collected
+            del module
+
+            # Periodic cleanup to prevent memory fragmentation
+            # More frequent cleanup (every 25 layers) for better memory behavior
+            if (i + 1) % 25 == 0:
+                gc.collect()
+                torch.cuda.empty_cache()
+
+        if (i + 1) % 100 == 0 or (streaming and (i + 1) % 50 == 0):
             if torch.cuda.is_available():
                 current_mem = torch.cuda.memory_allocated() / 1024**3
-                logger.debug(
+                logger.info(
                     f"Quantized {i + 1}/{num_layers} layers, "
-                    f"current memory: {current_mem:.2f} GB"
+                    f"current GPU memory: {current_mem:.2f} GB"
                 )
 
     # Final garbage collection and cache clear

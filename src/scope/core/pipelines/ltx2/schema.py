@@ -131,7 +131,7 @@ class LTX2Config(BasePipelineConfig):
     # Set to 0 to disable (keep all blocks on GPU).
     # LTX-2 has 48 transformer blocks. Streaming 24 blocks saves ~10-15GB VRAM.
     blocks_to_stream: int = Field(
-        default=0,
+        default=24,
         ge=0,
         le=47,
         description=(
@@ -139,6 +139,18 @@ class LTX2Config(BasePipelineConfig):
             "Higher values save more VRAM but slow down inference. "
             "LTX-2 has 48 blocks. Set to 24 to save ~10-15GB VRAM. "
             "Set to 0 to disable streaming (fastest, highest VRAM)."
+        ),
+    )
+
+    # Offload text encoder to CPU after encoding
+    # The text encoder (Gemma 12B) uses ~25GB VRAM but is only needed once per prompt.
+    # Offloading it to CPU after encoding frees this memory for the transformer.
+    offload_text_encoder: bool = Field(
+        default=True,
+        description=(
+            "Offload text encoder to CPU after encoding prompts. "
+            "Saves ~25GB VRAM but adds latency when prompts change. "
+            "Recommended for GPUs with less than 48GB VRAM."
         ),
     )
 
