@@ -125,6 +125,37 @@ class LTX2Config(BasePipelineConfig):
         ),
     )
 
+    # Weight streaming for low-VRAM inference
+    # Streams transformer blocks from CPU to GPU during forward pass.
+    # This enables running on GPUs with less VRAM at the cost of slower inference.
+    # Set to 0 to disable (keep all blocks on GPU).
+    # LTX-2 has 48 transformer blocks. Streaming 24 blocks saves ~10-15GB VRAM.
+    blocks_to_stream: int = Field(
+        default=0,
+        ge=0,
+        le=47,
+        description=(
+            "Number of transformer blocks to stream from CPU during inference. "
+            "Higher values save more VRAM but slow down inference. "
+            "LTX-2 has 48 blocks. Set to 24 to save ~10-15GB VRAM. "
+            "Set to 0 to disable streaming (fastest, highest VRAM)."
+        ),
+    )
+
+    # Prefetch blocks for weight streaming
+    # Number of blocks to prefetch ahead using async CUDA transfers.
+    # Higher values hide more transfer latency but use more GPU memory.
+    prefetch_blocks: int = Field(
+        default=1,
+        ge=0,
+        le=4,
+        description=(
+            "Number of blocks to prefetch ahead during weight streaming. "
+            "Higher values reduce latency but use more GPU memory. "
+            "Only applies when blocks_to_stream > 0."
+        ),
+    )
+
     # Randomize seed on every generation
     # LTX2 is bidirectional (not autoregressive), so each chunk is independent.
     # With a fixed seed, the same chunk is regenerated unless the prompt changes.

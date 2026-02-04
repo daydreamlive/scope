@@ -217,6 +217,38 @@ class LTX2Pipeline(Pipeline):
         torch.cuda.empty_cache()
         log_gpu_memory("GC after transformer")
 
+        # Set up weight streaming if configured
+        self._streaming_state = None
+        blocks_to_stream = getattr(config, "blocks_to_stream", 0)
+        if blocks_to_stream > 0:
+            from ..weight_streaming import BlockStreamingConfig, setup_block_streaming
+
+            prefetch_blocks = getattr(config, "prefetch_blocks", 1)
+            logger.info(
+                f"Setting up weight streaming: {blocks_to_stream} blocks to stream, "
+                f"{prefetch_blocks} prefetch blocks"
+            )
+
+            # Get the transformer blocks from the model
+            # Structure: X0Model -> velocity_model (LTXModel) -> transformer_blocks
+            transformer_blocks = (
+                self._cached_transformer.velocity_model.transformer_blocks
+            )
+
+            streaming_config = BlockStreamingConfig(
+                blocks_to_stream=blocks_to_stream,
+                prefetch_blocks=prefetch_blocks,
+                use_pinned_memory=True,
+                use_non_blocking=True,
+                compute_device=self.device,
+                debug=False,
+            )
+
+            self._streaming_state = setup_block_streaming(
+                transformer_blocks, streaming_config
+            )
+            log_gpu_memory("weight streaming setup")
+
         logger.info("  - Loading video decoder (~3GB)...")
         self._cached_video_decoder = self.model_ledger.video_decoder()
         logger.info("  - Loading audio decoder...")
