@@ -17,7 +17,6 @@ from diffusers.utils import export_to_video
 from scope.core.pipelines.video import load_video
 from scope.server.schema import (
     GenerateRequest,
-    LongLiveLoadParams,
     LoRAConfig,
     LoRAMergeMode,
     PipelineLoadRequest,
@@ -195,17 +194,11 @@ def run_test(name: str):
 
     # Load pipeline
     print(f"Loading pipeline '{pipeline_id}' at {width}x{height}...")
-    request = PipelineLoadRequest(
-        pipeline_ids=[pipeline_id],
-        load_params=LongLiveLoadParams(
-            height=height,
-            width=width,
-            loras=loras,
-            lora_merge_mode=LoRAMergeMode.RUNTIME_PEFT
-            if loras
-            else LoRAMergeMode.PERMANENT_MERGE,
-        ),
-    )
+    load_params = {"height": height, "width": width}
+    if loras:
+        load_params["loras"] = [lora.model_dump() for lora in loras]
+        load_params["lora_merge_mode"] = "runtime_peft"
+    request = PipelineLoadRequest(pipeline_ids=[pipeline_id], load_params=load_params)
     requests.post(
         f"{SERVER_URL}/api/v1/pipeline/load", json=request.model_dump(mode="json")
     ).raise_for_status()
