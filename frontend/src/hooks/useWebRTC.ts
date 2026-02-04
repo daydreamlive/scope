@@ -23,6 +23,7 @@ interface InitialParameters {
   images?: string[];
   first_frame_image?: string;
   last_frame_image?: string;
+  recording?: boolean;
 }
 
 interface UseWebRTCOptions {

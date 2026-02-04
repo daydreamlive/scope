@@ -119,6 +119,9 @@ export function StreamPage() {
   const [timelineCurrentTime, setTimelineCurrentTime] = useState(0);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
 
+  // Recording toggle state
+  const [isRecording, setIsRecording] = useState(false);
+
   // Video display state
   const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
 
@@ -1001,6 +1004,7 @@ export function StreamPage() {
         first_frame_image?: string;
         last_frame_image?: string;
         images?: string[];
+        recording?: boolean;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1075,6 +1079,9 @@ export function StreamPage() {
       if (settings.spoutReceiver?.enabled) {
         initialParameters.spout_receiver = settings.spoutReceiver;
       }
+
+      // Include recording toggle state
+      initialParameters.recording = isRecording;
 
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
@@ -1350,6 +1357,8 @@ export function StreamPage() {
               }
               isDownloading={isDownloading}
               onSaveGeneration={handleSaveGeneration}
+              isRecording={isRecording}
+              onRecordingToggle={() => setIsRecording(prev => !prev)}
             />
           </div>
         </div>

@@ -20,7 +20,7 @@ TEMP_FILE_PREFIXES = {
 }
 
 # Environment variables
-RECORDING_ENABLED = os.getenv("RECORDING_ENABLED", "true").lower() == "true"
+RECORDING_ENABLED = os.getenv("RECORDING_ENABLED", "false").lower() == "true"
 RECORDING_MAX_LENGTH_STR = os.getenv("RECORDING_MAX_LENGTH", "1h")
 RECORDING_STARTUP_CLEANUP_ENABLED = (
     os.getenv("RECORDING_STARTUP_CLEANUP_ENABLED", "true").lower() == "true"
@@ -180,12 +180,6 @@ class RecordingManager:
 
     async def start_recording(self):
         """Start recording frames to MP4 file using MediaRecorder."""
-        if not RECORDING_ENABLED:
-            logger.debug(
-                "Recording is disabled via RECORDING_ENABLED environment variable"
-            )
-            return
-
         with self.recording_lock:
             if self.recording_started:
                 return
@@ -239,7 +233,7 @@ class RecordingManager:
         Returns:
             True if max length was reached and recording should be stopped, False otherwise
         """
-        if not RECORDING_ENABLED or self.max_length_reached:
+        if self.max_length_reached:
             return False
 
         with self.recording_lock:

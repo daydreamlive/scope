@@ -48,6 +48,8 @@ interface PromptInputWithTimelineProps {
   onVideoScaleModeToggle?: () => void;
   isDownloading?: boolean;
   onSaveGeneration?: () => void;
+  isRecording?: boolean;
+  onRecordingToggle?: () => void;
 }
 
 export function PromptInputWithTimeline({
@@ -85,6 +87,8 @@ export function PromptInputWithTimeline({
   onVideoScaleModeToggle,
   isDownloading = false,
   onSaveGeneration,
+  isRecording = false,
+  onRecordingToggle,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -577,6 +581,8 @@ export function PromptInputWithTimeline({
         onVideoScaleModeToggle={onVideoScaleModeToggle}
         isDownloading={isDownloading}
         onSaveGeneration={onSaveGeneration}
+        isRecording={isRecording}
+        onRecordingToggle={onRecordingToggle}
       />
     </div>
   );
