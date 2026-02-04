@@ -50,6 +50,7 @@ from .kafka_publisher import (
     is_kafka_enabled,
     set_kafka_publisher,
 )
+from .generate import generate_video_stream
 from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
@@ -78,6 +79,7 @@ from .schema import (
     AssetsResponse,
     CloudConnectRequest,
     CloudStatusResponse,
+    GenerateRequest,
     HardwareInfoResponse,
     HealthResponse,
     IceCandidateRequest,
@@ -1124,6 +1126,30 @@ async def download_pipeline_models(
     except Exception as e:
         logger.error(f"Error starting model download: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/generate")
+async def generate_video(
+    request: "GenerateRequest",
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Generate video frames in batch mode with SSE progress streaming."""
+    status_info = await pipeline_manager.get_status_info_async()
+    if status_info["status"] != "loaded":
+        raise HTTPException(
+            status_code=400,
+            detail="Pipeline not loaded. Please load pipeline first.",
+        )
+
+    return StreamingResponse(
+        generate_video_stream(request, pipeline_manager, status_info, logger),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def is_spout_available() -> bool:

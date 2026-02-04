@@ -816,3 +816,126 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
+class ChunkFrameSpec(BaseModel):
+    """Specification for a frame image at a specific chunk."""
+
+    chunk: int = Field(..., ge=0, description="Chunk index")
+    image: str = Field(..., description="Path to image file")
+
+
+class ChunkPromptSpec(BaseModel):
+    """Specification for a prompt at a specific chunk."""
+
+    chunk: int = Field(..., ge=0, description="Chunk index")
+    text: str = Field(..., description="Prompt text for this chunk")
+
+
+class ChunkRefImagesSpec(BaseModel):
+    """Specification for reference images at a specific chunk."""
+
+    chunk: int = Field(default=0, ge=0, description="Chunk index (default: 0)")
+    images: list[str] = Field(..., description="List of reference image paths")
+
+
+class EncodedArray(BaseModel):
+    """Base64-encoded numpy array with shape metadata."""
+
+    base64: str = Field(..., description="Base64-encoded numpy array bytes")
+    shape: list[int] = Field(..., description="Array shape for decoding")
+
+
+class GenerateRequest(BaseModel):
+    """Request for batch video generation."""
+
+    pipeline_id: str = Field(..., description="Pipeline ID to use for generation")
+    prompt: str = Field(..., description="Text prompt for generation (sent on chunk 0)")
+    chunk_prompts: list[ChunkPromptSpec] | None = Field(
+        default=None,
+        description="Prompt changes at later chunks (sticky behavior). The prompt persists until the next specified chunk.",
+    )
+    num_frames: int = Field(
+        default=64,
+        ge=1,
+        le=1024,
+        description="Total number of frames to generate",
+    )
+    height: int | None = Field(
+        default=None,
+        ge=64,
+        le=2048,
+        description="Output height (defaults to pipeline's native resolution)",
+    )
+    width: int | None = Field(
+        default=None,
+        ge=64,
+        le=2048,
+        description="Output width (defaults to pipeline's native resolution)",
+    )
+    seed: int | list[int] = Field(
+        default=42,
+        description="Random seed. Single int applies to all chunks; list applies per-chunk.",
+    )
+    # Video-to-video input (optional)
+    input_video: EncodedArray | None = Field(
+        default=None,
+        description="Input video frames (THWC, uint8). If provided, enables video-to-video mode.",
+    )
+    noise_scale: float | list[float] = Field(
+        default=0.7,
+        description="Noise scale for video-to-video mode. Single float applies to all chunks; list applies per-chunk.",
+    )
+    denoising_steps: list[int] | None = Field(
+        default=None,
+        description="Denoising timesteps (e.g., [1000, 750, 500, 250])",
+    )
+    manage_cache: bool = Field(
+        default=True,
+        description="Enable automatic cache management. Set to False to prevent cache resets when parameters change (e.g., LoRA scales).",
+    )
+    # Per-chunk parameters
+    lora_scales: dict[str, float | list[float]] | None = Field(
+        default=None,
+        description="LoRA scales by path. Single float applies to all chunks; list applies per-chunk. Example: {'path/to/lora.pt': 0.8} or {'path/to/lora.pt': [0.5, 0.7, 0.9]}",
+    )
+    vace_context_scale: float | list[float] = Field(
+        default=1.0,
+        description="VACE context scale. Single float applies to all chunks; list applies per-chunk.",
+    )
+    # Keyframe specifications (chunk, image) pairs
+    first_frames: list[ChunkFrameSpec] | None = Field(
+        default=None,
+        description="First frame anchors. Each specifies a chunk index and image path to use as that chunk's first frame.",
+    )
+    last_frames: list[ChunkFrameSpec] | None = Field(
+        default=None,
+        description="Last frame anchors. Each specifies a chunk index and image path to use as that chunk's last frame.",
+    )
+    vace_ref_images: list[ChunkRefImagesSpec] | None = Field(
+        default=None,
+        description="Reference images for VACE conditioning. Each specifies a chunk index and list of image paths.",
+    )
+    # VACE conditioning frames/masks (for depth guidance, inpainting, etc.)
+    vace_frames: EncodedArray | None = Field(
+        default=None,
+        description="VACE conditioning frames ([1, C, T, H, W] float32 [-1, 1]). Used for depth guidance, structural control, etc.",
+    )
+    vace_masks: EncodedArray | None = Field(
+        default=None,
+        description="VACE masks ([1, 1, T, H, W] float32 {0, 1}). Used for inpainting (1 = regenerate, 0 = keep).",
+    )
+
+
+class GenerateResponse(BaseModel):
+    """Response from batch video generation."""
+
+    video_base64: str = Field(
+        ...,
+        description="Base64-encoded output video frames as numpy array bytes (THWC, float32, [0,1] range)",
+    )
+    video_shape: list[int] = Field(
+        ...,
+        description="Shape of output video [T, H, W, C]",
+    )
+    num_frames: int = Field(..., description="Number of frames generated")
+    num_chunks: int = Field(..., description="Number of chunks processed")
+    chunk_size: int = Field(..., description="Frames per chunk")
