@@ -585,7 +585,7 @@ async def handle_webrtc_offer(
             logger.info(
                 "[CLOUD] Using relay mode - video will flow through backend to fal.ai"
             )
-            return await webrtc_manager.handle_offer_with_cloud(request, cloud_manager)
+            return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
         # Local mode: ensure pipeline is loaded before proceeding
         status_info = await pipeline_manager.get_status_info_async()
