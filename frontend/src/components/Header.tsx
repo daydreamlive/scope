@@ -157,7 +157,7 @@ export function Header({ className = "" }: HeaderProps) {
         initialPluginPath={initialPluginPath}
       />
 
-      <ReportBugDialog open={reportBugOpen} onOpenChange={setReportBugOpen} />
+      <ReportBugDialog open={reportBugOpen} onClose={() => setReportBugOpen(false)} />
     </header>
   );
 }

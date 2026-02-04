@@ -119,6 +119,8 @@ export interface PipelineInfo {
   supportsControllerInput?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
+  // Available VAE types extracted from schema
+  vaeTypes?: string[];
   // Raw config schema for dynamic settings UI
   configSchema?: import("../lib/api").PipelineConfigSchema;
 }

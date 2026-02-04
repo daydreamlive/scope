@@ -102,7 +102,7 @@ export function StreamPage() {
   }, [isDirectCloudMode, isCloudReady]);
 
   // Fetch available pipelines dynamically
-  const { pipelines } = usePipelinesContext();
+  const { pipelines, refreshPipelines } = usePipelinesContext();
 
   // Helper to get default mode for a pipeline
   const getPipelineDefaultMode = (pipelineId: string): InputMode => {
