@@ -401,10 +401,8 @@ async def load_pipeline(
                 detail="pipeline_ids must be provided and cannot be empty",
             )
 
-        # Convert pydantic model to dict for pipeline manager
-        load_params_dict = None
-        if request.load_params:
-            load_params_dict = request.load_params.model_dump()
+        # load_params is already a dict (or None)
+        load_params_dict = request.load_params
 
         # If connected to cloud, proxy the request
         if cloud_manager.is_connected:
