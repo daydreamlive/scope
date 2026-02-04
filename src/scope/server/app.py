@@ -902,8 +902,16 @@ async def download_pipeline_models(request: DownloadModelsRequest):
                 detail=f"Download already in progress for {pipeline_id}",
             )
 
+        # Clear any previous error state before starting a new download
+        download_progress_manager.clear_progress(pipeline_id)
+
         # Download in a background thread to avoid blocking
         import threading
+
+        def _is_auth_error(error: Exception) -> bool:
+            """Check if a download error is authentication-related."""
+            msg = str(error)
+            return "401" in msg or "403" in msg or "Unauthorized" in msg
 
         def download_in_background():
             """Run download in background thread."""
@@ -912,7 +920,11 @@ async def download_pipeline_models(request: DownloadModelsRequest):
                 download_progress_manager.mark_complete(pipeline_id)
             except Exception as e:
                 logger.error(f"Error downloading models for {pipeline_id}: {e}")
-                download_progress_manager.clear_progress(pipeline_id)
+                if _is_auth_error(e):
+                    user_msg = "Download failed due to authentication error. Check the server logs for details."
+                else:
+                    user_msg = "Download failed. Check the server logs for details."
+                download_progress_manager.mark_error(pipeline_id, user_msg)
 
         thread = threading.Thread(target=download_in_background)
         thread.daemon = True

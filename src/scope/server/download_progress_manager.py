@@ -30,6 +30,28 @@ class DownloadProgressManager:
             if pipeline_id not in self._progress:
                 return None
             data = self._progress[pipeline_id]
+
+            # If there's an error, return it even without artifact data
+            if "error" in data:
+                result = {
+                    "is_downloading": False,
+                    "percentage": 0,
+                    "current_artifact": None,
+                    "error": data["error"],
+                }
+                # Include last artifact info if available
+                if data["artifacts"]:
+                    *_, (current_artifact, current_data) = data["artifacts"].items()
+                    result["current_artifact"] = current_artifact
+                    if current_data["total_mb"] > 0:
+                        result["percentage"] = round(
+                            current_data["downloaded_mb"]
+                            / current_data["total_mb"]
+                            * 100,
+                            1,
+                        )
+                return result
+
             if not data["artifacts"]:
                 return None
 
@@ -54,6 +76,14 @@ class DownloadProgressManager:
         with self._lock:
             if pipeline_id in self._progress:
                 self._progress[pipeline_id]["is_downloading"] = False
+
+    def mark_error(self, pipeline_id: str, error_message: str):
+        """Mark download as failed with an error message."""
+        with self._lock:
+            if pipeline_id not in self._progress:
+                self._progress[pipeline_id] = {"artifacts": {}, "is_downloading": False}
+            self._progress[pipeline_id]["is_downloading"] = False
+            self._progress[pipeline_id]["error"] = error_message
 
     def clear_progress(self, pipeline_id: str):
         """Clear progress data."""

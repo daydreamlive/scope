@@ -128,6 +128,7 @@ export interface DownloadProgress {
   is_downloading: boolean;
   percentage: number;
   current_artifact: string | null;
+  error?: string | null;
 }
 
 export interface ModelStatusResponse {
