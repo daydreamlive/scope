@@ -191,8 +191,8 @@ uv run daydream-scope
 HuggingFace access token for using Cloudflare's TURN servers. See [Firewalls](#firewalls) for details.
 
 ### `RECORDING_ENABLED`
-- **Default**: `true`
-- **Description**: Enable/disable recording. When `false`, recording is disabled.
+- **Default**: `false`
+- **Description**: Enable/disable recording as a fallback when no recording parameter is provided via the UI. The UI recording toggle takes precedence over this value.
 
 ### `RECORDING_MAX_LENGTH`
 - **Default**: `1h`
