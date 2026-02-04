@@ -116,6 +116,7 @@ export interface PipelineInfo {
   minDimension?: number;
   recommendedQuantizationVramThreshold?: number | null;
   // Controller input support - presence of ctrl_input field in pipeline schema
+  pluginName?: string;
   supportsControllerInput?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
