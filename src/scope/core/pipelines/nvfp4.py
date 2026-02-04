@@ -130,18 +130,26 @@ class NVFP4Linear(torch.nn.Module):
         """
         from comfy_kitchen.tensor import QuantizedTensor
 
+        # Capture metadata before we potentially lose access
+        in_features = linear.in_features
+        out_features = linear.out_features
+        has_bias = linear.bias is not None
+        device = linear.weight.device
+        dtype = linear.weight.dtype
+
         nvfp4_linear = cls(
-            in_features=linear.in_features,
-            out_features=linear.out_features,
-            bias=linear.bias is not None,
-            device=linear.weight.device,
-            dtype=linear.weight.dtype,
+            in_features=in_features,
+            out_features=out_features,
+            bias=has_bias,
+            device=device,
+            dtype=dtype,
         )
 
         # Quantize weight to NVFP4 using comfy-kitchen
         # Weight shape is (out_features, in_features)
         # from_float takes a string layout name
-        weight_2d = linear.weight.data
+        # Use .detach() to avoid keeping computation graph references
+        weight_2d = linear.weight.data.detach()
         quantized_weight = QuantizedTensor.from_float(weight_2d, NVFP4_LAYOUT)
 
         # Store as nn.Parameter - this is critical for __torch_dispatch__ to work
@@ -152,14 +160,15 @@ class NVFP4Linear(torch.nn.Module):
         if hasattr(quantized_weight, "_qdata"):
             qdata = quantized_weight._qdata
             logger.debug(
-                f"Quantized Linear({linear.in_features}, {linear.out_features}): "
+                f"Quantized Linear({in_features}, {out_features}): "
                 f"original={weight_2d.numel() * weight_2d.element_size()} bytes, "
                 f"quantized _qdata={qdata.numel() * qdata.element_size()} bytes"
             )
 
-        if linear.bias is not None:
+        if has_bias:
+            # Clone bias to avoid keeping reference to original
             nvfp4_linear.bias = torch.nn.Parameter(
-                linear.bias.data.clone().to(linear.weight.dtype)
+                linear.bias.data.detach().clone().to(dtype), requires_grad=False
             )
 
         return nvfp4_linear
@@ -254,11 +263,17 @@ def quantize_model_nvfp4(
 
     logger.info(f"Quantizing {len(layers_to_replace)} Linear layers to NVFP4")
 
-    # Log memory before quantization
+    # Log memory before quantization - ensure clean state first
     if torch.cuda.is_available():
+        gc.collect()
+        torch.cuda.empty_cache()
         torch.cuda.synchronize()
         mem_before = torch.cuda.memory_allocated() / 1024**3
-        logger.info(f"GPU memory before quantization: {mem_before:.2f} GB")
+        mem_reserved = torch.cuda.memory_reserved() / 1024**3
+        logger.info(
+            f"GPU memory before quantization: {mem_before:.2f} GB allocated, "
+            f"{mem_reserved:.2f} GB reserved"
+        )
 
     for i, (name, module) in enumerate(layers_to_replace):
         # Navigate to parent module
@@ -267,35 +282,48 @@ def quantize_model_nvfp4(
         for part in parts[:-1]:
             parent = getattr(parent, part)
 
+        # Get reference to original weight tensor for cleanup
+        original_weight = module.weight
+        original_bias = module.bias if hasattr(module, "bias") else None
+
         # Create NVFP4Linear from the original Linear
         nvfp4_module = NVFP4Linear.from_linear(module)
 
-        # Replace with NVFP4Linear
-        # After this, the original module should no longer be referenced by the model
+        # Replace with NVFP4Linear FIRST
         setattr(parent, parts[-1], nvfp4_module)
 
-        # Periodically clear CUDA cache to prevent memory fragmentation
-        # Do this every 100 layers to balance between memory and speed
-        if (i + 1) % 100 == 0:
-            gc.collect()
-            torch.cuda.empty_cache()
-            if torch.cuda.is_available():
-                current_mem = torch.cuda.memory_allocated() / 1024**3
-                logger.debug(
-                    f"Quantized {i + 1}/{len(layers_to_replace)} layers, "
-                    f"current memory: {current_mem:.2f} GB"
-                )
+        # Now explicitly free the original tensors
+        # Setting .data to empty tensor on CPU forces CUDA memory release
+        if original_weight is not None:
+            original_weight.data = torch.empty(0, device="cpu", dtype=torch.float32)
+        if original_bias is not None:
+            original_bias.data = torch.empty(0, device="cpu", dtype=torch.float32)
+
+        # Clear local references
+        del original_weight, original_bias, module
 
     # Final garbage collection and cache clear
     gc.collect()
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()
 
     # Log memory after quantization
     if torch.cuda.is_available():
         torch.cuda.synchronize()
         mem_after = torch.cuda.memory_allocated() / 1024**3
-        logger.info(f"GPU memory after quantization: {mem_after:.2f} GB")
-        logger.info(f"Memory saved: {mem_before - mem_after:.2f} GB")
+        mem_reserved_after = torch.cuda.memory_reserved() / 1024**3
+        logger.info(
+            f"GPU memory after quantization: {mem_after:.2f} GB allocated, "
+            f"{mem_reserved_after:.2f} GB reserved"
+        )
+        mem_saved = mem_before - mem_after
+        if mem_saved > 0:
+            logger.info(f"Memory saved: {mem_saved:.2f} GB")
+        else:
+            logger.warning(
+                f"Memory INCREASED by {-mem_saved:.2f} GB - quantization may not be "
+                "freeing original weights properly"
+            )
 
         # Verify quantization by checking a sample layer
         if layers_to_replace:
@@ -322,6 +350,11 @@ def quantize_model_nvfp4(
                         f"  Storage: {qdata.numel() * qdata.element_size()} bytes "
                         f"(vs {weight.shape[0] * weight.shape[1] * 2} bytes for BF16)"
                     )
+            else:
+                logger.warning(
+                    f"Sample layer '{sample_name}' is NOT NVFP4Linear, "
+                    f"got {type(sample_module).__name__}"
+                )
 
 
 def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
