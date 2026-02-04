@@ -615,6 +615,83 @@ export async function getServerInfo(): Promise<ServerInfo> {
   return { version: data.version, gitCommit: data.git_commit };
 }
 
+// API Key management types and functions
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  description: string;
+  is_set: boolean;
+  source: string | null;
+  env_var: string | null;
+  key_url: string | null;
+}
+
+export interface ApiKeySetResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ApiKeyDeleteResponse {
+  success: boolean;
+  message: string;
+}
+
+export const getApiKeys = async (): Promise<{ keys: ApiKeyInfo[] }> => {
+  const response = await fetch("/api/v1/keys", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get API keys failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const setApiKey = async (
+  serviceId: string,
+  value: string
+): Promise<ApiKeySetResponse> => {
+  const response = await fetch(
+    `/api/v1/keys/${encodeURIComponent(serviceId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    }
+  );
+
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+
+  return response.json();
+};
+
+export const deleteApiKey = async (
+  serviceId: string
+): Promise<ApiKeyDeleteResponse> => {
+  const response = await fetch(
+    `/api/v1/keys/${encodeURIComponent(serviceId)}`,
+    {
+      method: "DELETE",
+    }
+  );
+
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+
+  return response.json();
+};
+
 export const downloadRecording = async (sessionId: string): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");

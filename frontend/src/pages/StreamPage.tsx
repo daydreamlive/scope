@@ -127,6 +127,9 @@ export function StreamPage() {
     string | null
   >(null);
 
+  // Settings dialog navigation state
+  const [openSettingsTab, setOpenSettingsTab] = useState<string | null>(null);
+
   // Download dialog state
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -1111,7 +1114,10 @@ export function StreamPage() {
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <Header />
+      <Header
+        openSettingsTab={openSettingsTab}
+        onSettingsTabOpened={() => setOpenSettingsTab(null)}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
@@ -1444,6 +1450,10 @@ export function StreamPage() {
           isDownloading={isDownloading}
           progress={downloadProgress}
           error={downloadError}
+          onOpenSettings={tab => {
+            setShowDownloadDialog(false);
+            setOpenSettingsTab(tab);
+          }}
         />
       )}
     </div>
