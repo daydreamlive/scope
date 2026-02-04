@@ -271,14 +271,8 @@ def quantize_model_nvfp4(
         nvfp4_module = NVFP4Linear.from_linear(module)
 
         # Replace with NVFP4Linear
+        # After this, the original module should no longer be referenced by the model
         setattr(parent, parts[-1], nvfp4_module)
-
-        # Explicitly delete the original module's parameters to free memory
-        # This is important because Python's GC might not immediately free GPU memory
-        if hasattr(module, "weight"):
-            del module.weight
-        if hasattr(module, "bias") and module.bias is not None:
-            del module.bias
 
         # Periodically clear CUDA cache to prevent memory fragmentation
         # Do this every 100 layers to balance between memory and speed
