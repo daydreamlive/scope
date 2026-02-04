@@ -43,6 +43,15 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      keyframes: {
+        "record-pulse": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.5" },
+        },
+      },
+      animation: {
+        "record-pulse": "record-pulse 2s ease-in-out infinite",
+      },
     },
   },
   plugins: [],

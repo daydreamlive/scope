@@ -14,6 +14,7 @@ interface ExportDialogProps {
   onClose: () => void;
   onSaveGeneration: () => void;
   onSaveTimeline: () => void;
+  isRecording?: boolean;
 }
 
 export function ExportDialog({
@@ -21,6 +22,7 @@ export function ExportDialog({
   onClose,
   onSaveGeneration,
   onSaveTimeline,
+  isRecording = false,
 }: ExportDialogProps) {
   return (
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
@@ -33,22 +35,24 @@ export function ExportDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-3 mt-4">
-          <Button
-            onClick={() => {
-              onSaveGeneration();
-              onClose();
-            }}
-            variant="outline"
-            className="w-full justify-start gap-3 px-4 py-6"
-          >
-            <Download className="h-4 w-4" />
-            <div className="flex flex-col items-start">
-              <span className="font-semibold">Save Generation</span>
-              <span className="text-xs text-muted-foreground">
-                Downloads MP4 to default Downloads folder
-              </span>
-            </div>
-          </Button>
+          {isRecording && (
+            <Button
+              onClick={() => {
+                onSaveGeneration();
+                onClose();
+              }}
+              variant="outline"
+              className="w-full justify-start gap-3 px-4 py-6"
+            >
+              <Download className="h-4 w-4" />
+              <div className="flex flex-col items-start">
+                <span className="font-semibold">Save Generation</span>
+                <span className="text-xs text-muted-foreground">
+                  Downloads MP4 to default Downloads folder
+                </span>
+              </div>
+            </Button>
+          )}
 
           <Button
             onClick={() => {

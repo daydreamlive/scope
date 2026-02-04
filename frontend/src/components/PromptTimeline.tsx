@@ -11,6 +11,7 @@ import { Card, CardContent } from "./ui/card";
 import {
   Play,
   Pause,
+  Circle,
   Download,
   Upload,
   ZoomIn,
@@ -166,6 +167,8 @@ interface PromptTimelineProps {
   onVideoScaleModeToggle?: () => void;
   isDownloading?: boolean;
   onSaveGeneration?: () => void;
+  isRecording?: boolean;
+  onRecordingToggle?: () => void;
 }
 
 export function PromptTimeline({
@@ -196,6 +199,8 @@ export function PromptTimeline({
   onVideoScaleModeToggle,
   isDownloading = false,
   onSaveGeneration,
+  isRecording = false,
+  onRecordingToggle,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -678,6 +683,22 @@ export function PromptTimeline({
               <RotateCcw className="h-4 w-4" />
             </Button>
             <Button
+              onClick={onRecordingToggle}
+              disabled={disabled || isLoading || isDownloading || isStreaming}
+              size="sm"
+              variant="outline"
+              title={isRecording ? "Stop recording" : "Start recording"}
+              className={
+                isRecording
+                  ? "border-red-500 hover:border-red-400 animate-record-pulse"
+                  : ""
+              }
+            >
+              <Circle
+                className={`h-3.5 w-3.5 ${isRecording ? "fill-red-500 text-red-500" : "fill-muted-foreground text-muted-foreground"}`}
+              />
+            </Button>
+            <Button
               onClick={onClear}
               disabled={
                 disabled ||
@@ -731,6 +752,7 @@ export function PromptTimeline({
                 }
               }}
               onSaveTimeline={handleSaveTimeline}
+              isRecording={isRecording}
             />
             <div className="relative">
               <input

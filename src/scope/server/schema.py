@@ -154,6 +154,10 @@ class Parameters(BaseModel):
         default=None,
         description="List of reference image paths for non-VACE visual conditioning",
     )
+    recording: bool | None = Field(
+        default=None,
+        description="Enable recording for this session. When true, the backend records the stream. ",
+    )
 
 
 class SpoutConfig(BaseModel):
