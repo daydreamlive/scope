@@ -1,22 +1,19 @@
 /**
- * Get the current port from the address bar, or default based on protocol
+ * Get the redirect URL for OAuth callback (the current origin)
  */
-function getCurrentPort(): string {
+function getRedirectUrl(): string {
   if (typeof window !== "undefined") {
-    // If port is explicitly set in URL, use it
-    if (window.location.port) {
-      return window.location.port;
-    }
-    // Otherwise use default ports based on protocol
-    return window.location.protocol === "https:" ? "443" : "80";
+    return window.location.origin;
   }
   // Fallback for SSR or non-browser environments
-  return "8000";
+  return "http://localhost:8000";
 }
 
-const DAYDREAM_AUTH_URL = `https://app.livepeer.monster/sign-in/local?port=${getCurrentPort()}`;
+const DAYDREAM_AUTH_URL = `https://app.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
+// const DAYDREAM_AUTH_URL = `https://streamdiffusion-git-mh-signin.preview.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
 const DAYDREAM_API_BASE = (import.meta as any).env?.VITE_DAYDREAM_API_BASE || "https://api.daydream.monster";
 const API_KEY_STORAGE_KEY = "daydream_api_key";
+const USER_ID_STORAGE_KEY = "daydream_user_id";
 
 /**
  * Get the stored Daydream API key from localStorage or environment variable
@@ -25,7 +22,6 @@ export function getDaydreamAPIKey(): string | null {
   // First check localStorage for a user-authenticated key
   const storedKey = localStorage.getItem(API_KEY_STORAGE_KEY);
   if (storedKey) {
-    console.log("Found Daydream API key in localStorage");
     return storedKey;
   }
 
@@ -35,20 +31,31 @@ export function getDaydreamAPIKey(): string | null {
 }
 
 /**
- * Save the Daydream API key to localStorage
+ * Get the stored Daydream user ID from localStorage
  */
-export function saveDaydreamAPIKey(apiKey: string): void {
+export function getDaydreamUserId(): string | null {
+  return localStorage.getItem(USER_ID_STORAGE_KEY);
+}
+
+/**
+ * Save the Daydream auth credentials to localStorage
+ */
+export function saveDaydreamAuth(apiKey: string, userId: string | null): void {
   localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
-  console.log("Saved Daydream API key to localStorage");
+  if (userId) {
+    localStorage.setItem(USER_ID_STORAGE_KEY, userId);
+  }
+  console.log("Saved Daydream auth to localStorage");
   // Dispatch custom event to notify components of auth state change
   window.dispatchEvent(new CustomEvent("daydream-auth-change"));
 }
 
 /**
- * Clear the stored Daydream API key
+ * Clear the stored Daydream auth credentials
  */
-export function clearDaydreamAPIKey(): void {
+export function clearDaydreamAuth(): void {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
+  localStorage.removeItem(USER_ID_STORAGE_KEY);
   // Dispatch custom event to notify components of auth state change
   window.dispatchEvent(new CustomEvent("daydream-auth-change"));
 }
@@ -57,40 +64,7 @@ export function clearDaydreamAPIKey(): void {
  * Check if user is authenticated (has an API key)
  */
 export function isAuthenticated(): boolean {
-  return getDaydreamAPIKey() !== null;
-}
-
-export interface CloudTokenResponse {
-  token: string;
-  userId: string;
-  expiresAt: string;
-}
-
-/**
- * Fetch cloud token using the stored API key
- * Returns the token response with userId for backend logging
- */
-export async function fetchCloudToken(): Promise<CloudTokenResponse | null> {
-  const apiKey = getDaydreamAPIKey();
-  if (!apiKey) {
-    console.log("No API key found, skipping cloud token fetch");
-    return null;
-  }
-
-  try {
-    const response = await fetch(`${DAYDREAM_API_BASE}/auth/fal/token`, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-      },
-    });
-    const result = await response.json();
-    console.log("Cloud token response:", result);
-    return result as CloudTokenResponse;
-  } catch (error) {
-    console.error("Failed to get cloud token:", error);
-    return null;
-  }
+  return getDaydreamAPIKey() !== null && getDaydreamUserId() !== null;
 }
 
 /**
@@ -113,7 +87,7 @@ export async function exchangeTokenForAPIKey(token: string): Promise<string> {
       "Authorization": `Bearer ${token}`,
     },
     body: JSON.stringify({
-      "name": "foo",
+      "name": "scope",
     }),
   });
 
@@ -142,6 +116,7 @@ export async function exchangeTokenForAPIKey(token: string): Promise<string> {
 export async function handleOAuthCallback(): Promise<boolean> {
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("token");
+  const userId = urlParams.get("userId");
 
   if (!token) {
     return false;
@@ -151,12 +126,14 @@ export async function handleOAuthCallback(): Promise<boolean> {
     // Exchange the short-lived token for a long-lived API key
     const apiKey = await exchangeTokenForAPIKey(token);
 
-    // Save the API key to localStorage
-    saveDaydreamAPIKey(apiKey);
+    // Save the API key and userId to localStorage
+    saveDaydreamAuth(apiKey, userId);
 
     // Clean up the URL by removing the token parameter
     const url = new URL(window.location.href);
     url.searchParams.delete("token");
+    url.searchParams.delete("state");
+    url.searchParams.delete("userId");
     window.history.replaceState({}, document.title, url.toString());
 
     return true;

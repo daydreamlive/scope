@@ -53,11 +53,13 @@ class CloudTrack(MediaStreamTrack):
         fps: int = 30,
         initial_parameters: dict | None = None,
         notification_callback: Callable | None = None,
+        user_id: str | None = None,
     ):
         super().__init__()
         self.cloud_manager = cloud_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
+        self.user_id = user_id
 
         # FPS control
         self.fps = fps
@@ -98,6 +100,7 @@ class CloudTrack(MediaStreamTrack):
             initial_parameters=self.initial_parameters,
             notification_callback=self.notification_callback,
             cloud_manager=self.cloud_manager,  # Enable cloud mode
+            user_id=self.user_id,
         )
         self.frame_processor.start()
 

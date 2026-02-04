@@ -376,6 +376,8 @@ class CloudConnectionManager:
             logger.info(
                 f"[CLOUD] Offer includes initial parameters: {list(initial_parameters.keys())}"
             )
+        if self._user_id:
+            message["user_id"] = self._user_id
 
         response = await self.send_and_wait(message, timeout=30.0)
 

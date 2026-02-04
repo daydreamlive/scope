@@ -14,7 +14,8 @@ import { Cloud, Loader2, X, Copy, Check } from "lucide-react";
 import {
   isAuthenticated,
   redirectToSignIn,
-  clearDaydreamAPIKey,
+  clearDaydreamAuth,
+  getDaydreamUserId,
 } from "../../lib/auth";
 
 interface CloudStatus {
@@ -118,7 +119,7 @@ export function DaydreamAccountSection({
     abortControllerRef.current = abortController;
 
     try {
-      const userId = "TODO";
+      const userId = getDaydreamUserId();
 
       const response = await fetch("/api/v1/cloud/connect", {
         method: "POST",
@@ -224,7 +225,7 @@ export function DaydreamAccountSection({
     if (status.connected) {
       handleDisconnect();
     }
-    clearDaydreamAPIKey();
+    clearDaydreamAuth();
     setIsSignedIn(false);
   };
 

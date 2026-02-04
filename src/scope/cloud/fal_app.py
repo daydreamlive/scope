@@ -87,13 +87,7 @@ class KafkaPublisher:
                 self._started = False
                 self._producer = None
 
-    async def publish(
-        self,
-        event_type: str,
-        user_id: str | None = None,
-        connection_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
+    async def publish(self, event_type: str, data: dict[str, Any]) -> bool:
         """Publish an event to Kafka."""
         if not self._started or not self._producer:
             return False
@@ -101,24 +95,16 @@ class KafkaPublisher:
         event_id = str(uuid.uuid4())
         timestamp_ms = str(int(time.time() * 1000))
 
-        data: dict[str, Any] = {"event_type": event_type}
-        if user_id:
-            data["user_id"] = user_id
-        if connection_id:
-            data["connection_id"] = connection_id
-        if metadata:
-            data.update(metadata)
-
         event = {
             "id": event_id,
-            "type": "scope_stream_trace",
+            "type": "stream_trace",
             "timestamp": timestamp_ms,
-            "data": data,
+            "data": {"event_type": event_type, "client_source": "scope", **data},
         }
 
         try:
             await self._producer.send_and_wait(self._topic, value=event, key=event_id)
-            print(f"[Kafka] ✅ Published event: {event_type} (user={user_id}, conn={connection_id})")
+            print(f"[Kafka] ✅ Published event: {event_type}")
             return True
         except Exception as e:
             print(f"[Kafka] ❌ Failed to publish event {event_type}: {e}")
@@ -176,7 +162,7 @@ def cleanup_session_data():
 # fal deploy fal_app.py --auth public
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:5de3158"
+DOCKER_IMAGE = "daydreamlive/scope:75284d2"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -408,6 +394,7 @@ class ScopeApp(fal.App, keep_alive=300):
                         "sdp": payload.get("sdp"),
                         "type": payload.get("sdp_type", "offer"),
                         "initialParameters": payload.get("initialParameters"),
+                        "user_id": payload.get("user_id"),
                     },
                     timeout=30.0,
                 )
@@ -599,16 +586,20 @@ class ScopeApp(fal.App, keep_alive=300):
             msg_type = payload.get("type")
             request_id = payload.get("request_id")
 
+            # Reject all messages until user_id is set (except set_user_id itself)
+            if user_id is None and msg_type != "set_user_id":
+                print(f"[{connection_id}] Rejecting message type '{msg_type}' - user_id not set yet")
+                return None
+
             if msg_type == "set_user_id":
                 user_id = payload.get("user_id")
                 print(f"[{log_prefix()}] User ID set")
                 # Publish websocket connected event with user_id
                 if kafka_publisher and kafka_publisher.is_running:
-                    await kafka_publisher.publish(
-                        event_type="websocket_connected",
-                        user_id=user_id,
-                        connection_id=connection_id,
-                    )
+                    await kafka_publisher.publish("websocket_connected", {
+                        "user_id": user_id,
+                        "connection_id": connection_id,
+                    })
                 return {"type": "user_id_set", "user_id": user_id}
             elif msg_type == "get_ice_servers":
                 return await handle_get_ice_servers(payload)
@@ -664,13 +655,15 @@ class ScopeApp(fal.App, keep_alive=300):
         finally:
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
-                elapsed_seconds = time.time() - connection_start_time
-                await kafka_publisher.publish(
-                    event_type="websocket_disconnected",
-                    user_id=user_id,
-                    connection_id=connection_id,
-                    metadata={"duration_seconds": round(elapsed_seconds, 2)},
-                )
+                end_time = time.time()
+                elapsed_seconds = end_time - connection_start_time
+                await kafka_publisher.publish("websocket_disconnected", {
+                    "user_id": user_id,
+                    "connection_id": connection_id,
+                    "duration_seconds": round(elapsed_seconds, 2),
+                    "start_time": connection_start_time * 1000,
+                    "end_time": end_time * 1000,
+                })
             # Clean up session data to prevent data leakage between users
             cleanup_session_data()
             print(f"[{log_prefix()}] WebSocket connection closed, session data cleaned up")

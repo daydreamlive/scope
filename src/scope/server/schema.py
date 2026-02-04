@@ -171,6 +171,9 @@ class WebRTCOfferRequest(BaseModel):
     initialParameters: Parameters | None = Field(
         default=None, description="Initial parameters for the session"
     )
+    user_id: str | None = Field(
+        default=None, description="User ID for event tracking in cloud mode"
+    )
 
 
 class WebRTCOfferResponse(BaseModel):

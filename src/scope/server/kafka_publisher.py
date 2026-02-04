@@ -124,6 +124,7 @@ class KafkaPublisher:
         event_type: str,
         session_id: str | None = None,
         pipeline_ids: list[str] | None = None,
+        user_id: str | None = None,
         error: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
@@ -133,6 +134,7 @@ class KafkaPublisher:
             event_type: Type of event (e.g., "stream_started", "stream_stopped")
             session_id: Optional session ID associated with the event
             pipeline_ids: Optional list of pipeline IDs associated with the event
+            user_id: Optional user ID associated with the event
             error: Optional error details for error events
             metadata: Optional additional metadata
 
@@ -153,11 +155,14 @@ class KafkaPublisher:
         # Build data payload
         data: dict[str, Any] = {
             "event_type": event_type,
+            "client_source": "scope",
         }
         if session_id:
             data["session_id"] = session_id
         if pipeline_ids:
             data["pipeline_ids"] = pipeline_ids
+        if user_id:
+            data["user_id"] = user_id
         if error:
             data["error"] = error
         if metadata:
@@ -166,7 +171,7 @@ class KafkaPublisher:
         # Event structure matching Go kafka.go format
         event = {
             "id": event_id,
-            "type": "scope_stream_trace",
+            "type": "stream_trace",
             "timestamp": timestamp_ms,
             "data": data,
         }
@@ -186,6 +191,7 @@ class KafkaPublisher:
         event_type: str,
         session_id: str | None = None,
         pipeline_ids: list[str] | None = None,
+        user_id: str | None = None,
         error: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -198,6 +204,7 @@ class KafkaPublisher:
             event_type: Type of event (e.g., "stream_started", "stream_stopped")
             session_id: Optional session ID associated with the event
             pipeline_ids: Optional list of pipeline IDs associated with the event
+            user_id: Optional user ID associated with the event
             error: Optional error details for error events
             metadata: Optional additional metadata
         """
@@ -215,6 +222,7 @@ class KafkaPublisher:
                         event_type=event_type,
                         session_id=session_id,
                         pipeline_ids=pipeline_ids,
+                        user_id=user_id,
                         error=error,
                         metadata=metadata,
                     ),
@@ -257,6 +265,7 @@ def publish_event(
     event_type: str,
     session_id: str | None = None,
     pipeline_ids: list[str] | None = None,
+    user_id: str | None = None,
     error: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
@@ -269,6 +278,7 @@ def publish_event(
         event_type: Type of event (e.g., "stream_started", "stream_stopped")
         session_id: Optional session ID associated with the event
         pipeline_ids: Optional list of pipeline IDs associated with the event
+        user_id: Optional user ID associated with the event
         error: Optional error details for error events
         metadata: Optional additional metadata
     """
@@ -278,6 +288,7 @@ def publish_event(
             event_type=event_type,
             session_id=session_id,
             pipeline_ids=pipeline_ids,
+            user_id=user_id,
             error=error,
             metadata=metadata,
         )
@@ -287,6 +298,7 @@ async def publish_event_async(
     event_type: str,
     session_id: str | None = None,
     pipeline_ids: list[str] | None = None,
+    user_id: str | None = None,
     error: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> bool:
@@ -299,6 +311,7 @@ async def publish_event_async(
         event_type: Type of event (e.g., "stream_started", "stream_stopped")
         session_id: Optional session ID associated with the event
         pipeline_ids: Optional list of pipeline IDs associated with the event
+        user_id: Optional user ID associated with the event
         error: Optional error details for error events
         metadata: Optional additional metadata
 
@@ -311,6 +324,7 @@ async def publish_event_async(
             event_type=event_type,
             session_id=session_id,
             pipeline_ids=pipeline_ids,
+            user_id=user_id,
             error=error,
             metadata=metadata,
         )

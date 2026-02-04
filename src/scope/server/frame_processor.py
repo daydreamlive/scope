@@ -52,12 +52,15 @@ class FrameProcessor:
         notification_callback: callable = None,
         cloud_manager: "Any | None" = None,  # CloudConnectionManager for cloud mode
         session_id: str | None = None,  # Session ID for event tracking
+        user_id: str | None = None,  # User ID for event tracking
     ):
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
 
         # Session ID for Kafka event tracking
         self.session_id = session_id or str(uuid.uuid4())
+        # User ID for Kafka event tracking
+        self.user_id = user_id
 
         # Current parameters
         self.parameters = initial_parameters or {}
@@ -149,6 +152,7 @@ class FrameProcessor:
             publish_event(
                 event_type="stream_started",
                 session_id=self.session_id,
+                user_id=self.user_id,
                 metadata={"mode": "relay"},
             )
             return
@@ -175,6 +179,7 @@ class FrameProcessor:
             event_type="stream_started",
             session_id=self.session_id,
             pipeline_ids=self.pipeline_ids,
+            user_id=self.user_id,
             metadata={"mode": "local"},
         )
 
@@ -248,6 +253,7 @@ class FrameProcessor:
                 event_type="stream_error",
                 session_id=self.session_id,
                 pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
+                user_id=self.user_id,
                 error={
                     "message": error_message,
                     "type": "StreamError",
@@ -265,6 +271,7 @@ class FrameProcessor:
             event_type="stream_stopped",
             session_id=self.session_id,
             pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
+            user_id=self.user_id,
             metadata={
                 "mode": "cloud" if self._cloud_mode else "local",
                 "frames_in": self._frames_in,
@@ -793,6 +800,8 @@ class FrameProcessor:
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
+                session_id=self.session_id,
+                user_id=self.user_id,
             )
 
             self.pipeline_processors.append(processor)
