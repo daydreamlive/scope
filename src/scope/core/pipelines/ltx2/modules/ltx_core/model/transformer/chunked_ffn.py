@@ -1,21 +1,28 @@
 """Chunked FeedForward for memory-efficient inference.
 
 This module provides a wrapper that processes FeedForward layers in chunks
-along the sequence dimension, dramatically reducing peak memory usage.
+along the sequence dimension, reducing peak memory during FFN forward passes.
 
 The key insight is that FFN layers operate independently on each token position
 (unlike attention which computes relationships across all positions). This means
 FFN computation is embarrassingly parallel and can be chunked without any
 mathematical difference in the output.
 
-Memory Impact:
+Memory Impact (per-layer peak during forward pass):
 - Standard FFN: Creates intermediate tensor of shape (batch, seq_len, 4*dim)
-  For seq_len=57000, dim=4096: ~3.7GB per layer
+  For seq_len=49000, dim=4096: ~1.6GB per layer peak
 - Chunked FFN: Creates intermediate tensor of shape (batch, chunk_size, 4*dim)
-  For chunk_size=4096, dim=4096: ~0.26GB per layer
+  For chunk_size=4096, dim=4096: ~134MB per layer peak
 
-With 96 FFN layers (48 video + 48 audio), this reduces peak activation memory
-from ~50-60GB to ~5-6GB.
+IMPORTANT LIMITATIONS:
+- FFN chunking does NOT reduce model weight memory (use quantization for that)
+- FFN chunking does NOT reduce attention memory (attention is O(seq_len²))
+- The main benefit is reducing peak memory spikes during FFN computation
+- For LTX-2, attention memory is often the bigger bottleneck at long sequences
+
+For 512x768 @ 33 frames (~49K tokens), attention scores alone require:
+- 49K × 49K × 2 bytes × 32 heads ≈ 150GB (without FlashAttention)
+- With FlashAttention: O(seq_len) instead of O(seq_len²)
 
 Reference:
 - ComfyUI LTX-2 VRAM Memory Management:
@@ -32,7 +39,8 @@ import torch
 if TYPE_CHECKING:
     from ltx_core.model.transformer.feed_forward import FeedForward
 
-logger = logging.getLogger(__name__)
+# Use scope logger namespace to ensure logs appear in the main application log
+logger = logging.getLogger("scope.core.pipelines.ltx2.chunked_ffn")
 
 
 class ChunkedFeedForward(torch.nn.Module):
@@ -56,6 +64,8 @@ class ChunkedFeedForward(torch.nn.Module):
         self.ff = original_ff
         self.chunk_size = chunk_size
 
+    _logged_chunking: bool = False
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with chunked processing.
 
@@ -71,6 +81,15 @@ class ChunkedFeedForward(torch.nn.Module):
         if seq_len <= self.chunk_size:
             return self.ff(x)
 
+        # Log once that chunking is active (for debugging)
+        if not ChunkedFeedForward._logged_chunking:
+            ChunkedFeedForward._logged_chunking = True
+            num_chunks = (seq_len + self.chunk_size - 1) // self.chunk_size
+            logger.info(
+                f"FFN chunking active: seq_len={seq_len}, chunk_size={self.chunk_size}, "
+                f"num_chunks={num_chunks}"
+            )
+
         # Process in chunks along sequence dimension
         # Pre-allocate output tensor to avoid fragmentation
         output = torch.empty_like(x)
@@ -84,6 +103,25 @@ class ChunkedFeedForward(torch.nn.Module):
 
     def extra_repr(self) -> str:
         return f"chunk_size={self.chunk_size}"
+
+
+def _is_feedforward_module(module: torch.nn.Module) -> bool:
+    """Check if a module is a FeedForward layer.
+
+    We check both isinstance and class name because the import path
+    can differ depending on how the module was loaded.
+    """
+    # Try isinstance check first
+    try:
+        from ltx_core.model.transformer.feed_forward import FeedForward
+
+        if isinstance(module, FeedForward):
+            return True
+    except ImportError:
+        pass
+
+    # Fall back to class name check
+    return type(module).__name__ == "FeedForward"
 
 
 def apply_chunked_ffn(
@@ -104,17 +142,19 @@ def apply_chunked_ffn(
     Returns:
         Number of FeedForward layers that were wrapped
     """
-    from ltx_core.model.transformer.feed_forward import FeedForward
-
     patched_count = 0
 
     # Find all FeedForward modules and their parent modules
-    modules_to_patch: list[tuple[torch.nn.Module, str, FeedForward]] = []
+    modules_to_patch: list[tuple[torch.nn.Module, str, torch.nn.Module]] = []
 
     for name, module in model.named_modules():
-        if isinstance(module, FeedForward) and not isinstance(
-            module, ChunkedFeedForward
-        ):
+        is_feedforward = _is_feedforward_module(module)
+        is_already_chunked = (
+            isinstance(module, ChunkedFeedForward)
+            or type(module).__name__ == "ChunkedFeedForward"
+        )
+
+        if is_feedforward and not is_already_chunked:
             # Find the parent module
             parts = name.rsplit(".", 1)
             if len(parts) == 2:
@@ -125,6 +165,23 @@ def apply_chunked_ffn(
                 attr_name = name
 
             modules_to_patch.append((parent, attr_name, module))
+
+    if verbose:
+        if not modules_to_patch:
+            # Debug: list module types to help diagnose
+            ff_like_modules = [
+                (name, type(module).__name__)
+                for name, module in model.named_modules()
+                if "ff" in name.lower()
+                or "feedforward" in type(module).__name__.lower()
+            ]
+            if ff_like_modules:
+                logger.warning(
+                    f"No FeedForward modules found, but found {len(ff_like_modules)} "
+                    f"FF-like modules: {ff_like_modules[:5]}..."
+                )
+            else:
+                logger.warning("No FeedForward or FF-like modules found in model")
 
     # Apply patches
     for parent, attr_name, ff_module in modules_to_patch:

@@ -122,7 +122,12 @@ class NVFP4Linear(torch.nn.Module):
 
     @classmethod
     def from_linear(cls, linear: torch.nn.Linear) -> NVFP4Linear:
-        """Create NVFP4Linear from a standard Linear layer."""
+        """Create NVFP4Linear from a standard Linear layer.
+
+        Note: This method does NOT free the original linear layer's memory.
+        The caller is responsible for deleting the original module after
+        this method returns.
+        """
         from comfy_kitchen.tensor import QuantizedTensor
 
         nvfp4_linear = cls(
@@ -255,7 +260,7 @@ def quantize_model_nvfp4(
         mem_before = torch.cuda.memory_allocated() / 1024**3
         logger.info(f"GPU memory before quantization: {mem_before:.2f} GB")
 
-    for name, module in layers_to_replace:
+    for i, (name, module) in enumerate(layers_to_replace):
         # Navigate to parent module
         parts = name.split(".")
         parent = model
@@ -266,10 +271,28 @@ def quantize_model_nvfp4(
         nvfp4_module = NVFP4Linear.from_linear(module)
 
         # Replace with NVFP4Linear
-        # The original module will be garbage collected after replacement
         setattr(parent, parts[-1], nvfp4_module)
 
-    # Force garbage collection and clear CUDA cache
+        # Explicitly delete the original module's parameters to free memory
+        # This is important because Python's GC might not immediately free GPU memory
+        if hasattr(module, "weight"):
+            del module.weight
+        if hasattr(module, "bias") and module.bias is not None:
+            del module.bias
+
+        # Periodically clear CUDA cache to prevent memory fragmentation
+        # Do this every 100 layers to balance between memory and speed
+        if (i + 1) % 100 == 0:
+            gc.collect()
+            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                current_mem = torch.cuda.memory_allocated() / 1024**3
+                logger.debug(
+                    f"Quantized {i + 1}/{len(layers_to_replace)} layers, "
+                    f"current memory: {current_mem:.2f} GB"
+                )
+
+    # Final garbage collection and cache clear
     gc.collect()
     torch.cuda.empty_cache()
 

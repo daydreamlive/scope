@@ -192,17 +192,38 @@ class LTX2Pipeline(Pipeline):
 
         # Cache all models in VRAM for maximum performance
         # This uses more VRAM (~48GB total) but eliminates all reload overhead
+        def log_gpu_memory(stage: str) -> None:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                reserved = torch.cuda.memory_reserved() / 1024**3
+                logger.info(
+                    f"  GPU memory after {stage}: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
+                )
+
         logger.info("Loading and caching models in VRAM...")
         logger.info("  - Loading text encoder (~20GB)...")
         self._cached_text_encoder = self.model_ledger.text_encoder()
-        logger.info("  - Loading transformer (~25GB)...")
+        log_gpu_memory("text encoder")
+
+        logger.info("  - Loading transformer...")
         self._cached_transformer = self.model_ledger.transformer()
+        log_gpu_memory("transformer")
+
+        # Force garbage collection after transformer to free any temporary tensors
+        import gc
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        log_gpu_memory("GC after transformer")
+
         logger.info("  - Loading video decoder (~3GB)...")
         self._cached_video_decoder = self.model_ledger.video_decoder()
         logger.info("  - Loading audio decoder...")
         self._cached_audio_decoder = self.model_ledger.audio_decoder()
         logger.info("  - Loading vocoder...")
         self._cached_vocoder = self.model_ledger.vocoder()
+        log_gpu_memory("all models")
         logger.info("All models cached successfully in VRAM")
 
         logger.info(f"LTX2 models loaded in {time.time() - start:.2f}s")
