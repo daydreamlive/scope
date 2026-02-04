@@ -265,13 +265,8 @@ def quantize_model_nvfp4(
         # Create NVFP4Linear from the original Linear
         nvfp4_module = NVFP4Linear.from_linear(module)
 
-        # Explicitly delete the original module's weight to free memory
-        # before replacing the module
-        del module.weight
-        if module.bias is not None:
-            del module.bias
-
         # Replace with NVFP4Linear
+        # The original module will be garbage collected after replacement
         setattr(parent, parts[-1], nvfp4_module)
 
     # Force garbage collection and clear CUDA cache
