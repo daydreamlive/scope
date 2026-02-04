@@ -228,6 +228,13 @@ def quantize_model_nvfp4(
 ) -> None:
     """Quantize Linear layers in a model to NVFP4 in-place.
 
+    This function replaces nn.Linear layers with NVFP4Linear layers that use
+    comfy-kitchen's QuantizedTensor for ~4x weight memory reduction and
+    hardware-accelerated matmul on Blackwell GPUs.
+
+    IMPORTANT: We only store layer NAMES (not module references) to avoid
+    keeping original weights alive in memory during the replacement loop.
+
     Args:
         model: PyTorch model to quantize
         layer_filter: Optional function (name, module) -> bool to filter layers.
@@ -235,15 +242,17 @@ def quantize_model_nvfp4(
     """
     import gc
 
-    layers_to_replace = []
-    skipped_lora = []
+    # CRITICAL: Only store layer names, NOT module references!
+    # Storing (name, module) tuples keeps all original modules alive in memory,
+    # preventing garbage collection of original weights during the loop.
+    layer_names_to_replace: list[str] = []
+    skipped_lora: list[str] = []
 
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
             # Always skip LoRA adapter layers regardless of filter
             # PEFT uses lora_A and lora_B as ModuleDict containers
             # The full path looks like: blocks.0.self_attn.q.lora_A.default
-            # Also skip lora_embedding_A/B and any lora_ prefixed modules
             name_parts = name.split(".")
             is_lora_layer = any(
                 part.startswith("lora_") or part in ("lora_A", "lora_B")
@@ -255,15 +264,17 @@ def quantize_model_nvfp4(
                 continue
 
             if layer_filter is None or layer_filter(name, module):
-                layers_to_replace.append((name, module))
+                layer_names_to_replace.append(name)
 
     if skipped_lora:
         logger.info(f"Skipped {len(skipped_lora)} LoRA adapter layers")
         logger.debug(f"Skipped LoRA layers: {skipped_lora[:5]}...")
 
-    logger.info(f"Quantizing {len(layers_to_replace)} Linear layers to NVFP4")
+    num_layers = len(layer_names_to_replace)
+    logger.info(f"Quantizing {num_layers} Linear layers to NVFP4")
 
     # Log memory before quantization - ensure clean state first
+    mem_before = 0.0
     if torch.cuda.is_available():
         gc.collect()
         torch.cuda.empty_cache()
@@ -275,41 +286,59 @@ def quantize_model_nvfp4(
             f"{mem_reserved:.2f} GB reserved"
         )
 
-    for i, (name, module) in enumerate(layers_to_replace):
-        # Navigate to parent module
+    # Process each layer by name - look up module fresh each iteration
+    for i, name in enumerate(layer_names_to_replace):
+        # Navigate to parent module and get the Linear layer
         parts = name.split(".")
         parent = model
         for part in parts[:-1]:
             parent = getattr(parent, part)
 
-        # Get reference to original weight tensor for cleanup
-        original_weight = module.weight
-        original_bias = module.bias if hasattr(module, "bias") else None
+        # Get the current module (this is the only reference we hold)
+        module = getattr(parent, parts[-1])
+
+        # Verify it's still a Linear (not already replaced)
+        if not isinstance(module, torch.nn.Linear):
+            logger.warning(f"Layer {name} is no longer nn.Linear, skipping")
+            continue
 
         # Create NVFP4Linear from the original Linear
+        # from_linear() creates new quantized weights, does NOT keep reference to original
         nvfp4_module = NVFP4Linear.from_linear(module)
 
-        # Replace with NVFP4Linear FIRST
+        # Replace in the model - this removes the model's reference to original module
         setattr(parent, parts[-1], nvfp4_module)
 
-        # Now explicitly free the original tensors
-        # Setting .data to empty tensor on CPU forces CUDA memory release
-        if original_weight is not None:
-            original_weight.data = torch.empty(0, device="cpu", dtype=torch.float32)
-        if original_bias is not None:
-            original_bias.data = torch.empty(0, device="cpu", dtype=torch.float32)
+        # Explicitly clear the original module's weight data to force CUDA memory release
+        # This is necessary because 'module' still holds a reference until end of iteration
+        if module.weight is not None:
+            module.weight.data = torch.empty(0, device="cpu", dtype=torch.float32)
+        if module.bias is not None:
+            module.bias.data = torch.empty(0, device="cpu", dtype=torch.float32)
 
-        # Clear local references
-        del original_weight, original_bias, module
+        # Delete local reference - now module can be garbage collected
+        del module
+
+        # Periodic cleanup to prevent memory fragmentation
+        # More frequent cleanup (every 25 layers) for better memory behavior
+        if (i + 1) % 25 == 0:
+            gc.collect()
+            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                current_mem = torch.cuda.memory_allocated() / 1024**3
+                logger.debug(
+                    f"Quantized {i + 1}/{num_layers} layers, "
+                    f"current memory: {current_mem:.2f} GB"
+                )
 
     # Final garbage collection and cache clear
     gc.collect()
     torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
     # Log memory after quantization
     if torch.cuda.is_available():
-        torch.cuda.synchronize()
         mem_after = torch.cuda.memory_allocated() / 1024**3
         mem_reserved_after = torch.cuda.memory_reserved() / 1024**3
         logger.info(
@@ -321,13 +350,14 @@ def quantize_model_nvfp4(
             logger.info(f"Memory saved: {mem_saved:.2f} GB")
         else:
             logger.warning(
-                f"Memory INCREASED by {-mem_saved:.2f} GB - quantization may not be "
-                "freeing original weights properly"
+                f"Memory INCREASED by {-mem_saved:.2f} GB - this may indicate "
+                "quantized weights are larger than expected or original weights "
+                "were not fully freed"
             )
 
         # Verify quantization by checking a sample layer
-        if layers_to_replace:
-            sample_name = layers_to_replace[0][0]
+        if layer_names_to_replace:
+            sample_name = layer_names_to_replace[0]
             parts = sample_name.split(".")
             sample_module = model
             for part in parts:
@@ -343,12 +373,17 @@ def quantize_model_nvfp4(
                 )
                 if hasattr(weight, "_qdata"):
                     qdata = weight._qdata
+                    original_bytes = weight.shape[0] * weight.shape[1] * 2
+                    quantized_bytes = qdata.numel() * qdata.element_size()
+                    ratio = (
+                        original_bytes / quantized_bytes if quantized_bytes > 0 else 0
+                    )
                     logger.info(
                         f"  _qdata.shape: {qdata.shape}, _qdata.dtype: {qdata.dtype}"
                     )
                     logger.info(
-                        f"  Storage: {qdata.numel() * qdata.element_size()} bytes "
-                        f"(vs {weight.shape[0] * weight.shape[1] * 2} bytes for BF16)"
+                        f"  Storage: {quantized_bytes:,} bytes "
+                        f"(vs {original_bytes:,} bytes for BF16, {ratio:.1f}x reduction)"
                     )
             else:
                 logger.warning(
