@@ -21,6 +21,11 @@ interface SettingsDialogProps {
   onClose: () => void;
   initialTab?: "general" | "plugins";
   initialPluginPath?: string;
+  // Cloud mode callbacks
+  onCloudStatusChange?: (connected: boolean) => void;
+  onCloudConnectingChange?: (connecting: boolean) => void;
+  onPipelinesRefresh?: () => Promise<unknown>;
+  cloudDisabled?: boolean;
 }
 
 const isLocalPath = (spec: string): boolean => {
@@ -55,6 +60,10 @@ export function SettingsDialog({
   onClose,
   initialTab = "general",
   initialPluginPath = "",
+  onCloudStatusChange,
+  onCloudConnectingChange,
+  onPipelinesRefresh,
+  cloudDisabled,
 }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
   const [modelsDirectory, setModelsDirectory] = useState(
@@ -345,6 +354,10 @@ export function SettingsDialog({
                 onModelsDirectoryChange={handleModelsDirectoryChange}
                 onLogsDirectoryChange={handleLogsDirectoryChange}
                 onReportBug={() => setReportBugOpen(true)}
+                onCloudStatusChange={onCloudStatusChange}
+                onCloudConnectingChange={onCloudConnectingChange}
+                onPipelinesRefresh={onPipelinesRefresh ?? refetchPipelines}
+                cloudDisabled={cloudDisabled}
               />
             </TabsContent>
             <TabsContent value="plugins" className="mt-0">

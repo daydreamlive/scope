@@ -1,19 +1,25 @@
 import { useState, useEffect } from "react";
-import { Settings, BookOpenText, Bug, LogIn, LogOut } from "lucide-react";
+import { Settings, BookOpenText, Bug } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { ReportBugDialog } from "./ReportBugDialog";
-import {
-  isAuthenticated,
-  redirectToSignIn,
-  clearDaydreamAPIKey,
-} from "../lib/auth";
 
 interface HeaderProps {
   className?: string;
+  // Cloud mode callbacks
+  onCloudStatusChange?: (connected: boolean) => void;
+  onCloudConnectingChange?: (connecting: boolean) => void;
+  onPipelinesRefresh?: () => Promise<unknown>;
+  cloudDisabled?: boolean;
 }
 
-export function Header({ className = "" }: HeaderProps) {
+export function Header({
+  className = "",
+  onCloudStatusChange,
+  onCloudConnectingChange,
+  onPipelinesRefresh,
+  cloudDisabled,
+}: HeaderProps) {
   // Settings dialog state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<"general" | "plugins">(
@@ -23,9 +29,6 @@ export function Header({ className = "" }: HeaderProps) {
 
   // Report bug dialog state
   const [reportBugOpen, setReportBugOpen] = useState(false);
-
-  // Auth state
-  const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
     // Handle deep link actions for plugin installation
@@ -40,35 +43,10 @@ export function Header({ className = "" }: HeaderProps) {
     }
   }, []);
 
-  useEffect(() => {
-    // Check authentication status on mount
-    setAuthenticated(isAuthenticated());
-
-    // Listen for auth state changes
-    const handleAuthChange = () => {
-      setAuthenticated(isAuthenticated());
-    };
-
-    window.addEventListener("daydream-auth-change", handleAuthChange);
-
-    return () => {
-      window.removeEventListener("daydream-auth-change", handleAuthChange);
-    };
-  }, []);
-
   const handleSettingsClose = () => {
     setSettingsOpen(false);
     setInitialTab("general");
     setInitialPluginPath("");
-  };
-
-  const handleSignIn = () => {
-    redirectToSignIn();
-  };
-
-  const handleSignOut = () => {
-    clearDaydreamAPIKey();
-    setAuthenticated(false);
   };
 
   return (
@@ -117,27 +95,6 @@ export function Header({ className = "" }: HeaderProps) {
           >
             <BookOpenText className="h-5 w-5 text-muted-foreground opacity-60" />
           </a>
-          {authenticated ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSignOut}
-              className="hover:opacity-80 transition-opacity gap-1.5"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="text-xs">Sign Out</span>
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSignIn}
-              className="hover:opacity-80 transition-opacity gap-1.5"
-            >
-              <LogIn className="h-4 w-4" />
-              <span className="text-xs">Sign In</span>
-            </Button>
-          )}
           <Button
             variant="ghost"
             size="icon"
@@ -155,6 +112,10 @@ export function Header({ className = "" }: HeaderProps) {
         onClose={handleSettingsClose}
         initialTab={initialTab}
         initialPluginPath={initialPluginPath}
+        onCloudStatusChange={onCloudStatusChange}
+        onCloudConnectingChange={onCloudConnectingChange}
+        onPipelinesRefresh={onPipelinesRefresh}
+        cloudDisabled={cloudDisabled}
       />
 
       <ReportBugDialog open={reportBugOpen} onClose={() => setReportBugOpen(false)} />

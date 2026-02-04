@@ -3,7 +3,6 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
-import { CloudModeToggle } from "../components/CloudModeToggle";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
@@ -30,7 +29,6 @@ import type {
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
-import { isAuthenticated } from "../lib/auth";
 
 // Delay before resetting video reinitialization flag (ms)
 // This allows useVideoSource to detect the flag change and trigger reinitialization
@@ -78,18 +76,6 @@ export function StreamPage() {
   const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
   // Track when cloud connection is in progress (to disable controls)
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
-  // Track authentication status for showing/hiding cloud toggle
-  const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
-
-  // Listen for auth state changes
-  useEffect(() => {
-    const handleAuthChange = () => {
-      setIsSignedIn(isAuthenticated());
-    };
-    window.addEventListener("daydream-auth-change", handleAuthChange);
-    return () =>
-      window.removeEventListener("daydream-auth-change", handleAuthChange);
-  }, []);
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
@@ -1140,7 +1126,12 @@ export function StreamPage() {
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <Header />
+      <Header
+        onCloudStatusChange={setIsBackendCloudConnected}
+        onCloudConnectingChange={setIsCloudConnecting}
+        onPipelinesRefresh={handlePipelinesRefresh}
+        cloudDisabled={isStreaming}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
@@ -1386,14 +1377,6 @@ export function StreamPage() {
 
         {/* Right Panel - Settings */}
         <div className="w-1/5 flex flex-col gap-3">
-          {isSignedIn && (
-            <CloudModeToggle
-              onStatusChange={setIsBackendCloudConnected}
-              onConnectingChange={setIsCloudConnecting}
-              onPipelinesRefresh={handlePipelinesRefresh}
-              disabled={isStreaming}
-            />
-          )}
           <SettingsPanel
             className="flex-1 min-h-0 overflow-auto"
             pipelines={pipelines}
