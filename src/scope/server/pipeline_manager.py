@@ -373,6 +373,17 @@ class PipelineManager:
             for pipeline_id_to_unload in pipelines_to_unload:
                 self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
 
+            # Clean up stale status entries for pipelines not in the new request list
+            # This handles cases where a previous pipeline failed to load (status=ERROR/NOT_LOADED)
+            # but its status entry was never cleaned up because it wasn't in _pipelines
+            stale_status_ids = [
+                pid for pid in self._pipeline_statuses.keys()
+                if pid not in pipeline_ids
+            ]
+            for stale_id in stale_status_ids:
+                del self._pipeline_statuses[stale_id]
+                logger.debug(f"Cleaned up stale status entry for pipeline: {stale_id}")
+
         # Load all pipelines
         success = True
         for pipeline_id in pipeline_ids:
@@ -554,13 +565,23 @@ class PipelineManager:
             "video-depth-anything",
             "controller-viz",
             "rife",
+            "scribble",
+            "gray",
+            "optical-flow",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
-            # Plugin pipeline - instantiate generically with load_params
+            # Plugin pipeline - use schema defaults merged with load_params
             logger.info(f"Loading plugin pipeline: {pipeline_id}")
-            load_params = load_params or {}
-            return pipeline_class(**load_params)
+            config_class = pipeline_class.get_config_class()
+            # Get defaults from schema fields
+            schema_defaults = {}
+            for name, field in config_class.model_fields.items():
+                if field.default is not None:
+                    schema_defaults[name] = field.default
+            # Merge: load_params override schema defaults
+            merged_params = {**schema_defaults, **(load_params or {})}
+            return pipeline_class(**merged_params)
 
         # Fall through to built-in pipeline initialization
         if pipeline_id == "streamdiffusionv2":
@@ -969,6 +990,44 @@ class PipelineManager:
                 dtype=torch.float16,
             )
             logger.info("RIFE pipeline initialized")
+            return pipeline
+        elif pipeline_id == "scribble":
+            from scope.core.pipelines import ScribblePipeline
+
+            pipeline = ScribblePipeline(
+                device=get_device(),
+                dtype=torch.float16,
+            )
+            logger.info("Scribble pipeline initialized")
+            return pipeline
+        elif pipeline_id == "gray":
+            from scope.core.pipelines import GrayPipeline
+
+            pipeline = GrayPipeline(
+                device=get_device(),
+            )
+            logger.info("Gray pipeline initialized")
+
+        elif pipeline_id == "optical-flow":
+            from scope.core.pipelines import OpticalFlowPipeline
+            from scope.core.pipelines.optical_flow.schema import OpticalFlowConfig
+
+            # Create config with schema defaults, overridden by load_params
+            params = load_params or {}
+            config = OmegaConf.create(
+                {
+                    "model_size": params.get(
+                        "model_size",
+                        OpticalFlowConfig.model_fields["model_size"].default,
+                    ),
+                }
+            )
+
+            pipeline = OpticalFlowPipeline(
+                config,
+                device=get_device(),
+            )
+            logger.info("OpticalFlow pipeline initialized")
             return pipeline
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")

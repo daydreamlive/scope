@@ -17,14 +17,6 @@ def initialize_kv_cache(
 ):
     kv_cache = []
 
-    # Validate frame_seq_length to catch configuration issues early
-    if frame_seq_length <= 0:
-        raise ValueError(
-            f"frame_seq_length must be > 0, got {frame_seq_length}. "
-            "This usually means height/width are not set correctly in the pipeline config. "
-            "Check that the pipeline is initialized with valid height and width values."
-        )
-
     # Calculate KV cache size
     if local_attn_size != -1:
         # Use the local attention size to compute the KV cache size

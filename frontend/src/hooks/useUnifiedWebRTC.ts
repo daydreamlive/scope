@@ -238,7 +238,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             console.log(
               "[UnifiedWebRTC] Mode:",
               isCloudMode
-                ? "CLOUD (frontend → fal.ai)"
+                ? "CLOUD (frontend → cloud)"
                 : "LOCAL (frontend → backend)"
             );
             console.log("[UnifiedWebRTC] Session ID:", sessionIdRef.current);

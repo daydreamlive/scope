@@ -221,7 +221,7 @@ class FrameProcessor:
                 logger.error(f"Error releasing Spout receiver: {e}")
             self.spout_receiver = None
 
-        # Clean up fal.ai callback in cloud mode
+        # Clean up cloud callback in cloud mode
         if self._cloud_mode and self.cloud_manager:
             self.cloud_manager.remove_frame_callback(self._on_frame_from_cloud)
 
@@ -304,7 +304,7 @@ class FrameProcessor:
 
         if self._cloud_mode:
             # Cloud mode: send frame to cloud (only in video mode)
-            # In text mode, fal.ai generates video from prompts only - no input frames
+            # In text mode, cloud generates video from prompts only - no input frames
             if not self._video_mode:
                 return True  # Silently ignore frames in text mode
             if self.cloud_manager:
@@ -742,7 +742,7 @@ class FrameProcessor:
 
                     if self._cloud_mode:
                         # Cloud mode: send Spout frames to cloud (only in video mode)
-                        # In text mode, fal.ai generates video from prompts only - no input frames
+                        # In text mode, cloud generates video from prompts only - no input frames
                         if self._video_mode and self.cloud_manager:
                             if self.cloud_manager.send_frame_to_fal(rgb_frame):
                                 self._frames_to_cloud += 1

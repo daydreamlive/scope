@@ -655,11 +655,11 @@ async def handle_webrtc_offer(
 ):
     """Handle WebRTC offer and return answer.
 
-    In cloud mode, video flows through the backend to fal.ai:
-        Browser → Backend (WebRTC) → fal.ai (WebRTC) → Backend → Browser
+    In cloud mode, video flows through the backend to cloud:
+        Browser → Backend (WebRTC) → cloud (WebRTC) → Backend → Browser
 
     This enables:
-    - Spout input to be forwarded to fal.ai
+    - Spout input to be forwarded to cloud
     - Full control over the video pipeline on the backend
     - Local backend can record/manipulate frames
     """
@@ -667,7 +667,7 @@ async def handle_webrtc_offer(
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
             logger.info(
-                "[CLOUD] Using relay mode - video will flow through backend to fal.ai"
+                "[CLOUD] Using relay mode - video will flow through backend to cloud"
             )
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
@@ -702,7 +702,7 @@ async def add_ice_candidate(
     ICE candidates as they are discovered.
 
     Note: In cloud mode, the browser still connects to the LOCAL backend via WebRTC.
-    The backend then relays frames to/from fal.ai via a separate WebRTC connection.
+    The backend then relays frames to/from cloud via a separate WebRTC connection.
     So browser ICE candidates always go to the local WebRTC session.
     """
     # TODO: Validate that the Content-Type is 'application/trickle-ice-sdpfrag'
@@ -744,27 +744,27 @@ async def download_recording(
     This will finalize the current recording and create a copy for download,
     then continue recording with a new file.
 
-    In cloud mode, this proxies the download request to fal.ai.
+    In cloud mode, this proxies the download request to cloud.
     """
     try:
-        # If cloud mode is active, proxy to fal.ai
+        # If cloud mode is active, proxy to cloud
         if cloud_manager.is_connected:
             logger.info(f"[CLOUD] Downloading recording for session {session_id}")
 
-            # Use the fal.ai session ID if we have an active WebRTC connection
-            cloud_session_id = cloud_manager.cloud_session_id
+            # Use the cloud session ID if we have an active WebRTC connection
+            cloud_session_id = cloud_manager._webrtc_client.session_id
             if not cloud_session_id:
                 raise HTTPException(
                     status_code=404,
-                    detail="No active fal.ai session for recording download",
+                    detail="No active cloud session for recording download",
                 )
 
-            # Download from fal.ai
+            # Download from cloud
             content = await cloud_manager.download_recording(cloud_session_id)
             if not content:
                 raise HTTPException(
                     status_code=404,
-                    detail="Recording not available from fal.ai",
+                    detail="Recording not available from cloud",
                 )
 
             # Generate filename with datetime
@@ -890,7 +890,7 @@ async def list_assets(
 ):
     """List available asset files in the assets directory and its subdirectories.
 
-    When cloud mode is active, lists assets from the fal.ai server instead.
+    When cloud mode is active, lists assets from the cloud server instead.
     """
 
     def process_asset_file(
@@ -913,9 +913,9 @@ async def list_assets(
         )
 
     try:
-        # If cloud mode is active, proxy to fal.ai
+        # If cloud mode is active, proxy to cloud
         if cloud_manager.is_connected:
-            logger.info("[CLOUD] Fetching assets list from fal.ai")
+            logger.info("[CLOUD] Fetching assets list from cloud")
             path = "/api/v1/assets"
             if type:
                 path = f"{path}?type={type}"
@@ -942,7 +942,7 @@ async def list_assets(
                 for a in assets_data
             ]
 
-            logger.info(f"[CLOUD] Found {len(asset_files)} assets on fal.ai")
+            logger.info(f"[CLOUD] Found {len(asset_files)} assets on cloud")
             return AssetsResponse(assets=asset_files)
 
         # Local mode: list local assets
@@ -986,7 +986,7 @@ async def upload_asset(
 ):
     """Upload an asset file (image or video) to the assets directory.
 
-    When cloud mode is active, the file is uploaded to the fal.ai server instead.
+    When cloud mode is active, the file is uploaded to the cloud server instead.
     """
     import base64
 
@@ -1035,11 +1035,11 @@ async def upload_asset(
                 detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
             )
 
-        # If cloud mode is active, upload to fal.ai AND save locally for thumbnails
+        # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:
             # TODO need a unique directory for each user so that they can't see each other's assets or just make sure we clean the dir for each websocket connection
             logger.info(
-                f"upload_asset: Uploading {asset_type} to fal.ai and locally: {filename}"
+                f"upload_asset: Uploading {asset_type} to cloud and locally: {filename}"
             )
 
             # Also save locally for thumbnail serving
@@ -1051,10 +1051,10 @@ async def upload_asset(
                 f"upload_asset: Saved local copy for thumbnails: {local_file_path}"
             )
 
-            # Base64 encode the content for JSON transport to fal.ai
+            # Base64 encode the content for JSON transport to cloud
             base64_content = base64.b64encode(content).decode("utf-8")
 
-            # Send to fal.ai via WebSocket proxy
+            # Send to cloud via WebSocket proxy
             response = await cloud_manager.api_request(
                 method="POST",
                 path=f"/api/v1/assets?filename={filename}",
@@ -1065,15 +1065,15 @@ async def upload_asset(
                 timeout=60.0,  # Longer timeout for uploads
             )
 
-            # Extract data from response - this is the fal.ai path
+            # Extract data from response - this is the cloud path
             data = response.get("data", {})
             cloud_path = data.get("path", "")
-            logger.info(f"upload_asset: Uploaded to fal.ai: {cloud_path}")
+            logger.info(f"upload_asset: Uploaded to cloud: {cloud_path}")
 
-            # Return the fal.ai path (which fal.ai will use for processing)
+            # Return the cloud path (which cloud will use for processing)
             return AssetFileInfo(
                 name=data.get("name", filename),
-                path=cloud_path,  # Use fal.ai path for parameters sent to cloud
+                path=cloud_path,  # Use cloud path for parameters sent to cloud
                 size_mb=data.get("size_mb", round(len(content) / (1024 * 1024), 2)),
                 folder=data.get("folder"),
                 type=data.get("type", asset_type),
@@ -1117,13 +1117,13 @@ async def upload_asset(
 async def serve_asset(asset_path: str):
     """Serve an asset file (for thumbnails/previews).
 
-    Handles both relative paths and absolute paths (e.g., from fal.ai).
+    Handles both relative paths and absolute paths (e.g., from cloud).
     For absolute paths, extracts the filename and serves from local assets.
     """
     try:
         assets_dir = get_assets_dir()
 
-        # Handle absolute paths (e.g., from fal.ai: /root/.daydream-scope/assets/filename.png)
+        # Handle absolute paths (e.g., from cloud: /root/.daydream-scope/assets/filename.png)
         # Extract just the filename to serve from local cache
         if asset_path.startswith("/") or asset_path.startswith("root/"):
             # Extract just the filename
@@ -1621,7 +1621,7 @@ async def reload_plugin(
 
 
 # =============================================================================
-# Cloud Integration Endpoints (fal.ai)
+# Cloud Integration Endpoints
 # =============================================================================
 
 
@@ -1631,7 +1631,7 @@ async def connect_to_cloud(
     request: CloudConnectRequest,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Connect to cloud (fal.ai) for remote GPU inference.
+    """Connect to cloud for remote GPU inference.
 
     This establishes a WebSocket connection to the cloud runner,
     which stays open until disconnect is called. Once connected:
@@ -1640,7 +1640,7 @@ async def connect_to_cloud(
     - The cloud runner stays warm and ready for video processing
 
     Credentials can be provided in the request body or via CLI args:
-    --cloud-app-id and --cloud-api-key (or FAL_APP_ID/FAL_KEY env vars).
+    --cloud-app-id and --cloud-api-key (or SCOPE_CLOUD_APP_ID/SCOPE_CLOUD_API_KEY env vars).
 
     Note: The connection may take 1-2 minutes on cold start while the
     cloud runner initializes.
@@ -1658,7 +1658,7 @@ async def connect_to_cloud(
             raise HTTPException(
                 status_code=400,
                 detail="cloud credentials not configured. Use --cloud-app-id and --cloud-api-key CLI args, "
-                "or FAL_APP_ID and FAL_KEY environment variables.",
+                "or SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_APP_ID environment variables.",
             )
 
         logger.info(f"Connecting to cloud: {app_id} (user_id: {request.user_id})")
@@ -1874,14 +1874,14 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 @click.option(
     "--cloud-app-id",
     default="Daydream/scope-app--staging/ws",
-    envvar="FAL_APP_ID",
+    envvar="SCOPE_CLOUD_APP_ID",
     help="Cloud app ID for cloud mode (e.g., 'username/scope-app')",
 )
 @click.option(
     "--cloud-api-key",
     default=None,
-    envvar="FAL_API_KEY",
-    help="fal.ai API key for cloud mode",
+    envvar="SCOPE_CLOUD_API_KEY",
+    help="Cloud API key for cloud mode",
 )
 @click.pass_context
 def main(

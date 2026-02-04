@@ -634,16 +634,16 @@ class PluginUpdatesResponse(BaseModel):
 
 
 # =============================================================================
-# Cloud Integration Schemas (fal.ai)
+# Cloud Integration Schemas
 # =============================================================================
 
 
 class CloudConnectRequest(BaseModel):
-    """Request to connect to cloud processing (fal.ai).
+    """Request to connect to cloud processing.
 
     Credentials can be provided in the request body or via CLI args/env vars.
     If not provided here, the server will use --cloud-app-id and --cloud-api-key
-    (or FAL_APP_ID and FAL_KEY environment variables).
+    (or SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_API_KEY environment variables).
     """
 
     app_id: str | None = Field(
@@ -656,7 +656,7 @@ class CloudConnectRequest(BaseModel):
     )
     user_id: str | None = Field(
         default=None,
-        description="The user ID for logging purposes (from fal token).",
+        description="The user ID for logging purposes.",
     )
 
 

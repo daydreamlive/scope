@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class CloudTrack(MediaStreamTrack):
-    """MediaStreamTrack that relays video through fal.ai for processing.
+    """MediaStreamTrack that relays video through cloud for processing.
 
     This track uses FrameProcessor in cloud mode, which handles:
     - Sending frames to cloud
@@ -207,7 +207,7 @@ class CloudTrack(MediaStreamTrack):
         return frame
 
     def update_parameters(self, params: dict) -> None:
-        """Update pipeline parameters on fal.ai."""
+        """Update pipeline parameters on cloud."""
         # Handle Spout settings via FrameProcessor
         if self.frame_processor:
             self.frame_processor.update_parameters(params)

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class FrameInputTrack(MediaStreamTrack):
     """A MediaStreamTrack that receives frames from a queue/callback.
 
-    This track is used to send frames TO fal.ai. Frames can come from:
+    This track is used to send frames TO cloud. Frames can come from:
     - Browser WebRTC connection (relayed through backend)
     - Spout receiver
     - Any other frame source
@@ -98,7 +98,7 @@ class FrameInputTrack(MediaStreamTrack):
 
 
 class FrameOutputHandler:
-    """Handles frames received FROM fal.ai.
+    """Handles frames received FROM cloud.
 
     Processed frames from cloud are passed to registered callbacks,
     which can send them to:
@@ -144,7 +144,7 @@ class FrameOutputHandler:
 class CloudWebRTCClient:
     """WebRTC client that connects to cloud for remote processing.
 
-    This establishes a WebRTC peer connection to the fal.ai runner,
+    This establishes a WebRTC peer connection to the cloud runner,
     allowing video frames to be sent for processing and received back.
 
     Usage:

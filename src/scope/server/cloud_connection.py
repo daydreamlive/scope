@@ -11,7 +11,7 @@ Architecture:
 - CloudConnectionManager is instantiated once at app startup
 - When connect() is called, it opens a WebSocket to cloud and waits for "ready"
 - When start_webrtc() is called, it establishes a WebRTC connection to cloud.ai
-- Video frames flow: Browser/Spout → Backend → fal.ai → Backend → Browser/Spout
+- Video frames flow: Browser/Spout → Backend → cloud → Backend → Browser/Spout
 - When disconnect() is called, both WebSocket and WebRTC are closed
 """
 
@@ -104,12 +104,8 @@ class CloudConnectionManager:
         self._user_id = user_id
         self._stop_event.clear()
 
-        # Get temporary token
-        # token = await self._get_temporary_token()
-        token = "foo"
-
         # Build WebSocket URL
-        ws_url = self._build_ws_url(token)
+        ws_url = self._build_ws_url()
         logger.info(f"Connecting to cloud WebSocket: {ws_url.split('?')[0]}...")
 
         # Create session and connect
@@ -167,39 +163,7 @@ class CloudConnectionManager:
         # Start receive loop
         self._receive_task = asyncio.create_task(self._receive_loop())
 
-    async def _get_temporary_token(self) -> str:
-        """Get temporary JWT token from cloud API."""
-        if not self.api_key or not self.app_id:
-            raise RuntimeError("API key and app_id must be set before getting token")
-
-        # Extract alias from app_id (e.g., "owner/app-name" -> "app-name")
-        parts = self.app_id.split("/")
-        alias = parts[1] if len(parts) >= 2 else self.app_id
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://rest.alpha.fal.ai/tokens/",
-                headers={
-                    "Authorization": f"Key {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "allowed_apps": [alias],
-                    "token_expiration": TOKEN_EXPIRATION_SECONDS,
-                },
-            ) as resp:
-                if not resp.ok:
-                    error_body = await resp.text()
-                    raise RuntimeError(
-                        f"Token request failed: {resp.status} {error_body}"
-                    )
-                token_data = await resp.json()
-                # Handle both string and object responses
-                if isinstance(token_data, dict) and "detail" in token_data:
-                    return token_data["detail"]
-                return token_data
-
-    def _build_ws_url(self, token: str) -> str:
+    def _build_ws_url(self) -> str:
         """Build WebSocket URL with JWT token."""
         app_id = self.app_id.strip("/") if self.app_id else ""
         # Ensure we're connecting to the /ws endpoint
@@ -467,7 +431,7 @@ class CloudConnectionManager:
     async def start_webrtc(self, initial_parameters: dict | None = None) -> None:
         """Start WebRTC connection to cloud.ai for media relay.
 
-        This establishes a WebRTC peer connection FROM the backend TO fal.ai,
+        This establishes a WebRTC peer connection FROM the backend TO cloud,
         allowing video frames to flow through the backend.
 
         Args:
@@ -559,7 +523,7 @@ class CloudConnectionManager:
 
     @property
     def fal_session_id(self) -> str | None:
-        """Get the current fal.ai WebRTC session ID."""
+        """Get the current cloud WebRTC session ID."""
         if self._webrtc_client is not None:
             return self._webrtc_client.session_id
         return None
@@ -568,7 +532,7 @@ class CloudConnectionManager:
         """Download a recording from cloud.ai.
 
         Args:
-            session_id: The fal.ai session ID. If None, uses the current session.
+            session_id: The cloud session ID. If None, uses the current session.
 
         Returns:
             The recording file bytes, or None if not available.
@@ -579,7 +543,7 @@ class CloudConnectionManager:
         # Use provided session ID or fall back to current
         target_session_id = session_id or self.fal_session_id
         if not target_session_id:
-            raise RuntimeError("No fal.ai session ID available")
+            raise RuntimeError("No cloud session ID available")
 
         logger.info(f"[CLOUD] Downloading recording for session: {target_session_id}")
 
