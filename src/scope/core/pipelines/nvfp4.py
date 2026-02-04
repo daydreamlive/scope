@@ -428,7 +428,9 @@ def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
     if is_lora_layer:
         return False
 
-    # Skip embedding and output layers
+    # Skip embedding, output layers, and input projection layers
+    # Input projections like patchify_proj are often referenced by non-Module classes
+    # and replacing them can cause stale reference issues
     skip_patterns = [
         "embed",
         "lm_head",
@@ -437,6 +439,8 @@ def transformer_block_filter(name: str, module: torch.nn.Module) -> bool:
         "norm",
         "ln_",
         "layernorm",
+        "patchify",  # Input projection layers (patchify_proj, audio_patchify_proj)
+        "caption_projection",  # Text projection layers
     ]
     for pattern in skip_patterns:
         if pattern in name_lower:
