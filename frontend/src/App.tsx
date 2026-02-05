@@ -3,7 +3,7 @@ import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { CloudProvider } from "./lib/cloudContext";
-import { handleOAuthCallback } from "./lib/auth";
+import { handleOAuthCallback, initElectronAuthListener } from "./lib/auth";
 import { toast } from "sonner";
 import "./index.css";
 
@@ -18,7 +18,20 @@ function App() {
   const [isHandlingAuth, setIsHandlingAuth] = useState(true);
 
   useEffect(() => {
-    // Handle OAuth callback on mount
+    // Initialize Electron auth callback listener (if running in Electron)
+    const cleanupElectronAuth = initElectronAuthListener(
+      () => {
+        // Success callback - show toast
+        toast.success("Successfully signed in!");
+      },
+      error => {
+        // Error callback - show toast
+        console.error("Electron auth callback error:", error);
+        toast.error(`Failed to sign in: ${error.message}`);
+      }
+    );
+
+    // Handle OAuth callback on mount (for browser flow)
     handleOAuthCallback()
       .then(handled => {
         if (handled) {
@@ -32,6 +45,11 @@ function App() {
       .finally(() => {
         setIsHandlingAuth(false);
       });
+
+    return () => {
+      // Cleanup Electron auth listener
+      cleanupElectronAuth?.();
+    };
   }, []);
 
   if (isHandlingAuth) {

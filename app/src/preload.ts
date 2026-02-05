@@ -112,4 +112,29 @@ contextBridge.exposeInMainWorld('scope', {
       ipcRenderer.removeListener(IPC_CHANNELS.DEEP_LINK_ACTION, handler);
     };
   },
+
+  openExternal: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url),
+
+  onAuthCallback: (callback: (data: { token: string; userId: string | null }) => void) => {
+    // Validate callback
+    if (typeof callback !== 'function') {
+      throw new Error('Callback must be a function');
+    }
+
+    const handler = (_event: Electron.IpcRendererEvent, data: { token: string; userId: string | null }) => {
+      // Validate data structure
+      if (typeof data !== 'object' || typeof data.token !== 'string') {
+        console.error('Invalid auth callback data:', data);
+        return;
+      }
+      callback(data);
+    };
+
+    ipcRenderer.on(IPC_CHANNELS.AUTH_CALLBACK, handler);
+
+    // Return cleanup function
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.AUTH_CALLBACK, handler);
+    };
+  },
 });

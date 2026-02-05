@@ -1,7 +1,20 @@
 /**
- * Get the redirect URL for OAuth callback (the current origin)
+ * Check if running in Electron desktop app
+ */
+function isElectron(): boolean {
+  return typeof window !== "undefined" && "scope" in window;
+}
+
+/**
+ * Get the redirect URL for OAuth callback
+ * - In Electron: uses deep link protocol for callback
+ * - In browser: uses current origin for HTTP redirect
  */
 function getRedirectUrl(): string {
+  if (isElectron()) {
+    // Use deep link protocol for Electron callback
+    return "daydream-scope://auth-callback";
+  }
   if (typeof window !== "undefined") {
     return window.location.origin;
   }
@@ -48,7 +61,6 @@ export function saveDaydreamAuth(apiKey: string, userId: string | null): void {
   if (userId) {
     localStorage.setItem(USER_ID_STORAGE_KEY, userId);
   }
-  console.log("Saved Daydream auth to localStorage");
   // Dispatch custom event to notify components of auth state change
   window.dispatchEvent(new CustomEvent("daydream-auth-change"));
 }
@@ -72,9 +84,27 @@ export function isAuthenticated(): boolean {
 
 /**
  * Redirect to Daydream sign-in page
+ * - In Electron: opens in system browser via IPC
+ * - In browser: navigates directly
  */
 export function redirectToSignIn(): void {
-  window.location.href = `${DAYDREAM_AUTH_URL}?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
+  const authUrl = `${DAYDREAM_AUTH_URL}?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
+
+  if (isElectron()) {
+    // Open in system browser via Electron IPC
+    (
+      window as unknown as {
+        scope: { openExternal: (url: string) => Promise<boolean> };
+      }
+    ).scope
+      .openExternal(authUrl)
+      .catch(err => {
+        console.error("Failed to open auth URL in browser:", err);
+      });
+  } else {
+    // Standard browser navigation
+    window.location.href = authUrl;
+  }
 }
 
 /**
@@ -144,4 +174,59 @@ export async function handleOAuthCallback(): Promise<boolean> {
     console.error("Failed to exchange token for API key:", error);
     throw error;
   }
+}
+
+/**
+ * Process auth callback data (used by Electron deep link handler)
+ */
+async function processAuthCallback(data: {
+  token: string;
+  userId: string | null;
+}): Promise<void> {
+  // Exchange the short-lived token for a long-lived API key
+  const apiKey = await exchangeTokenForAPIKey(data.token);
+
+  // Save the API key and userId to localStorage
+  saveDaydreamAuth(apiKey, data.userId);
+}
+
+/**
+ * Initialize Electron auth callback listener
+ * Call this once when the app starts if running in Electron
+ * Returns a cleanup function
+ *
+ * @param onSuccess - Optional callback when auth succeeds
+ * @param onError - Optional callback when auth fails
+ */
+export function initElectronAuthListener(
+  onSuccess?: () => void,
+  onError?: (error: Error) => void
+): (() => void) | null {
+  if (!isElectron()) {
+    return null;
+  }
+
+  const scopeApi = (
+    window as unknown as {
+      scope: {
+        onAuthCallback: (
+          callback: (data: { token: string; userId: string | null }) => void
+        ) => () => void;
+      };
+    }
+  ).scope;
+
+  // Set up the auth callback listener
+  const cleanup = scopeApi.onAuthCallback(data => {
+    processAuthCallback(data)
+      .then(() => {
+        onSuccess?.();
+      })
+      .catch(err => {
+        console.error("Failed to process Electron auth callback:", err);
+        onError?.(err instanceof Error ? err : new Error(String(err)));
+      });
+  });
+
+  return cleanup;
 }

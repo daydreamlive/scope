@@ -19,6 +19,12 @@ export const IPC_CHANNELS = {
 
   // Deep links
   DEEP_LINK_ACTION: 'deep-link-action',
+
+  // External URLs
+  OPEN_EXTERNAL: 'open-external',
+
+  // Auth
+  AUTH_CALLBACK: 'auth-callback',
 } as const;
 
 export const SETUP_STATUS = {
