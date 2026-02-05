@@ -690,15 +690,15 @@ class ScopeApp(fal.App, keep_alive=300):
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
-                elapsed_seconds = end_time - connection_start_time
+                elapsed_ms = end_time * 1000 - connection_start_time * 1000
                 await kafka_publisher.publish(
                     "websocket_disconnected",
                     {
                         "user_id": user_id,
                         "connection_id": connection_id,
-                        "duration_seconds": round(elapsed_seconds, 2),
-                        "start_time": connection_start_time * 1000,
-                        "end_time": end_time * 1000,
+                        "duration_ms": elapsed_ms,
+                        "session_start_time_ms": connection_start_time * 1000,
+                        "session_end_time_ms": end_time * 1000,
                     },
                 )
             # Clean up session data to prevent data leakage between users

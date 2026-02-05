@@ -9,11 +9,12 @@ function getRedirectUrl(): string {
   return "http://localhost:8000";
 }
 
-// const DAYDREAM_AUTH_URL = `https://app.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
-const DAYDREAM_AUTH_URL = `https://streamdiffusion-git-mh-signin.preview.livepeer.monster/sign-in/local?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
+const DAYDREAM_AUTH_URL =
+  (import.meta.env.VITE_DAYDREAM_AUTH_URL as string | undefined) ||
+  `https://app.daydream.live/sign-in/local`;
 const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
-  "https://api.daydream.monster";
+  "https://api.daydream.live";
 const API_KEY_STORAGE_KEY = "daydream_api_key";
 const USER_ID_STORAGE_KEY = "daydream_user_id";
 
@@ -73,7 +74,7 @@ export function isAuthenticated(): boolean {
  * Redirect to Daydream sign-in page
  */
 export function redirectToSignIn(): void {
-  window.location.href = DAYDREAM_AUTH_URL;
+  window.location.href = `${DAYDREAM_AUTH_URL}?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
 }
 
 /**
