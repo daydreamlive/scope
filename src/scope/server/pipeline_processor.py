@@ -184,6 +184,9 @@ class PipelineProcessor:
                 except queue.Empty:
                     break
 
+        # Release pipeline reference to allow GC of GPU resources
+        self.pipeline = None
+
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
     def update_parameters(self, parameters: dict[str, Any]):
