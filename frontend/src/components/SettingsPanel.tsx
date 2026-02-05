@@ -3,7 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
@@ -259,11 +262,44 @@ export function SettingsPanel({
             </SelectTrigger>
             <SelectContent>
               {pipelines &&
-                Object.entries(pipelines).map(([id]) => (
-                  <SelectItem key={id} value={id}>
-                    {id}
-                  </SelectItem>
-                ))}
+                (() => {
+                  const entries = Object.entries(pipelines);
+                  const builtIn = entries.filter(
+                    ([, info]) => !info.pluginName
+                  );
+                  const plugin = entries.filter(([, info]) => info.pluginName);
+                  return (
+                    <>
+                      {builtIn.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-xs text-muted-foreground font-bold">
+                            Built-in Pipelines
+                          </SelectLabel>
+                          {builtIn.map(([id]) => (
+                            <SelectItem key={id} value={id}>
+                              {id}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                      {builtIn.length > 0 && plugin.length > 0 && (
+                        <SelectSeparator />
+                      )}
+                      {plugin.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-xs text-muted-foreground font-bold">
+                            Plugin Pipelines
+                          </SelectLabel>
+                          {plugin.map(([id]) => (
+                            <SelectItem key={id} value={id}>
+                              {id}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                    </>
+                  );
+                })()}
             </SelectContent>
           </Select>
         </div>
@@ -274,6 +310,12 @@ export function SettingsPanel({
               <div>
                 <h4 className="text-sm font-semibold">
                   {currentPipeline.name}
+                  {currentPipeline.pluginName && (
+                    <span className="font-normal text-muted-foreground">
+                      {" "}
+                      ({currentPipeline.pluginName})
+                    </span>
+                  )}
                 </h4>
               </div>
 

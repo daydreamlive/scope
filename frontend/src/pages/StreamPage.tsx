@@ -148,6 +148,9 @@ export function StreamPage() {
   const [timelineCurrentTime, setTimelineCurrentTime] = useState(0);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
 
+  // Recording toggle state
+  const [isRecording, setIsRecording] = useState(false);
+
   // Video display state
   const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
 
@@ -155,6 +158,9 @@ export function StreamPage() {
   const [externalSelectedPromptId, setExternalSelectedPromptId] = useState<
     string | null
   >(null);
+
+  // Settings dialog navigation state
+  const [openSettingsTab, setOpenSettingsTab] = useState<string | null>(null);
 
   // Download dialog state
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
@@ -167,6 +173,7 @@ export function StreamPage() {
   const [currentDownloadPipeline, setCurrentDownloadPipeline] = useState<
     string | null
   >(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -391,6 +398,18 @@ export function StreamPage() {
             setDownloadProgress(status.progress);
           }
 
+          // Check for download error
+          if (status.progress?.error) {
+            const errorMessage = status.progress.error;
+            console.error("Download failed:", errorMessage);
+            toast.error(errorMessage);
+            setIsDownloading(false);
+            setDownloadProgress(null);
+            setDownloadError(errorMessage);
+            setCurrentDownloadPipeline(null);
+            return;
+          }
+
           if (status.downloaded) {
             // Download complete for this pipeline
             // Remove it from the list
@@ -493,6 +512,7 @@ export function StreamPage() {
     if (pipelinesNeedingModels.length === 0) return;
 
     setIsDownloading(true);
+    setDownloadError(null);
     setShowDownloadDialog(true); // Keep dialog open to show progress
 
     // Start downloading the first pipeline in the list
@@ -505,6 +525,7 @@ export function StreamPage() {
     setShowDownloadDialog(false);
     setPipelinesNeedingModels([]);
     setCurrentDownloadPipeline(null);
+    setDownloadError(null);
 
     // When user cancels, no stream or timeline has started yet, so nothing to clean up
     // Just close the dialog and return early without any state changes
@@ -1013,6 +1034,7 @@ export function StreamPage() {
         first_frame_image?: string;
         last_frame_image?: string;
         images?: string[];
+        recording?: boolean;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1088,6 +1110,9 @@ export function StreamPage() {
         initialParameters.spout_receiver = settings.spoutReceiver;
       }
 
+      // Include recording toggle state
+      initialParameters.recording = isRecording;
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
@@ -1131,6 +1156,8 @@ export function StreamPage() {
         onCloudConnectingChange={setIsCloudConnecting}
         onPipelinesRefresh={handlePipelinesRefresh}
         cloudDisabled={isStreaming}
+        openSettingsTab={openSettingsTab}
+        onSettingsTabOpened={() => setOpenSettingsTab(null)}
       />
 
       {/* Main Content Area */}
@@ -1371,6 +1398,8 @@ export function StreamPage() {
               }
               isDownloading={isDownloading}
               onSaveGeneration={handleSaveGeneration}
+              isRecording={isRecording}
+              onRecordingToggle={() => setIsRecording(prev => !prev)}
             />
           </div>
         </div>
@@ -1471,6 +1500,11 @@ export function StreamPage() {
           onDownload={handleDownloadModels}
           isDownloading={isDownloading}
           progress={downloadProgress}
+          error={downloadError}
+          onOpenSettings={tab => {
+            setShowDownloadDialog(false);
+            setOpenSettingsTab(tab);
+          }}
         />
       )}
     </div>

@@ -1,4 +1,10 @@
-import { Download, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  Loader2,
+  RotateCcw,
+  Settings,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -20,6 +26,8 @@ interface DownloadDialogProps {
   onDownload: () => void;
   isDownloading?: boolean;
   progress?: DownloadProgress | null;
+  error?: string | null;
+  onOpenSettings?: (tab: string) => void;
 }
 
 export function DownloadDialog({
@@ -31,6 +39,8 @@ export function DownloadDialog({
   onDownload,
   isDownloading = false,
   progress = null,
+  error = null,
+  onOpenSettings,
 }: DownloadDialogProps) {
   if (pipelineIds.length === 0) return null;
 
@@ -53,19 +63,25 @@ export function DownloadDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {isDownloading ? "Downloading Models..." : "Download Models"}
+            {error
+              ? "Download Failed"
+              : isDownloading
+                ? "Downloading Models..."
+                : "Download Models"}
           </DialogTitle>
           <DialogDescription className="mt-3">
-            {isDownloading
-              ? currentDownloadPipeline
-                ? `Downloading models for ${currentPipelineInfo?.name || currentDownloadPipeline}...`
-                : "Please wait while models are downloaded."
-              : "The following pipeline(s) require models to be downloaded:"}
+            {error
+              ? "An error occurred while downloading models."
+              : isDownloading
+                ? currentDownloadPipeline
+                  ? `Downloading models for ${currentPipelineInfo?.name || currentDownloadPipeline}...`
+                  : "Please wait while models are downloaded."
+                : "The following pipeline(s) require models to be downloaded:"}
           </DialogDescription>
         </DialogHeader>
 
         {/* List of missing pipelines/preprocessors */}
-        {!isDownloading && (
+        {!isDownloading && !error && (
           <div className="space-y-2 mb-3">
             {pipelineIds.map(id => {
               const info = pipelines?.[id];
@@ -97,7 +113,7 @@ export function DownloadDialog({
           </div>
         )}
 
-        {!isDownloading && totalVram > 0 && (
+        {!isDownloading && !error && totalVram > 0 && (
           <p className="text-sm text-muted-foreground mb-3">
             <span className="font-semibold">Total Estimated GPU VRAM:</span>{" "}
             {totalVram} GB
@@ -123,9 +139,33 @@ export function DownloadDialog({
         )}
 
         {/* Loading State (no progress data yet) */}
-        {isDownloading && !progress && (
+        {isDownloading && !progress && !error && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="rounded border border-destructive/50 bg-destructive/10 p-3">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+              <div className="space-y-2">
+                <p className="text-sm text-destructive">{error}</p>
+                {error.toLowerCase().includes("authentication") &&
+                  onOpenSettings && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onOpenSettings("api-keys")}
+                      className="gap-1.5"
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                      Open Settings &gt; API Keys
+                    </Button>
+                  )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -138,7 +178,13 @@ export function DownloadDialog({
         )}
 
         <DialogFooter>
-          {!isDownloading && (
+          {error && (
+            <Button onClick={onDownload} className="gap-2">
+              <RotateCcw className="h-4 w-4" />
+              Retry Download
+            </Button>
+          )}
+          {!isDownloading && !error && (
             <Button onClick={onDownload} className="gap-2">
               <Download className="h-4 w-4" />
               Download All

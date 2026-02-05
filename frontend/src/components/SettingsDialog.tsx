@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { ApiKeysTab } from "./settings/ApiKeysTab";
 import { GeneralTab } from "./settings/GeneralTab";
 import { PluginsTab } from "./settings/PluginsTab";
 import { ReportBugDialog } from "./ReportBugDialog";
@@ -19,7 +20,7 @@ import { toast } from "sonner";
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
-  initialTab?: "general" | "plugins";
+  initialTab?: "general" | "api-keys" | "plugins";
   initialPluginPath?: string;
   // Cloud mode callbacks
   onCloudStatusChange?: (connected: boolean) => void;
@@ -337,6 +338,12 @@ export function SettingsDialog({
               General
             </TabsTrigger>
             <TabsTrigger
+              value="api-keys"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              API Keys
+            </TabsTrigger>
+            <TabsTrigger
               value="plugins"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
@@ -359,6 +366,9 @@ export function SettingsDialog({
                 onPipelinesRefresh={onPipelinesRefresh ?? refetchPipelines}
                 cloudDisabled={cloudDisabled}
               />
+            </TabsContent>
+            <TabsContent value="api-keys" className="mt-0">
+              <ApiKeysTab isActive={open && activeTab === "api-keys"} />
             </TabsContent>
             <TabsContent value="plugins" className="mt-0">
               <PluginsTab

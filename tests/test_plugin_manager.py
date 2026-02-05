@@ -1134,3 +1134,104 @@ class TestEditableVenvRollback:
                     mock_logger.error.assert_called()
                     error_call = str(mock_logger.error.call_args)
                     assert "rollback" in error_call.lower()
+
+
+class TestListPluginsDeduplication:
+    """Tests for plugin deduplication in _list_plugins_sync."""
+
+    def _make_mock_dist(self, name, source="pypi", editable=False):
+        """Helper to create a mock distribution with scope entry points."""
+        mock_ep = MagicMock()
+        mock_ep.group = "scope"
+        mock_ep.name = name
+
+        mock_dist = MagicMock()
+        mock_dist.entry_points = [mock_ep]
+        mock_dist.metadata = {
+            "Name": name,
+            "Version": "1.0.0",
+            "Author": "Test",
+            "Summary": "A test plugin",
+        }
+        mock_dist._path = None  # Default to no direct_url.json (PyPI)
+        return mock_dist
+
+    def test_deduplicates_plugins_by_name(self):
+        """Two distributions with same name should return one plugin."""
+        pm = PluginManager()
+
+        dist1 = self._make_mock_dist("test-plugin")
+        dist2 = self._make_mock_dist("test-plugin")
+
+        with patch("importlib.metadata.distributions", return_value=[dist1, dist2]):
+            plugins = pm._list_plugins_sync()
+
+        assert len(plugins) == 1
+        assert plugins[0]["name"] == "test-plugin"
+
+    def test_dedup_prefers_editable_over_non_editable(self):
+        """When duplicate exists, editable version should win."""
+        pm = PluginManager()
+
+        dist_git = self._make_mock_dist("test-plugin")
+        dist_editable = self._make_mock_dist("test-plugin")
+
+        # Make dist_git return git source
+        def git_source(dist):
+            if dist is dist_git:
+                return ("git", False, None, "https://github.com/user/repo.git")
+            return ("local", True, "/path/to/plugin", None)
+
+        with patch(
+            "importlib.metadata.distributions", return_value=[dist_git, dist_editable]
+        ):
+            with patch.object(pm, "_get_plugin_source", side_effect=git_source):
+                plugins = pm._list_plugins_sync()
+
+        assert len(plugins) == 1
+        assert plugins[0]["editable"] is True
+        assert plugins[0]["source"] == "local"
+
+
+class TestEditableInstallPluginsTxtCleanup:
+    """Tests for plugins.txt cleanup during editable installs."""
+
+    def test_editable_install_cleans_plugins_txt(self):
+        """Editable install should remove existing entry from plugins.txt."""
+        pm = PluginManager()
+
+        with patch.object(
+            pm,
+            "_read_plugins_file",
+            return_value=["git+https://github.com/user/test-plugin.git"],
+        ):
+            with patch.object(pm, "_write_plugins_file") as mock_write:
+                with patch.object(
+                    pm, "_get_package_name_from_path", return_value="test-plugin"
+                ):
+                    with patch("subprocess.run") as mock_run:
+                        mock_run.return_value = MagicMock(
+                            returncode=0, stdout="", stderr=""
+                        )
+                        pm._install_editable_plugin("/path/to/test-plugin")
+
+        # Should have written plugins.txt with the git entry removed
+        mock_write.assert_called_once_with([])
+
+    def test_editable_install_noop_if_not_in_plugins_txt(self):
+        """No write should happen if plugin not in plugins.txt."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_write_plugins_file") as mock_write:
+                with patch.object(
+                    pm, "_get_package_name_from_path", return_value="test-plugin"
+                ):
+                    with patch("subprocess.run") as mock_run:
+                        mock_run.return_value = MagicMock(
+                            returncode=0, stdout="", stderr=""
+                        )
+                        pm._install_editable_plugin("/path/to/test-plugin")
+
+        # _write_plugins_file should NOT have been called
+        mock_write.assert_not_called()

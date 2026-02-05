@@ -154,6 +154,10 @@ class Parameters(BaseModel):
         default=None,
         description="List of reference image paths for non-VACE visual conditioning",
     )
+    recording: bool | None = Field(
+        default=None,
+        description="Enable recording for this session. When true, the backend records the stream. ",
+    )
 
 
 class SpoutConfig(BaseModel):
@@ -724,3 +728,34 @@ class CloudStatusResponse(BaseModel):
         default=None,
         description="Connection statistics (only included when connected)",
     )
+# API Key management schemas
+
+
+class ApiKeyInfo(BaseModel):
+    """Status info for a single API key service."""
+
+    id: str
+    name: str
+    description: str
+    is_set: bool
+    source: str | None  # "env_var", "stored", or None
+    env_var: str | None  # e.g. "HF_TOKEN"
+    key_url: str | None  # URL where user can create a key
+
+
+class ApiKeysListResponse(BaseModel):
+    keys: list[ApiKeyInfo]
+
+
+class ApiKeySetRequest(BaseModel):
+    value: str = Field(..., min_length=1)
+
+
+class ApiKeySetResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class ApiKeyDeleteResponse(BaseModel):
+    success: bool
+    message: str

@@ -195,13 +195,24 @@ class WebRTCManager:
             relay = MediaRelay()
             relayed_track = relay.subscribe(video_track)
 
-            # Create RecordingManager and store it in the session
-            # Pass the original video_track - RecordingManager will subscribe to relay itself
-            recording_manager = RecordingManager(video_track=video_track)
-            session.recording_manager = recording_manager
+            # Only create RecordingManager if recording is enabled for this session
+            # WebRTC initial params take precedence; if absent, fall back to env var
+            from .recording import RECORDING_ENABLED
 
-            # Set the relay on the recording manager so it can create a recording track
-            recording_manager.set_relay(relay)
+            recording_param = initial_parameters.get("recording")
+            recording_enabled = (
+                recording_param if recording_param is not None else RECORDING_ENABLED
+            )
+            if recording_enabled:
+                # Create RecordingManager and store it in the session
+                # Pass the original video_track - RecordingManager will subscribe to relay itself
+                recording_manager = RecordingManager(video_track=video_track)
+                session.recording_manager = recording_manager
+
+                # Set the relay on the recording manager so it can create a recording track
+                recording_manager.set_relay(relay)
+            else:
+                session.recording_manager = None
 
             # Add the relayed track to WebRTC connection
             pc.addTrack(relayed_track)
@@ -209,19 +220,21 @@ class WebRTCManager:
             # Store relay for cleanup
             session.relay = relay
 
-            # Start recording when ready
-            # We start it in a background task to avoid blocking the offer/answer flow
-            async def start_recording_when_ready():
-                """Start recording when frames start flowing."""
-                try:
-                    # Wait a bit for the connection to establish and frames to start flowing
-                    await asyncio.sleep(0.1)
-                    # Try to start recording
-                    await recording_manager.start_recording()
-                except Exception as e:
-                    logger.debug(f"Could not start recording yet: {e}")
+            # Start recording when ready (only if recording is enabled)
+            if recording_enabled and session.recording_manager:
+                recording_manager = session.recording_manager
 
-            asyncio.create_task(start_recording_when_ready())
+                async def start_recording_when_ready():
+                    """Start recording when frames start flowing."""
+                    try:
+                        # Wait a bit for the connection to establish and frames to start flowing
+                        await asyncio.sleep(0.1)
+                        # Try to start recording
+                        await recording_manager.start_recording()
+                    except Exception as e:
+                        logger.debug(f"Could not start recording yet: {e}")
+
+                asyncio.create_task(start_recording_when_ready())
 
             logger.info(f"Created new session: {session}")
 
@@ -545,7 +558,9 @@ class WebRTCManager:
 def create_rtc_config() -> RTCConfiguration:
     """Setup RTCConfiguration with TURN credentials if available."""
     try:
-        hf_token = os.getenv("HF_TOKEN")
+        from huggingface_hub import get_token
+
+        hf_token = get_token()
         twilio_account_sid = os.getenv("TWILIO_ACCOUNT_SID")
         twilio_auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 

@@ -57,6 +57,11 @@ from .recording import (
     cleanup_temp_file,
 )
 from .schema import (
+    ApiKeyDeleteResponse,
+    ApiKeyInfo,
+    ApiKeySetRequest,
+    ApiKeySetResponse,
+    ApiKeysListResponse,
     AssetFileInfo,
     AssetsResponse,
     CloudConnectRequest,
@@ -596,7 +601,9 @@ async def get_pipeline_schemas(
 
     # Local mode: get schemas from local registry
     from scope.core.pipelines.registry import PipelineRegistry
+    from scope.core.plugins import get_plugin_manager
 
+    plugin_manager = get_plugin_manager()
     pipelines: dict = {}
 
     for pipeline_id in PipelineRegistry.list_pipelines():
@@ -605,6 +612,9 @@ async def get_pipeline_schemas(
             # get_schema_with_metadata() includes supported_modes, default_mode,
             # and mode_defaults directly from the config class
             schema_data = config_class.get_schema_with_metadata()
+            schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
+                pipeline_id
+            )
             pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
@@ -1254,8 +1264,16 @@ async def download_pipeline_models(
                 detail=f"Download already in progress for {pipeline_id}",
             )
 
+        # Clear any previous error state before starting a new download
+        download_progress_manager.clear_progress(pipeline_id)
+
         # Download in a background thread to avoid blocking
         import threading
+
+        def _is_auth_error(error: Exception) -> bool:
+            """Check if a download error is authentication-related."""
+            msg = str(error)
+            return "401" in msg or "403" in msg or "Unauthorized" in msg
 
         def download_in_background():
             """Run download in background thread."""
@@ -1264,7 +1282,11 @@ async def download_pipeline_models(
                 download_progress_manager.mark_complete(pipeline_id)
             except Exception as e:
                 logger.error(f"Error downloading models for {pipeline_id}: {e}")
-                download_progress_manager.clear_progress(pipeline_id)
+                if _is_auth_error(e):
+                    user_msg = "Download failed due to authentication error. For HuggingFace models, make sure your HuggingFace key is configured in Settings > API Keys."
+                else:
+                    user_msg = "Download failed. Check the server logs for details."
+                download_progress_manager.mark_error(pipeline_id, user_msg)
 
         thread = threading.Thread(target=download_in_background)
         thread.daemon = True
@@ -1336,6 +1358,78 @@ async def get_hardware_info(
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/keys", response_model=ApiKeysListResponse)
+async def list_api_keys():
+    """List all registered API key services with their status."""
+    import os
+
+    from huggingface_hub import get_token
+
+    token = get_token()
+    env_var_set = bool(os.environ.get("HF_TOKEN"))
+
+    if token:
+        source = "env_var" if env_var_set else "stored"
+    else:
+        source = None
+
+    hf_key = ApiKeyInfo(
+        id="huggingface",
+        name="HuggingFace",
+        description="Required for downloading gated models",
+        is_set=token is not None,
+        source=source,
+        env_var="HF_TOKEN",
+        key_url="https://huggingface.co/settings/tokens",
+    )
+
+    return ApiKeysListResponse(keys=[hf_key])
+
+
+@app.put("/api/v1/keys/{service_id}", response_model=ApiKeySetResponse)
+async def set_api_key(service_id: str, request: ApiKeySetRequest):
+    """Set/save an API key for a service."""
+    import os
+
+    if service_id != "huggingface":
+        raise HTTPException(status_code=404, detail=f"Unknown service: {service_id}")
+
+    if os.environ.get("HF_TOKEN"):
+        raise HTTPException(
+            status_code=409,
+            detail="HF_TOKEN environment variable is already set. Remove it to manage this key from the UI.",
+        )
+
+    from huggingface_hub import login
+
+    login(token=request.value, add_to_git_credential=False)
+
+    return ApiKeySetResponse(success=True, message="HuggingFace token saved")
+
+
+@app.delete("/api/v1/keys/{service_id}", response_model=ApiKeyDeleteResponse)
+async def delete_api_key(service_id: str):
+    """Remove a stored API key for a service."""
+    import os
+
+    if service_id != "huggingface":
+        raise HTTPException(status_code=404, detail=f"Unknown service: {service_id}")
+
+    # Check current source
+    env_var_set = bool(os.environ.get("HF_TOKEN"))
+    if env_var_set:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot remove token set via HF_TOKEN environment variable. Unset the environment variable instead.",
+        )
+
+    from huggingface_hub import logout
+
+    logout()
+
+    return ApiKeyDeleteResponse(success=True, message="HuggingFace token removed")
 
 
 @app.get("/api/v1/logs/current")

@@ -11,6 +11,9 @@ interface HeaderProps {
   onCloudConnectingChange?: (connecting: boolean) => void;
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
+  // External settings tab control
+  openSettingsTab?: string | null;
+  onSettingsTabOpened?: () => void;
 }
 
 export function Header({
@@ -19,16 +22,27 @@ export function Header({
   onCloudConnectingChange,
   onPipelinesRefresh,
   cloudDisabled,
+  openSettingsTab,
+  onSettingsTabOpened,
 }: HeaderProps) {
   // Settings dialog state
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [initialTab, setInitialTab] = useState<"general" | "plugins">(
-    "general"
-  );
+  const [initialTab, setInitialTab] = useState<
+    "general" | "api-keys" | "plugins"
+  >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
   // Report bug dialog state
   const [reportBugOpen, setReportBugOpen] = useState(false);
+
+  // React to external requests to open a specific settings tab
+  useEffect(() => {
+    if (openSettingsTab) {
+      setInitialTab(openSettingsTab as "general" | "api-keys" | "plugins");
+      setSettingsOpen(true);
+      onSettingsTabOpened?.();
+    }
+  }, [openSettingsTab, onSettingsTabOpened]);
 
   useEffect(() => {
     // Handle deep link actions for plugin installation
