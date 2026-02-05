@@ -728,6 +728,8 @@ class CloudStatusResponse(BaseModel):
         default=None,
         description="Connection statistics (only included when connected)",
     )
+
+
 # API Key management schemas
 
 
