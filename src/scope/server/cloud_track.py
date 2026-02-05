@@ -248,6 +248,9 @@ class CloudTrack(MediaStreamTrack):
         # Stop WebRTC connection to cloud - next session will start fresh
         await self.cloud_manager.stop_webrtc()
 
+        # Call parent stop() synchronously - MediaStreamTrack.stop() is not async
+        super().stop()
+
     def get_stats(self) -> dict:
         """Get relay statistics."""
         if self.frame_processor:

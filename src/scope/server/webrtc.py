@@ -32,19 +32,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# TODO: Fix bitrate
-# Monkey patching these values in aiortc don't seem to work as expected
-# The expected behavior is for the bitrate calculations to set a bitrate based on the ceiling, floor and defaults
-# For now, these values were set kind of arbitrarily to increase the bitrate
+# Bitrate configuration for WebRTC video codecs
+# Note: High bitrates (>4 Mbps) can cause "packet is too long" errors in pylibsrtp
+# when SRTP packets exceed the ~65KB buffer limit. Keyframes at high bitrates
+# can easily exceed this, causing WebRTC connections to fail immediately.
+# Keep bitrates moderate (2-3 Mbps) for reliable SRTP packet handling.
 h264.MAX_FRAME_RATE = 8
-h264.DEFAULT_BITRATE = 7000000
-h264.MIN_BITRATE = 5000000
-h264.MAX_BITRATE = 10000000
+h264.DEFAULT_BITRATE = 2500000  # 2.5 Mbps - safe for SRTP
+h264.MIN_BITRATE = 1000000      # 1 Mbps
+h264.MAX_BITRATE = 3500000      # 3.5 Mbps - max safe for SRTP
 
 vpx.MAX_FRAME_RATE = 8
-vpx.DEFAULT_BITRATE = 7000000
-vpx.MIN_BITRATE = 5000000
-vpx.MAX_BITRATE = 10000000
+vpx.DEFAULT_BITRATE = 2500000   # 2.5 Mbps - safe for SRTP
+vpx.MIN_BITRATE = 1000000       # 1 Mbps
+vpx.MAX_BITRATE = 3500000       # 3.5 Mbps - max safe for SRTP
 
 
 class Session:

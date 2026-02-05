@@ -64,7 +64,8 @@ class VideoProcessingTrack(MediaStreamTrack):
                 break
             except Exception as e:
                 # Stop the input loop on connection errors to avoid spam
-                logger.error(f"Error in input loop, stopping: {e}")
+                # Note: MediaStreamError often has empty message when connection closes
+                logger.error(f"Error in input loop, stopping: {type(e).__name__}: {e}")
                 self.input_task_running = False
                 break
 
@@ -179,4 +180,5 @@ class VideoProcessingTrack(MediaStreamTrack):
         if self.frame_processor is not None:
             self.frame_processor.stop()
 
-        await super().stop()
+        # Call parent stop() synchronously - MediaStreamTrack.stop() is not async
+        super().stop()
