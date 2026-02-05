@@ -246,14 +246,9 @@ export function DaydreamAccountSection({
         // Not logged in state
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">Not logged in</p>
-          <div className="flex gap-2">
-            <Button onClick={handleSignIn} variant="default" size="sm">
-              Log in
-            </Button>
-            <Button onClick={handleSignIn} variant="outline" size="sm">
-              Sign up
-            </Button>
-          </div>
+          <Button onClick={handleSignIn} variant="default" size="sm">
+            Log in
+          </Button>
         </div>
       ) : (
         // Logged in state
@@ -304,6 +299,7 @@ export function DaydreamAccountSection({
                     checked={status.connected}
                     onCheckedChange={handleToggle}
                     disabled={disabled}
+                    className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
                   />
                 )}
               </div>

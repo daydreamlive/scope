@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Settings } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Settings, Cloud, CloudOff } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 
@@ -26,14 +26,50 @@ export function Header({
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "api-keys" | "plugins"
+    "general" | "account" | "api-keys" | "plugins"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
+  const [cloudConnected, setCloudConnected] = useState(false);
+
+  // Fetch initial cloud status
+  useEffect(() => {
+    const fetchCloudStatus = async () => {
+      try {
+        const response = await fetch("/api/v1/cloud/status");
+        if (response.ok) {
+          const data = await response.json();
+          setCloudConnected(data.connected);
+        }
+      } catch (e) {
+        console.error("[Header] Failed to fetch cloud status:", e);
+      }
+    };
+    fetchCloudStatus();
+    // Poll periodically
+    const interval = setInterval(fetchCloudStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Handle cloud status changes from settings dialog
+  const handleCloudStatusChange = useCallback(
+    (connected: boolean) => {
+      setCloudConnected(connected);
+      onCloudStatusChange?.(connected);
+    },
+    [onCloudStatusChange]
+  );
+
+  const handleCloudIconClick = () => {
+    setInitialTab("account");
+    setSettingsOpen(true);
+  };
 
   // React to external requests to open a specific settings tab
   useEffect(() => {
     if (openSettingsTab) {
-      setInitialTab(openSettingsTab as "general" | "api-keys" | "plugins");
+      setInitialTab(
+        openSettingsTab as "general" | "account" | "api-keys" | "plugins"
+      );
       setSettingsOpen(true);
       onSettingsTabOpened?.();
     }
@@ -62,15 +98,34 @@ export function Header({
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-medium text-foreground">Daydream Scope</h1>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setSettingsOpen(true)}
-          className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
-          title="Settings"
-        >
-          <Settings className="h-5 w-5" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleCloudIconClick}
+            className={`hover:opacity-80 transition-opacity h-8 w-8 ${
+              cloudConnected
+                ? "text-green-500 opacity-80"
+                : "text-muted-foreground opacity-60"
+            }`}
+            title={cloudConnected ? "Cloud connected" : "Cloud disconnected"}
+          >
+            {cloudConnected ? (
+              <Cloud className="h-5 w-5" />
+            ) : (
+              <CloudOff className="h-5 w-5" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSettingsOpen(true)}
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
+            title="Settings"
+          >
+            <Settings className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
 
       <SettingsDialog
@@ -78,7 +133,7 @@ export function Header({
         onClose={handleClose}
         initialTab={initialTab}
         initialPluginPath={initialPluginPath}
-        onCloudStatusChange={onCloudStatusChange}
+        onCloudStatusChange={handleCloudStatusChange}
         onCloudConnectingChange={onCloudConnectingChange}
         onPipelinesRefresh={onPipelinesRefresh}
         cloudDisabled={cloudDisabled}

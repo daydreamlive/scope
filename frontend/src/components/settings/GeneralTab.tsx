@@ -1,6 +1,5 @@
 import { BookOpenText, Bug, Github } from "lucide-react";
 import { Input } from "../ui/input";
-import { DaydreamAccountSection } from "./DaydreamAccountSection";
 
 interface GeneralTabProps {
   version: string;
@@ -10,11 +9,6 @@ interface GeneralTabProps {
   onModelsDirectoryChange: (value: string) => void;
   onLogsDirectoryChange: (value: string) => void;
   onReportBug: () => void;
-  // Cloud mode callbacks
-  onCloudStatusChange?: (connected: boolean) => void;
-  onCloudConnectingChange?: (connecting: boolean) => void;
-  onPipelinesRefresh?: () => Promise<unknown>;
-  cloudDisabled?: boolean;
 }
 
 export function GeneralTab({
@@ -25,10 +19,6 @@ export function GeneralTab({
   onModelsDirectoryChange,
   onLogsDirectoryChange,
   onReportBug,
-  onCloudStatusChange,
-  onCloudConnectingChange,
-  onPipelinesRefresh,
-  cloudDisabled,
 }: GeneralTabProps) {
   const handleDocsClick = () => {
     console.log("Docs clicked");
@@ -50,14 +40,6 @@ export function GeneralTab({
 
   return (
     <div className="space-y-4">
-      {/* Daydream Account Section */}
-      <DaydreamAccountSection
-        onStatusChange={onCloudStatusChange}
-        onConnectingChange={onCloudConnectingChange}
-        onPipelinesRefresh={onPipelinesRefresh}
-        disabled={cloudDisabled}
-      />
-
       <div className="rounded-lg bg-muted/50 p-4 space-y-4">
         {/* Version Info */}
         <div className="flex items-center gap-4">
