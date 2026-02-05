@@ -162,6 +162,17 @@ export function StreamPage() {
   // Settings dialog navigation state
   const [openSettingsTab, setOpenSettingsTab] = useState<string | null>(null);
 
+  // Open account tab after successful sign-in
+  useEffect(() => {
+    const handleAuthSuccess = () => {
+      setOpenSettingsTab("account");
+    };
+    window.addEventListener("daydream-auth-success", handleAuthSuccess);
+    return () => {
+      window.removeEventListener("daydream-auth-success", handleAuthSuccess);
+    };
+  }, []);
+
   // Download dialog state
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);

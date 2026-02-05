@@ -15,7 +15,10 @@ import {
   isAuthenticated,
   redirectToSignIn,
   clearDaydreamAuth,
+  getDaydreamAPIKey,
   getDaydreamUserId,
+  getDaydreamUserDisplayName,
+  fetchAndStoreUserProfile,
 } from "../../lib/auth";
 
 interface CloudStatus {
@@ -44,6 +47,7 @@ export function DaydreamAccountSection({
 }: DaydreamAccountSectionProps) {
   // Auth state
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
 
   // Cloud status state (same as CloudModeToggle)
   const [status, setStatus] = useState<CloudStatus>({
@@ -60,10 +64,22 @@ export function DaydreamAccountSection({
 
   // Check auth on mount and listen for changes
   useEffect(() => {
-    setIsSignedIn(isAuthenticated());
+    const authed = isAuthenticated();
+    const cachedName = getDaydreamUserDisplayName();
+    setIsSignedIn(authed);
+    setDisplayName(cachedName);
+
+    // If signed in but no display name cached, fetch the profile
+    if (authed && !cachedName) {
+      const apiKey = getDaydreamAPIKey();
+      if (apiKey) {
+        fetchAndStoreUserProfile(apiKey);
+      }
+    }
 
     const handleAuthChange = () => {
       setIsSignedIn(isAuthenticated());
+      setDisplayName(getDaydreamUserDisplayName());
     };
 
     window.addEventListener("daydream-auth-change", handleAuthChange);
@@ -242,106 +258,98 @@ export function DaydreamAccountSection({
     <div className="rounded-lg bg-muted/50 p-4 space-y-4">
       <h3 className="text-sm font-medium text-foreground">Daydream Account</h3>
 
-      {!isSignedIn ? (
-        // Not logged in state
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">Not logged in</p>
-          <Button onClick={handleSignIn} variant="default" size="sm">
-            Log in
-          </Button>
-        </div>
-      ) : (
-        // Logged in state
-        <div className="space-y-4">
-          {/* User info and actions */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Signed in</span>
-            <div className="flex gap-2">
-              <Button onClick={handleSignOut} variant="outline" size="sm">
-                Log out
+      {/* Auth row */}
+      <div className="flex items-center justify-between">
+        {isSignedIn ? (
+          <>
+            <span className="text-sm text-muted-foreground">
+              {displayName || "Signed in"}
+            </span>
+            <Button onClick={handleSignOut} variant="outline" size="sm">
+              Log out
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-muted-foreground">Not logged in</span>
+            <Button onClick={handleSignIn} variant="default" size="sm">
+              Log in
+            </Button>
+          </>
+        )}
+      </div>
+
+      {/* Cloud Mode section - always visible */}
+      <div className="space-y-3 pt-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Cloud className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Cloud Mode</span>
+          </div>
+          {isConnecting ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">
+                Connecting...
+              </span>
+              <Button
+                onClick={handleCancel}
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                title="Cancel connection"
+              >
+                <X className="h-3 w-3" />
               </Button>
             </div>
-          </div>
-
-          {/* Cloud Mode Toggle */}
-          {status.credentials_configured ? (
-            <div className="space-y-3 pt-2 border-t border-border">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Cloud className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Cloud Mode</span>
-                </div>
-                {isConnecting ? (
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">
-                      Connecting...
-                    </span>
-                    <Button
-                      onClick={handleCancel}
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 w-6 p-0"
-                      title="Cancel connection"
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ) : isDisconnecting ? (
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">
-                      Disconnecting...
-                    </span>
-                  </div>
-                ) : (
-                  <Switch
-                    checked={status.connected}
-                    onCheckedChange={handleToggle}
-                    disabled={disabled}
-                    className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
-                  />
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Use Daydream cloud models
-              </p>
-
-              {/* Connection ID when connected */}
-              {status.connected && status.connection_id && (
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-xs text-muted-foreground">
-                    Connection ID:{" "}
-                    <code className="bg-background px-1 rounded">
-                      {status.connection_id}
-                    </code>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-5 w-5 p-0"
-                    onClick={handleCopyConnectionId}
-                    title="Copy connection ID"
-                  >
-                    {copied ? (
-                      <Check className="h-3 w-3 text-green-500" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
-                </div>
-              )}
-
-              {error && <p className="text-xs text-destructive">{error}</p>}
+          ) : isDisconnecting ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">
+                Disconnecting...
+              </span>
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground pt-2 border-t border-border">
-              Cloud mode requires the server to be started with cloud
-              credentials configured.
-            </p>
+            <Switch
+              checked={status.connected}
+              onCheckedChange={handleToggle}
+              disabled={disabled || !isSignedIn}
+              className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
+            />
           )}
         </div>
-      )}
+        <p className="text-xs text-muted-foreground">
+          Use Daydream Cloud for running pipelines.
+          {!isSignedIn && " Log in required."}
+        </p>
+
+        {/* Connection ID when connected */}
+        {status.connected && status.connection_id && (
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-xs text-muted-foreground">
+              Connection ID:{" "}
+              <code className="bg-background px-1 rounded">
+                {status.connection_id}
+              </code>
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 w-5 p-0"
+              onClick={handleCopyConnectionId}
+              title="Copy connection ID"
+            >
+              {copied ? (
+                <Check className="h-3 w-3 text-green-500" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+            </Button>
+          </div>
+        )}
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
     </div>
   );
 }
