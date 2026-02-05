@@ -91,11 +91,34 @@ class DecodedInputs:
     prompts: dict[int, str] = field(default_factory=dict)
 
 
-def decode_inputs(request: "GenerateRequest", num_frames: int) -> DecodedInputs:
-    """Decode all base64 inputs from request."""
+def load_video_from_file(file_path: str) -> np.ndarray:
+    """Load video from temp file.
+
+    Args:
+        file_path: Path to video file with header
+
+    Returns:
+        Video array [T, H, W, C] uint8
+    """
+    with open(file_path, "rb") as f:
+        ndim = int.from_bytes(f.read(4), "little")
+        shape = tuple(int.from_bytes(f.read(4), "little") for _ in range(ndim))
+        data = np.frombuffer(f.read(), dtype=np.uint8).reshape(shape)
+    return data
+
+
+def decode_inputs(
+    request: "GenerateRequest", num_frames: int, logger: "Logger"
+) -> DecodedInputs:
+    """Decode all inputs from request (base64 or file-based)."""
     inputs = DecodedInputs()
 
-    if request.input_video:
+    # Handle input video - either from file path or base64
+    if request.input_path:
+        logger.info(f"Loading input video from file: {request.input_path}")
+        inputs.input_video = load_video_from_file(request.input_path)
+        inputs.input_video = loop_to_length(inputs.input_video, num_frames, axis=0)
+    elif request.input_video:
         inputs.input_video = decode_array(request.input_video, np.uint8)
         inputs.input_video = loop_to_length(inputs.input_video, num_frames, axis=0)
 
@@ -212,81 +235,121 @@ def generate_video_stream(
     status_info: dict,
     logger: "Logger",
 ) -> Iterator[str]:
-    """Generate video frames, yielding SSE events."""
+    """Generate video frames, yielding SSE events.
+
+    Writes output to temp file incrementally, returns output_path for download.
+    """
     try:
         pipeline = pipeline_manager.get_pipeline_by_id(request.pipeline_id)
 
         # Determine chunk size from pipeline
-        has_video = request.input_video is not None
+        has_video = request.input_video is not None or request.input_path is not None
         requirements = pipeline.prepare(video=[] if has_video else None)
         chunk_size = requirements.input_size if requirements else DEFAULT_CHUNK_SIZE
         num_chunks = (request.num_frames + chunk_size - 1) // chunk_size
 
-        # Decode inputs
-        inputs = decode_inputs(request, request.num_frames)
+        # Decode inputs (supports both file-based and base64)
+        inputs = decode_inputs(request, request.num_frames, logger)
 
         # Setup
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.bfloat16
-        output_chunks = []
         latency_measures = []
         fps_measures = []
 
-        for chunk_idx in range(num_chunks):
-            start_frame = chunk_idx * chunk_size
-            end_frame = min(start_frame + chunk_size, request.num_frames)
+        # Create output file for incremental writing (reuse recording pattern)
+        from .recording import TEMP_FILE_PREFIXES, RecordingManager
 
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        output_file_path = RecordingManager._create_temp_file(
+            ".bin", TEMP_FILE_PREFIXES["generate_output"]
+        )
+        output_file = open(output_file_path, "wb")
 
-            kwargs = build_chunk_kwargs(
-                request,
-                inputs,
-                chunk_idx,
-                chunk_size,
-                start_frame,
-                end_frame,
-                status_info,
-                device,
-                dtype,
-                logger,
-            )
+        # We'll write a placeholder header, then update it at the end
+        # Header format: ndim (4 bytes) + shape (4 * ndim bytes)
+        # For video [T, H, W, C], that's 4 + 16 = 20 bytes
+        header_size = 4 + 4 * 4  # ndim + 4 dimensions
+        output_file.write(b"\x00" * header_size)  # Placeholder
 
-            # Run pipeline
-            chunk_start = time.time()
-            with torch.amp.autocast("cuda", dtype=dtype):
-                result = pipeline(**kwargs)
-            chunk_latency = time.time() - chunk_start
+        total_frames = 0
+        video_height = None
+        video_width = None
+        video_channels = None
 
-            chunk_output = result["video"]
-            num_output_frames = chunk_output.shape[0]
-            chunk_fps = num_output_frames / chunk_latency
+        try:
+            for chunk_idx in range(num_chunks):
+                start_frame = chunk_idx * chunk_size
+                end_frame = min(start_frame + chunk_size, request.num_frames)
 
-            latency_measures.append(chunk_latency)
-            fps_measures.append(chunk_fps)
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
-            logger.info(
-                f"Chunk {chunk_idx + 1}/{num_chunks}: "
-                f"{num_output_frames} frames, latency={chunk_latency:.2f}s, fps={chunk_fps:.2f}"
-            )
+                kwargs = build_chunk_kwargs(
+                    request,
+                    inputs,
+                    chunk_idx,
+                    chunk_size,
+                    start_frame,
+                    end_frame,
+                    status_info,
+                    device,
+                    dtype,
+                    logger,
+                )
 
-            output_chunks.append(chunk_output.detach().cpu())
+                # Run pipeline
+                chunk_start = time.time()
+                with torch.amp.autocast("cuda", dtype=dtype):
+                    result = pipeline(**kwargs)
+                chunk_latency = time.time() - chunk_start
 
-            yield sse_event(
-                "progress",
-                {
-                    "chunk": chunk_idx + 1,
-                    "total_chunks": num_chunks,
-                    "frames": num_output_frames,
-                    "latency": round(chunk_latency, 3),
-                    "fps": round(chunk_fps, 2),
-                },
-            )
+                chunk_output = result["video"]
+                num_output_frames = chunk_output.shape[0]
+                chunk_fps = num_output_frames / chunk_latency
 
-        # Concatenate and encode output
-        output_video = torch.cat(output_chunks, dim=0)
-        output_np = output_video.numpy()
+                latency_measures.append(chunk_latency)
+                fps_measures.append(chunk_fps)
+
+                logger.info(
+                    f"Chunk {chunk_idx + 1}/{num_chunks}: "
+                    f"{num_output_frames} frames, latency={chunk_latency:.2f}s, fps={chunk_fps:.2f}"
+                )
+
+                # Write chunk to file immediately (convert to uint8)
+                chunk_np = chunk_output.detach().cpu().numpy()
+                chunk_uint8 = (chunk_np * 255).clip(0, 255).astype(np.uint8)
+                output_file.write(chunk_uint8.tobytes())
+
+                # Track dimensions
+                total_frames += num_output_frames
+                if video_height is None:
+                    video_height = chunk_np.shape[1]
+                    video_width = chunk_np.shape[2]
+                    video_channels = chunk_np.shape[3]
+
+                yield sse_event(
+                    "progress",
+                    {
+                        "chunk": chunk_idx + 1,
+                        "total_chunks": num_chunks,
+                        "frames": num_output_frames,
+                        "latency": round(chunk_latency, 3),
+                        "fps": round(chunk_fps, 2),
+                    },
+                )
+
+            # Update header with actual shape
+            output_file.seek(0)
+            shape = (total_frames, video_height, video_width, video_channels)
+            output_file.write(len(shape).to_bytes(4, "little"))
+            for dim in shape:
+                output_file.write(dim.to_bytes(4, "little"))
+
+        finally:
+            output_file.close()
+
+        logger.info(f"Output video saved: {output_file_path}")
 
         # Log performance summary
         if latency_measures:
@@ -300,15 +363,14 @@ def generate_video_stream(
                 f"Max: {max(fps_measures):.2f}, Min: {min(fps_measures):.2f}"
             )
 
-        video_bytes = output_np.astype(np.float32).tobytes()
-        video_base64 = base64.b64encode(video_bytes).decode("utf-8")
+        output_shape = [total_frames, video_height, video_width, video_channels]
 
         yield sse_event(
             "complete",
             {
-                "video_base64": video_base64,
-                "video_shape": list(output_np.shape),
-                "num_frames": output_np.shape[0],
+                "output_path": output_file_path,
+                "video_shape": output_shape,
+                "num_frames": total_frames,
                 "num_chunks": num_chunks,
                 "chunk_size": chunk_size,
             },

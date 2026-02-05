@@ -1152,6 +1152,139 @@ async def generate_video(
     )
 
 
+@app.post("/api/v1/generate/upload")
+async def upload_video_for_generate(request: Request):
+    """Upload a video for batch generation (file-based transfer for large videos).
+
+    Accepts raw binary video data with metadata headers:
+    - X-Video-Frames: number of frames (T)
+    - X-Video-Height: frame height (H)
+    - X-Video-Width: frame width (W)
+    - X-Video-Channels: number of channels (C), typically 3 for RGB
+
+    Video data should be raw uint8 bytes in THWC order.
+
+    Returns input_path to use in the generate request.
+    """
+    from .recording import TEMP_FILE_PREFIXES, RecordingManager
+    from .schema import VideoUploadResponse
+
+    try:
+        # Get video dimensions from headers
+        num_frames = int(request.headers.get("X-Video-Frames", 0))
+        height = int(request.headers.get("X-Video-Height", 0))
+        width = int(request.headers.get("X-Video-Width", 0))
+        channels = int(request.headers.get("X-Video-Channels", 3))
+
+        if not all([num_frames, height, width]):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required headers: X-Video-Frames, X-Video-Height, X-Video-Width",
+            )
+
+        expected_size = num_frames * height * width * channels
+        shape = (num_frames, height, width, channels)
+
+        # Create temp file (reuse recording pattern)
+        file_path = RecordingManager._create_temp_file(
+            ".bin", TEMP_FILE_PREFIXES["generate_input"]
+        )
+
+        # Stream body to file
+        with open(file_path, "wb") as f:
+            # Write header: ndim (4 bytes) + shape (ndim * 4 bytes)
+            f.write(len(shape).to_bytes(4, "little"))
+            for dim in shape:
+                f.write(dim.to_bytes(4, "little"))
+
+            # Stream video data
+            bytes_written = 0
+            async for chunk in request.stream():
+                f.write(chunk)
+                bytes_written += len(chunk)
+
+        if bytes_written != expected_size:
+            Path(file_path).unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video data size mismatch: expected {expected_size}, got {bytes_written}",
+            )
+
+        logger.info(f"Uploaded video: {file_path} (shape: {shape})")
+
+        return VideoUploadResponse(
+            input_path=file_path,
+            num_frames=num_frames,
+            shape=list(shape),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading video: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/generate/download")
+async def download_generated_video(
+    path: str = Query(..., description="Path to output video file"),
+    background_tasks: BackgroundTasks = None,
+):
+    """Download a generated video by path.
+
+    Returns raw binary video data with metadata headers:
+    - X-Video-Frames: number of frames (T)
+    - X-Video-Height: frame height (H)
+    - X-Video-Width: frame width (W)
+    - X-Video-Channels: number of channels (C)
+
+    Video data is raw uint8 bytes in THWC order.
+    """
+    import tempfile
+
+    from .recording import TEMP_FILE_PREFIXES, cleanup_temp_file
+
+    try:
+        file_path = Path(path)
+
+        # Security: only allow files in temp dir with our prefix
+        temp_dir = Path(tempfile.gettempdir())
+        if not file_path.is_relative_to(temp_dir):
+            raise HTTPException(status_code=403, detail="Invalid file path")
+        if not file_path.name.startswith(TEMP_FILE_PREFIXES["generate_output"]):
+            raise HTTPException(status_code=403, detail="Invalid file path")
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Output video not found")
+
+        # Read header to get shape
+        with open(file_path, "rb") as f:
+            ndim = int.from_bytes(f.read(4), "little")
+            shape = tuple(int.from_bytes(f.read(4), "little") for _ in range(ndim))
+
+        # Schedule cleanup after download
+        if background_tasks:
+            background_tasks.add_task(cleanup_temp_file, str(file_path))
+
+        # Return file with metadata headers
+        return FileResponse(
+            file_path,
+            media_type="application/octet-stream",
+            headers={
+                "X-Video-Frames": str(shape[0]),
+                "X-Video-Height": str(shape[1]),
+                "X-Video-Width": str(shape[2]),
+                "X-Video-Channels": str(shape[3]) if len(shape) > 3 else "3",
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading generated video: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 def is_spout_available() -> bool:
     """Check if Spout is available (native Windows only, not WSL)."""
     return sys.platform == "win32"

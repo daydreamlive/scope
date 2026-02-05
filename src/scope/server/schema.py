@@ -844,6 +844,16 @@ class EncodedArray(BaseModel):
     shape: list[int] = Field(..., description="Array shape for decoding")
 
 
+class VideoUploadResponse(BaseModel):
+    """Response after uploading a video for generation."""
+
+    input_path: str = Field(
+        ..., description="Path to uploaded video file for generate request"
+    )
+    num_frames: int = Field(..., description="Number of frames in uploaded video")
+    shape: list[int] = Field(..., description="Video shape [T, H, W, C]")
+
+
 class GenerateRequest(BaseModel):
     """Request for batch video generation."""
 
@@ -875,10 +885,14 @@ class GenerateRequest(BaseModel):
         default=42,
         description="Random seed. Single int applies to all chunks; list applies per-chunk.",
     )
-    # Video-to-video input (optional)
+    # Video-to-video input (optional) - two mutually exclusive options
     input_video: EncodedArray | None = Field(
         default=None,
-        description="Input video frames (THWC, uint8). If provided, enables video-to-video mode.",
+        description="Input video frames (THWC, uint8). If provided, enables video-to-video mode. For large videos, use input_path instead.",
+    )
+    input_path: str | None = Field(
+        default=None,
+        description="Path to uploaded video file (from /generate/upload). Alternative to input_video for large files.",
     )
     noise_scale: float | list[float] = Field(
         default=0.7,
@@ -926,11 +940,22 @@ class GenerateRequest(BaseModel):
 
 
 class GenerateResponse(BaseModel):
-    """Response from batch video generation."""
+    """Response from batch video generation.
 
-    video_base64: str = Field(
-        ...,
-        description="Base64-encoded output video frames as numpy array bytes (THWC, float32, [0,1] range)",
+    Supports two modes:
+    - Legacy: video_base64 contains the full video (for small videos)
+    - File-based: output_path references a downloadable file (for large videos)
+    """
+
+    # File-based output (preferred for large videos)
+    output_path: str | None = Field(
+        default=None,
+        description="Path to output video file for download via /generate/download. Preferred for large videos.",
+    )
+    # Legacy base64 output (kept for backwards compatibility)
+    video_base64: str | None = Field(
+        default=None,
+        description="Base64-encoded output video frames (THWC, uint8). Deprecated for large videos, use output_path.",
     )
     video_shape: list[int] = Field(
         ...,
