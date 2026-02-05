@@ -1966,7 +1966,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 )
 @click.option(
     "--cloud-app-id",
-    default="Daydream/scope-app--staging/ws",
+    default="Daydream/mjh-scope/ws",
     envvar="SCOPE_CLOUD_APP_ID",
     help="Cloud app ID for cloud mode (e.g., 'username/scope-app')",
 )
