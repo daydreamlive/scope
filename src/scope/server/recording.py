@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 TEMP_FILE_PREFIXES = {
     "recording": "scope_recording_",
     "download": "scope_download_",
+    "generate_input": "scope_gen_input_",
+    "generate_output": "scope_gen_output_",
 }
 
 # Environment variables
