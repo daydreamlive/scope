@@ -21,8 +21,9 @@ function App() {
     // Initialize Electron auth callback listener (if running in Electron)
     const cleanupElectronAuth = initElectronAuthListener(
       () => {
-        // Success callback - show toast
+        // Success callback - show toast and open account settings
         toast.success("Successfully signed in!");
+        window.dispatchEvent(new CustomEvent("daydream-auth-success"));
       },
       error => {
         // Error callback - show toast
@@ -36,6 +37,7 @@ function App() {
       .then(handled => {
         if (handled) {
           toast.success("Successfully signed in!");
+          window.dispatchEvent(new CustomEvent("daydream-auth-success"));
         }
       })
       .catch(error => {

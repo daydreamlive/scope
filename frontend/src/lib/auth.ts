@@ -30,6 +30,7 @@ const DAYDREAM_API_BASE =
   "https://api.daydream.live";
 const API_KEY_STORAGE_KEY = "daydream_api_key";
 const USER_ID_STORAGE_KEY = "daydream_user_id";
+const USER_DISPLAY_NAME_STORAGE_KEY = "daydream_user_display_name";
 
 /**
  * Get the stored Daydream API key from localStorage or environment variable
@@ -54,6 +55,13 @@ export function getDaydreamUserId(): string | null {
 }
 
 /**
+ * Get the stored Daydream user display name from localStorage
+ */
+export function getDaydreamUserDisplayName(): string | null {
+  return localStorage.getItem(USER_DISPLAY_NAME_STORAGE_KEY);
+}
+
+/**
  * Save the Daydream auth credentials to localStorage
  */
 export function saveDaydreamAuth(apiKey: string, userId: string | null): void {
@@ -66,11 +74,33 @@ export function saveDaydreamAuth(apiKey: string, userId: string | null): void {
 }
 
 /**
+ * Fetch user profile and store display name in localStorage
+ */
+export async function fetchAndStoreUserProfile(apiKey: string): Promise<void> {
+  try {
+    const response = await fetch(`${DAYDREAM_API_BASE}/users/profile`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (response.ok) {
+      const profile = await response.json();
+      const displayName = profile.email || profile.name || profile.username;
+      if (displayName) {
+        localStorage.setItem(USER_DISPLAY_NAME_STORAGE_KEY, displayName);
+        window.dispatchEvent(new CustomEvent("daydream-auth-change"));
+      }
+    }
+  } catch (e) {
+    console.error("Failed to fetch user profile:", e);
+  }
+}
+
+/**
  * Clear the stored Daydream auth credentials
  */
 export function clearDaydreamAuth(): void {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
   localStorage.removeItem(USER_ID_STORAGE_KEY);
+  localStorage.removeItem(USER_DISPLAY_NAME_STORAGE_KEY);
   // Dispatch custom event to notify components of auth state change
   window.dispatchEvent(new CustomEvent("daydream-auth-change"));
 }
@@ -162,6 +192,9 @@ export async function handleOAuthCallback(): Promise<boolean> {
     // Save the API key and userId to localStorage
     saveDaydreamAuth(apiKey, userId);
 
+    // Fetch and store user profile
+    await fetchAndStoreUserProfile(apiKey);
+
     // Clean up the URL by removing the token parameter
     const url = new URL(window.location.href);
     url.searchParams.delete("token");
@@ -188,6 +221,9 @@ async function processAuthCallback(data: {
 
   // Save the API key and userId to localStorage
   saveDaydreamAuth(apiKey, data.userId);
+
+  // Fetch and store user profile
+  await fetchAndStoreUserProfile(apiKey);
 }
 
 /**
