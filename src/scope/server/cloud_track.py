@@ -20,7 +20,6 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-import numpy as np
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
@@ -171,10 +170,7 @@ class CloudTrack(MediaStreamTrack):
         await self._start()
 
         # Wait for a processed frame from FrameProcessor
-        max_wait = 1.0  # seconds
-        start_time = time.time()
-
-        while time.time() - start_time < max_wait:
+        while True:
             if self.frame_processor:
                 frame_tensor = self.frame_processor.get()
                 if frame_tensor is not None:
@@ -191,20 +187,6 @@ class CloudTrack(MediaStreamTrack):
 
             # No frame yet, wait a bit
             await asyncio.sleep(0.01)
-
-        # No frame received, return last frame or black frame
-        if self._last_frame is not None:
-            pts, time_base = await self.next_timestamp()
-            self._last_frame.pts = pts
-            return self._last_frame
-
-        # Return black frame as fallback
-        black = np.zeros((512, 512, 3), dtype=np.uint8)
-        frame = VideoFrame.from_ndarray(black, format="rgb24")
-        pts, time_base = await self.next_timestamp()
-        frame.pts = pts
-        frame.time_base = time_base
-        return frame
 
     def update_parameters(self, params: dict) -> None:
         """Update pipeline parameters on cloud."""

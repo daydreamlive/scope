@@ -164,7 +164,6 @@ class SetupCachesBlock(ModularPipelineBlocks):
             components.config.vae_spatial_downsample_factor
             * components.config.patch_embedding_spatial_downsample_factor
         )
-
         frame_seq_length = (block_state.height // scale_size) * (
             block_state.width // scale_size
         )
