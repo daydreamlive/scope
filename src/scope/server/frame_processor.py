@@ -8,7 +8,7 @@ from typing import Any
 import torch
 from aiortc.mediastreams import VideoFrame
 
-from .kafka_publisher import publish_event
+from .event_bus import emit_event
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
@@ -57,9 +57,9 @@ class FrameProcessor:
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
 
-        # Session ID for Kafka event tracking
+        # Session ID for event tracking
         self.session_id = session_id or str(uuid.uuid4())
-        # User ID for Kafka event tracking
+        # User ID for event tracking
         self.user_id = user_id
 
         # Current parameters
@@ -149,7 +149,7 @@ class FrameProcessor:
             logger.info("[FRAME-PROCESSOR] Started in cloud mode")
 
             # Publish stream_started event for relay mode
-            publish_event(
+            emit_event(
                 event_type="stream_started",
                 session_id=self.session_id,
                 user_id=self.user_id,
@@ -175,7 +175,7 @@ class FrameProcessor:
         )
 
         # Publish stream_started event for local mode
-        publish_event(
+        emit_event(
             event_type="stream_started",
             session_id=self.session_id,
             pipeline_ids=self.pipeline_ids,
@@ -249,10 +249,10 @@ class FrameProcessor:
                 self.notification_callback(message)
             except Exception as e:
                 logger.error(f"Error in frame processor stop callback: {e}")
-        # Publish Kafka events for stream stop
+        # Emit events for stream stop
         if error_message:
             # Publish stream_error event
-            publish_event(
+            emit_event(
                 event_type="stream_error",
                 session_id=self.session_id,
                 pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
@@ -270,7 +270,7 @@ class FrameProcessor:
             )
 
         # Publish stream_stopped event
-        publish_event(
+        emit_event(
             event_type="stream_stopped",
             session_id=self.session_id,
             pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,

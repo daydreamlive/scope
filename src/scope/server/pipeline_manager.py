@@ -10,7 +10,7 @@ from typing import Any
 import torch
 from omegaconf import OmegaConf
 
-from .kafka_publisher import publish_event
+from .event_bus import emit_event
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ class PipelineManager:
             logger.info(f"Pipeline {pipeline_id} loaded successfully")
 
             # Publish pipeline_loaded event
-            publish_event(
+            emit_event(
                 event_type="pipeline_loaded",
                 pipeline_ids=[pipeline_id],
                 metadata={"load_params": load_params} if load_params else None,
@@ -209,7 +209,7 @@ class PipelineManager:
                     del self._pipeline_load_params[pipeline_id]
 
             # Publish pipeline_error event
-            publish_event(
+            emit_event(
                 event_type="pipeline_error",
                 pipeline_ids=[pipeline_id],
                 error={
@@ -576,7 +576,7 @@ class PipelineManager:
                 logger.warning(f"CUDA cleanup failed: {e}")
 
         # Publish pipeline_unloaded event
-        publish_event(
+        emit_event(
             event_type="pipeline_unloaded",
             pipeline_ids=[pipeline_id],
         )

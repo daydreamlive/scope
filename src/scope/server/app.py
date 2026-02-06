@@ -21,7 +21,7 @@ import click
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -33,11 +33,7 @@ if TYPE_CHECKING:
 
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
-from .kafka_publisher import (
-    KafkaPublisher,
-    is_kafka_enabled,
-    set_kafka_publisher,
-)
+from .event_bus import EventBus, set_event_bus
 from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
@@ -224,8 +220,8 @@ pipeline_manager = None
 server_start_time = time.time()
 # Global cloud connection manager instance
 cloud_connection_manager = None
-# Global Kafka publisher instance (optional, initialized if credentials are present)
-kafka_publisher = None
+# Global event bus instance
+event_bus = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -250,7 +246,7 @@ async def lifespan(app: FastAPI):
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager, cloud_connection_manager, kafka_publisher
+    global webrtc_manager, pipeline_manager, cloud_connection_manager, event_bus
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -291,15 +287,11 @@ async def lifespan(app: FastAPI):
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
 
-    # Initialize Kafka publisher if credentials are configured
-    if is_kafka_enabled():
-        kafka_publisher = KafkaPublisher()
-        if await kafka_publisher.start():
-            set_kafka_publisher(kafka_publisher)
-            logger.info("Kafka publisher initialized")
-        else:
-            kafka_publisher = None
-            logger.warning("Kafka publisher failed to start")
+    # Initialize event bus for lifecycle events (consumed via SSE by fal_app)
+    event_bus = EventBus()
+    event_bus.set_loop(asyncio.get_running_loop())
+    set_event_bus(event_bus)
+    logger.info("Event bus initialized")
 
     yield
 
@@ -319,11 +311,9 @@ async def lifespan(app: FastAPI):
         await cloud_connection_manager.disconnect()
         logger.info("Cloud connection shutdown complete")
 
-    if kafka_publisher:
-        logger.info("Shutting down Kafka publisher...")
-        await kafka_publisher.stop()
-        set_kafka_publisher(None)
-        logger.info("Kafka publisher shutdown complete")
+    if event_bus:
+        set_event_bus(None)
+        logger.info("Event bus shutdown complete")
 
 
 def get_webrtc_manager() -> "WebRTCManager":
@@ -1711,6 +1701,36 @@ async def reload_plugin(
             status_code=500,
             detail=f"Failed to reload {name}. Check server logs for details.",
         ) from e
+
+
+# =============================================================================
+# Event Stream Endpoint
+# =============================================================================
+
+
+@app.get("/api/v1/events/stream")
+async def event_stream():
+    """Server-Sent Events stream for lifecycle events.
+
+    Returns a stream of events (pipeline loaded/unloaded, stream started/stopped,
+    session created/closed, errors) that can be consumed by external services
+    like fal_app to publish to Kafka.
+    """
+    from .event_bus import get_event_bus
+
+    bus = get_event_bus()
+    if not bus:
+        raise HTTPException(status_code=503, detail="Event bus not initialized")
+
+    return StreamingResponse(
+        bus.subscribe_sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # =============================================================================

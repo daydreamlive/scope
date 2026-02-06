@@ -11,7 +11,7 @@ import torch
 
 from scope.core.pipelines.controller import parse_ctrl_input
 
-from .kafka_publisher import publish_event
+from .event_bus import emit_event
 from .pipeline_manager import PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
@@ -226,7 +226,7 @@ class PipelineProcessor:
                         f"Non-recoverable error in worker loop for {self.pipeline_id}: {e}, stopping"
                     )
                     # Publish stream_error event for non-recoverable errors
-                    publish_event(
+                    emit_event(
                         event_type="stream_error",
                         session_id=self.session_id,
                         pipeline_ids=[self.pipeline_id],

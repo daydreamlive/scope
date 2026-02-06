@@ -21,7 +21,7 @@ from aiortc.sdp import candidate_from_sdp
 
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
-from .kafka_publisher import publish_event_async
+from .event_bus import emit_event_async
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
@@ -318,7 +318,7 @@ class WebRTCManager:
 
             # Publish session_created event
             pipeline_ids = initial_parameters.get("pipeline_ids")
-            await publish_event_async(
+            await emit_event_async(
                 event_type="session_created",
                 session_id=session.id,
                 pipeline_ids=pipeline_ids if pipeline_ids else None,
@@ -446,7 +446,7 @@ class WebRTCManager:
 
             # Publish session_created event for relay mode
             pipeline_ids = initial_parameters.get("pipeline_ids")
-            await publish_event_async(
+            await emit_event_async(
                 event_type="session_created",
                 session_id=session.id,
                 pipeline_ids=pipeline_ids if pipeline_ids else None,
@@ -479,7 +479,7 @@ class WebRTCManager:
             await session.close()
 
             # Publish session_closed event
-            await publish_event_async(
+            await emit_event_async(
                 event_type="session_closed",
                 session_id=session_id,
                 user_id=session.user_id,

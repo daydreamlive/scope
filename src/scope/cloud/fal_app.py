@@ -21,104 +21,7 @@ from fal.container import ContainerImage
 from fastapi import WebSocket
 
 
-class KafkaPublisher:
-    """Async Kafka event publisher for fal.ai websocket events."""
-
-    def __init__(self):
-        self._producer = None
-        self._started = False
-        self._topic = None
-
-    async def start(self) -> bool:
-        """Start the Kafka producer."""
-        # Read env vars at runtime (they may not be available at module load time on fal.ai)
-        bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-        self._topic = os.getenv("KAFKA_TOPIC", "network_events")
-        sasl_username = os.getenv("KAFKA_SASL_USERNAME")
-        sasl_password = os.getenv("KAFKA_SASL_PASSWORD")
-
-        print(
-            f"[Kafka] Starting publisher (KAFKA_BOOTSTRAP_SERVERS={bootstrap_servers})"
-        )
-        if not bootstrap_servers:
-            print("[Kafka] Not configured, event publishing disabled")
-            return False
-
-        try:
-            from aiokafka import AIOKafkaProducer
-
-            config = {
-                "bootstrap_servers": bootstrap_servers,
-                "value_serializer": lambda v: json.dumps(v).encode("utf-8"),
-                "key_serializer": lambda k: k.encode("utf-8") if k else None,
-            }
-
-            if sasl_username and sasl_password:
-                import ssl
-
-                ssl_context = ssl.create_default_context()
-                config.update(
-                    {
-                        "security_protocol": "SASL_SSL",
-                        "sasl_mechanism": "PLAIN",
-                        "sasl_plain_username": sasl_username,
-                        "sasl_plain_password": sasl_password,
-                        "ssl_context": ssl_context,
-                    }
-                )
-
-            self._producer = AIOKafkaProducer(**config)
-            await self._producer.start()
-            self._started = True
-            print(f"[Kafka] ✅ Publisher started, topic: {self._topic}")
-            return True
-
-        except ImportError:
-            print("[Kafka] ⚠️ aiokafka not installed, Kafka disabled")
-            return False
-        except Exception as e:
-            print(f"[Kafka] ❌ Failed to start producer: {e}")
-            return False
-
-    async def stop(self):
-        """Stop the Kafka producer."""
-        if self._producer and self._started:
-            try:
-                await self._producer.stop()
-                print("[Kafka] Publisher stopped")
-            except Exception as e:
-                print(f"[Kafka] Error stopping producer: {e}")
-            finally:
-                self._started = False
-                self._producer = None
-
-    async def publish(self, event_type: str, data: dict[str, Any]) -> bool:
-        """Publish an event to Kafka."""
-        if not self._started or not self._producer:
-            return False
-
-        event_id = str(uuid.uuid4())
-        timestamp_ms = str(int(time.time() * 1000))
-
-        event = {
-            "id": event_id,
-            "type": "stream_trace",
-            "timestamp": timestamp_ms,
-            "data": {"event_type": event_type, "client_source": "scope", **data},
-        }
-
-        try:
-            await self._producer.send_and_wait(self._topic, value=event, key=event_id)
-            print(f"[Kafka] ✅ Published event: {event_type}")
-            return True
-        except Exception as e:
-            print(f"[Kafka] ❌ Failed to publish event {event_type}: {e}")
-            return False
-
-    @property
-    def is_running(self) -> bool:
-        return self._started
-
+from scope.cloud.kafka_publisher import KafkaPublisher
 
 # Global Kafka publisher instance
 kafka_publisher: KafkaPublisher | None = None
@@ -168,7 +71,7 @@ def cleanup_session_data():
 # fal deploy fal_app.py --auth public
 
 # Configuration
-DOCKER_IMAGE = "daydreamlive/scope:6334b27"
+DOCKER_IMAGE = "daydreamlive/scope:ad5cb26"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -329,6 +232,39 @@ class ScopeApp(fal.App, keep_alive=300):
         if kafka_publisher is None:
             kafka_publisher = KafkaPublisher()
             await kafka_publisher.start()
+
+        async def subscribe_to_scope_events():
+            """Subscribe to scope server's SSE event stream and publish to Kafka."""
+            while True:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        async with client.stream(
+                            "GET",
+                            f"{SCOPE_BASE_URL}/api/v1/events/stream",
+                            timeout=None,
+                        ) as response:
+                            async for line in response.aiter_lines():
+                                if line.startswith("data:"):
+                                    try:
+                                        event = json.loads(line[5:].strip())
+                                        if (
+                                            kafka_publisher
+                                            and kafka_publisher.is_running
+                                        ):
+                                            event_type = event.pop(
+                                                "event_type", "unknown"
+                                            )
+                                            await kafka_publisher.publish(
+                                                event_type, event
+                                            )
+                                    except json.JSONDecodeError:
+                                        pass
+                except Exception as e:
+                    print(f"[SSE] Event stream error: {e}, reconnecting in 5s...")
+                    await asyncio.sleep(5)
+
+        # Start SSE subscription as background task
+        sse_task = asyncio.create_task(subscribe_to_scope_events())
 
         await ws.accept()
 
@@ -687,6 +623,9 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"[{log_prefix()}] WebSocket error: {e}")
             await safe_send_json({"type": "error", "error": str(e)})
         finally:
+            # Cancel SSE subscription
+            sse_task.cancel()
+
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
