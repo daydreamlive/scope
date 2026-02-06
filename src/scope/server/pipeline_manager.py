@@ -121,6 +121,45 @@ class PipelineManager:
             None, self._load_pipeline_by_id_sync, pipeline_id, load_params
         )
 
+    def _wait_for_pipeline_load(
+        self, pipeline_id: str, timeout: float = 300, poll_interval: float = 1.0
+    ) -> bool:
+        """Wait for an in-progress pipeline load to complete.
+
+        Must NOT be called while holding self._lock.
+
+        Args:
+            pipeline_id: ID of the pipeline to wait for
+            timeout: Maximum seconds to wait
+            poll_interval: Seconds between status checks
+
+        Returns:
+            True if the pipeline loaded successfully, False otherwise.
+        """
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            time.sleep(poll_interval)
+            with self._lock:
+                status = self._pipeline_statuses.get(
+                    pipeline_id, PipelineStatus.NOT_LOADED
+                )
+                if status == PipelineStatus.LOADED:
+                    logger.info(
+                        f"Pipeline {pipeline_id} finished loading (waited successfully)"
+                    )
+                    return True
+                if status != PipelineStatus.LOADING:
+                    # Error, not_loaded, or gone — the other thread failed
+                    logger.warning(
+                        f"Pipeline {pipeline_id} load finished with status: "
+                        f"{status.value}"
+                    )
+                    return False
+        logger.error(f"Timed out waiting for pipeline {pipeline_id} to load")
+        return False
+
     def _load_pipeline_by_id_sync(
         self, pipeline_id: str, load_params: dict | None = None
     ) -> bool:
@@ -158,13 +197,20 @@ class PipelineManager:
                 )
                 return True
 
-            # If already loading, wait
+            # If already loading, release lock and wait for the in-progress load
             if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADING:
-                logger.info(f"Pipeline {pipeline_id} already loading by another thread")
-                return False
+                already_loading = True
+            else:
+                already_loading = False
+                # Mark as loading
+                self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
 
-            # Mark as loading
-            self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
+        # Outside the lock: wait for the other thread's load to finish
+        if already_loading:
+            logger.info(
+                f"Pipeline {pipeline_id} already loading by another thread, waiting"
+            )
+            return self._wait_for_pipeline_load(pipeline_id)
 
         # Release lock during slow loading operation
         logger.info(f"Loading pipeline: {pipeline_id}")
