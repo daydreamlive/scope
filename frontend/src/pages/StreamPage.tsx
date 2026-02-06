@@ -74,8 +74,6 @@ export function StreamPage() {
 
   // Track backend cloud relay mode (local backend connected to cloud)
   const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
-  // Track when cloud connection is in progress (to disable controls)
-  const [isCloudConnecting, setIsCloudConnecting] = useState(false);
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
@@ -151,6 +149,9 @@ export function StreamPage() {
   // Recording toggle state
   const [isRecording, setIsRecording] = useState(false);
 
+  // Track when waiting for cloud WebSocket to connect after clicking Play
+  const [isCloudConnecting, setIsCloudConnecting] = useState(false);
+
   // Video display state
   const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
 
@@ -220,7 +221,7 @@ export function StreamPage() {
     sessionId,
   } = useUnifiedWebRTC();
 
-  // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or connecting to cloud
+  // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
     isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
 
@@ -874,6 +875,33 @@ export function StreamPage() {
   // adjust resolution if needed. This prevents the video source resolution from
   // overriding the carefully tuned per-mode defaults.
 
+  // Wait for an in-progress cloud connection to complete before starting WebRTC
+  const waitForCloudConnection = async (): Promise<boolean> => {
+    const maxWaitMs = 180_000; // 3 minutes
+    const pollIntervalMs = 2000;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const response = await fetch("/api/v1/cloud/status");
+        if (response.ok) {
+          const data = await response.json();
+          if (data.connected) return true;
+          if (!data.connecting) {
+            // Not connecting and not connected — connection failed
+            console.error("Cloud connection failed:", data.error);
+            return false;
+          }
+        }
+      } catch (e) {
+        console.error("Error polling cloud status:", e);
+      }
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+    console.error("Timed out waiting for cloud connection");
+    return false;
+  };
+
   const handleStartStream = async (
     overridePipelineId?: PipelineId
   ): Promise<boolean> => {
@@ -922,6 +950,33 @@ export function StreamPage() {
         setPipelinesNeedingModels(missingPipelines);
         setShowDownloadDialog(true);
         return false; // Stream did not start
+      }
+
+      // If cloud connection is in progress, wait for it before loading pipeline
+      // (pipeline load is proxied to cloud only when connected)
+      // Check API directly rather than React state to avoid stale values
+      try {
+        const cloudRes = await fetch("/api/v1/cloud/status");
+        if (cloudRes.ok) {
+          const cloudData = await cloudRes.json();
+          if (cloudData.connecting && !cloudData.connected) {
+            console.log(
+              "[StreamPage] Cloud connecting, waiting before pipeline load..."
+            );
+            setIsCloudConnecting(true);
+            try {
+              const cloudReady = await waitForCloudConnection();
+              if (!cloudReady) {
+                console.error("Cloud connection failed, cannot start stream");
+                return false;
+              }
+            } finally {
+              setIsCloudConnecting(false);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error checking cloud status before stream:", e);
       }
 
       // Always load pipeline with current parameters - backend will handle the rest
@@ -1164,7 +1219,6 @@ export function StreamPage() {
       {/* Header */}
       <Header
         onCloudStatusChange={setIsBackendCloudConnected}
-        onCloudConnectingChange={setIsCloudConnecting}
         onPipelinesRefresh={handlePipelinesRefresh}
         cloudDisabled={isStreaming}
         openSettingsTab={openSettingsTab}
@@ -1184,7 +1238,7 @@ export function StreamPage() {
             mode={mode}
             onModeChange={handleModeChange}
             isStreaming={isStreaming}
-            isConnecting={isConnecting}
+            isConnecting={isConnecting || isCloudConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={
               settings.inputMode === "text"
@@ -1231,7 +1285,6 @@ export function StreamPage() {
             onRefImagesChange={handleRefImagesChange}
             onSendHints={handleSendHints}
             isDownloading={isDownloading}
-            isCloudConnecting={isCloudConnecting}
             supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
             firstFrameImage={settings.firstFrameImage}
             onFirstFrameImageChange={handleFirstFrameImageChange}
@@ -1268,8 +1321,8 @@ export function StreamPage() {
               className="h-full"
               remoteStream={remoteStream}
               isPipelineLoading={isPipelineLoading}
-              isConnecting={isConnecting}
               isCloudConnecting={isCloudConnecting}
+              isConnecting={isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
               isDownloading={isDownloading}

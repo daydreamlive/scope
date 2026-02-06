@@ -1754,12 +1754,15 @@ async def connect_to_cloud(
                 "or SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_APP_ID environment variables.",
             )
 
-        logger.info(f"Connecting to cloud: {app_id} (user_id: {request.user_id})")
-        await cloud_manager.connect(app_id, api_key, request.user_id)
+        logger.info(
+            f"Connecting to cloud (background): {app_id} (user_id: {request.user_id})"
+        )
+        await cloud_manager.connect_background(app_id, api_key, request.user_id)
 
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
-            connected=True,
+            connected=False,
+            connecting=True,
             webrtc_connected=False,
             app_id=app_id,
             credentials_configured=credentials_configured,
