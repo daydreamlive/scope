@@ -260,13 +260,31 @@ function parseDeepLinkUrl(url: string): { action: string; package: string } | nu
  * Process any pending deep link after frontend loads
  */
 function processPendingDeepLink(): void {
-  if (pendingDeepLink && electronAppService) {
+  if (!pendingDeepLink || !electronAppService) {
+    return;
+  }
+
+  const mainWindow = appState.mainWindow;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  const sendLink = () => {
+    // Delay after did-finish-load to allow React to mount and register the listener
     setTimeout(() => {
-      if (pendingDeepLink) {
+      if (pendingDeepLink && electronAppService) {
         electronAppService.sendDeepLinkAction(pendingDeepLink);
         pendingDeepLink = null;
       }
     }, 500);
+  };
+
+  if (!mainWindow.webContents.isLoading()) {
+    sendLink();
+  } else {
+    mainWindow.webContents.once('did-finish-load', () => {
+      sendLink();
+    });
   }
 }
 
@@ -798,6 +816,19 @@ app.on('ready', async () => {
 
   // Check if launched with special arguments (e.g., --show-logs from Jump List)
   electronAppService.checkLaunchArgs();
+
+  // Check process.argv for deep link URL (Windows/Linux cold start).
+  // On macOS, deep links are delivered via the 'open-url' event instead.
+  if (process.platform !== 'darwin') {
+    const deepLinkArg = process.argv.find(arg => arg.startsWith(`${PROTOCOL_SCHEME}://`));
+    if (deepLinkArg) {
+      const data = parseDeepLinkUrl(deepLinkArg);
+      if (data) {
+        pendingDeepLink = data;
+        logger.info(`Deep link found in process.argv: ${deepLinkArg}`);
+      }
+    }
+  }
 
   // Wait for window to load before proceeding (with timeout)
   logger.info('Waiting for window to load...');
