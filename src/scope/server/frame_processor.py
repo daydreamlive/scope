@@ -60,7 +60,8 @@ class FrameProcessor:
         session_id: str | None = None,  # Session ID for event tracking
         user_id: str | None = None,  # User ID for event tracking
         connection_id: str | None = None,  # Connection ID for event correlation
-        connection_info: dict | None = None,  # Connection metadata (gpu_type, region, etc.)
+        connection_info: dict
+        | None = None,  # Connection metadata (gpu_type, region, etc.)
     ):
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
@@ -124,6 +125,7 @@ class FrameProcessor:
         self._last_stats_time = time.time()
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
+        self._stream_start_time: float | None = None
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -152,6 +154,7 @@ class FrameProcessor:
         self._frames_from_cloud = 0
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
+        self._stream_start_time = time.monotonic()
         self._last_stats_time = time.time()
 
         if self._cloud_mode:
@@ -411,18 +414,27 @@ class FrameProcessor:
         # Emit playback_ready event on first frame output
         if not self._playback_ready_emitted:
             self._playback_ready_emitted = True
+            time_to_first_frame_ms = (
+                int((time.monotonic() - self._stream_start_time) * 1000)
+                if self._stream_start_time is not None
+                else None
+            )
             publish_event(
                 event_type="playback_ready",
                 session_id=self.session_id,
                 connection_id=self.connection_id,
                 pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
                 user_id=self.user_id,
-                metadata={"mode": "cloud" if self._cloud_mode else "local"},
+                metadata={
+                    "mode": "cloud" if self._cloud_mode else "local",
+                    "ttff_ms": time_to_first_frame_ms,
+                },
                 connection_info=self.connection_info,
             )
             logger.info(
                 f"[FRAME-PROCESSOR] First frame produced, playback ready "
-                f"(session={self.session_id}, mode={'cloud' if self._cloud_mode else 'local'})"
+                f"(session={self.session_id}, mode={'cloud' if self._cloud_mode else 'local'}, "
+                f"ttff={time_to_first_frame_ms}ms)"
             )
 
         # Enqueue frame for async Spout sending (non-blocking)
@@ -508,7 +520,9 @@ class FrameProcessor:
                 heartbeat_metadata["frames_to_cloud"] = self._frames_to_cloud
                 heartbeat_metadata["frames_from_cloud"] = self._frames_from_cloud
             else:
-                heartbeat_metadata["pipeline_fps"] = round(pipeline_fps, 1) if pipeline_fps else None
+                heartbeat_metadata["pipeline_fps"] = (
+                    round(pipeline_fps, 1) if pipeline_fps else None
+                )
 
             publish_event(
                 event_type="stream_heartbeat",

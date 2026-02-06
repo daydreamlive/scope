@@ -464,7 +464,7 @@ class ScopeApp(fal.App, keep_alive=300):
         # Build connection_info with GPU type and any available infrastructure info
         connection_info = {
             "gpu_type": ScopeApp.machine_type,
-            "fal_host": os.getenv("FAL_RUN_HOST", "unknown"),
+            "fal_region": os.getenv("NOMAD_DC", "unknown"),
         }
 
         async def handle_offer(payload: dict):
@@ -593,6 +593,7 @@ class ScopeApp(fal.App, keep_alive=300):
                 and isinstance(body, dict)
             ):
                 body["connection_id"] = connection_id
+                body["connection_info"] = connection_info
 
             async with httpx.AsyncClient() as client:
                 try:
@@ -735,6 +736,7 @@ class ScopeApp(fal.App, keep_alive=300):
                         {
                             "user_id": user_id,
                             "connection_id": connection_id,
+                            "connection_info": connection_info,
                         },
                     )
                 return {"type": "user_id_set", "user_id": user_id}
@@ -796,15 +798,16 @@ class ScopeApp(fal.App, keep_alive=300):
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
-                elapsed_ms = end_time * 1000 - connection_start_time * 1000
+                elapsed_ms = int((end_time - connection_start_time) * 1000)
                 await kafka_publisher.publish(
                     "websocket_disconnected",
                     {
                         "user_id": user_id,
                         "connection_id": connection_id,
+                        "connection_info": connection_info,
                         "duration_ms": elapsed_ms,
-                        "session_start_time_ms": connection_start_time * 1000,
-                        "session_end_time_ms": end_time * 1000,
+                        "session_start_time_ms": int(connection_start_time * 1000),
+                        "session_end_time_ms": int(end_time * 1000),
                     },
                 )
             # Clean up session data to prevent data leakage between users

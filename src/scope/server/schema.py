@@ -463,6 +463,10 @@ class PipelineLoadRequest(BaseModel):
         default=None,
         description="Connection ID from fal.ai WebSocket for event correlation",
     )
+    connection_info: dict[str, Any] | None = Field(
+        default=None,
+        description="Connection info (gpu_type, fal_host) for event correlation",
+    )
 
 
 class PipelineStatusResponse(BaseModel):
