@@ -147,7 +147,7 @@ class KafkaPublisher:
             "id": event_id,
             "type": "stream_trace",
             "timestamp": timestamp_ms,
-            "data": {"type": event_type, "client_source": "scope", **data},
+            "data": {"type": event_type, "client_source": "scope", "timestamp": timestamp_ms, **data},
         }
 
         try:
@@ -208,7 +208,7 @@ def cleanup_session_data():
 # 2. switch to python 3.10 to match the scope image
 # 3. pip install fal
 # 4. fal auth login
-# 5. fal deploy fal_app.py --auth public
+# 5. fal deploy --env (main/staging/prod) (--app-name X) fal_app.py --auth public
 
 # Get git SHA at deploy time (this runs when the file is loaded during fal deploy)
 

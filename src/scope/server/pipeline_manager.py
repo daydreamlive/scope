@@ -209,7 +209,7 @@ class PipelineManager:
 
             # Publish pipeline_loaded event with load duration
             load_duration_ms = int((time.monotonic() - load_start_time) * 1000)
-            metadata = {"load_duration_ms": load_duration_ms}
+            metadata = {"load_duration_ms": load_duration_ms, "load_start_time_ms": load_start_time}
             if load_params:
                 metadata["load_params"] = load_params
             publish_event(
