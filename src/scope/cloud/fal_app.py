@@ -474,6 +474,7 @@ class ScopeApp(fal.App, keep_alive=300):
                         "type": payload.get("sdp_type", "offer"),
                         "initialParameters": payload.get("initialParameters"),
                         "user_id": payload.get("user_id"),
+                        "connection_id": connection_id,
                     },
                     timeout=30.0,
                 )
@@ -570,6 +571,14 @@ class ScopeApp(fal.App, keep_alive=300):
             path = payload.get("path", "")
             body = payload.get("body")
             request_id = payload.get("request_id")
+
+            # Inject connection_id into pipeline load requests for event correlation
+            if (
+                method == "POST"
+                and path == "/api/v1/pipeline/load"
+                and isinstance(body, dict)
+            ):
+                body["connection_id"] = connection_id
 
             async with httpx.AsyncClient() as client:
                 try:
