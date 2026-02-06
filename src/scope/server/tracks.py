@@ -26,6 +26,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         session_id: str | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
+        connection_info: dict | None = None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
@@ -34,6 +35,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
+        self.connection_info = connection_info
         # FPS variables (will be updated from FrameProcessor or input measurement)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
@@ -107,6 +109,7 @@ class VideoProcessingTrack(MediaStreamTrack):
                 session_id=self.session_id,
                 user_id=self.user_id,
                 connection_id=self.connection_id,
+                connection_info=self.connection_info,
             )
             self.frame_processor.start()
 

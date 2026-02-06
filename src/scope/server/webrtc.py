@@ -59,6 +59,7 @@ class Session:
         recording_manager: RecordingManager | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
+        connection_info: dict | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
@@ -68,6 +69,7 @@ class Session:
         self.recording_manager = recording_manager
         self.user_id = user_id
         self.connection_id = connection_id
+        self.connection_info = connection_info
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -179,7 +181,10 @@ class WebRTCManager:
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
             session = Session(
-                pc, user_id=request.user_id, connection_id=request.connection_id
+                pc,
+                user_id=request.user_id,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
             )
             self.sessions[session.id] = session
 
@@ -193,6 +198,7 @@ class WebRTCManager:
                 session_id=session.id,
                 user_id=request.user_id,
                 connection_id=request.connection_id,
+                connection_info=request.connection_info,
             )
             session.video_track = video_track
 
@@ -330,6 +336,7 @@ class WebRTCManager:
                 pipeline_ids=pipeline_ids if pipeline_ids else None,
                 user_id=request.user_id,
                 metadata={"mode": "local"},
+                connection_info=request.connection_info,
             )
 
             return {
@@ -374,7 +381,10 @@ class WebRTCManager:
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
             session = Session(
-                pc, user_id=request.user_id, connection_id=request.connection_id
+                pc,
+                user_id=request.user_id,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
             )
             self.sessions[session.id] = session
 
@@ -384,6 +394,7 @@ class WebRTCManager:
                 initial_parameters=initial_parameters,
                 user_id=request.user_id,
                 connection_id=request.connection_id,
+                connection_info=request.connection_info,
                 session_id=session.id,
             )
             session.video_track = cloud_track
@@ -463,6 +474,7 @@ class WebRTCManager:
                 pipeline_ids=pipeline_ids if pipeline_ids else None,
                 user_id=request.user_id,
                 metadata={"mode": "relay"},
+                connection_info=request.connection_info,
             )
 
             return {
@@ -495,6 +507,7 @@ class WebRTCManager:
                 session_id=session_id,
                 connection_id=session.connection_id,
                 user_id=session.user_id,
+                connection_info=session.connection_info,
             )
         else:
             logger.warning(f"Attempted to remove non-existent session: {session_id}")
