@@ -79,10 +79,32 @@ class Pipeline(ABC):
         pass
 
     def cleanup(self) -> None:
-        """Release GPU resources. Called before pipeline is unloaded.
+        """Release GPU resources. Called before pipeline is unloaded."""
 
-        Subclasses may override for custom cleanup behavior.
-        """
+        if hasattr(self, "components"):
+            try:
+                components_dict = getattr(self.components, "_components", None)
+                if components_dict is not None:
+                    for name in list(components_dict.keys()):
+                        del components_dict[name]
+                del self.components
+            except Exception as e:
+                pass
+
+        if hasattr(self, "state"):
+            try:
+                if hasattr(self.state, "values"):
+                    self.state.values.clear()
+                del self.state
+            except Exception as e:
+                pass
+
+        if hasattr(self, "blocks"):
+            try:
+                del self.blocks
+            except Exception as e:
+                pass
+
         gc.collect()
         try:
             import torch
