@@ -10,8 +10,8 @@ from typing import Any
 import torch
 
 from scope.core.pipelines.controller import parse_ctrl_input
+from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
-from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,6 @@ class PipelineProcessor:
         pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
-        session_id: str | None = None,
-        user_id: str | None = None,
     ):
         """Initialize a pipeline processor.
 
@@ -45,13 +43,9 @@ class PipelineProcessor:
             pipeline: Pipeline instance to process frames with
             pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
-            session_id: Session ID for event tracking
-            user_id: User ID for event tracking
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
-        self.session_id = session_id
-        self.user_id = user_id
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
@@ -71,7 +65,9 @@ class PipelineProcessor:
         self.is_prepared = False
 
         # Output FPS tracking (based on frames added to output queue)
-        self.output_frame_times = deque(maxlen=OUTPUT_FPS_SAMPLE_SIZE)
+        # Stores inter-frame durations (seconds)
+        self.output_frame_deltas = deque(maxlen=OUTPUT_FPS_SAMPLE_SIZE)
+        self._last_frame_time: float | None = None
         # Start with a higher initial FPS to prevent initial queue buildup
         self.current_output_fps = MAX_FPS
         self.output_fps_lock = threading.Lock()
@@ -90,6 +86,9 @@ class PipelineProcessor:
         self.vace_use_input_video = (initial_parameters or {}).get(
             "vace_use_input_video", True
         )
+
+        # Cache VACE support check to avoid isinstance on every chunk
+        self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
 
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
@@ -222,18 +221,6 @@ class PipelineProcessor:
                     logger.error(
                         f"Non-recoverable error in worker loop for {self.pipeline_id}: {e}, stopping"
                     )
-                    # Publish stream_error event for non-recoverable errors
-                    publish_event(
-                        event_type="stream_error",
-                        session_id=self.session_id,
-                        pipeline_ids=[self.pipeline_id],
-                        user_id=self.user_id,
-                        error={
-                            "message": str(e),
-                            "type": type(e).__name__,
-                            "recoverable": False,
-                        },
-                    )
                     break
 
         logger.info(f"Worker thread stopped for pipeline: {self.pipeline_id}")
@@ -286,8 +273,6 @@ class PipelineProcessor:
 
     def process_chunk(self):
         """Process a single chunk of frames."""
-        start_time = time.time()
-
         # Check if there are new parameters
         try:
             new_parameters = self.parameters_queue.get_nowait()
@@ -327,6 +312,8 @@ class PipelineProcessor:
         # Pause or resume the processing
         paused = self.parameters.pop("paused", None)
         if paused is not None and paused != self.paused:
+            # Reset so the next FPS delta doesn't span the pause/unpause gap
+            self._last_frame_time = None
             self.paused = paused
         if self.paused:
             self.shutdown_event.wait(SLEEP_TIME)
@@ -394,28 +381,29 @@ class PipelineProcessor:
                 self.parameters["ctrl_input"]["mouse"] = [0.0, 0.0]
 
             # Route video input based on VACE status
-            # We do not support combining latent initialization and VACE conditioning
-            if video_input is not None:
-                # Check if pipeline actually supports VACE before routing to vace_input_frames
-                from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
-
-                pipeline_supports_vace = isinstance(self.pipeline, VACEEnabledPipeline)
-
+            # Don't overwrite if preprocessor already provided vace_input_frames
+            if video_input is not None and "vace_input_frames" not in call_params:
                 if (
-                    pipeline_supports_vace
+                    self._pipeline_supports_vace
                     and self.vace_enabled
                     and self.vace_use_input_video
                 ):
-                    # VACE conditioning: route to vace_input_frames
                     call_params["vace_input_frames"] = video_input
                 else:
-                    # Latent initialization: route to video
                     call_params["video"] = video_input
 
             output_dict = self.pipeline(**call_params)
 
             # Extract video from the returned dictionary
-            output = output_dict["video"]
+            output = output_dict.get("video")
+            if output is None:
+                return
+
+            # Forward extra params to downstream pipeline (dual-output pattern)
+            # Preprocessors return {"video": frames, "vace_input_frames": ..., "vace_input_masks": ...}
+            extra_params = {k: v for k, v in output_dict.items() if k != "video"}
+            if extra_params and self.next_processor is not None:
+                self.next_processor.update_parameters(extra_params)
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates
@@ -441,11 +429,7 @@ class PipelineProcessor:
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
 
-            processing_time = time.time() - start_time
             num_frames = output.shape[0]
-            logger.debug(
-                f"Pipeline {self.pipeline_id} processed in {processing_time:.4f}s, {num_frames} frames"
-            )
 
             # Normalize to [0, 255] and convert to uint8
             # Keep frames on GPU - frame_processor handles CPU transfer for streaming
@@ -487,26 +471,30 @@ class PipelineProcessor:
         self.is_prepared = True
 
     def _track_output_frame(self):
-        """Track when a frame is added to the output queue (production rate)."""
+        """Track when a frame is added to the output queue (production rate).
+
+        Stores inter-frame deltas instead of absolute timestamps so that
+        pauses don't artificially lower the measured FPS.
+        """
+        now = time.time()
         with self.output_fps_lock:
-            self.output_frame_times.append(time.time())
+            if self._last_frame_time is not None:
+                delta = now - self._last_frame_time
+                self.output_frame_deltas.append(delta)
+
+            self._last_frame_time = now
 
         self._calculate_output_fps()
 
     def _calculate_output_fps(self):
-        """Calculate FPS based on how fast frames are produced into the output queue."""
+        """Calculate FPS from the average inter-frame delta."""
         with self.output_fps_lock:
-            if len(self.output_frame_times) >= OUTPUT_FPS_MIN_SAMPLES:
-                times = list(self.output_frame_times)
-                # Time span from first to last frame
-                time_span = times[-1] - times[0]
-                # Require minimum time span to avoid unstable estimates from very short intervals
-                if time_span >= 0.05:  # At least 50ms
-                    # FPS = number of frames / time_span
-                    # e.g., if 4 frames are produced in 1s, then we have 4 FPS
-                    num_frames = len(times)
-                    estimated_fps = num_frames / time_span
-
+            if len(self.output_frame_deltas) >= OUTPUT_FPS_MIN_SAMPLES:
+                avg_delta = sum(self.output_frame_deltas) / len(
+                    self.output_frame_deltas
+                )
+                if avg_delta > 0:
+                    estimated_fps = 1.0 / avg_delta
                     # Clamp to reasonable bounds
                     estimated_fps = max(MIN_FPS, min(MAX_FPS, estimated_fps))
                     self.current_output_fps = estimated_fps
