@@ -1083,6 +1083,14 @@ export function StreamPage() {
       // Include recording toggle state
       initialParameters.recording = isRecording;
 
+      // Include runtime schema field overrides so they reach __call__ on first frame
+      if (
+        settings.schemaFieldOverrides &&
+        Object.keys(settings.schemaFieldOverrides).length > 0
+      ) {
+        Object.assign(initialParameters, settings.schemaFieldOverrides);
+      }
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 

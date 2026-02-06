@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Import enums from torch-free module to avoid loading torch at CLI startup
 from scope.core.pipelines.enums import Quantization, VaeType
@@ -68,6 +68,8 @@ class PromptTransition(BaseModel):
 
 class Parameters(BaseModel):
     """Parameters for WebRTC session."""
+
+    model_config = ConfigDict(extra="allow")
 
     input_mode: Literal["text", "video"] | None = Field(
         default=None,
