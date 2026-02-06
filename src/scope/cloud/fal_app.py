@@ -9,6 +9,7 @@ Based on:
 - https://github.com/fal-ai-community/fal-demos/blob/main/fal_demos/video/yolo_webcam_webrtc/yolo.py
 """
 
+import asyncio
 import json
 import os
 import shutil
@@ -369,6 +370,7 @@ class ScopeApp(fal.App, keep_alive=300):
         async def check_max_duration_exceeded() -> bool:
             """Check if connection has exceeded max duration. Returns True if should close."""
             elapsed_seconds = time.time() - connection_start_time
+            print(f"[{log_prefix()}] Checking max duration: {elapsed_seconds:.0f}s")
             if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
                 print(
                     f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)"
@@ -657,7 +659,7 @@ class ScopeApp(fal.App, keep_alive=300):
                     message = await asyncio.wait_for(
                         ws.receive_text(), timeout=TIMEOUT_CHECK_INTERVAL_SECONDS
                     )
-                except TimeoutError:
+                except (asyncio.TimeoutError, TimeoutError):
                     if await check_max_duration_exceeded():
                         break
                     continue
@@ -684,8 +686,8 @@ class ScopeApp(fal.App, keep_alive=300):
         except WebSocketDisconnect:
             print(f"[{log_prefix()}] WebSocket disconnected")
         except Exception as e:
-            print(f"[{log_prefix()}] WebSocket error: {e}")
-            await safe_send_json({"type": "error", "error": str(e)})
+            print(f"[{log_prefix()}] WebSocket error ({type(e).__name__}): {e}")
+            await safe_send_json({"type": "error", "error": f"{type(e).__name__}: {e}"})
         finally:
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
