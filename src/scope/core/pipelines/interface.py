@@ -80,6 +80,7 @@ class Pipeline(ABC):
 
     def cleanup(self) -> None:
         """Release GPU resources. Called before pipeline is unloaded."""
+        import torch
 
         if hasattr(self, "components"):
             try:
@@ -88,7 +89,7 @@ class Pipeline(ABC):
                     for name in list(components_dict.keys()):
                         del components_dict[name]
                 del self.components
-            except Exception as e:
+            except Exception:
                 pass
 
         if hasattr(self, "state"):
@@ -96,20 +97,65 @@ class Pipeline(ABC):
                 if hasattr(self.state, "values"):
                     self.state.values.clear()
                 del self.state
-            except Exception as e:
+            except Exception:
                 pass
 
         if hasattr(self, "blocks"):
             try:
                 del self.blocks
-            except Exception as e:
+            except Exception:
                 pass
 
-        gc.collect()
-        try:
-            import torch
+        self._cleanup_gpu_objects(self, depth=0, max_depth=2, visited=set())
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _cleanup_gpu_objects(
+        self, obj: object, depth: int, max_depth: int, visited: set
+    ) -> None:
+        """Recursively find and delete GPU objects (nn.Module, Tensor) from __dict__.
+
+        Args:
+            obj: Object to inspect
+            depth: Current recursion depth
+            max_depth: Maximum recursion depth (2 levels catches wrapper patterns)
+            visited: Set of object ids already visited (prevents circular refs)
+        """
+        import torch
+
+        obj_id = id(obj)
+        if obj_id in visited:
+            return
+        visited.add(obj_id)
+
+        if depth >= max_depth:
+            return
+
+        if not hasattr(obj, "__dict__"):
+            return
+
+        attrs_to_delete = []
+        objects_to_recurse = []
+
+        for attr_name, attr_value in list(obj.__dict__.items()):
+            if isinstance(attr_value, (torch.nn.Module, torch.Tensor)):
+                attrs_to_delete.append(attr_name)
+            elif (
+                hasattr(attr_value, "__dict__")
+                and not isinstance(attr_value, type)
+                and not isinstance(
+                    attr_value, (str, bytes, int, float, bool, list, dict, tuple)
+                )
+            ):
+                objects_to_recurse.append(attr_value)
+
+        for attr_name in attrs_to_delete:
+            try:
+                delattr(obj, attr_name)
+            except Exception:
+                pass
+
+        for nested_obj in objects_to_recurse:
+            self._cleanup_gpu_objects(nested_obj, depth + 1, max_depth, visited)
