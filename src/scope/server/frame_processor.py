@@ -24,6 +24,9 @@ OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 # FPS calculation constants
 DEFAULT_FPS = 30.0  # Default FPS
 
+# Heartbeat interval for stream stats logging and Kafka events
+HEARTBEAT_INTERVAL_SECONDS = 10.0
+
 
 class _SpoutFrame:
     """Lightweight wrapper for Spout frames to match VideoFrame interface."""
@@ -57,6 +60,7 @@ class FrameProcessor:
         session_id: str | None = None,  # Session ID for event tracking
         user_id: str | None = None,  # User ID for event tracking
         connection_id: str | None = None,  # Connection ID for event correlation
+        connection_info: dict | None = None,  # Connection metadata (gpu_type, region, etc.)
     ):
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
@@ -67,6 +71,8 @@ class FrameProcessor:
         self.user_id = user_id
         # Connection ID from fal.ai WebSocket for event correlation
         self.connection_id = connection_id
+        # Connection metadata (gpu_type, region, etc.) for Kafka events
+        self.connection_info = connection_info
 
         # Current parameters
         self.parameters = initial_parameters or {}
@@ -116,6 +122,8 @@ class FrameProcessor:
         self._frames_in = 0
         self._frames_out = 0
         self._last_stats_time = time.time()
+        self._last_heartbeat_time = time.time()
+        self._playback_ready_emitted = False
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -142,6 +150,8 @@ class FrameProcessor:
         self._frames_out = 0
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
+        self._last_heartbeat_time = time.time()
+        self._playback_ready_emitted = False
         self._last_stats_time = time.time()
 
         if self._cloud_mode:
@@ -161,6 +171,7 @@ class FrameProcessor:
                 connection_id=self.connection_id,
                 user_id=self.user_id,
                 metadata={"mode": "relay"},
+                connection_info=self.connection_info,
             )
             return
 
@@ -189,6 +200,7 @@ class FrameProcessor:
             pipeline_ids=self.pipeline_ids,
             user_id=self.user_id,
             metadata={"mode": "local"},
+            connection_info=self.connection_info,
         )
 
     def stop(self, error_message: str = None):
@@ -273,6 +285,7 @@ class FrameProcessor:
                     "frames_in": self._frames_in,
                     "frames_out": self._frames_out,
                 },
+                connection_info=self.connection_info,
             )
 
         # Publish stream_stopped event
@@ -287,6 +300,7 @@ class FrameProcessor:
                 "frames_in": self._frames_in,
                 "frames_out": self._frames_out,
             },
+            connection_info=self.connection_info,
         )
 
     def _get_or_create_pinned_buffer(self, shape):
@@ -308,9 +322,11 @@ class FrameProcessor:
 
         self._frames_in += 1
 
-        # Log stats every 100 frames
-        if self._frames_in % 100 == 0:
+        # Log stats and emit heartbeat every HEARTBEAT_INTERVAL_SECONDS
+        now = time.time()
+        if now - self._last_heartbeat_time >= HEARTBEAT_INTERVAL_SECONDS:
             self._log_frame_stats()
+            self._last_heartbeat_time = now
 
         if self._cloud_mode:
             # Cloud mode: send frame to cloud (only in video mode)
@@ -392,6 +408,23 @@ class FrameProcessor:
         # Common processing for both modes
         self._frames_out += 1
 
+        # Emit playback_ready event on first frame output
+        if not self._playback_ready_emitted:
+            self._playback_ready_emitted = True
+            publish_event(
+                event_type="playback_ready",
+                session_id=self.session_id,
+                connection_id=self.connection_id,
+                pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
+                user_id=self.user_id,
+                metadata={"mode": "cloud" if self._cloud_mode else "local"},
+                connection_info=self.connection_info,
+            )
+            logger.info(
+                f"[FRAME-PROCESSOR] First frame produced, playback ready "
+                f"(session={self.session_id}, mode={'cloud' if self._cloud_mode else 'local'})"
+            )
+
         # Enqueue frame for async Spout sending (non-blocking)
         if self.spout_sender_enabled and self.spout_sender is not None:
             try:
@@ -439,13 +472,14 @@ class FrameProcessor:
         return last_processor.get_fps()
 
     def _log_frame_stats(self):
-        """Log frame processing statistics."""
+        """Log frame processing statistics and emit heartbeat event."""
         now = time.time()
         elapsed = now - self._last_stats_time
 
         if elapsed > 0:
             fps_in = self._frames_in / elapsed if self._frames_in > 0 else 0
             fps_out = self._frames_out / elapsed if self._frames_out > 0 else 0
+            pipeline_fps = self.get_fps() if not self._cloud_mode else None
 
             if self._cloud_mode:
                 logger.info(
@@ -458,8 +492,33 @@ class FrameProcessor:
                 logger.info(
                     f"[FRAME-PROCESSOR] Frames: in={self._frames_in}, out={self._frames_out} | "
                     f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out | "
-                    f"Pipeline FPS: {self.get_fps():.1f}"
+                    f"Pipeline FPS: {pipeline_fps:.1f}"
                 )
+
+            # Emit stream_heartbeat Kafka event
+            heartbeat_metadata = {
+                "mode": "cloud" if self._cloud_mode else "local",
+                "frames_in": self._frames_in,
+                "frames_out": self._frames_out,
+                "fps_in": round(fps_in, 1),
+                "fps_out": round(fps_out, 1),
+                "elapsed_seconds": round(elapsed, 1),
+            }
+            if self._cloud_mode:
+                heartbeat_metadata["frames_to_cloud"] = self._frames_to_cloud
+                heartbeat_metadata["frames_from_cloud"] = self._frames_from_cloud
+            else:
+                heartbeat_metadata["pipeline_fps"] = round(pipeline_fps, 1) if pipeline_fps else None
+
+            publish_event(
+                event_type="stream_heartbeat",
+                session_id=self.session_id,
+                connection_id=self.connection_id,
+                pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
+                user_id=self.user_id,
+                metadata=heartbeat_metadata,
+                connection_info=self.connection_info,
+            )
 
     def get_frame_stats(self) -> dict:
         """Get current frame processing statistics."""
@@ -809,6 +868,7 @@ class FrameProcessor:
                 session_id=self.session_id,
                 user_id=self.user_id,
                 connection_id=self.connection_id,
+                connection_info=self.connection_info,
             )
 
             self.pipeline_processors.append(processor)

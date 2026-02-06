@@ -127,6 +127,7 @@ class KafkaPublisher:
         user_id: str | None = None,
         error: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> bool:
         """Publish an event to Kafka asynchronously.
 
@@ -138,6 +139,7 @@ class KafkaPublisher:
             user_id: Optional user ID associated with the event
             error: Optional error details for error events
             metadata: Optional additional metadata
+            connection_info: Optional connection metadata (e.g., gpu_type, region)
 
         Returns:
             True if published successfully, False otherwise.
@@ -155,7 +157,7 @@ class KafkaPublisher:
 
         # Build data payload
         data: dict[str, Any] = {
-            "event_type": event_type,
+            "type": event_type,
             "client_source": "scope",
         }
         if session_id:
@@ -168,6 +170,8 @@ class KafkaPublisher:
             data["user_id"] = user_id
         if error:
             data["error"] = error
+        if connection_info:
+            data["connection_info"] = connection_info
         if metadata:
             data.update(metadata)
 
@@ -200,6 +204,7 @@ class KafkaPublisher:
         user_id: str | None = None,
         error: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> None:
         """Publish an event to Kafka from a sync context (thread-safe).
 
@@ -214,6 +219,7 @@ class KafkaPublisher:
             user_id: Optional user ID associated with the event
             error: Optional error details for error events
             metadata: Optional additional metadata
+            connection_info: Optional connection metadata (e.g., gpu_type, region)
         """
         if not self._started or not self._event_loop:
             return
@@ -233,6 +239,7 @@ class KafkaPublisher:
                         user_id=user_id,
                         error=error,
                         metadata=metadata,
+                        connection_info=connection_info,
                     ),
                     self._event_loop,
                 )
@@ -277,6 +284,7 @@ def publish_event(
     user_id: str | None = None,
     error: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    connection_info: dict[str, Any] | None = None,
 ) -> None:
     """Convenience function to publish an event using the global publisher.
 
@@ -291,6 +299,7 @@ def publish_event(
         user_id: Optional user ID associated with the event
         error: Optional error details for error events
         metadata: Optional additional metadata
+        connection_info: Optional connection metadata (e.g., gpu_type, region)
     """
     publisher = get_kafka_publisher()
     if publisher and publisher.is_running:
@@ -302,6 +311,7 @@ def publish_event(
             user_id=user_id,
             error=error,
             metadata=metadata,
+            connection_info=connection_info,
         )
 
 
@@ -313,6 +323,7 @@ async def publish_event_async(
     user_id: str | None = None,
     error: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    connection_info: dict[str, Any] | None = None,
 ) -> bool:
     """Async convenience function to publish an event using the global publisher.
 
@@ -327,6 +338,7 @@ async def publish_event_async(
         user_id: Optional user ID associated with the event
         error: Optional error details for error events
         metadata: Optional additional metadata
+        connection_info: Optional connection metadata (e.g., gpu_type, region)
 
     Returns:
         True if published successfully, False otherwise.
@@ -341,5 +353,6 @@ async def publish_event_async(
             user_id=user_id,
             error=error,
             metadata=metadata,
+            connection_info=connection_info,
         )
     return False
