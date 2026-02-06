@@ -1,5 +1,6 @@
 """Base interface for all pipelines."""
 
+import gc
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -76,3 +77,17 @@ class Pipeline(ABC):
             The video tensor is in THWC format and [0, 1] range.
         """
         pass
+
+    def cleanup(self) -> None:
+        """Release GPU resources. Called before pipeline is unloaded.
+
+        Subclasses may override for custom cleanup behavior.
+        """
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass

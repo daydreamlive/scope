@@ -420,6 +420,18 @@ class PipelineManager:
                 if loaded_id not in pipeline_ids or current_params != new_params:
                     pipelines_to_unload.add(loaded_id)
 
+            # Log GPU memory before unload
+            if pipelines_to_unload and torch.cuda.is_available():
+                try:
+                    from scope.core.pipelines.memory import get_cuda_free_memory_gb
+
+                    device = torch.device("cuda")
+                    logger.info(
+                        f"GPU memory free before unload: {get_cuda_free_memory_gb(device):.2f} GiB"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to log GPU memory before unload: {e}")
+
             # Unload pipelines that need to be unloaded
             for pipeline_id_to_unload in pipelines_to_unload:
                 self._unload_pipeline_by_id_unsafe(
@@ -427,6 +439,28 @@ class PipelineManager:
                     connection_id=connection_id,
                     connection_info=connection_info,
                 )
+
+            # Log GPU memory after unload
+            if pipelines_to_unload and torch.cuda.is_available():
+                try:
+                    from scope.core.pipelines.memory import get_cuda_free_memory_gb
+
+                    device = torch.device("cuda")
+                    logger.info(
+                        f"GPU memory free after unload: {get_cuda_free_memory_gb(device):.2f} GiB"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to log GPU memory after unload: {e}")
+
+            # Clean up stale status entries for pipelines not in the new request list
+            # This handles cases where a previous pipeline failed to load (status=ERROR/NOT_LOADED)
+            # but its status entry was never cleaned up because it wasn't in _pipelines
+            stale_status_ids = [
+                pid for pid in self._pipeline_statuses.keys() if pid not in pipeline_ids
+            ]
+            for stale_id in stale_status_ids:
+                del self._pipeline_statuses[stale_id]
+                logger.debug(f"Cleaned up stale status entry for pipeline: {stale_id}")
 
         # Load all pipelines
         success = True
@@ -449,6 +483,18 @@ class PipelineManager:
             logger.info(f"All {len(pipeline_ids)} pipeline(s) loaded successfully")
         else:
             logger.error("Some pipelines failed to load")
+
+        # Log GPU memory after load
+        if torch.cuda.is_available():
+            try:
+                from scope.core.pipelines.memory import get_cuda_free_memory_gb
+
+                device = torch.device("cuda")
+                logger.info(
+                    f"GPU memory free after load: {get_cuda_free_memory_gb(device):.2f} GiB"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log GPU memory after load: {e}")
 
         return success
 
@@ -575,6 +621,16 @@ class PipelineManager:
             return
 
         logger.info(f"Unloading pipeline: {pipeline_id}")
+
+        # Call cleanup to explicitly free GPU resources before removing references
+        pipeline_obj = self._pipelines.get(pipeline_id)
+        if pipeline_obj is None and self._pipeline_id == pipeline_id:
+            pipeline_obj = self._pipeline
+        if pipeline_obj is not None and hasattr(pipeline_obj, "cleanup"):
+            try:
+                pipeline_obj.cleanup()
+            except Exception as e:
+                logger.warning(f"Pipeline cleanup failed for {pipeline_id}: {e}")
 
         # Remove from tracked pipelines
         if pipeline_id in self._pipelines:
