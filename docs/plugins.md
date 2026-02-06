@@ -158,6 +158,8 @@ build-backend = "hatchling.build"
 
 The `[project.entry-points."scope"]` section registers your plugin with Scope. The key (`my_scope_plugin`) is your plugin name, and the value points to the module containing your hook implementation.
 
+If your plugin needs additional third-party packages, add them to `[project.dependencies]` in `pyproject.toml` — Scope installs them automatically. You don't need to declare packages that Scope already provides (e.g. `torch`, `pydantic`) since they're available from the host environment.
+
 #### plugin.py
 
 ```python
