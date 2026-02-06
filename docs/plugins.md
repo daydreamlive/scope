@@ -77,6 +77,52 @@ The experience of using plugins with a manual installation of Scope is very simi
 - No deep link support eg a website cannot auto-open the UI to facilitate plugin installation
 - No browse button for selecting local plugin directories (you can still type a local path manually into the install field)
 
+### Using Plugins from the CLI
+
+The `daydream-scope` CLI provides commands for managing plugins and pipelines directly from the terminal.
+
+#### Listing Installed Plugins
+
+```
+uv run daydream-scope plugins
+```
+
+Shows all installed plugins with their name, version, source, and registered pipelines.
+
+#### Installing a Plugin
+
+```
+uv run daydream-scope install <package>
+```
+
+Examples for each source type:
+
+```bash
+# From a Git repository
+uv run daydream-scope install https://github.com/user/plugin-repo
+
+# From PyPI
+uv run daydream-scope install my-scope-plugin
+
+# From a local directory (editable mode)
+uv run daydream-scope install -e /path/to/my-plugin
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--upgrade` | Upgrade the plugin to the latest version |
+| `-e`, `--editable` | Install a project in editable mode from a local path |
+
+#### Uninstalling a Plugin
+
+```
+uv run daydream-scope uninstall <name>
+```
+
+Removes the plugin and unloads any active pipelines it provided.
+
 ## Plugin Sources
 
 Plugins can be installed from three sources:
