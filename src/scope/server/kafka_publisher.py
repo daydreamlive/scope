@@ -122,6 +122,7 @@ class KafkaPublisher:
         self,
         event_type: str,
         session_id: str | None = None,
+        connection_id: str | None = None,
         pipeline_ids: list[str] | None = None,
         user_id: str | None = None,
         error: dict[str, Any] | None = None,
@@ -132,6 +133,7 @@ class KafkaPublisher:
         Args:
             event_type: Type of event (e.g., "stream_started", "stream_stopped")
             session_id: Optional session ID associated with the event
+            connection_id: Optional connection ID from fal.ai WebSocket for event correlation
             pipeline_ids: Optional list of pipeline IDs associated with the event
             user_id: Optional user ID associated with the event
             error: Optional error details for error events
@@ -158,6 +160,8 @@ class KafkaPublisher:
         }
         if session_id:
             data["session_id"] = session_id
+        if connection_id:
+            data["connection_id"] = connection_id
         if pipeline_ids:
             data["pipeline_ids"] = pipeline_ids
         if user_id:
@@ -191,6 +195,7 @@ class KafkaPublisher:
         self,
         event_type: str,
         session_id: str | None = None,
+        connection_id: str | None = None,
         pipeline_ids: list[str] | None = None,
         user_id: str | None = None,
         error: dict[str, Any] | None = None,
@@ -204,6 +209,7 @@ class KafkaPublisher:
         Args:
             event_type: Type of event (e.g., "stream_started", "stream_stopped")
             session_id: Optional session ID associated with the event
+            connection_id: Optional connection ID from fal.ai WebSocket for event correlation
             pipeline_ids: Optional list of pipeline IDs associated with the event
             user_id: Optional user ID associated with the event
             error: Optional error details for error events
@@ -222,6 +228,7 @@ class KafkaPublisher:
                     self.publish_async(
                         event_type=event_type,
                         session_id=session_id,
+                        connection_id=connection_id,
                         pipeline_ids=pipeline_ids,
                         user_id=user_id,
                         error=error,
@@ -265,6 +272,7 @@ def set_kafka_publisher(publisher: KafkaPublisher | None):
 def publish_event(
     event_type: str,
     session_id: str | None = None,
+    connection_id: str | None = None,
     pipeline_ids: list[str] | None = None,
     user_id: str | None = None,
     error: dict[str, Any] | None = None,
@@ -278,6 +286,7 @@ def publish_event(
     Args:
         event_type: Type of event (e.g., "stream_started", "stream_stopped")
         session_id: Optional session ID associated with the event
+        connection_id: Optional connection ID from fal.ai WebSocket for event correlation
         pipeline_ids: Optional list of pipeline IDs associated with the event
         user_id: Optional user ID associated with the event
         error: Optional error details for error events
@@ -288,6 +297,7 @@ def publish_event(
         publisher.publish(
             event_type=event_type,
             session_id=session_id,
+            connection_id=connection_id,
             pipeline_ids=pipeline_ids,
             user_id=user_id,
             error=error,
@@ -298,6 +308,7 @@ def publish_event(
 async def publish_event_async(
     event_type: str,
     session_id: str | None = None,
+    connection_id: str | None = None,
     pipeline_ids: list[str] | None = None,
     user_id: str | None = None,
     error: dict[str, Any] | None = None,
@@ -311,6 +322,7 @@ async def publish_event_async(
     Args:
         event_type: Type of event (e.g., "stream_started", "stream_stopped")
         session_id: Optional session ID associated with the event
+        connection_id: Optional connection ID from fal.ai WebSocket for event correlation
         pipeline_ids: Optional list of pipeline IDs associated with the event
         user_id: Optional user ID associated with the event
         error: Optional error details for error events
@@ -324,6 +336,7 @@ async def publish_event_async(
         return await publisher.publish_async(
             event_type=event_type,
             session_id=session_id,
+            connection_id=connection_id,
             pipeline_ids=pipeline_ids,
             user_id=user_id,
             error=error,
