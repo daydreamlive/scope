@@ -505,6 +505,7 @@ class FrameProcessor:
         """Release pipeline reference when a pipeline is being unloaded."""
         for processor in self.pipeline_processors:
             if processor.pipeline_id == pipeline_id:
+                processor.stop()
                 processor.release_pipeline()
 
     def update_parameters(self, parameters: dict[str, Any]):
