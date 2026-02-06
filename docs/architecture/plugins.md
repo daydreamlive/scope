@@ -131,6 +131,102 @@ Local installations support editable mode for rapid development iteration. Git i
 
 **Rollback**: If installation fails at any step, the venv is restored to its captured state.
 
+### Plugin Update Flow
+
+The update flow has two phases: **detection** (happens automatically when plugins are listed) and **execution** (triggered by the user). The execution phase reuses the installation flow with an `upgrade: true` flag.
+
+#### Update Detection
+
+```
+┌──────────┐     ┌─────────┐
+│ Frontend │     │ Backend │
+└────┬─────┘     └────┬────┘
+     │                │
+     │ GET /plugins   │
+     │───────────────▶│
+     │                │ For each plugin:
+     │                │ _check_plugin_update()
+     │                │────────┐
+     │                │        │ Compare installed
+     │                │        │ vs latest version
+     │                │◀───────┘
+     │  Plugin list   │
+     │  (with         │
+     │  update_available│
+     │  flags)        │
+     │◀───────────────│
+     │                │
+```
+
+**Step by step:**
+
+1. Frontend fetches the plugin list via `GET /plugins`
+2. Backend iterates over installed plugins and calls `_check_plugin_update()` for each
+3. For PyPI plugins, the installed version is compared against the latest version on PyPI
+4. For Git plugins, the installed commit hash is compared against the latest commit on the remote
+5. Local plugins are skipped (use Reload instead)
+6. Each plugin in the response includes an `update_available` flag
+7. Frontend displays an "Update available" badge on plugins where the flag is `true`
+
+#### Update Execution
+
+```
+┌──────┐     ┌──────────┐     ┌─────────┐     ┌─────────────┐
+│ User │     │ Frontend │     │ Backend │     │ Desktop App │
+└──┬───┘     └────┬─────┘     └────┬────┘     └──────┬──────┘
+   │              │                │                  │
+   │ Click Update │                │                  │
+   │─────────────▶│                │                  │
+   │              │ POST /plugins  │                  │
+   │              │ {upgrade: true}│                  │
+   │              │───────────────▶│                  │
+   │              │                │ Capture venv     │
+   │              │                │────────┐         │
+   │              │                │◀───────┘         │
+   │              │                │ Compile with     │
+   │              │                │ --upgrade-package│
+   │              │                │────────┐         │
+   │              │                │◀───────┘         │
+   │              │                │ Sync deps        │
+   │              │                │────────┐         │
+   │              │                │◀───────┘         │
+   │              │     200 OK     │                  │
+   │              │◀───────────────│                  │
+   │              │ Request restart│                  │
+   │              │───────────────────────────────────▶
+   │              │                │                  │ Respawn server
+   │              │                │                  │────────┐
+   │              │                │                  │◀───────┘
+   │              │ Poll health    │                  │
+   │              │───────────────▶│                  │
+   │              │ Refresh pipelines                 │
+   │              │───────────────▶│                  │
+   │              │                │                  │
+```
+
+**Step by step:**
+
+1. User clicks the Update button on a plugin
+2. Frontend sends `POST /plugins` with the plugin spec and `upgrade: true`
+3. Backend captures the current venv state (for rollback)
+4. Backend runs `uv pip compile` with `--upgrade-package` targeting only the plugin package
+5. Backend syncs the environment with the newly resolved dependencies
+6. Backend updates the plugin registry
+7. Frontend triggers server restart
+8. Server restarts with the updated plugin loaded
+9. Frontend polls until server is healthy
+10. Frontend refreshes pipeline list
+
+**Rollback**: If the update fails at any step, the venv is restored to its pre-update state, just like a failed installation.
+
+#### Source-Specific Update Behavior
+
+| Source | Detection Method | Notes |
+|--------|-----------------|-------|
+| **PyPI** | Compares installed version against latest version on PyPI | Standard version comparison |
+| **Git** | Compares installed commit hash against latest remote commit | Detects new commits on the default branch |
+| **Local** | Skipped | Local plugins use [Reload](#manual-reload-flow-editable-plugins-only) instead |
+
 ### Plugin Uninstallation Flow
 
 1. User initiates uninstall
@@ -204,7 +300,7 @@ The `<spec>` parameter must be URL encoded. Examples:
 
 | Component | Responsibility |
 |-----------|----------------|
-| **Plugin Manager** | Singleton that manages plugin lifecycle (install, uninstall, reload) |
+| **Plugin Manager** | Singleton that manages plugin lifecycle (install, uninstall, update, reload) |
 | **Dependency Validator** | Pre-validates that new packages won't break existing environment |
 | **Venv Snapshot** | Captures and restores environment state for safe rollback |
 | **Pipeline Registry** | Maps pipeline IDs to their implementations and source plugins |
@@ -288,7 +384,7 @@ Plugin state is persisted in the user's data directory:
 | Data | Location | Purpose |
 |------|----------|---------|
 | Plugin list | `~/.daydream-scope/plugins/plugins.txt` | Installed package specs |
-| Resolved deps | `~/.daydream-scope/plugins/resolved.txt` | Lock file for reproducibility |
+| Resolved deps | `~/.daydream-scope/plugins/resolved.txt` | Lock file for reproducibility; baseline for update detection |
 | Venv backup | `~/.daydream-scope/plugins/freeze.txt` | Rollback state |
 
 ---
