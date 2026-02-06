@@ -1,5 +1,6 @@
 import { app, ipcMain, nativeImage, dialog, session, shell } from 'electron';
 import path from 'path';
+import { execSync } from 'child_process';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import { AppState } from './types/services';
@@ -177,6 +178,19 @@ if (process.defaultApp) {
   }
 } else {
   app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
+}
+
+// Set FriendlyAppName in registry so Windows/Chromium protocol handler dialogs
+// show "Daydream Scope" instead of the exe's cached FileDescription
+if (process.platform === 'win32') {
+  try {
+    execSync(
+      `reg add "HKCU\\Software\\Classes\\${PROTOCOL_SCHEME}\\shell\\open" /v FriendlyAppName /d "${app.name}" /f`,
+      { windowsHide: true },
+    );
+  } catch {
+    // Non-critical — dialog falls back to exe FileDescription
+  }
 }
 
 // Request single instance lock for Windows Jump List functionality
