@@ -373,16 +373,6 @@ class PipelineManager:
             for pipeline_id_to_unload in pipelines_to_unload:
                 self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
 
-            # Clean up stale status entries for pipelines not in the new request list
-            # This handles cases where a previous pipeline failed to load (status=ERROR/NOT_LOADED)
-            # but its status entry was never cleaned up because it wasn't in _pipelines
-            stale_status_ids = [
-                pid for pid in self._pipeline_statuses.keys() if pid not in pipeline_ids
-            ]
-            for stale_id in stale_status_ids:
-                del self._pipeline_statuses[stale_id]
-                logger.debug(f"Cleaned up stale status entry for pipeline: {stale_id}")
-
         # Load all pipelines
         success = True
         for pipeline_id in pipeline_ids:

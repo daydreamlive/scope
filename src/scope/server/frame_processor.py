@@ -739,10 +739,6 @@ class FrameProcessor:
                 if rgb_frame is not None:
                     last_frame_time = time.time()
 
-                    # Skip sending frames while paused
-                    if self.paused:
-                        continue
-
                     if self._cloud_mode:
                         # Cloud mode: send Spout frames to cloud (only in video mode)
                         # In text mode, cloud generates video from prompts only - no input frames
