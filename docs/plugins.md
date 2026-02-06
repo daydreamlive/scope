@@ -63,7 +63,7 @@ When using a local plugin directory, you can reload it after making code changes
 The experience of using plugins with a manual installation of Scope is very similar to the experience in the desktop app with the following exceptions:
 
 - No deep link support eg a website cannot auto-open the UI to facilitate plugin installation
-- No local plugin support
+- No browse button for selecting local plugin directories (you can still type a local path manually into the install field)
 
 ## Plugin Sources
 
@@ -475,3 +475,5 @@ def __init__(self, intensity: float = 1.0, **kwargs):
 ### Testing Your Plugin
 
 Make code changes and then see the section on [reloading local plugins](#reloading-a-plugin-local-plugins-only).
+
+> **Tip:** In the desktop app, you can use the browse button to select your local plugin directory. Without the desktop app, you can run `pwd` in the plugin directory to get the full path to paste into the install field which also works if you are running the server on a remote machine (eg. Runpod).
