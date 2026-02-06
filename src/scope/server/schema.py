@@ -184,6 +184,10 @@ class WebRTCOfferRequest(BaseModel):
         default=None,
         description="Connection ID from fal.ai WebSocket for event correlation",
     )
+    connection_info: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional connection metadata (e.g., gpu_type, region) from cloud infrastructure",
+    )
 
 
 class WebRTCOfferResponse(BaseModel):

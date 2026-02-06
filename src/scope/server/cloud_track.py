@@ -54,6 +54,7 @@ class CloudTrack(MediaStreamTrack):
         notification_callback: Callable | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
+        connection_info: dict | None = None,
         session_id: str | None = None,
     ):
         super().__init__()
@@ -62,6 +63,7 @@ class CloudTrack(MediaStreamTrack):
         self.notification_callback = notification_callback
         self.user_id = user_id
         self.connection_id = connection_id
+        self.connection_info = connection_info
         self.session_id = session_id
 
         # FPS control
@@ -106,6 +108,7 @@ class CloudTrack(MediaStreamTrack):
             session_id=self.session_id,
             user_id=self.user_id,
             connection_id=self.connection_id,
+            connection_info=self.connection_info,
         )
         self.frame_processor.start()
 

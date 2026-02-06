@@ -39,6 +39,7 @@ class PipelineProcessor:
         session_id: str | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
+        connection_info: dict | None = None,
     ):
         """Initialize a pipeline processor.
 
@@ -49,12 +50,14 @@ class PipelineProcessor:
             session_id: Session ID for event tracking
             user_id: User ID for event tracking
             connection_id: Connection ID from fal.ai WebSocket for event correlation
+            connection_info: Connection metadata (gpu_type, region, etc.)
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
+        self.connection_info = connection_info
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
@@ -242,6 +245,7 @@ class PipelineProcessor:
                             "type": type(e).__name__,
                             "recoverable": False,
                         },
+                        connection_info=self.connection_info,
                     )
                     break
 

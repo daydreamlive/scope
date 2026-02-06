@@ -147,7 +147,7 @@ class KafkaPublisher:
             "id": event_id,
             "type": "stream_trace",
             "timestamp": timestamp_ms,
-            "data": {"event_type": event_type, "client_source": "scope", **data},
+            "data": {"type": event_type, "client_source": "scope", **data},
         }
 
         try:
@@ -461,41 +461,55 @@ class ScopeApp(fal.App, keep_alive=300):
                     "status": response.status_code,
                 }
 
+        # Build connection_info with GPU type and any available infrastructure info
+        connection_info = {
+            "gpu_type": ScopeApp.machine_type,
+            "fal_host": os.getenv("FAL_RUN_HOST", "unknown"),
+        }
+
         async def handle_offer(payload: dict):
             """Proxy POST /api/v1/webrtc/offer"""
             nonlocal session_id
             request_id = payload.get("request_id")
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
-                    json={
-                        "sdp": payload.get("sdp"),
-                        "type": payload.get("sdp_type", "offer"),
-                        "initialParameters": payload.get("initialParameters"),
-                        "user_id": payload.get("user_id"),
-                        "connection_id": connection_id,
-                    },
-                    timeout=30.0,
-                )
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
+                        json={
+                            "sdp": payload.get("sdp"),
+                            "type": payload.get("sdp_type", "offer"),
+                            "initialParameters": payload.get("initialParameters"),
+                            "user_id": payload.get("user_id"),
+                            "connection_id": connection_id,
+                            "connection_info": connection_info,
+                        },
+                        timeout=30.0,
+                    )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    session_id = data.get("sessionId")
-                    return {
-                        "type": "answer",
-                        "request_id": request_id,
-                        "sdp": data.get("sdp"),
-                        "sdp_type": data.get("type"),
-                        "sessionId": session_id,
-                    }
-                else:
-                    return {
-                        "type": "error",
-                        "request_id": request_id,
-                        "error": f"Offer failed: {response.status_code}",
-                        "detail": response.text,
-                    }
+                    if response.status_code == 200:
+                        data = response.json()
+                        session_id = data.get("sessionId")
+                        return {
+                            "type": "answer",
+                            "request_id": request_id,
+                            "sdp": data.get("sdp"),
+                            "sdp_type": data.get("type"),
+                            "sessionId": session_id,
+                        }
+                    else:
+                        return {
+                            "type": "error",
+                            "request_id": request_id,
+                            "error": f"Offer failed: {response.status_code}",
+                            "detail": response.text,
+                        }
+            except (httpx.TimeoutException, TimeoutError):
+                return {
+                    "type": "error",
+                    "request_id": request_id,
+                    "error": "WebRTC offer timeout - Scope server may be overloaded",
+                }
 
         async def handle_icecandidate(payload: dict):
             """Proxy PATCH /api/v1/webrtc/offer/{session_id} for ICE candidates"""
