@@ -3,7 +3,7 @@ import queue
 import threading
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from aiortc.mediastreams import VideoFrame
@@ -11,6 +11,9 @@ from aiortc.mediastreams import VideoFrame
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
+
+if TYPE_CHECKING:
+    from .cloud_connection import CloudConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +53,7 @@ class FrameProcessor:
         max_parameter_queue_size: int = 8,
         initial_parameters: dict = None,
         notification_callback: callable = None,
-        cloud_manager: "Any | None" = None,  # CloudConnectionManager for cloud mode
+        cloud_manager: "CloudConnectionManager | None" = None,
         session_id: str | None = None,  # Session ID for event tracking
         user_id: str | None = None,  # User ID for event tracking
     ):
@@ -800,8 +803,6 @@ class FrameProcessor:
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
-                session_id=self.session_id,
-                user_id=self.user_id,
             )
 
             self.pipeline_processors.append(processor)

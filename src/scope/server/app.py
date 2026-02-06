@@ -1751,7 +1751,7 @@ async def connect_to_cloud(
             raise HTTPException(
                 status_code=400,
                 detail="cloud credentials not configured. Use --cloud-app-id and --cloud-api-key CLI args, "
-                "or SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_APP_ID environment variables.",
+                "or SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_API_KEY environment variables.",
             )
 
         logger.info(
