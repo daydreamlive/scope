@@ -159,6 +159,7 @@ class KafkaPublisher:
         data: dict[str, Any] = {
             "type": event_type,
             "client_source": "scope",
+            "timestamp": timestamp_ms,
         }
         if session_id:
             data["session_id"] = session_id
