@@ -191,6 +191,12 @@ class FrameProcessor:
             self.running = False
             return
 
+        # Register for pipeline unload notifications to release references
+        if self.pipeline_manager:
+            self.pipeline_manager.register_unload_callback(
+                self._on_pipeline_unloading
+            )
+
         logger.info(
             f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
         )
@@ -211,6 +217,12 @@ class FrameProcessor:
             return
 
         self.running = False
+
+        # Unregister pipeline unload callback
+        if self.pipeline_manager:
+            self.pipeline_manager.unregister_unload_callback(
+                self._on_pipeline_unloading
+            )
 
         # Stop all pipeline processors
         for processor in self.pipeline_processors:
@@ -574,6 +586,12 @@ class FrameProcessor:
         except Exception as e:
             logger.warning(f"Could not get pipeline dimensions: {e}")
             return 512, 512
+
+    def _on_pipeline_unloading(self, pipeline_id: str):
+        """Release pipeline reference when a pipeline is being unloaded."""
+        for processor in self.pipeline_processors:
+            if processor.pipeline_id == pipeline_id:
+                processor.release_pipeline()
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
