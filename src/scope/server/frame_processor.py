@@ -196,6 +196,9 @@ class FrameProcessor:
         # Clear pipeline processors
         self.pipeline_processors.clear()
 
+        # Clear pinned memory buffers
+        self._pinned_buffer_cache.clear()
+
         # Clean up Spout sender
         self.spout_sender_enabled = False
         if self.spout_sender_thread and self.spout_sender_thread.is_alive():
