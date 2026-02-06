@@ -60,6 +60,11 @@ class CloudConnectionManager:
         # User ID for log correlation (from fal token)
         self._user_id: str | None = None
 
+        # Background connection state
+        self._connecting = False
+        self._connect_task: asyncio.Task | None = None
+        self._connect_error: str | None = None
+
         # WebRTC client for media relay
         self._webrtc_client: CloudWebRTCClient | None = None
         self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
@@ -162,6 +167,41 @@ class CloudConnectionManager:
 
         # Start receive loop
         self._receive_task = asyncio.create_task(self._receive_loop())
+
+    async def connect_background(
+        self, app_id: str, api_key: str, user_id: str | None = None
+    ) -> None:
+        """Start connecting to cloud in the background.
+
+        Unlike connect(), this returns immediately and runs the connection
+        in an asyncio task. Check get_status() for connection progress.
+
+        Args:
+            app_id: The cloud app ID
+            api_key: The cloud API key
+            user_id: Optional user ID for log correlation
+        """
+        # Cancel any existing connection task
+        if self._connect_task is not None and not self._connect_task.done():
+            self._connect_task.cancel()
+            try:
+                await self._connect_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        self._connecting = True
+        self._connect_error = None
+
+        async def _do_connect():
+            try:
+                await self.connect(app_id, api_key, user_id)
+                self._connecting = False
+            except Exception as e:
+                self._connecting = False
+                self._connect_error = str(e)
+                logger.error(f"Background cloud connection failed: {e}")
+
+        self._connect_task = asyncio.create_task(_do_connect())
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with JWT token."""
@@ -394,6 +434,17 @@ class CloudConnectionManager:
 
     async def disconnect(self) -> None:
         """Disconnect from cloud.ai cloud."""
+        # Clear background connection state
+        self._connecting = False
+        self._connect_error = None
+        if self._connect_task is not None and not self._connect_task.done():
+            self._connect_task.cancel()
+            try:
+                await self._connect_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._connect_task = None
+
         self._stop_event.set()
         self._connected = False
         self._connection_id = None
@@ -591,6 +642,8 @@ class CloudConnectionManager:
         """Get current connection status."""
         status = {
             "connected": self.is_connected,
+            "connecting": self._connecting,
+            "error": self._connect_error,
             "app_id": self.app_id if self.is_connected else None,
             "connection_id": self._connection_id if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,

@@ -30,6 +30,7 @@ export function Header({
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
   const [cloudConnected, setCloudConnected] = useState(false);
+  const [cloudConnecting, setCloudConnecting] = useState(false);
 
   // Fetch initial cloud status
   useEffect(() => {
@@ -39,6 +40,7 @@ export function Header({
         if (response.ok) {
           const data = await response.json();
           setCloudConnected(data.connected);
+          setCloudConnecting(data.connecting ?? false);
         }
       } catch (e) {
         console.error("[Header] Failed to fetch cloud status:", e);
@@ -106,12 +108,22 @@ export function Header({
             className={`hover:opacity-80 transition-opacity h-8 w-8 ${
               cloudConnected
                 ? "text-green-500 opacity-80"
-                : "text-muted-foreground opacity-60"
+                : cloudConnecting
+                  ? "text-amber-400 opacity-80"
+                  : "text-muted-foreground opacity-60"
             }`}
-            title={cloudConnected ? "Cloud connected" : "Cloud disconnected"}
+            title={
+              cloudConnected
+                ? "Cloud connected"
+                : cloudConnecting
+                  ? "Connecting to cloud..."
+                  : "Cloud disconnected"
+            }
           >
             {cloudConnected ? (
               <Cloud className="h-5 w-5" />
+            ) : cloudConnecting ? (
+              <Cloud className="h-5 w-5 animate-pulse" />
             ) : (
               <CloudOff className="h-5 w-5" />
             )}

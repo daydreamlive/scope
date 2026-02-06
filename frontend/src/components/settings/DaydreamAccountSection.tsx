@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
-import { Cloud, Loader2, X, Copy, Check } from "lucide-react";
+import { Cloud, Copy, Check } from "lucide-react";
 import {
   isAuthenticated,
   redirectToSignIn,
@@ -23,6 +23,8 @@ import {
 
 interface CloudStatus {
   connected: boolean;
+  connecting: boolean;
+  error: string | null;
   app_id: string | null;
   connection_id: string | null;
   credentials_configured: boolean;
@@ -52,15 +54,16 @@ export function DaydreamAccountSection({
   // Cloud status state (same as CloudModeToggle)
   const [status, setStatus] = useState<CloudStatus>({
     connected: false,
+    connecting: false,
+    error: null,
     app_id: null,
     connection_id: null,
     credentials_configured: false,
   });
-  const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const prevConnectedRef = useRef(false);
 
   // Check auth on mount and listen for changes
   useEffect(() => {
@@ -112,8 +115,22 @@ export function DaydreamAccountSection({
 
   // Notify parent when connecting/disconnecting state changes
   useEffect(() => {
-    onConnectingChange?.(isConnecting || isDisconnecting);
-  }, [isConnecting, isDisconnecting, onConnectingChange]);
+    onConnectingChange?.(status.connecting || isDisconnecting);
+  }, [status.connecting, isDisconnecting, onConnectingChange]);
+
+  // Detect connection completion (connecting → connected) to trigger pipeline refresh
+  useEffect(() => {
+    if (!prevConnectedRef.current && status.connected) {
+      // Just transitioned to connected
+      onPipelinesRefresh?.().catch(e =>
+        console.error(
+          "[DaydreamAccountSection] Failed to refresh pipelines:",
+          e
+        )
+      );
+    }
+    prevConnectedRef.current = status.connected;
+  }, [status.connected, onPipelinesRefresh]);
 
   const handleCopyConnectionId = async () => {
     if (status.connection_id) {
@@ -128,11 +145,7 @@ export function DaydreamAccountSection({
   };
 
   const handleConnect = async () => {
-    setIsConnecting(true);
     setError(null);
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
 
     try {
       const userId = getDaydreamUserId();
@@ -141,7 +154,6 @@ export function DaydreamAccountSection({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userId }),
-        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -149,51 +161,13 @@ export function DaydreamAccountSection({
         throw new Error(data.detail || "Connection failed");
       }
 
-      const data = await response.json();
-      setStatus(data);
-      onStatusChange?.(data.connected);
-
-      if (data.connected && onPipelinesRefresh) {
-        try {
-          await onPipelinesRefresh();
-        } catch (refreshError) {
-          console.error(
-            "[DaydreamAccountSection] Failed to refresh pipelines:",
-            refreshError
-          );
-        }
-      }
+      // Backend returns immediately with connecting=true
+      await fetchStatus();
     } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") {
-        console.log("[DaydreamAccountSection] Connection canceled by user");
-        return;
-      }
       const message = e instanceof Error ? e.message : "Connection failed";
       setError(message);
       console.error("[DaydreamAccountSection] Connect failed:", e);
-    } finally {
-      abortControllerRef.current = null;
-      setIsConnecting(false);
     }
-  };
-
-  const handleCancel = async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-
-    try {
-      await fetch("/api/v1/cloud/disconnect", { method: "POST" });
-      await fetchStatus();
-    } catch (e) {
-      console.error(
-        "[DaydreamAccountSection] Failed to cleanup after cancel:",
-        e
-      );
-    }
-
-    setIsConnecting(false);
   };
 
   const handleDisconnect = async () => {
@@ -286,37 +260,12 @@ export function DaydreamAccountSection({
             <Cloud className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">Cloud Mode</span>
           </div>
-          {isConnecting ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">
-                Connecting...
-              </span>
-              <Button
-                onClick={handleCancel}
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0"
-                title="Cancel connection"
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-          ) : isDisconnecting ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">
-                Disconnecting...
-              </span>
-            </div>
-          ) : (
-            <Switch
-              checked={status.connected}
-              onCheckedChange={handleToggle}
-              disabled={disabled || !isSignedIn}
-              className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
-            />
-          )}
+          <Switch
+            checked={status.connected || status.connecting}
+            onCheckedChange={handleToggle}
+            disabled={disabled || !isSignedIn || isDisconnecting}
+            className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
+          />
         </div>
         <p className="text-xs text-muted-foreground">
           Use Daydream Cloud for running pipelines.
@@ -348,7 +297,9 @@ export function DaydreamAccountSection({
           </div>
         )}
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {(error || status.error) && (
+          <p className="text-xs text-destructive">{error || status.error}</p>
+        )}
       </div>
     </div>
   );

@@ -708,6 +708,14 @@ class CloudStatusResponse(BaseModel):
         ...,
         description="Whether connected to cloud (WebSocket)",
     )
+    connecting: bool = Field(
+        default=False,
+        description="Whether a background connection attempt is in progress",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Error message if the last connection attempt failed",
+    )
     webrtc_connected: bool = Field(
         default=False,
         description="Whether WebRTC media connection to cloud is active",
