@@ -15,6 +15,8 @@ import os
 import shutil
 import subprocess as _subprocess
 import time
+import uuid
+from typing import Any
 
 import fal
 from fal.container import ContainerImage
@@ -275,6 +277,7 @@ class ScopeApp(fal.App, keep_alive=300):
         """
         Start the Scope backend server as a background process.
         """
+        import os
         import subprocess
         import threading
         import time
@@ -376,6 +379,7 @@ class ScopeApp(fal.App, keep_alive=300):
         This keeps a persistent connection to prevent fal from spawning new runners.
         """
         import asyncio
+        import json
         import uuid
 
         import httpx
@@ -383,12 +387,10 @@ class ScopeApp(fal.App, keep_alive=300):
 
         SCOPE_BASE_URL = "http://localhost:8000"
 
-        # Initialize Kafka publisher if not already done (lazy import from scope server)
+        # Initialize Kafka publisher if not already done
         global kafka_publisher
         if kafka_publisher is None:
-            from scope.server.kafka_publisher import KafkaPublisher as _KafkaPublisher
-
-            kafka_publisher = _KafkaPublisher()
+            kafka_publisher = KafkaPublisher()
             await kafka_publisher.start()
 
         await ws.accept()
@@ -714,10 +716,12 @@ class ScopeApp(fal.App, keep_alive=300):
                 print(f"[{log_prefix()}] User ID set, access granted")
                 # Publish websocket connected event with user_id
                 if kafka_publisher and kafka_publisher.is_running:
-                    await kafka_publisher.publish_async(
-                        event_type="websocket_connected",
-                        connection_id=connection_id,
-                        user_id=user_id,
+                    await kafka_publisher.publish(
+                        "websocket_connected",
+                        {
+                            "user_id": user_id,
+                            "connection_id": connection_id,
+                        },
                     )
                 return {"type": "user_id_set", "user_id": user_id}
             elif msg_type == "get_ice_servers":
@@ -779,11 +783,11 @@ class ScopeApp(fal.App, keep_alive=300):
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
                 elapsed_ms = end_time * 1000 - connection_start_time * 1000
-                await kafka_publisher.publish_async(
-                    event_type="websocket_disconnected",
-                    connection_id=connection_id,
-                    user_id=user_id,
-                    metadata={
+                await kafka_publisher.publish(
+                    "websocket_disconnected",
+                    {
+                        "user_id": user_id,
+                        "connection_id": connection_id,
                         "duration_ms": elapsed_ms,
                         "session_start_time_ms": connection_start_time * 1000,
                         "session_end_time_ms": end_time * 1000,
