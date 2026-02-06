@@ -168,6 +168,8 @@ For local/editable plugins, developers can trigger a reload to pick up code chan
 
 This triggers a server restart to ensure Python modules are fully reloaded.
 
+In standalone mode (without the desktop app), the reload flow is the same except the server performs a self-restart instead of being respawned by the desktop app (see [Standalone Mode](#standalone-mode)).
+
 ### Deep Link Installation Flow
 
 External sources can facilitate plugin installation via protocol URLs:
@@ -225,6 +227,8 @@ The `<spec>` parameter must be URL encoded. Examples:
 | **Deep Link Handler** | Receives and parses protocol URLs |
 | **IPC Bridge** | Communicates between main process and renderer |
 | **File Browser** | Native dialog for selecting local plugin directories |
+
+> **Note:** The File Browser is a desktop convenience feature. In standalone mode, users can type local paths directly into the plugin installation input field.
 
 ---
 
