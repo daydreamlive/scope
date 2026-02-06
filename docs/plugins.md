@@ -44,6 +44,18 @@ The Plugins tab displays a list of all installed plugins.
 
 3. Wait for the uninstallation to complete and the server to restart.
 
+#### Updating a Plugin
+
+Scope automatically checks for updates when you open the Plugins tab.
+
+1. Open the Plugins tab — any plugin with a newer version available shows an update button.
+
+2. Click the **Update** button next to the plugin.
+
+3. Wait for the update to complete and the server to restart.
+
+> **Note:** Local plugins do not support update detection. To pick up code changes for a local plugin, use [Reload](#reloading-a-plugin-local-plugins-only) instead.
+
 #### Reloading a Plugin (Local Plugins Only)
 
 When using a local plugin directory, you can reload it after making code changes without reinstalling:
