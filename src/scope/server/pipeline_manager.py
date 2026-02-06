@@ -5,6 +5,7 @@ import gc
 import logging
 import threading
 from enum import Enum
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -50,6 +51,20 @@ class PipelineManager:
         self._pipelines: dict[str, Any] = {}  # pipeline_id -> pipeline instance
         self._pipeline_statuses: dict[str, PipelineStatus] = {}  # pipeline_id -> status
         self._pipeline_load_params: dict[str, dict] = {}  # pipeline_id -> load_params
+
+        # Callbacks invoked before a pipeline is unloaded (to release external references)
+        self._unload_callbacks: list[Callable[[str], None]] = []
+
+    def register_unload_callback(self, callback: Callable[[str], None]):
+        """Register a callback to be called before a pipeline is unloaded."""
+        self._unload_callbacks.append(callback)
+
+    def unregister_unload_callback(self, callback: Callable[[str], None]):
+        """Unregister a pipeline unload callback."""
+        try:
+            self._unload_callbacks.remove(callback)
+        except ValueError:
+            pass
 
     @property
     def status(self) -> PipelineStatus:
@@ -547,6 +562,13 @@ class PipelineManager:
             return
 
         logger.info(f"Unloading pipeline: {pipeline_id}")
+
+        # Notify listeners to release pipeline references before cleanup
+        for callback in self._unload_callbacks:
+            try:
+                callback(pipeline_id)
+            except Exception as e:
+                logger.warning(f"Unload callback failed for {pipeline_id}: {e}")
 
         # Call cleanup to explicitly free GPU resources before removing references
         pipeline_obj = self._pipelines.get(pipeline_id)

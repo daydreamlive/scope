@@ -189,6 +189,11 @@ class PipelineProcessor:
 
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
+    def release_pipeline(self):
+        """Release pipeline reference to allow GC of GPU resources."""
+        logger.info(f"Releasing pipeline reference for {self.pipeline_id}")
+        self.pipeline = None
+
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
         try:
@@ -349,6 +354,10 @@ class PipelineProcessor:
                         self.output_queue.get_nowait()
                     except queue.Empty:
                         break
+
+        # Pipeline may have been released during a switch
+        if self.pipeline is None:
+            return
 
         requirements = None
         if hasattr(self.pipeline, "prepare"):
