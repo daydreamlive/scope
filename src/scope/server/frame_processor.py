@@ -56,6 +56,7 @@ class FrameProcessor:
         cloud_manager: "CloudConnectionManager | None" = None,
         session_id: str | None = None,  # Session ID for event tracking
         user_id: str | None = None,  # User ID for event tracking
+        connection_id: str | None = None,  # Connection ID for event correlation
     ):
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
@@ -64,6 +65,8 @@ class FrameProcessor:
         self.session_id = session_id or str(uuid.uuid4())
         # User ID for Kafka event tracking
         self.user_id = user_id
+        # Connection ID from fal.ai WebSocket for event correlation
+        self.connection_id = connection_id
 
         # Current parameters
         self.parameters = initial_parameters or {}
@@ -155,6 +158,7 @@ class FrameProcessor:
             publish_event(
                 event_type="stream_started",
                 session_id=self.session_id,
+                connection_id=self.connection_id,
                 user_id=self.user_id,
                 metadata={"mode": "relay"},
             )
@@ -181,6 +185,7 @@ class FrameProcessor:
         publish_event(
             event_type="stream_started",
             session_id=self.session_id,
+            connection_id=self.connection_id,
             pipeline_ids=self.pipeline_ids,
             user_id=self.user_id,
             metadata={"mode": "local"},
@@ -255,6 +260,7 @@ class FrameProcessor:
             publish_event(
                 event_type="stream_error",
                 session_id=self.session_id,
+                connection_id=self.connection_id,
                 pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
                 user_id=self.user_id,
                 error={
@@ -273,6 +279,7 @@ class FrameProcessor:
         publish_event(
             event_type="stream_stopped",
             session_id=self.session_id,
+            connection_id=self.connection_id,
             pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
             user_id=self.user_id,
             metadata={
@@ -799,6 +806,9 @@ class FrameProcessor:
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
+                session_id=self.session_id,
+                user_id=self.user_id,
+                connection_id=self.connection_id,
             )
 
             self.pipeline_processors.append(processor)
