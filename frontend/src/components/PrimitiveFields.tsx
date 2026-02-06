@@ -287,8 +287,8 @@ export function EnumField({
           </SelectTrigger>
           <SelectContent>
             {options.map(opt => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
+              <SelectItem key={String(opt)} value={String(opt)}>
+                {String(opt)}
               </SelectItem>
             ))}
           </SelectContent>
