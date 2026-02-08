@@ -1,7 +1,9 @@
 # Modified from https://github.com/NVlabs/LongLive
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 import math
+import time
 
+from huggingface_hub import try_to_load_from_cache
 import torch
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -22,37 +24,31 @@ from .model import (
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
     n, c = x.size(2), x.size(3) // 2
 
-    # split freqs
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
 
-    # loop over samples
-    output = []
+    f, h, w = grid_sizes.tolist()
+    seq_len = f * h * w
 
-    for i, (f, h, w) in enumerate(grid_sizes.tolist()):
-        seq_len = f * h * w
+    # precompute multipliers
+    x_rope = torch.view_as_complex(
+        x[:, :seq_len].to(torch.float64).reshape(-1, seq_len, n, c, 2)
+    )
+    freqs_i = torch.cat(
+        [
+            freqs[0][start_frame : start_frame + f]
+            .view(f, 1, 1, -1)
+            .expand(f, h, w, -1),
+            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
+            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
+        ],
+        dim=-1,
+    ).reshape(seq_len, 1, -1)
 
-        # precompute multipliers
-        x_i = torch.view_as_complex(
-            x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2)
-        )
-        freqs_i = torch.cat(
-            [
-                freqs[0][start_frame : start_frame + f]
-                .view(f, 1, 1, -1)
-                .expand(f, h, w, -1),
-                freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-                freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
-            ],
-            dim=-1,
-        ).reshape(seq_len, 1, -1)
+    # apply rotary embedding
+    x_rope = torch.view_as_real(x_rope * freqs_i).flatten(3)
+    x_out = torch.cat([x_rope, x[:, seq_len:]], dim=1)
 
-        # apply rotary embedding
-        x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
-        x_i = torch.cat([x_i, x[i, seq_len:]])
-
-        # append to collection
-        output.append(x_i)
-    return torch.stack(output).type_as(x)
+    return x_out.type_as(x)
 
 
 class CausalWanSelfAttention(nn.Module):
@@ -102,7 +98,7 @@ class CausalWanSelfAttention(nn.Module):
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
             seq_lens(Tensor): Shape [B]
-            grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
+            grid_sizes(Tensor): Shape [3], contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
             block_mask (BlockMask)
         """
@@ -119,7 +115,7 @@ class CausalWanSelfAttention(nn.Module):
 
         q, k, v = qkv_fn(x)
 
-        frame_seqlen = math.prod(grid_sizes[0][1:]).item()
+        frame_seqlen = math.prod(grid_sizes[1:]).item()
         current_start_frame = current_start // frame_seqlen
         roped_query = causal_rope_apply(
             q, grid_sizes, freqs, start_frame=current_start_frame
@@ -367,7 +363,7 @@ class CausalWanAttentionBlock(nn.Module):
             x(Tensor): Shape [B, L, C]
             e(Tensor): Shape [B, F, 6, C]
             seq_lens(Tensor): Shape [B], length of each sequence in batch
-            grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
+            grid_sizes(Tensor): Shape [3], contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
         num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
@@ -680,7 +676,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         x,
         t,
         context,
-        seq_len,
         kv_cache: dict = None,
         crossattn_cache: dict = None,
         current_start: int = 0,
@@ -708,7 +703,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         """
         self.freqs = self.freqs.to(self.patch_embedding.weight.device)
         x = self.patch_embedding(x)
-        grid_sizes = torch.tensor(x.shape[2:], dtype=torch.long).repeat(x.shape[0], 1)
+        grid_sizes = torch.tensor(x.shape[2:], dtype=torch.long)
         x = x.flatten(2).transpose(1, 2)
         seq_lens = torch.full((x.shape[0],), x.shape[1], dtype=torch.long)
 
@@ -760,9 +755,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 x = result
         if kv_cache is not None and cache_update_infos:
             self._apply_cache_updates(kv_cache, cache_update_infos)
-
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
-        print(f"x: {x.shape}")
         x = self.unpatchify(x, grid_sizes)
         return x
 
@@ -778,7 +771,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 Batch of patchified features, shape [B, L, C_out * prod(patch_size)]
             grid_sizes (Tensor):
                 Original spatial-temporal grid dimensions before patching,
-                    shape [B, 3] (3 dimensions correspond to F_patches, H_patches, W_patches)
+                    shape [3] (3 dimensions correspond to F_patches, H_patches, W_patches)
 
         Returns:
             Tensor:
@@ -786,7 +779,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         """
 
         c = self.out_dim
-        v = grid_sizes[0].tolist()
+        v = grid_sizes.tolist()
         x = x.view(x.shape[0], *v, *self.patch_size, c)
         x = torch.einsum("bfhwpqrc->bcfphqwr", x)
         x = x.reshape(x.shape[0], c, *[i * j for i, j in zip(v, self.patch_size)])
