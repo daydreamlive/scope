@@ -172,17 +172,6 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             .to(generator_param.device)
         )
 
-        # Prepare blockwise causal mask
-        components.generator.model.block_mask = (
-            components.generator.model._prepare_blockwise_causal_attn_mask(
-                device=recache_frames.device,
-                num_frames=num_recache_frames,
-                frame_seqlen=frame_seq_length,
-                num_frame_per_block=components.config.num_frame_per_block,
-                local_attn_size=components.config.local_attn_size,
-            )
-        )
-
         context_timestep = (
             torch.ones(
                 [1, num_recache_frames],
