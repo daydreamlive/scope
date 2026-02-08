@@ -15,10 +15,10 @@ import {
   isAuthenticated,
   redirectToSignIn,
   clearDaydreamAuth,
-  getDaydreamAPIKey,
   getDaydreamUserId,
   getDaydreamUserDisplayName,
-  fetchAndStoreUserProfile,
+  refreshUserProfile,
+  shouldShowCloudMode,
 } from "../../lib/auth";
 
 interface CloudStatus {
@@ -50,6 +50,7 @@ export function DaydreamAccountSection({
   // Auth state
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [showCloudMode, setShowCloudMode] = useState(false);
 
   // Cloud status state (same as CloudModeToggle)
   const [status, setStatus] = useState<CloudStatus>({
@@ -71,18 +72,17 @@ export function DaydreamAccountSection({
     const cachedName = getDaydreamUserDisplayName();
     setIsSignedIn(authed);
     setDisplayName(cachedName);
+    setShowCloudMode(shouldShowCloudMode());
 
-    // If signed in but no display name cached, fetch the profile
+    // If signed in but no display name cached, refresh the profile
     if (authed && !cachedName) {
-      const apiKey = getDaydreamAPIKey();
-      if (apiKey) {
-        fetchAndStoreUserProfile(apiKey);
-      }
+      refreshUserProfile();
     }
 
     const handleAuthChange = () => {
       setIsSignedIn(isAuthenticated());
       setDisplayName(getDaydreamUserDisplayName());
+      setShowCloudMode(shouldShowCloudMode());
     };
 
     window.addEventListener("daydream-auth-change", handleAuthChange);
@@ -253,54 +253,56 @@ export function DaydreamAccountSection({
         )}
       </div>
 
-      {/* Cloud Mode section - always visible */}
-      <div className="space-y-3 pt-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Cloud Mode</span>
+      {/* Cloud Mode section - only visible for cohort participants or admins */}
+      {showCloudMode && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cloud className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Cloud Mode</span>
+            </div>
+            <Switch
+              checked={status.connected || status.connecting}
+              onCheckedChange={handleToggle}
+              disabled={disabled || !isSignedIn || isDisconnecting}
+              className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
+            />
           </div>
-          <Switch
-            checked={status.connected || status.connecting}
-            onCheckedChange={handleToggle}
-            disabled={disabled || !isSignedIn || isDisconnecting}
-            className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
-          />
+          <p className="text-xs text-muted-foreground">
+            Use Daydream Cloud for running pipelines.
+            {!isSignedIn && " Log in required."}
+          </p>
+
+          {/* Connection ID when connected */}
+          {status.connected && status.connection_id && (
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-xs text-muted-foreground">
+                Connection ID:{" "}
+                <code className="bg-background px-1 rounded">
+                  {status.connection_id}
+                </code>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0"
+                onClick={handleCopyConnectionId}
+                title="Copy connection ID"
+              >
+                {copied ? (
+                  <Check className="h-3 w-3 text-green-500" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </Button>
+            </div>
+          )}
+
+          {(error || status.error) && (
+            <p className="text-xs text-destructive">{error || status.error}</p>
+          )}
         </div>
-        <p className="text-xs text-muted-foreground">
-          Use Daydream Cloud for running pipelines.
-          {!isSignedIn && " Log in required."}
-        </p>
-
-        {/* Connection ID when connected */}
-        {status.connected && status.connection_id && (
-          <div className="flex items-center gap-2 pt-1">
-            <span className="text-xs text-muted-foreground">
-              Connection ID:{" "}
-              <code className="bg-background px-1 rounded">
-                {status.connection_id}
-              </code>
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 w-5 p-0"
-              onClick={handleCopyConnectionId}
-              title="Copy connection ID"
-            >
-              {copied ? (
-                <Check className="h-3 w-3 text-green-500" />
-              ) : (
-                <Copy className="h-3 w-3" />
-              )}
-            </Button>
-          </div>
-        )}
-
-        {(error || status.error) && (
-          <p className="text-xs text-destructive">{error || status.error}</p>
-        )}
-      </div>
+      )}
     </div>
   );
 }
