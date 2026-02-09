@@ -65,6 +65,10 @@ class CloudConnectionManager:
         self._connect_task: asyncio.Task | None = None
         self._connect_error: str | None = None
 
+        # Last close info (for reporting to frontend)
+        self._last_close_code: int | None = None
+        self._last_close_reason: str | None = None
+
         # WebRTC client for media relay
         self._webrtc_client: CloudWebRTCClient | None = None
         self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
@@ -153,6 +157,10 @@ class CloudConnectionManager:
         self._stats["connected_at"] = time.time()
         self._stats["last_activity_at"] = time.time()
 
+        # Clear any previous close info on successful connection
+        self._last_close_code = None
+        self._last_close_reason = None
+
         # Send user_id to cloud for log correlation
         if self._user_id:
             await self.ws.send_json({"type": "set_user_id", "user_id": self._user_id})
@@ -233,7 +241,22 @@ class CloudConnectionManager:
                     except json.JSONDecodeError:
                         logger.warning(f"Non-JSON message from cloud: {msg.data}")
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
-                    logger.info("Cloud WebSocket closed")
+                    # Get close code and reason from the WebSocket
+                    close_code = self.ws.close_code if self.ws else None
+                    # Try to get close reason from message data or ws object
+                    close_reason = None
+                    if msg.data:
+                        close_reason = str(msg.data)
+                    elif msg.extra:
+                        close_reason = str(msg.extra)
+                    
+                    # Store for status reporting to frontend
+                    self._last_close_code = close_code
+                    self._last_close_reason = close_reason
+                    
+                    logger.warning(
+                        f"Cloud WebSocket closed (code={close_code}, reason={close_reason})"
+                    )
                     break
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     logger.error(f"Cloud WebSocket error: {self.ws.exception()}")
@@ -647,6 +670,8 @@ class CloudConnectionManager:
             "app_id": self.app_id if self.is_connected else None,
             "connection_id": self._connection_id if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,
+            "last_close_code": self._last_close_code,
+            "last_close_reason": self._last_close_reason,
         }
 
         # Include stats if connected

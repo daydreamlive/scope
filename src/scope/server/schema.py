@@ -736,6 +736,14 @@ class CloudStatusResponse(BaseModel):
         default=None,
         description="Connection statistics (only included when connected)",
     )
+    last_close_code: int | None = Field(
+        default=None,
+        description="WebSocket close code from the last disconnection",
+    )
+    last_close_reason: str | None = Field(
+        default=None,
+        description="WebSocket close reason from the last disconnection",
+    )
 
 
 # API Key management schemas
