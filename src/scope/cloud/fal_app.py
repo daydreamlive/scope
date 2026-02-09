@@ -21,6 +21,46 @@ import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
 
+# Daydream API configuration
+DAYDREAM_API_BASE = os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
+
+async def validate_user_access(user_id: str) -> tuple[bool, str]:
+    """
+    Validate that a user has access to cloud mode.
+
+    Returns (is_valid, reason) tuple.
+    Access is granted if user is a cohort participant OR has @livepeer.org email.
+    """
+    import urllib.request
+    import urllib.error
+
+    if not user_id:
+        return False, "No user ID provided"
+
+    url = f"{DAYDREAM_API_BASE}/v1/users/{user_id}"
+
+    def fetch_user():
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode())
+
+    try:
+        # Run synchronous urllib in thread pool to not block event loop
+        user = await asyncio.get_event_loop().run_in_executor(None, fetch_user)
+        email = user.get("email", "")
+        is_cohort = user.get("cohortParticipant", False)
+        is_livepeer = email.endswith("@livepeer.org")
+
+        if is_cohort or is_livepeer:
+            return True, "Access granted"
+        return False, "User is not a cohort participant"
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False, "User not found"
+        return False, f"Failed to fetch user: {e.code}"
+    except Exception as e:
+        return False, f"Error validating user: {e}"
+
 
 class KafkaPublisher:
     """Async Kafka event publisher for fal.ai websocket events."""
@@ -622,8 +662,25 @@ class ScopeApp(fal.App, keep_alive=300):
                 return None
 
             if msg_type == "set_user_id":
-                user_id = payload.get("user_id")
-                print(f"[{log_prefix()}] User ID set")
+                requested_user_id = payload.get("user_id")
+                print(f"[{log_prefix()}] Validating user access for {requested_user_id}")
+
+                # Validate user has access to cloud mode
+                is_valid, reason = await validate_user_access(requested_user_id)
+                if not is_valid:
+                    print(f"[{log_prefix()}] Access denied: {reason}")
+                    await safe_send_json(
+                        {
+                            "type": "error",
+                            "error": f"Access denied: {reason}",
+                            "code": "ACCESS_DENIED",
+                        }
+                    )
+                    await ws.close(code=4003, reason="Access denied")
+                    return None
+
+                user_id = requested_user_id
+                print(f"[{log_prefix()}] User ID set, access granted")
                 # Publish websocket connected event with user_id
                 if kafka_publisher and kafka_publisher.is_running:
                     await kafka_publisher.publish(
