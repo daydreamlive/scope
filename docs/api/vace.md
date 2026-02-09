@@ -17,8 +17,9 @@ VACE allows you to:
 1. Pipeline loaded with VACE enabled (default):
 
 ```javascript
-await loadPipeline("longlive", {
-  vace_enabled: true  // This is the default
+await loadPipeline({
+  pipeline_ids: ["longlive"],
+  load_params: { vace_enabled: true }  // This is the default
 });
 ```
 

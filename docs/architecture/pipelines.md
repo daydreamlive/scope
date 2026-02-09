@@ -423,7 +423,7 @@ The registry maintains a mapping of pipeline IDs to their implementation classes
 **Plugin pipelines** register through the pluggy hook system:
 
 ```python
-from scope.core.pipelines.hookspecs import hookimpl
+from scope.core.plugins.hookspecs import hookimpl
 
 @hookimpl
 def register_pipelines(register):
