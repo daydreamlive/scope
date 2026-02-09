@@ -200,16 +200,35 @@ def cleanup_session_data():
         print(f"Warning: Session cleanup failed: {e}")
 
 
-# update image tag below from your latest branch push e.g. https://github.com/daydreamlive/scope/actions/runs/21450540770/job/61777880949
-# look for a line like #17 pushing manifest for docker.io/daydreamlive/scope:14149c7@sha256:a9047982edf126b0fc9fe63b3e913f2291c940a63ab26420f3e00f204ee4a3fa 1.6s done
-# then run:
-# switch to python 3.10 to match the scope image
-# pip install fal
-# fal auth login
-# fal deploy fal_app.py --auth public
+# To deploy:
+# 1. Ensure the docker image for your current git SHA has been built
+#    (check https://github.com/daydreamlive/scope/actions for the docker-build workflow)
+# 2. switch to python 3.10 to match the scope image
+# 3. pip install fal
+# 4. fal auth login
+# 5. fal deploy fal_app.py --auth public
 
-# Configuration
-DOCKER_IMAGE = "daydreamlive/scope:6334b27"
+# Get git SHA at deploy time (this runs when the file is loaded during fal deploy)
+import subprocess as _subprocess
+
+def _get_git_sha() -> str:
+    """Get the short git SHA of the current checkout."""
+    try:
+        result = _subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"Warning: Could not get git SHA: {e}")
+        return "unknown"
+
+GIT_SHA = _get_git_sha()
+
+# Configuration - uses git SHA from current checkout
+DOCKER_IMAGE = f"daydreamlive/scope:{GIT_SHA}"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""
@@ -260,7 +279,7 @@ class ScopeApp(fal.App, keep_alive=300):
         import threading
         import time
 
-        print("Starting Scope container setup...")
+        print(f"Starting Scope container setup... (version: {GIT_SHA})")
 
         # Verify GPU is available
         try:

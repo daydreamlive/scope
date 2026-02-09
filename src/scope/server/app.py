@@ -1711,7 +1711,6 @@ async def reload_plugin(
 # =============================================================================
 
 
-# TODO disconnect from cloud if browser is closed
 @app.post("/api/v1/cloud/connect", response_model=CloudStatusResponse)
 async def connect_to_cloud(
     request: CloudConnectRequest,
