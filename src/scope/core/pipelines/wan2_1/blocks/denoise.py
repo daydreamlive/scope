@@ -91,12 +91,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="Initialized KV cache",
             ),
             InputParam(
-                "crossattn_cache",
-                required=True,
-                type_hint=list[dict],
-                description="Initialized cross-attention cache",
-            ),
-            InputParam(
                 "kv_bank",
                 type_hint=list[dict],
                 description="Initialized KV memory bank",
@@ -187,7 +181,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                     conditional_dict=conditional_dict,
                     timestep=timestep,
                     kv_cache=block_state.kv_cache,
-                    crossattn_cache=block_state.crossattn_cache,
                     kv_bank=block_state.kv_bank,
                     update_bank=False,
                     q_bank=q_bank,
@@ -223,7 +216,6 @@ class DenoiseBlock(ModularPipelineBlocks):
                     conditional_dict=conditional_dict,
                     timestep=timestep,
                     kv_cache=block_state.kv_cache,
-                    crossattn_cache=block_state.crossattn_cache,
                     kv_bank=block_state.kv_bank,
                     update_bank=False,
                     q_bank=q_bank,

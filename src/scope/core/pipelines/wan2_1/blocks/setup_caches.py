@@ -13,7 +13,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ..utils import initialize_crossattn_cache, initialize_kv_cache
+from ..utils import initialize_kv_cache
 
 logger = logging.getLogger(__name__)
 
@@ -199,20 +199,6 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 kv_cache_existing=block_state.kv_cache,
             )
 
-        # If the conditioning embeds change we need to reinitialize the crossattn cache
-        # During transitions, this updates cross-attn cache without full KV cache reset
-        if (
-            init_cache
-            or block_state.crossattn_cache is None
-            or block_state.conditioning_embeds_updated
-        ):
-            block_state.crossattn_cache = initialize_crossattn_cache(
-                generator=components.generator,
-                batch_size=1,
-                dtype=generator_param.dtype,
-                device=generator_param.device,
-                crossattn_cache_existing=block_state.crossattn_cache,
-            )
 
         if init_cache:
             logger.info(

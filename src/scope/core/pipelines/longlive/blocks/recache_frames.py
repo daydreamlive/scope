@@ -8,7 +8,6 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 )
 
 from scope.core.pipelines.wan2_1.utils import (
-    initialize_crossattn_cache,
     initialize_kv_cache,
 )
 
@@ -53,12 +52,6 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 description="Initialized KV cache",
             ),
             InputParam(
-                "crossattn_cache",
-                required=True,
-                type_hint=list[dict],
-                description="Initialized cross-attention cache",
-            ),
-            InputParam(
                 "kv_bank",
                 type_hint=list[dict],
                 description="Initialized KV memory bank",
@@ -90,11 +83,6 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 "kv_cache",
                 type_hint=list[dict],
                 description="Initialized KV cache",
-            ),
-            OutputParam(
-                "crossattn_cache",
-                type_hint=list[dict],
-                description="Initialized cross-attention cache",
             ),
             OutputParam(
                 "recache_buffer",
@@ -189,7 +177,6 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             conditional_dict=conditional_dict,
             timestep=context_timestep,
             kv_cache=block_state.kv_cache,
-            crossattn_cache=block_state.crossattn_cache,
             kv_bank=block_state.kv_bank,
             update_bank=False,
             q_bank=True,
@@ -197,14 +184,6 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             is_recache=True,
             current_start=recache_start * frame_seq_length,
             sink_recache_after_switch=not global_sink,
-        )
-
-        block_state.crossattn_cache = initialize_crossattn_cache(
-            generator=components.generator,
-            batch_size=1,
-            dtype=generator_param.dtype,
-            device=generator_param.device,
-            crossattn_cache_existing=block_state.crossattn_cache,
         )
 
         self.set_block_state(state, block_state)
