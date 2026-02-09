@@ -33,16 +33,16 @@ if TYPE_CHECKING:
 
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
-from .kafka_publisher import (
-    KafkaPublisher,
-    is_kafka_enabled,
-    set_kafka_publisher,
-)
 from .file_utils import (
     IMAGE_EXTENSIONS,
     LORA_EXTENSIONS,
     VIDEO_EXTENSIONS,
     iter_files,
+)
+from .kafka_publisher import (
+    KafkaPublisher,
+    is_kafka_enabled,
+    set_kafka_publisher,
 )
 from .logs_config import (
     cleanup_old_logs,

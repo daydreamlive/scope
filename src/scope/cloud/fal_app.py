@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess as _subprocess
 import time
 import uuid
 from typing import Any
@@ -32,8 +33,8 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
     Returns (is_valid, reason) tuple.
     Access is granted if user is a cohort participant OR has @livepeer.org email.
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     if not user_id:
         return False, "No user ID provided"
@@ -210,7 +211,6 @@ def cleanup_session_data():
 # 5. fal deploy fal_app.py --auth public
 
 # Get git SHA at deploy time (this runs when the file is loaded during fal deploy)
-import subprocess as _subprocess
 
 
 def _get_git_sha() -> str:
@@ -740,7 +740,7 @@ class ScopeApp(fal.App, keep_alive=300):
                     message = await asyncio.wait_for(
                         ws.receive_text(), timeout=TIMEOUT_CHECK_INTERVAL_SECONDS
                     )
-                except (asyncio.TimeoutError, TimeoutError):
+                except (asyncio.TimeoutError, TimeoutError):  # noqa: UP041
                     if await check_max_duration_exceeded():
                         break
                     continue
