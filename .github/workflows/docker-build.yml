@@ -8,6 +8,7 @@ on:
         required: true
         type: string
         default: 'latest'
+  pull_request:
   push:
     branches:
       - main
@@ -22,6 +23,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -50,32 +53,26 @@ jobs:
         id: tag
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.version }}"
+            # Manual dispatch: use provided version + latest
             TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            # Extract version from tag (e.g., v0.1.0 -> 0.1.0)
+            # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
             VERSION_TAG="${{ github.ref_name }}"
             VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAG="$VERSION"
             TAGS="daydreamlive/scope:$VERSION,daydreamlive/scope:latest"
-          elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
-            TAG="runpod-serverless"
-            TAGS="daydreamlive/scope:runpod-serverless"
-          else
-            TAG="main"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            # Main branch
             TAGS="daydreamlive/scope:main"
+          elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
+            # Runpod serverless branch
+            TAGS="daydreamlive/scope:runpod-serverless"
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            # Pull request: use sanitized branch name + short SHA
+            BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
+            SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
+            TAGS="daydreamlive/scope:$BRANCH_TAG,daydreamlive/scope:$SHORT_SHA"
           fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: daydreamlive/scope
-          tags: |
-            type=raw,value=${{ steps.tag.outputs.tag }}
-            ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'type=raw,value=latest' || '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
