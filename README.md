@@ -21,19 +21,19 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 
 ## Features
 
-- Autoregressive video diffusion models with configurable [VAEs](./docs/vae.md)
-  - [StreamDiffusionV2](./src/scope/core/pipelines/streamdiffusionv2/docs/usage.md) (text-to-video, video-to-video)
-  - [LongLive](./src/scope/core/pipelines/longlive/docs/usage.md) (text-to-video, video-to-video)
-  - [Krea Realtime Video](./src/scope/core/pipelines/krea_realtime_video/docs/usage.md) (text-to-video)
-  - [RewardForcing](./src/scope/core/pipelines/reward_forcing/docs/usage.md) (text-to-video, video-to-video)
-  - [MemFlow](./src/scope/core/pipelines/memflow/docs/usage.md) (text-to-video, video-to-video)
+- Autoregressive video diffusion models with configurable [VAEs](https://docs.daydream.live/scope/reference/vae)
+  - [StreamDiffusionV2](https://docs.daydream.live/scope/reference/pipelines/streamdiffusion-v2) (text-to-video, video-to-video)
+  - [LongLive](https://docs.daydream.live/scope/reference/pipelines/longlive) (text-to-video, video-to-video)
+  - [Krea Realtime Video](https://docs.daydream.live/scope/reference/pipelines/krea-realtime) (text-to-video)
+  - [RewardForcing](https://docs.daydream.live/scope/reference/pipelines/reward-forcing) (text-to-video, video-to-video)
+  - [MemFlow](https://docs.daydream.live/scope/reference/pipelines/memflow) (text-to-video, video-to-video)
   - Additional models including [Waypoint-1](https://github.com/daydreamlive/scope-overworld) via plugins
-- [Composable pipeline architecture](./docs/architecture/pipelines.md) enabling using additional video processing techniques such as real-time depth mapping and frame interpolation together with video diffusion
-- [Plugins](./docs/plugins.md) to extend Scope's capabilities with new models, visual effects and more
-- [LoRAs](./docs/lora.md) to customize concepts and styles used with autoregressive video diffusion models
-- [VACE](./docs/vace.md) to use reference images and control videos to guide autoregressive video diffusion models
-- [API](./docs/server.md) with WebRTC real-time streaming
-- [Spout](./docs/spout.md) (Windows only) real-time video sharing with local applications
+- [Composable pipeline architecture](https://docs.daydream.live/scope/reference/architecture/pipelines) enabling using additional video processing techniques such as real-time depth mapping and frame interpolation together with video diffusion
+- [Plugins](https://docs.daydream.live/scope/guides/plugins) to extend Scope's capabilities with new models, visual effects and more
+- [LoRAs](https://docs.daydream.live/scope/guides/loras) to customize concepts and styles used with autoregressive video diffusion models
+- [VACE](https://docs.daydream.live/scope/guides/vace) to use reference images and control videos to guide autoregressive video diffusion models
+- [API](https://docs.daydream.live/scope/reference/api) with WebRTC real-time streaming
+- [Spout](https://docs.daydream.live/scope/guides/spout) (Windows only) real-time video sharing with local applications
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
 
