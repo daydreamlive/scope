@@ -84,7 +84,10 @@ export function Header({
     if (prevConnectedRef.current !== isConnected) {
       // Connection status changed - refresh pipelines to get the right list
       onPipelinesRefresh?.().catch(e =>
-        console.error("[Header] Failed to refresh pipelines after cloud status change:", e)
+        console.error(
+          "[Header] Failed to refresh pipelines after cloud status change:",
+          e
+        )
       );
     }
     prevConnectedRef.current = isConnected;

@@ -364,7 +364,11 @@ export function initElectronAuthListener(
     window as unknown as {
       scope: {
         onAuthCallback: (
-          callback: (data: { token: string; userId: string | null; state: string | null }) => void
+          callback: (data: {
+            token: string;
+            userId: string | null;
+            state: string | null;
+          }) => void
         ) => () => void;
       };
     }

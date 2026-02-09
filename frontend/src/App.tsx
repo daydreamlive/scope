@@ -14,7 +14,10 @@ import "./index.css";
 const CLOUD_WS_URL = import.meta.env.VITE_CLOUD_WS_URL as string | undefined;
 const CLOUD_KEY = import.meta.env.VITE_CLOUD_KEY as string | undefined;
 
-type AuthResult = { type: "success" } | { type: "error"; message: string } | null;
+type AuthResult =
+  | { type: "success" }
+  | { type: "error"; message: string }
+  | null;
 
 function App() {
   const [isHandlingAuth, setIsHandlingAuth] = useState(true);

@@ -78,7 +78,9 @@ export function CloudProvider({ wsUrl, apiKey, children }: CloudProviderProps) {
     error,
   };
 
-  return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>;
+  return (
+    <CloudContext.Provider value={value}>{children}</CloudContext.Provider>
+  );
 }
 
 /**

@@ -24,6 +24,7 @@ from fastapi import WebSocket
 # Daydream API configuration
 DAYDREAM_API_BASE = os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
 
+
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
     """
     Validate that a user has access to cloud mode.
@@ -211,6 +212,7 @@ def cleanup_session_data():
 # Get git SHA at deploy time (this runs when the file is loaded during fal deploy)
 import subprocess as _subprocess
 
+
 def _get_git_sha() -> str:
     """Get the short git SHA of the current checkout."""
     try:
@@ -224,6 +226,7 @@ def _get_git_sha() -> str:
     except Exception as e:
         print(f"Warning: Could not get git SHA: {e}")
         return "unknown"
+
 
 GIT_SHA = _get_git_sha()
 
@@ -682,7 +685,9 @@ class ScopeApp(fal.App, keep_alive=300):
 
             if msg_type == "set_user_id":
                 requested_user_id = payload.get("user_id")
-                print(f"[{log_prefix()}] Validating user access for {requested_user_id}")
+                print(
+                    f"[{log_prefix()}] Validating user access for {requested_user_id}"
+                )
 
                 # Validate user has access to cloud mode
                 is_valid, reason = await validate_user_access(requested_user_id)
