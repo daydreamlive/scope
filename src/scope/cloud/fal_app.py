@@ -796,6 +796,7 @@ class ScopeApp(fal.App, keep_alive=300):
 #   2. Run: fal deploy fal_app.py (to deploy to fal.ai)
 #   3. fal.ai will provide you with a WebSocket URL
 #
+
 # Client usage:
 #   1. Connect to wss://<fal-url>/ws
 #   2. Wait for {"type": "ready"}
