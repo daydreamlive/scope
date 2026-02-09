@@ -409,7 +409,7 @@ my_plugin = "my_plugin.plugin"
 ### Hook Implementation
 
 ```python
-from scope.core.pipelines.hookspecs import hookimpl
+from scope.core.plugins.hookspecs import hookimpl
 
 @hookimpl
 def register_pipelines(register):

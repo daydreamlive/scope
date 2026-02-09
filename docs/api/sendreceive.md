@@ -279,8 +279,9 @@ When VACE is enabled on the pipeline (default), input video is routed through VA
 
 ```javascript
 // Load with VACE disabled for traditional V2V
-await loadPipeline("longlive", {
-  vace_enabled: false
+await loadPipeline({
+  pipeline_ids: ["longlive"],
+  load_params: { vace_enabled: false }
 });
 ```
 

@@ -81,7 +81,7 @@ Create a file named `index.html` with the following content:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pipeline_id: "longlive"
+          pipeline_ids: ["longlive"]
         })
       });
 
