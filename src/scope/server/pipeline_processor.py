@@ -451,10 +451,10 @@ class PipelineProcessor:
             # Output frames are [H, W, C], convert to [1, H, W, C] for consistency
             for frame in output:
                 frame = frame.unsqueeze(0)
+                # Track when a frame is ready (production rate)
+                self._track_output_frame()
                 try:
                     self.output_queue.put_nowait(frame)
-                    # Track when a frame is added to output queue for FPS calculation
-                    self._track_output_frame()
                 except queue.Full:
                     logger.info(
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
