@@ -1,9 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  loadPipeline as loadPipelineApi,
-  getPipelineStatus as getPipelineStatusApi,
-} from "../lib/api";
-import { useCloudContext } from "../lib/cloudContext";
+import { useApi } from "./useApi";
 import type { PipelineStatusResponse, PipelineLoadParams } from "../lib/api";
 import { toast } from "sonner";
 
@@ -14,29 +10,9 @@ interface UsePipelineOptions {
 
 export function usePipeline(options: UsePipelineOptions = {}) {
   const { pollInterval = 2000, maxTimeout = 600000 } = options;
-  const { adapter, isCloudMode } = useCloudContext();
 
-  // Helper functions that use cloud adapter when available
-  const getPipelineStatus =
-    useCallback(async (): Promise<PipelineStatusResponse> => {
-      if (isCloudMode && adapter) {
-        return adapter.api.getPipelineStatus();
-      }
-      return getPipelineStatusApi();
-    }, [adapter, isCloudMode]);
-
-  const loadPipelineRequest = useCallback(
-    async (data: {
-      pipeline_ids: string[];
-      load_params?: PipelineLoadParams | null;
-    }) => {
-      if (isCloudMode && adapter) {
-        return adapter.api.loadPipeline(data);
-      }
-      return loadPipelineApi(data);
-    },
-    [adapter, isCloudMode]
-  );
+  // Use the unified API hook - handles cloud/local routing automatically
+  const { getPipelineStatus, loadPipeline: loadPipelineRequest } = useApi();
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");

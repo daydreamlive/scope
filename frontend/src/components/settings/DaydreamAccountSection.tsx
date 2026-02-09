@@ -7,7 +7,7 @@
  * - Cloud connecting/connected states
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { Cloud, Copy, Check } from "lucide-react";
@@ -20,15 +20,7 @@ import {
   refreshUserProfile,
   shouldShowCloudMode,
 } from "../../lib/auth";
-
-interface CloudStatus {
-  connected: boolean;
-  connecting: boolean;
-  error: string | null;
-  app_id: string | null;
-  connection_id: string | null;
-  credentials_configured: boolean;
-}
+import { useCloudStatus } from "../../hooks/useCloudStatus";
 
 interface DaydreamAccountSectionProps {
   /** Callback when cloud mode status changes */
@@ -52,15 +44,10 @@ export function DaydreamAccountSection({
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [showCloudMode, setShowCloudMode] = useState(false);
 
-  // Cloud status state (same as CloudModeToggle)
-  const [status, setStatus] = useState<CloudStatus>({
-    connected: false,
-    connecting: false,
-    error: null,
-    app_id: null,
-    connection_id: null,
-    credentials_configured: false,
-  });
+  // Use shared cloud status hook - avoids redundant polling with Header
+  const { status, refresh: refreshStatus } = useCloudStatus();
+
+  // Local action state
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -91,27 +78,10 @@ export function DaydreamAccountSection({
     };
   }, []);
 
-  // Poll cloud status
-  const fetchStatus = useCallback(async () => {
-    try {
-      const response = await fetch("/api/v1/cloud/status");
-      if (response.ok) {
-        const data = await response.json();
-        setStatus(data);
-        onStatusChange?.(data.connected);
-      }
-    } catch (e) {
-      console.error("[DaydreamAccountSection] Failed to fetch status:", e);
-    }
-  }, [onStatusChange]);
-
+  // Notify parent when status changes
   useEffect(() => {
-    if (isSignedIn) {
-      fetchStatus();
-      const interval = setInterval(fetchStatus, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [isSignedIn, fetchStatus]);
+    onStatusChange?.(status.connected);
+  }, [status.connected, onStatusChange]);
 
   // Notify parent when connecting/disconnecting state changes
   useEffect(() => {
@@ -162,7 +132,7 @@ export function DaydreamAccountSection({
       }
 
       // Backend returns immediately with connecting=true
-      await fetchStatus();
+      await refreshStatus();
     } catch (e) {
       const message = e instanceof Error ? e.message : "Connection failed";
       setError(message);
@@ -184,11 +154,10 @@ export function DaydreamAccountSection({
         throw new Error(data.detail || "Disconnect failed");
       }
 
-      const data = await response.json();
-      setStatus(data);
-      onStatusChange?.(data.connected);
+      // Refresh status from shared hook
+      await refreshStatus();
 
-      if (!data.connected && onPipelinesRefresh) {
+      if (onPipelinesRefresh) {
         try {
           await onPipelinesRefresh();
         } catch (refreshError) {
@@ -219,10 +188,10 @@ export function DaydreamAccountSection({
     redirectToSignIn();
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     // Disconnect from cloud if connected before signing out
     if (status.connected) {
-      handleDisconnect();
+      await handleDisconnect();
     }
     clearDaydreamAuth();
     setIsSignedIn(false);

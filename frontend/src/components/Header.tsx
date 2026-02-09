@@ -3,6 +3,7 @@ import { Settings, Cloud, CloudOff } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { toast } from "sonner";
+import { useCloudStatus } from "../hooks/useCloudStatus";
 
 interface HeaderProps {
   className?: string;
@@ -30,67 +31,58 @@ export function Header({
     "general" | "account" | "api-keys" | "plugins"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
-  const [cloudConnected, setCloudConnected] = useState(false);
-  const [cloudConnecting, setCloudConnecting] = useState(false);
+
+  // Use shared cloud status hook - single source of truth for polling
+  const {
+    isConnected,
+    isConnecting,
+    lastCloseCode,
+    lastCloseReason,
+    refresh: refreshCloudStatus,
+  } = useCloudStatus();
 
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
 
-  // Fetch initial cloud status
+  // Detect unexpected disconnection and show toast
   useEffect(() => {
-    const fetchCloudStatus = async () => {
-      try {
-        const response = await fetch("/api/v1/cloud/status");
-        if (response.ok) {
-          const data = await response.json();
-          const isConnected = data.connected;
-          const isConnecting = data.connecting ?? false;
+    if (
+      lastCloseCode !== null &&
+      lastCloseCode !== lastNotifiedCloseCodeRef.current
+    ) {
+      console.warn(
+        `[Header] Cloud WebSocket closed unexpectedly (code=${lastCloseCode}, reason=${lastCloseReason})`
+      );
+      toast.error("Cloud connection lost", {
+        description: `WebSocket closed (code: ${lastCloseCode}${lastCloseReason ? `, reason: ${lastCloseReason}` : ""})`,
+        duration: 10000,
+      });
+      lastNotifiedCloseCodeRef.current = lastCloseCode;
+    }
 
-          // Detect unexpected disconnection: show toast when there's a close code we haven't
-          // notified about yet. The presence of a close code means a WebSocket was connected
-          // and then closed. Skip code 1000 (normal closure from manual disconnect).
-          const closeCode = data.last_close_code;
-          if (
-            closeCode !== null &&
-            closeCode !== lastNotifiedCloseCodeRef.current
-          ) {
-            const closeReason = data.last_close_reason;
-            console.warn(
-              `[Header] Cloud WebSocket closed unexpectedly (code=${closeCode}, reason=${closeReason})`
-            );
-            toast.error("Cloud connection lost", {
-              description: `WebSocket closed (code: ${closeCode}${closeReason ? `, reason: ${closeReason}` : ""})`,
-              duration: 10000,
-            });
-            lastNotifiedCloseCodeRef.current = closeCode;
-          }
+    // Reset the notified close code when connected (so we can show it again if it disconnects later)
+    if (isConnected) {
+      lastNotifiedCloseCodeRef.current = null;
+    }
+  }, [lastCloseCode, lastCloseReason, isConnected]);
 
-          // Update state
-          setCloudConnected(isConnected);
-          setCloudConnecting(isConnecting);
+  // Notify parent when cloud status changes
+  useEffect(() => {
+    onCloudStatusChange?.(isConnected);
+  }, [isConnected, onCloudStatusChange]);
 
-          // Reset the notified close code when connected (so we can show it again if it disconnects later)
-          if (isConnected) {
-            lastNotifiedCloseCodeRef.current = null;
-          }
-        }
-      } catch (e) {
-        console.error("[Header] Failed to fetch cloud status:", e);
-      }
-    };
-    fetchCloudStatus();
-    // Poll periodically
-    const interval = setInterval(fetchCloudStatus, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  useEffect(() => {
+    onCloudConnectingChange?.(isConnecting);
+  }, [isConnecting, onCloudConnectingChange]);
 
-  // Handle cloud status changes from settings dialog
+  // Handle cloud status changes from settings dialog (manual refresh)
   const handleCloudStatusChange = useCallback(
     (connected: boolean) => {
-      setCloudConnected(connected);
+      // Refresh to sync state after manual connect/disconnect
+      refreshCloudStatus();
       onCloudStatusChange?.(connected);
     },
-    [onCloudStatusChange]
+    [onCloudStatusChange, refreshCloudStatus]
   );
 
   const handleCloudIconClick = () => {
@@ -138,23 +130,23 @@ export function Header({
             size="icon"
             onClick={handleCloudIconClick}
             className={`hover:opacity-80 transition-opacity h-8 w-8 ${
-              cloudConnected
+              isConnected
                 ? "text-green-500 opacity-80"
-                : cloudConnecting
+                : isConnecting
                   ? "text-amber-400 opacity-80"
                   : "text-muted-foreground opacity-60"
             }`}
             title={
-              cloudConnected
+              isConnected
                 ? "Cloud connected"
-                : cloudConnecting
+                : isConnecting
                   ? "Connecting to cloud..."
                   : "Cloud disconnected"
             }
           >
-            {cloudConnected ? (
+            {isConnected ? (
               <Cloud className="h-5 w-5" />
-            ) : cloudConnecting ? (
+            ) : isConnecting ? (
               <Cloud className="h-5 w-5 animate-pulse" />
             ) : (
               <CloudOff className="h-5 w-5" />

@@ -9,7 +9,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { CloudAdapter } from "./cloudAdapter";
 
-interface FalContextValue {
+interface CloudContextValue {
   /** Whether we're in cloud mode */
   isCloudMode: boolean;
   /** The CloudAdapter instance (null if not in cloud mode) */
@@ -20,7 +20,7 @@ interface FalContextValue {
   error: Error | null;
 }
 
-const FalContext = createContext<FalContextValue>({
+const CloudContext = createContext<CloudContextValue>({
   isCloudMode: false,
   adapter: null,
   isReady: false,
@@ -69,23 +69,23 @@ export function CloudProvider({ wsUrl, apiKey, children }: CloudProviderProps) {
       console.log("[CloudProvider] Disconnecting from cloud");
       cloudAdapter.disconnect();
     };
-  }, [wsUrl]);
+  }, [wsUrl, apiKey]);
 
-  const value: FalContextValue = {
+  const value: CloudContextValue = {
     isCloudMode: !!wsUrl,
     adapter,
     isReady: !!wsUrl && isReady,
     error,
   };
 
-  return <FalContext.Provider value={value}>{children}</FalContext.Provider>;
+  return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>;
 }
 
 /**
  * Hook to access the cloud context
  */
 export function useCloudContext() {
-  return useContext(FalContext);
+  return useContext(CloudContext);
 }
 
 /**
