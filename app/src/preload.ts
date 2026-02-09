@@ -115,13 +115,13 @@ contextBridge.exposeInMainWorld('scope', {
 
   openExternal: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url),
 
-  onAuthCallback: (callback: (data: { token: string; userId: string | null }) => void) => {
+  onAuthCallback: (callback: (data: { token: string; userId: string | null; state: string | null }) => void) => {
     // Validate callback
     if (typeof callback !== 'function') {
       throw new Error('Callback must be a function');
     }
 
-    const handler = (_event: Electron.IpcRendererEvent, data: { token: string; userId: string | null }) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { token: string; userId: string | null; state: string | null }) => {
       // Validate data structure
       if (typeof data !== 'object' || typeof data.token !== 'string') {
         console.error('Invalid auth callback data:', data);

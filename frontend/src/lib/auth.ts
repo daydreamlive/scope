@@ -29,6 +29,38 @@ const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
   "https://api.daydream.live";
 const AUTH_STORAGE_KEY = "daydream_auth";
+const AUTH_STATE_KEY = "daydream_auth_state";
+
+/**
+ * Generate a random state string for OAuth CSRF protection
+ */
+function generateAuthState(): string {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Store the OAuth state in sessionStorage
+ */
+function storeAuthState(state: string): void {
+  sessionStorage.setItem(AUTH_STATE_KEY, state);
+}
+
+/**
+ * Verify and consume the OAuth state from sessionStorage
+ * Returns true if state matches, false otherwise
+ */
+function verifyAuthState(state: string | null): boolean {
+  const storedState = sessionStorage.getItem(AUTH_STATE_KEY);
+  // Clear the stored state regardless of match (one-time use)
+  sessionStorage.removeItem(AUTH_STATE_KEY);
+
+  if (!state || !storedState) {
+    return false;
+  }
+  return state === storedState;
+}
 
 interface DaydreamAuthData {
   apiKey: string;
@@ -184,7 +216,11 @@ export function isAuthenticated(): boolean {
  * - In browser: navigates directly
  */
 export function redirectToSignIn(): void {
-  const authUrl = `${DAYDREAM_AUTH_URL}?redirect_url=${encodeURIComponent(getRedirectUrl())}`;
+  // Generate and store state for CSRF protection
+  const state = generateAuthState();
+  storeAuthState(state);
+
+  const authUrl = `${DAYDREAM_AUTH_URL}?redirect_url=${encodeURIComponent(getRedirectUrl())}&state=${encodeURIComponent(state)}`;
 
   if (isElectron()) {
     // Open in system browser via Electron IPC
@@ -207,8 +243,7 @@ export function redirectToSignIn(): void {
  * Exchange a short-lived token for a long-lived API key
  */
 export async function exchangeTokenForAPIKey(token: string): Promise<string> {
-  // TODO if this fails, log out and redirect to sign in page
-  // TODO check state queryparam
+  // Error handling (toast + open account tab) is done in App.tsx via daydream-auth-error event
   const response = await fetch(`${DAYDREAM_API_BASE}/v1/api-key`, {
     method: "POST",
     headers: {
@@ -216,7 +251,7 @@ export async function exchangeTokenForAPIKey(token: string): Promise<string> {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      name: "scope",
+      name: "dd_scope_cloud",
     }),
   });
 
@@ -245,10 +280,25 @@ export async function exchangeTokenForAPIKey(token: string): Promise<string> {
 export async function handleOAuthCallback(): Promise<boolean> {
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("token");
+  const state = urlParams.get("state");
   const userId = urlParams.get("userId");
 
   if (!token) {
     return false;
+  }
+
+  // Verify the state parameter to prevent CSRF attacks
+  if (!verifyAuthState(state)) {
+    // Clean up URL even on state mismatch
+    const url = new URL(window.location.href);
+    url.searchParams.delete("token");
+    url.searchParams.delete("state");
+    url.searchParams.delete("userId");
+    window.history.replaceState({}, document.title, url.toString());
+
+    throw new Error(
+      "Invalid auth state. This may be a CSRF attack or the auth session expired. Please try signing in again."
+    );
   }
 
   try {
@@ -278,7 +328,15 @@ export async function handleOAuthCallback(): Promise<boolean> {
 async function processAuthCallback(data: {
   token: string;
   userId: string | null;
+  state: string | null;
 }): Promise<void> {
+  // Verify the state parameter to prevent CSRF attacks
+  if (!verifyAuthState(data.state)) {
+    throw new Error(
+      "Invalid auth state. This may be a CSRF attack or the auth session expired. Please try signing in again."
+    );
+  }
+
   // Exchange the short-lived token for a long-lived API key
   const apiKey = await exchangeTokenForAPIKey(data.token);
 
@@ -306,7 +364,7 @@ export function initElectronAuthListener(
     window as unknown as {
       scope: {
         onAuthCallback: (
-          callback: (data: { token: string; userId: string | null }) => void
+          callback: (data: { token: string; userId: string | null; state: string | null }) => void
         ) => () => void;
       };
     }

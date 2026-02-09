@@ -163,14 +163,16 @@ export function StreamPage() {
   // Settings dialog navigation state
   const [openSettingsTab, setOpenSettingsTab] = useState<string | null>(null);
 
-  // Open account tab after successful sign-in
+  // Open account tab after sign-in (success or error)
   useEffect(() => {
-    const handleAuthSuccess = () => {
+    const handleAuthEvent = () => {
       setOpenSettingsTab("account");
     };
-    window.addEventListener("daydream-auth-success", handleAuthSuccess);
+    window.addEventListener("daydream-auth-success", handleAuthEvent);
+    window.addEventListener("daydream-auth-error", handleAuthEvent);
     return () => {
-      window.removeEventListener("daydream-auth-success", handleAuthSuccess);
+      window.removeEventListener("daydream-auth-success", handleAuthEvent);
+      window.removeEventListener("daydream-auth-error", handleAuthEvent);
     };
   }, []);
 

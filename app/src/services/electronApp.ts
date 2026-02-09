@@ -391,7 +391,7 @@ export class ScopeElectronAppService {
     this.sendIPC(IPC_CHANNELS.DEEP_LINK_ACTION, data);
   }
 
-  sendAuthCallback(data: { token: string; userId: string | null }): void {
+  sendAuthCallback(data: { token: string; userId: string | null; state: string | null }): void {
     this.sendIPC(IPC_CHANNELS.AUTH_CALLBACK, data);
   }
 

@@ -18,7 +18,7 @@ const PROTOCOL_SCHEME = 'daydream-scope';
  */
 type DeepLinkData =
   | { action: 'install-plugin'; package: string }
-  | { action: 'auth-callback'; token: string; userId: string | null };
+  | { action: 'auth-callback'; token: string; userId: string | null; state: string | null };
 
 // Store pending deep link for processing after frontend loads
 let pendingDeepLink: DeepLinkData | null = null;
@@ -259,7 +259,13 @@ function parseDeepLinkUrl(url: string): DeepLinkData | null {
       const token = parsed.searchParams.get('token');
       if (token) {
         const userId = parsed.searchParams.get('userId');
-        return { action, token: decodeURIComponent(token), userId: userId ? decodeURIComponent(userId) : null };
+        const state = parsed.searchParams.get('state');
+        return {
+          action,
+          token: decodeURIComponent(token),
+          userId: userId ? decodeURIComponent(userId) : null,
+          state: state ? decodeURIComponent(state) : null,
+        };
       }
     }
 
@@ -280,7 +286,7 @@ function dispatchDeepLink(data: DeepLinkData): void {
   }
 
   if (data.action === 'auth-callback') {
-    electronAppService.sendAuthCallback({ token: data.token, userId: data.userId });
+    electronAppService.sendAuthCallback({ token: data.token, userId: data.userId, state: data.state });
   } else if (data.action === 'install-plugin') {
     electronAppService.sendDeepLinkAction({ action: data.action, package: data.package });
   }
