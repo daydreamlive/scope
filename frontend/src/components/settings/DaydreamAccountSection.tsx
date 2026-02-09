@@ -228,7 +228,7 @@ export function DaydreamAccountSection({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Cloud className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Cloud Mode</span>
+              <span className="text-sm font-medium">Remote Inference</span>
             </div>
             <Switch
               checked={status.connected || status.connecting}
@@ -238,7 +238,7 @@ export function DaydreamAccountSection({
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            Use Daydream Cloud for running pipelines.
+            Use remote inference for running pipelines.
             {!isSignedIn && " Log in required."}
           </p>
 

@@ -82,8 +82,8 @@ class CloudConnectionManager:
             "api_requests_successful": 0,
             "connected_at": None,
             "last_activity_at": None,
-            "frames_sent_to_fal": 0,
-            "frames_received_from_fal": 0,
+            "frames_sent_to_cloud": 0,
+            "frames_received_from_cloud": 0,
         }
 
     @property
@@ -249,11 +249,11 @@ class CloudConnectionManager:
                         close_reason = str(msg.data)
                     elif msg.extra:
                         close_reason = str(msg.extra)
-                    
+
                     # Store for status reporting to frontend
                     self._last_close_code = close_code
                     self._last_close_reason = close_reason
-                    
+
                     logger.warning(
                         f"Cloud WebSocket closed (code={close_code}, reason={close_reason})"
                     )
@@ -525,7 +525,7 @@ class CloudConnectionManager:
         self._webrtc_client = CloudWebRTCClient(self)
 
         # Register frame callback to update stats and forward to subscribers
-        self._webrtc_client.output_handler.add_callback(self._on_frame_from_fal)
+        self._webrtc_client.output_handler.add_callback(self._on_frame_from_cloud)
 
         try:
             await self._webrtc_client.connect(initial_parameters)
@@ -543,7 +543,7 @@ class CloudConnectionManager:
             self._webrtc_client = None
             logger.info("[CLOUD-RTC] WebRTC connection stopped")
 
-    def send_frame_to_fal(self, frame: VideoFrame | np.ndarray) -> bool:
+    def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a video frame to cloud.ai for processing.
 
         Args:
@@ -557,10 +557,10 @@ class CloudConnectionManager:
 
         success = self._webrtc_client.send_frame(frame)
         if success:
-            self._stats["frames_sent_to_fal"] += 1
+            self._stats["frames_sent_to_cloud"] += 1
         return success
 
-    def send_parameters_to_fal(self, params: dict) -> None:
+    def send_parameters(self, params: dict) -> None:
         """Send parameter update to cloud.ai via WebRTC data channel.
 
         Args:
@@ -584,9 +584,9 @@ class CloudConnectionManager:
         if callback in self._frame_callbacks:
             self._frame_callbacks.remove(callback)
 
-    def _on_frame_from_fal(self, frame: VideoFrame) -> None:
+    def _on_frame_from_cloud(self, frame: VideoFrame) -> None:
         """Handle frames received from cloud.ai."""
-        self._stats["frames_received_from_fal"] += 1
+        self._stats["frames_received_from_cloud"] += 1
 
         # Forward to all registered callbacks
         for callback in self._frame_callbacks:
@@ -596,7 +596,7 @@ class CloudConnectionManager:
                 logger.error(f"[CLOUD-RTC] Error in frame callback: {e}")
 
     @property
-    def fal_session_id(self) -> str | None:
+    def cloud_session_id(self) -> str | None:
         """Get the current cloud WebRTC session ID."""
         if self._webrtc_client is not None:
             return self._webrtc_client.session_id
@@ -615,7 +615,7 @@ class CloudConnectionManager:
             raise RuntimeError("Not connected to cloud.ai")
 
         # Use provided session ID or fall back to current
-        target_session_id = session_id or self.fal_session_id
+        target_session_id = session_id or self.cloud_session_id
         if not target_session_id:
             raise RuntimeError("No cloud session ID available")
 
@@ -687,8 +687,8 @@ class CloudConnectionManager:
                 "webrtc_ice_candidates_sent": self._stats["webrtc_ice_candidates_sent"],
                 "api_requests_sent": self._stats["api_requests_sent"],
                 "api_requests_successful": self._stats["api_requests_successful"],
-                "frames_sent_to_fal": self._stats["frames_sent_to_fal"],
-                "frames_received_from_fal": self._stats["frames_received_from_fal"],
+                "frames_sent_to_cloud": self._stats["frames_sent_to_cloud"],
+                "frames_received_from_cloud": self._stats["frames_received_from_cloud"],
             }
 
             # Include WebRTC client stats if available
@@ -729,9 +729,9 @@ class CloudConnectionManager:
         )
         logger.info("")
         logger.info("  Media Stats:")
-        logger.info(f"    Frames sent to cloud: {self._stats['frames_sent_to_fal']}")
+        logger.info(f"    Frames sent to cloud: {self._stats['frames_sent_to_cloud']}")
         logger.info(
-            f"    Frames received from cloud: {self._stats['frames_received_from_fal']}"
+            f"    Frames received from cloud: {self._stats['frames_received_from_cloud']}"
         )
 
         if self._webrtc_client is not None:

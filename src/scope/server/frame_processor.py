@@ -312,7 +312,7 @@ class FrameProcessor:
                 return True  # Silently ignore frames in text mode
             if self.cloud_manager:
                 frame_array = frame.to_ndarray(format="rgb24")
-                if self.cloud_manager.send_frame_to_fal(frame_array):
+                if self.cloud_manager.send_frame(frame_array):
                     self._frames_to_cloud += 1
                     return True
                 else:
@@ -743,7 +743,7 @@ class FrameProcessor:
                         # Cloud mode: send Spout frames to cloud (only in video mode)
                         # In text mode, cloud generates video from prompts only - no input frames
                         if self._video_mode and self.cloud_manager:
-                            if self.cloud_manager.send_frame_to_fal(rgb_frame):
+                            if self.cloud_manager.send_frame(rgb_frame):
                                 self._frames_to_cloud += 1
                     elif self.pipeline_processors:
                         # Local mode: put into first processor's input queue

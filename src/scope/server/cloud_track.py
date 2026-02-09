@@ -195,7 +195,7 @@ class CloudTrack(MediaStreamTrack):
             self.frame_processor.update_parameters(params)
 
         # Also send to cloud
-        self.cloud_manager.send_parameters_to_fal(params)
+        self.cloud_manager.send_parameters(params)
 
     def pause(self, paused: bool) -> None:
         """Pause/unpause the relay."""
