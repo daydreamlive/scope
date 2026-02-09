@@ -62,7 +62,8 @@ jobs:
             TAGS="daydreamlive/scope:$VERSION,daydreamlive/scope:latest"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             # Main branch
-            TAGS="daydreamlive/scope:main"
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            TAGS="daydreamlive/scope:main,daydreamlive/scope:$SHORT_SHA"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
             # Runpod serverless branch
             TAGS="daydreamlive/scope:runpod-serverless"
