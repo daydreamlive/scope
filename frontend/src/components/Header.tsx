@@ -44,6 +44,9 @@ export function Header({
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
 
+  // Track previous connection state to detect transitions for pipeline refresh
+  const prevConnectedRef = useRef(false);
+
   // Detect unexpected disconnection and show toast
   useEffect(() => {
     if (
@@ -74,6 +77,18 @@ export function Header({
   useEffect(() => {
     onCloudConnectingChange?.(isConnecting);
   }, [isConnecting, onCloudConnectingChange]);
+
+  // Refresh pipelines when cloud connection status changes
+  // This ensures pipeline list updates even if settings dialog is closed
+  useEffect(() => {
+    if (prevConnectedRef.current !== isConnected) {
+      // Connection status changed - refresh pipelines to get the right list
+      onPipelinesRefresh?.().catch(e =>
+        console.error("[Header] Failed to refresh pipelines after cloud status change:", e)
+      );
+    }
+    prevConnectedRef.current = isConnected;
+  }, [isConnected, onPipelinesRefresh]);
 
   // Handle cloud status changes from settings dialog (manual refresh)
   const handleCloudStatusChange = useCallback(

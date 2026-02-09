@@ -71,6 +71,7 @@ export interface SchemaComplexFieldContext {
   supportsKvCacheBias?: boolean;
   isStreaming?: boolean;
   isLoading?: boolean;
+  isCloudMode?: boolean;
   /** Per-field overrides for schema-driven fields (e.g. image path). */
   schemaFieldOverrides?: Record<string, unknown>;
   onSchemaFieldOverrideChange?: (
@@ -209,7 +210,7 @@ export function SchemaComplexField({
     );
   }
 
-  if (component === "lora" && !rendered.has("lora")) {
+  if (component === "lora" && !rendered.has("lora") && !ctx.isCloudMode) {
     rendered.add("lora");
     return (
       <div key="lora" className="space-y-4">

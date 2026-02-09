@@ -530,6 +530,7 @@ export function SettingsPanel({
               supportsKvCacheBias: pipelines?.[pipelineId]?.supportsKvCacheBias,
               isStreaming,
               isLoading,
+              isCloudMode,
               schemaFieldOverrides,
               onSchemaFieldOverrideChange,
             };
