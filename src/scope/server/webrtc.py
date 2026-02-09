@@ -3,7 +3,9 @@ import json
 import logging
 import os
 import uuid
-from typing import Any
+
+# Type checking imports
+from typing import TYPE_CHECKING, Any
 
 from aiortc import (
     MediaStreamTrack,
@@ -17,11 +19,16 @@ from aiortc.codecs import h264, vpx
 from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
+from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
+from .kafka_publisher import publish_event_async
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
 from .tracks import VideoProcessingTrack
+
+if TYPE_CHECKING:
+    from .cloud_connection import CloudConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +57,7 @@ class Session:
         data_channel: RTCDataChannel | None = None,
         relay: MediaRelay | None = None,
         recording_manager: RecordingManager | None = None,
+        user_id: str | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
@@ -57,6 +65,7 @@ class Session:
         self.data_channel = data_channel
         self.relay = relay
         self.recording_manager = recording_manager
+        self.user_id = user_id
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -167,7 +176,7 @@ class WebRTCManager:
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
-            session = Session(pc)
+            session = Session(pc, user_id=request.user_id)
             self.sessions[session.id] = session
 
             # Create NotificationSender for this session to send notifications to the frontend
@@ -177,6 +186,8 @@ class WebRTCManager:
                 pipeline_manager,
                 initial_parameters=initial_parameters,
                 notification_callback=notification_sender.call,
+                session_id=session.id,
+                user_id=request.user_id,
             )
             session.video_track = video_track
 
@@ -305,6 +316,16 @@ class WebRTCManager:
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
 
+            # Publish session_created event
+            pipeline_ids = initial_parameters.get("pipeline_ids")
+            await publish_event_async(
+                event_type="session_created",
+                session_id=session.id,
+                pipeline_ids=pipeline_ids if pipeline_ids else None,
+                user_id=request.user_id,
+                metadata={"mode": "local"},
+            )
+
             return {
                 "sdp": pc.localDescription.sdp,
                 "type": pc.localDescription.type,
@@ -313,6 +334,134 @@ class WebRTCManager:
 
         except Exception as e:
             logger.error(f"Error handling WebRTC offer: {e}")
+            if "session" in locals():
+                await self.remove_session(session.id)
+            raise
+
+    async def handle_offer_with_relay(
+        self, request: WebRTCOfferRequest, cloud_manager: "CloudConnectionManager"
+    ) -> dict[str, Any]:
+        """
+        Handle WebRTC offer and relay video through cloud for processing.
+
+        This creates a CloudTrack that:
+        1. Receives video from the browser
+        2. Sends it to cloud for processing
+        3. Returns processed frames to the browser
+
+        Args:
+            request: WebRTC offer request
+            cloud_manager: The CloudConnectionManager for cloud connection
+
+        Returns:
+            Dictionary containing SDP answer
+        """
+        try:
+            # Extract initial parameters from offer
+            initial_parameters = {}
+            if request.initialParameters:
+                initial_parameters = request.initialParameters.model_dump(
+                    exclude_none=True
+                )
+            logger.info(f"[CLOUD] Received offer with parameters: {initial_parameters}")
+
+            # Create new RTCPeerConnection with configuration
+            pc = RTCPeerConnection(self.rtc_config)
+            session = Session(pc, user_id=request.user_id)
+            self.sessions[session.id] = session
+
+            # Create CloudTrack instead of VideoProcessingTrack
+            cloud_track = CloudTrack(
+                cloud_manager=cloud_manager,
+                initial_parameters=initial_parameters,
+                user_id=request.user_id,
+            )
+            session.video_track = cloud_track
+
+            # Create a MediaRelay for the output
+            relay = MediaRelay()
+            relayed_track = relay.subscribe(cloud_track)
+
+            # Add the relayed track to WebRTC connection
+            pc.addTrack(relayed_track)
+
+            # Store relay for cleanup
+            session.relay = relay
+
+            logger.info(f"[CLOUD] Created session: {session.id}")
+
+            @pc.on("track")
+            def on_track(track: MediaStreamTrack):
+                logger.info(
+                    f"[CLOUD] Track received: {track.kind} for session {session.id}"
+                )
+                if track.kind == "video":
+                    # Set the browser's video track as the source for the relay
+                    cloud_track.set_source_track(track)
+
+            @pc.on("connectionstatechange")
+            async def on_connectionstatechange():
+                logger.info(
+                    f"[CLOUD] Connection state: {pc.connectionState} for session {session.id}"
+                )
+                if pc.connectionState in ["closed", "failed"]:
+                    # Stop the relay track
+                    if hasattr(cloud_track, "stop"):
+                        await cloud_track.stop()
+                    await self.remove_session(session.id)
+
+            @pc.on("iceconnectionstatechange")
+            async def on_iceconnectionstatechange():
+                logger.info(
+                    f"[CLOUD] ICE state: {pc.iceConnectionState} for session {session.id}"
+                )
+
+            # Handle data channel for parameter updates
+            @pc.on("datachannel")
+            def on_data_channel(data_channel):
+                logger.info(f"[CLOUD] Data channel: {data_channel.label}")
+                session.data_channel = data_channel
+
+                @data_channel.on("message")
+                def on_data_channel_message(message):
+                    try:
+                        data = json.loads(message)
+                        logger.info(f"[CLOUD] Parameter update: {data}")
+
+                        # Forward parameters to cloud
+                        cloud_track.update_parameters(data)
+
+                    except json.JSONDecodeError as e:
+                        logger.error(f"[CLOUD] Failed to parse message: {e}")
+                    except Exception as e:
+                        logger.error(f"[CLOUD] Error handling message: {e}")
+
+            # Set remote description (the offer)
+            offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
+            await pc.setRemoteDescription(offer_sdp)
+
+            # Create answer
+            answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+
+            # Publish session_created event for relay mode
+            pipeline_ids = initial_parameters.get("pipeline_ids")
+            await publish_event_async(
+                event_type="session_created",
+                session_id=session.id,
+                pipeline_ids=pipeline_ids if pipeline_ids else None,
+                user_id=request.user_id,
+                metadata={"mode": "relay"},
+            )
+
+            return {
+                "sdp": pc.localDescription.sdp,
+                "type": pc.localDescription.type,
+                "sessionId": session.id,
+            }
+
+        except Exception as e:
+            logger.error(f"[CLOUD] Error handling offer: {e}")
             if "session" in locals():
                 await self.remove_session(session.id)
             raise
@@ -328,6 +477,13 @@ class WebRTCManager:
                 await session.recording_manager.delete_recording()
 
             await session.close()
+
+            # Publish session_closed event
+            await publish_event_async(
+                event_type="session_closed",
+                session_id=session_id,
+                user_id=session.user_id,
+            )
         else:
             logger.warning(f"Attempted to remove non-existent session: {session_id}")
 

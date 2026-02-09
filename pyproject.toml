@@ -29,6 +29,7 @@ classifiers = [
 ]
 dependencies = [
     "aiortc>=1.13.0",
+    "aiohttp>=3.9.0",
     "fastapi>=0.116.1",
     "httpx>=0.28.1",
     "twilio>=9.8.0",
@@ -56,6 +57,11 @@ dependencies = [
     "triton-windows==3.5.1.post24; sys_platform == 'win32'",
     "SpoutGL>=0.1.1; sys_platform == 'win32'",
     "PyOpenGL>=3.1.10; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+kafka = [
+    "aiokafka>=0.10.0",
 ]
 
 [project.scripts]

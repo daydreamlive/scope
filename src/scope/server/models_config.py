@@ -4,6 +4,10 @@ Models configuration module for daydream-scope.
 Provides centralized configuration for model storage location with support for:
 - Default location: ~/.daydream-scope/models
 - Environment variable override: DAYDREAM_SCOPE_MODELS_DIR
+
+And assets storage location with support for:
+- Default location: ~/.daydream-scope/assets (or sibling to models dir)
+- Environment variable override: DAYDREAM_SCOPE_ASSETS_DIR
 """
 
 import logging
@@ -17,6 +21,9 @@ DEFAULT_MODELS_DIR = "~/.daydream-scope/models"
 
 # Environment variable for overriding models directory
 MODELS_DIR_ENV_VAR = "DAYDREAM_SCOPE_MODELS_DIR"
+
+# Environment variable for overriding assets directory
+ASSETS_DIR_ENV_VAR = "DAYDREAM_SCOPE_ASSETS_DIR"
 
 
 def get_models_dir() -> Path:
@@ -75,14 +82,22 @@ def get_model_file_path(relative_path: str) -> Path:
 
 def get_assets_dir() -> Path:
     """
-    Get the assets directory path (at the same level as models directory).
+    Get the assets directory path.
 
-    If DAYDREAM_SCOPE_MODELS_DIR is set, assets directory will be at the same level.
-    Otherwise, defaults to ~/.daydream-scope/assets
+    Priority order:
+    1. DAYDREAM_SCOPE_ASSETS_DIR environment variable
+    2. Sibling to models directory (e.g., ~/.daydream-scope/assets)
 
     Returns:
         Path: Absolute path to the assets directory
     """
+    # Check environment variable first
+    env_dir = os.environ.get(ASSETS_DIR_ENV_VAR)
+    if env_dir:
+        assets_dir = Path(env_dir).expanduser().resolve()
+        return assets_dir
+
+    # Default: sibling to models directory
     models_dir = get_models_dir()
     # Get the parent directory (e.g., ~/.daydream-scope) and create assets directory there
     assets_dir = models_dir.parent / "assets"

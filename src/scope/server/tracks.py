@@ -23,11 +23,15 @@ class VideoProcessingTrack(MediaStreamTrack):
         fps: int = 30,
         initial_parameters: dict = None,
         notification_callback: callable = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
+        self.session_id = session_id
+        self.user_id = user_id
         # FPS variables (will be updated from FrameProcessor or input measurement)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
@@ -98,6 +102,8 @@ class VideoProcessingTrack(MediaStreamTrack):
                 pipeline_manager=self.pipeline_manager,
                 initial_parameters=self.initial_parameters,
                 notification_callback=self.notification_callback,
+                session_id=self.session_id,
+                user_id=self.user_id,
             )
             self.frame_processor.start()
 

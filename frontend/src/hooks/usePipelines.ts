@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { getPipelineSchemas } from "../lib/api";
+import { useCloudContext } from "../lib/cloudContext";
 import type { InputMode, PipelineInfo } from "../types";
 
 export function usePipelines() {
+  const { adapter, isCloudMode, isReady } = useCloudContext();
+
   const [pipelines, setPipelines] = useState<Record<
     string,
     PipelineInfo
@@ -10,13 +13,9 @@ export function usePipelines() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPipelines = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const schemas = await getPipelineSchemas();
-
-      // Transform to camelCase for TypeScript conventions
+  // Transform schemas to PipelineInfo format
+  const transformSchemas = useCallback(
+    (schemas: Awaited<ReturnType<typeof getPipelineSchemas>>) => {
       const transformed: Record<string, PipelineInfo> = {};
       for (const [id, schema] of Object.entries(schemas.pipelines)) {
         // Check if pipeline supports controller input (has ctrl_input field in schema)
@@ -58,21 +57,85 @@ export function usePipelines() {
           configSchema: schema.config_schema,
         };
       }
+      return transformed;
+    },
+    []
+  );
 
+  // Refresh pipelines (can be called externally)
+  const refreshPipelines = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Use adapter if in cloud mode, otherwise direct API
+      const schemas =
+        isCloudMode && adapter
+          ? await adapter.api.getPipelineSchemas()
+          : await getPipelineSchemas();
+
+      const transformed = transformSchemas(schemas);
       setPipelines(transformed);
+      return transformed;
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to fetch pipelines";
       setError(errorMessage);
-      console.error("Failed to fetch pipelines:", err);
+      console.error("Failed to refresh pipelines:", err);
+      throw err;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [adapter, isCloudMode, transformSchemas]);
 
   useEffect(() => {
-    fetchPipelines();
-  }, [fetchPipelines]);
+    // In cloud mode, wait until adapter is ready
+    if (isCloudMode && !isReady) {
+      return;
+    }
 
-  return { pipelines, isLoading, error, refetch: fetchPipelines };
+    let mounted = true;
+
+    async function fetchPipelines() {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Use adapter if in cloud mode, otherwise direct API
+        const schemas =
+          isCloudMode && adapter
+            ? await adapter.api.getPipelineSchemas()
+            : await getPipelineSchemas();
+
+        if (!mounted) return;
+
+        const transformed = transformSchemas(schemas);
+        setPipelines(transformed);
+      } catch (err) {
+        if (!mounted) return;
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to fetch pipelines";
+        setError(errorMessage);
+        console.error("Failed to fetch pipelines:", err);
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    fetchPipelines();
+
+    return () => {
+      mounted = false;
+    };
+  }, [adapter, isCloudMode, isReady, transformSchemas]);
+
+  return {
+    pipelines,
+    isLoading,
+    error,
+    refreshPipelines,
+    refetch: refreshPipelines,
+  };
 }

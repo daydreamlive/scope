@@ -14,8 +14,15 @@ import { SERVER_CONFIG, validateConfig } from './utils/config';
 // Protocol scheme for deep links
 const PROTOCOL_SCHEME = 'daydream-scope';
 
+/**
+ * Deep link data types
+ */
+type DeepLinkData =
+  | { action: 'install-plugin'; package: string }
+  | { action: 'auth-callback'; token: string; userId: string | null; state: string | null };
+
 // Store pending deep link for processing after frontend loads
-let pendingDeepLink: { action: string; package: string } | null = null;
+let pendingDeepLink: DeepLinkData | null = null;
 
 // Configure electron-log for auto-updater
 log.transports.file.level = 'info';
@@ -222,11 +229,7 @@ if (!gotTheLock) {
     if (deepLinkArg) {
       const data = parseDeepLinkUrl(deepLinkArg);
       if (data) {
-        if (electronAppService) {
-          electronAppService.sendDeepLinkAction(data);
-        } else {
-          pendingDeepLink = data;
-        }
+        dispatchDeepLink(data);
       }
     }
   });
@@ -236,16 +239,15 @@ if (!gotTheLock) {
     event.preventDefault();
     const data = parseDeepLinkUrl(url);
     if (data) {
-      if (electronAppService) {
-        electronAppService.sendDeepLinkAction(data);
-      } else {
-        pendingDeepLink = data;
-      }
+      logger.info(`Received deep link: ${data.action}`);
+      dispatchDeepLink(data);
       // Focus window
       if (appState.mainWindow) {
         if (appState.mainWindow.isMinimized()) appState.mainWindow.restore();
         appState.mainWindow.focus();
       }
+    } else {
+      logger.warn(`Failed to parse deep link URL: ${url}`);
     }
   });
 }
@@ -253,20 +255,54 @@ if (!gotTheLock) {
 /**
  * Parse deep link URL and extract action and parameters
  */
-function parseDeepLinkUrl(url: string): { action: string; package: string } | null {
+function parseDeepLinkUrl(url: string): DeepLinkData | null {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== `${PROTOCOL_SCHEME}:`) return null;
 
     const action = parsed.hostname;
-    const packageSpec = parsed.searchParams.get('package');
 
-    if (action === 'install-plugin' && packageSpec) {
-      return { action, package: decodeURIComponent(packageSpec) };
+    if (action === 'install-plugin') {
+      const packageSpec = parsed.searchParams.get('package');
+      if (packageSpec) {
+        return { action, package: decodeURIComponent(packageSpec) };
+      }
     }
+
+    if (action === 'auth-callback') {
+      const token = parsed.searchParams.get('token');
+      if (token) {
+        const userId = parsed.searchParams.get('userId');
+        const state = parsed.searchParams.get('state');
+        return {
+          action,
+          token: decodeURIComponent(token),
+          userId: userId ? decodeURIComponent(userId) : null,
+          state: state ? decodeURIComponent(state) : null,
+        };
+      }
+    }
+
     return null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Dispatch a deep link action to the appropriate handler
+ */
+function dispatchDeepLink(data: DeepLinkData): void {
+  if (!electronAppService) {
+    logger.warn(`electronAppService not ready, storing pending deep link: ${data.action}`);
+    pendingDeepLink = data;
+    return;
+  }
+
+  if (data.action === 'auth-callback') {
+    electronAppService.sendAuthCallback({ token: data.token, userId: data.userId, state: data.state });
+  } else if (data.action === 'install-plugin') {
+    electronAppService.sendDeepLinkAction({ action: data.action, package: data.package });
   }
 }
 
@@ -286,8 +322,8 @@ function processPendingDeepLink(): void {
   const sendLink = () => {
     // Delay after did-finish-load to allow React to mount and register the listener
     setTimeout(() => {
-      if (pendingDeepLink && electronAppService) {
-        electronAppService.sendDeepLinkAction(pendingDeepLink);
+      if (pendingDeepLink) {
+        dispatchDeepLink(pendingDeepLink);
         pendingDeepLink = null;
       }
     }, 500);
@@ -319,7 +355,7 @@ function validateIPC<T extends (...args: any[]) => Promise<any>>(
 
       // Log IPC call for debugging (only in development)
       if (!app.isPackaged) {
-        logger.debug(`IPC call: ${handlerName}`, args);
+        logger.info(`IPC call: ${handlerName}`, args);
       }
 
       // Validate that handler exists
@@ -391,6 +427,26 @@ ipcMain.handle(IPC_CHANNELS.BROWSE_DIRECTORY, validateIPC(async (_event: any, ti
 
   return result.canceled ? null : result.filePaths[0];
 }, IPC_CHANNELS.BROWSE_DIRECTORY));
+
+ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL, validateIPC(async (_event: any, url: string) => {
+  // Validate URL
+  if (typeof url !== 'string') {
+    throw new Error('URL must be a string');
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    // Only allow http and https protocols for security
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      throw new Error('Only http and https URLs are allowed');
+    }
+    await shell.openExternal(url);
+    return true;
+  } catch (err) {
+    logger.error('Failed to open external URL:', err);
+    throw err;
+  }
+}, IPC_CHANNELS.OPEN_EXTERNAL));
 
 // Setup error callback for Python process
 function setupPythonProcessErrorHandler(): void {

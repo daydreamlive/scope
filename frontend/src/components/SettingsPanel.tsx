@@ -112,6 +112,7 @@ interface SettingsPanelProps {
     value: unknown,
     isRuntimeParam?: boolean
   ) => void;
+  isCloudMode?: boolean;
 }
 
 export function SettingsPanel({
@@ -157,6 +158,7 @@ export function SettingsPanel({
   onPostprocessorIdsChange,
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
+  isCloudMode = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -381,7 +383,7 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {/* Preprocessor Selector - fixed, always shown */}
+        {/* Preprocessor Selector */}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <LabelWithTooltip
@@ -528,6 +530,7 @@ export function SettingsPanel({
               supportsKvCacheBias: pipelines?.[pipelineId]?.supportsKvCacheBias,
               isStreaming,
               isLoading,
+              isCloudMode,
               schemaFieldOverrides,
               onSchemaFieldOverrideChange,
             };
@@ -671,7 +674,7 @@ export function SettingsPanel({
                 </div>
               )}
 
-              {currentPipeline?.supportsLoRA && (
+              {currentPipeline?.supportsLoRA && !isCloudMode && (
                 <div className="space-y-4">
                   <LoRAManager
                     loras={loras}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { AccountTab } from "./settings/AccountTab";
 import { ApiKeysTab } from "./settings/ApiKeysTab";
 import { GeneralTab } from "./settings/GeneralTab";
 import { PluginsTab } from "./settings/PluginsTab";
@@ -20,8 +21,13 @@ import { toast } from "sonner";
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
-  initialTab?: "general" | "api-keys" | "plugins";
+  initialTab?: "general" | "account" | "api-keys" | "plugins";
   initialPluginPath?: string;
+  // Cloud mode callbacks
+  onCloudStatusChange?: (connected: boolean) => void;
+  onCloudConnectingChange?: (connecting: boolean) => void;
+  onPipelinesRefresh?: () => Promise<unknown>;
+  cloudDisabled?: boolean;
 }
 
 const isLocalPath = (spec: string): boolean => {
@@ -56,6 +62,10 @@ export function SettingsDialog({
   onClose,
   initialTab = "general",
   initialPluginPath = "",
+  onCloudStatusChange,
+  onCloudConnectingChange,
+  onPipelinesRefresh,
+  cloudDisabled,
 }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
   const [modelsDirectory, setModelsDirectory] = useState(
@@ -329,6 +339,12 @@ export function SettingsDialog({
               General
             </TabsTrigger>
             <TabsTrigger
+              value="account"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              Account
+            </TabsTrigger>
+            <TabsTrigger
               value="api-keys"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
@@ -352,6 +368,14 @@ export function SettingsDialog({
                 onModelsDirectoryChange={handleModelsDirectoryChange}
                 onLogsDirectoryChange={handleLogsDirectoryChange}
                 onReportBug={() => setReportBugOpen(true)}
+              />
+            </TabsContent>
+            <TabsContent value="account" className="mt-0">
+              <AccountTab
+                onCloudStatusChange={onCloudStatusChange}
+                onCloudConnectingChange={onCloudConnectingChange}
+                onPipelinesRefresh={onPipelinesRefresh ?? refetchPipelines}
+                cloudDisabled={cloudDisabled}
               />
             </TabsContent>
             <TabsContent value="api-keys" className="mt-0">

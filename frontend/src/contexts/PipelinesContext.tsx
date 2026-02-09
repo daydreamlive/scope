@@ -6,7 +6,8 @@ interface PipelinesContextValue {
   pipelines: Record<string, PipelineInfo> | null;
   isLoading: boolean;
   error: string | null;
-  refetch: () => Promise<void>;
+  refetch: () => Promise<Record<string, PipelineInfo>>;
+  refreshPipelines: () => Promise<Record<string, PipelineInfo>>;
 }
 
 const PipelinesContext = createContext<PipelinesContextValue | null>(null);

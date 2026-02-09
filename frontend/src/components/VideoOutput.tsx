@@ -7,6 +7,7 @@ interface VideoOutputProps {
   className?: string;
   remoteStream: MediaStream | null;
   isPipelineLoading?: boolean;
+  isCloudConnecting?: boolean;
   isConnecting?: boolean;
   pipelineError?: string | null;
   isPlaying?: boolean;
@@ -28,6 +29,7 @@ export function VideoOutput({
   className = "",
   remoteStream,
   isPipelineLoading = false,
+  isCloudConnecting = false,
   isConnecting = false,
   pipelineError: _pipelineError = null,
   isPlaying = true,
@@ -200,6 +202,11 @@ export function VideoOutput({
           <div className="text-center text-muted-foreground text-lg">
             <Spinner size={24} className="mx-auto mb-3" />
             <p>Downloading...</p>
+          </div>
+        ) : isCloudConnecting ? (
+          <div className="text-center text-muted-foreground text-lg">
+            <Spinner size={24} className="mx-auto mb-3" />
+            <p>Connecting to cloud...</p>
           </div>
         ) : isPipelineLoading ? (
           <div className="text-center text-muted-foreground text-lg">

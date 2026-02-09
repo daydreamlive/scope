@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -7,13 +7,15 @@ import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
-import { useWebRTC } from "../hooks/useWebRTC";
+import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { useApi } from "../hooks/useApi";
+import { useCloudContext } from "../lib/cloudContext";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -25,11 +27,6 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import {
-  checkModelStatus,
-  downloadPipelineModels,
-  downloadRecording,
-} from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -70,8 +67,26 @@ function getVaceParams(
 }
 
 export function StreamPage() {
+  // Get API functions that work in both local and cloud modes
+  const api = useApi();
+  const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
+    useCloudContext();
+
+  // Track backend cloud relay mode (local backend connected to cloud)
+  const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
+
+  // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
+  const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // Show loading state while connecting to cloud
+  useEffect(() => {
+    if (isDirectCloudMode) {
+      console.log("[StreamPage] Cloud mode enabled, ready:", isCloudReady);
+    }
+  }, [isDirectCloudMode, isCloudReady]);
+
   // Fetch available pipelines dynamically
-  const { pipelines } = usePipelinesContext();
+  const { pipelines, refreshPipelines } = usePipelinesContext();
 
   // Helper to get default mode for a pipeline
   const getPipelineDefaultMode = (pipelineId: string): InputMode => {
@@ -85,7 +100,19 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    refreshPipelineSchemas,
+    refreshHardwareInfo,
   } = useStreamState();
+
+  // Combined refresh function for pipeline schemas, pipelines list, and hardware info
+  const handlePipelinesRefresh = useCallback(async () => {
+    // Refresh all hooks to keep them in sync when cloud mode toggles
+    await Promise.all([
+      refreshPipelineSchemas(),
+      refreshPipelines(),
+      refreshHardwareInfo(),
+    ]);
+  }, [refreshPipelineSchemas, refreshPipelines, refreshHardwareInfo]);
 
   // Prompt state - use unified default prompts based on mode
   const initialMode =
@@ -122,6 +149,9 @@ export function StreamPage() {
   // Recording toggle state
   const [isRecording, setIsRecording] = useState(false);
 
+  // Track when waiting for cloud WebSocket to connect after clicking Play
+  const [isCloudConnecting, setIsCloudConnecting] = useState(false);
+
   // Video display state
   const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
 
@@ -132,6 +162,19 @@ export function StreamPage() {
 
   // Settings dialog navigation state
   const [openSettingsTab, setOpenSettingsTab] = useState<string | null>(null);
+
+  // Open account tab after sign-in (success or error)
+  useEffect(() => {
+    const handleAuthEvent = () => {
+      setOpenSettingsTab("account");
+    };
+    window.addEventListener("daydream-auth-success", handleAuthEvent);
+    window.addEventListener("daydream-auth-error", handleAuthEvent);
+    return () => {
+      window.removeEventListener("daydream-auth-success", handleAuthEvent);
+      window.removeEventListener("daydream-auth-error", handleAuthEvent);
+    };
+  }, []);
 
   // Download dialog state
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
@@ -167,7 +210,7 @@ export function StreamPage() {
     pipelineInfo,
   } = usePipeline();
 
-  // WebRTC for streaming
+  // WebRTC for streaming (unified hook works in both local and cloud modes)
   const {
     remoteStream,
     isStreaming,
@@ -178,10 +221,11 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
     sessionId,
-  } = useWebRTC();
+  } = useUnifiedWebRTC();
 
-  // Computed loading state - true when downloading models, loading pipeline, or connecting WebRTC
-  const isLoading = isDownloading || isPipelineLoading || isConnecting;
+  // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
+  const isLoading =
+    isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
 
   // Get WebRTC stats for FPS
   const webrtcStats = useWebRTCStats({
@@ -356,12 +400,12 @@ export function StreamPage() {
     setDownloadProgress(null);
 
     try {
-      await downloadPipelineModels(pipelineId);
+      await api.downloadPipelineModels(pipelineId);
 
       // Enhanced polling with progress updates
       const checkDownloadProgress = async () => {
         try {
-          const status = await checkModelStatus(pipelineId);
+          const status = await api.checkModelStatus(pipelineId);
 
           // Update progress state
           if (status.progress) {
@@ -833,6 +877,33 @@ export function StreamPage() {
   // adjust resolution if needed. This prevents the video source resolution from
   // overriding the carefully tuned per-mode defaults.
 
+  // Wait for an in-progress cloud connection to complete before starting WebRTC
+  const waitForCloudConnection = async (): Promise<boolean> => {
+    const maxWaitMs = 180_000; // 3 minutes
+    const pollIntervalMs = 2000;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const response = await fetch("/api/v1/cloud/status");
+        if (response.ok) {
+          const data = await response.json();
+          if (data.connected) return true;
+          if (!data.connecting) {
+            // Not connecting and not connected — connection failed
+            console.error("Cloud connection failed:", data.error);
+            return false;
+          }
+        }
+      } catch (e) {
+        console.error("Error polling cloud status:", e);
+      }
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+    console.error("Timed out waiting for cloud connection");
+    return false;
+  };
+
   const handleStartStream = async (
     overridePipelineId?: PipelineId
   ): Promise<boolean> => {
@@ -862,7 +933,7 @@ export function StreamPage() {
         const pipelineInfo = pipelines?.[pipelineId];
         if (pipelineInfo?.requiresModels) {
           try {
-            const status = await checkModelStatus(pipelineId);
+            const status = await api.checkModelStatus(pipelineId);
             if (!status.downloaded) {
               missingPipelines.push(pipelineId);
             }
@@ -881,6 +952,33 @@ export function StreamPage() {
         setPipelinesNeedingModels(missingPipelines);
         setShowDownloadDialog(true);
         return false; // Stream did not start
+      }
+
+      // If cloud connection is in progress, wait for it before loading pipeline
+      // (pipeline load is proxied to cloud only when connected)
+      // Check API directly rather than React state to avoid stale values
+      try {
+        const cloudRes = await fetch("/api/v1/cloud/status");
+        if (cloudRes.ok) {
+          const cloudData = await cloudRes.json();
+          if (cloudData.connecting && !cloudData.connected) {
+            console.log(
+              "[StreamPage] Cloud connecting, waiting before pipeline load..."
+            );
+            setIsCloudConnecting(true);
+            try {
+              const cloudReady = await waitForCloudConnection();
+              if (!cloudReady) {
+                console.error("Cloud connection failed, cannot start stream");
+                return false;
+              }
+            } finally {
+              setIsCloudConnecting(false);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error checking cloud status before stream:", e);
       }
 
       // Always load pipeline with current parameters - backend will handle the rest
@@ -1113,7 +1211,7 @@ export function StreamPage() {
         });
         return;
       }
-      await downloadRecording(sessionId);
+      await api.downloadRecording(sessionId);
     } catch (error) {
       console.error("Error downloading recording:", error);
       toast.error("Error downloading recording", {
@@ -1130,6 +1228,9 @@ export function StreamPage() {
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <Header
+        onCloudStatusChange={setIsBackendCloudConnected}
+        onPipelinesRefresh={handlePipelinesRefresh}
+        cloudDisabled={isStreaming}
         openSettingsTab={openSettingsTab}
         onSettingsTabOpened={() => setOpenSettingsTab(null)}
       />
@@ -1147,7 +1248,7 @@ export function StreamPage() {
             mode={mode}
             onModeChange={handleModeChange}
             isStreaming={isStreaming}
-            isConnecting={isConnecting}
+            isConnecting={isConnecting || isCloudConnecting}
             isPipelineLoading={isPipelineLoading}
             canStartStream={
               settings.inputMode === "text"
@@ -1230,6 +1331,7 @@ export function StreamPage() {
               className="h-full"
               remoteStream={remoteStream}
               isPipelineLoading={isPipelineLoading}
+              isCloudConnecting={isCloudConnecting}
               isConnecting={isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
@@ -1337,7 +1439,12 @@ export function StreamPage() {
                   });
                 }
               }}
-              disabled={isPipelineLoading || isConnecting || showDownloadDialog}
+              disabled={
+                isPipelineLoading ||
+                isConnecting ||
+                isCloudConnecting ||
+                showDownloadDialog
+              }
               isStreaming={isStreaming}
               isVideoPaused={settings.paused}
               timelineRef={timelineRef}
@@ -1372,9 +1479,9 @@ export function StreamPage() {
         </div>
 
         {/* Right Panel - Settings */}
-        <div className="w-1/5">
+        <div className="w-1/5 flex flex-col gap-3">
           <SettingsPanel
-            className="h-full"
+            className="flex-1 min-h-0 overflow-auto"
             pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
@@ -1448,6 +1555,7 @@ export function StreamPage() {
                 sendParameterUpdate({ [key]: value });
               }
             }}
+            isCloudMode={isCloudMode}
           />
         </div>
       </div>
