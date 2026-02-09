@@ -298,7 +298,10 @@ class CausalWanSelfAttention(nn.Module):
                     key=padded_roped_key.transpose(2, 1),
                     value=padded_v.transpose(2, 1),
                     block_mask=block_mask,
-                )[:, :, :-padded_length].transpose(2, 1)
+                )
+                if padded_length > 0:
+                    x = x[:, :, :-padded_length]
+                x = x.transpose(2, 1)
 
             else:
                 roped_query = rope_apply(q, grid_sizes, freqs).type_as(v)
@@ -346,7 +349,10 @@ class CausalWanSelfAttention(nn.Module):
                     key=padded_roped_key.transpose(2, 1),
                     value=padded_v.transpose(2, 1),
                     block_mask=block_mask,
-                )[:, :, :-padded_length].transpose(2, 1)
+                )
+                if padded_length > 0:
+                    x = x[:, :, :-padded_length]
+                x = x.transpose(2, 1)
         else:
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
             current_start_frame = current_start // frame_seqlen
