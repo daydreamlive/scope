@@ -147,7 +147,12 @@ class KafkaPublisher:
             "id": event_id,
             "type": "stream_trace",
             "timestamp": timestamp_ms,
-            "data": {"type": event_type, "client_source": "scope", "timestamp": timestamp_ms, **data},
+            "data": {
+                "type": event_type,
+                "client_source": "scope",
+                "timestamp": timestamp_ms,
+                **data,
+            },
         }
 
         try:

@@ -12,6 +12,7 @@ import torch
 from scope.core.pipelines.controller import parse_ctrl_input
 from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
+from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)

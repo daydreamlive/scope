@@ -515,7 +515,9 @@ class FrameProcessor:
                 "fps_in": round(fps_in, 1),
                 "fps_out": round(fps_out, 1),
                 "elapsed_ms": int(elapsed * 1000),
-                "since_last_heartbeat_ms": int((now - self._last_heartbeat_time) * 1000),
+                "since_last_heartbeat_ms": int(
+                    (now - self._last_heartbeat_time) * 1000
+                ),
             }
             if self._cloud_mode:
                 heartbeat_metadata["frames_to_cloud"] = self._frames_to_cloud
