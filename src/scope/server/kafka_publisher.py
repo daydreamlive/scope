@@ -122,20 +122,24 @@ class KafkaPublisher:
         self,
         event_type: str,
         session_id: str | None = None,
+        connection_id: str | None = None,
         pipeline_ids: list[str] | None = None,
         user_id: str | None = None,
         error: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> bool:
         """Publish an event to Kafka asynchronously.
 
         Args:
             event_type: Type of event (e.g., "stream_started", "stream_stopped")
             session_id: Optional session ID associated with the event
+            connection_id: Optional connection ID from fal.ai WebSocket for event correlation
             pipeline_ids: Optional list of pipeline IDs associated with the event
             user_id: Optional user ID associated with the event
             error: Optional error details for error events
             metadata: Optional additional metadata
+            connection_info: Optional connection metadata (e.g., gpu_type, region)
 
         Returns:
             True if published successfully, False otherwise.
@@ -153,17 +157,22 @@ class KafkaPublisher:
 
         # Build data payload
         data: dict[str, Any] = {
-            "event_type": event_type,
+            "type": event_type,
             "client_source": "scope",
+            "timestamp": timestamp_ms,
         }
         if session_id:
             data["session_id"] = session_id
+        if connection_id:
+            data["connection_id"] = connection_id
         if pipeline_ids:
             data["pipeline_ids"] = pipeline_ids
         if user_id:
             data["user_id"] = user_id
         if error:
             data["error"] = error
+        if connection_info:
+            data["connection_info"] = connection_info
         if metadata:
             data.update(metadata)
 
@@ -191,10 +200,12 @@ class KafkaPublisher:
         self,
         event_type: str,
         session_id: str | None = None,
+        connection_id: str | None = None,
         pipeline_ids: list[str] | None = None,
         user_id: str | None = None,
         error: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> None:
         """Publish an event to Kafka from a sync context (thread-safe).
 
@@ -204,10 +215,12 @@ class KafkaPublisher:
         Args:
             event_type: Type of event (e.g., "stream_started", "stream_stopped")
             session_id: Optional session ID associated with the event
+            connection_id: Optional connection ID from fal.ai WebSocket for event correlation
             pipeline_ids: Optional list of pipeline IDs associated with the event
             user_id: Optional user ID associated with the event
             error: Optional error details for error events
             metadata: Optional additional metadata
+            connection_info: Optional connection metadata (e.g., gpu_type, region)
         """
         if not self._started or not self._event_loop:
             return
@@ -222,10 +235,12 @@ class KafkaPublisher:
                     self.publish_async(
                         event_type=event_type,
                         session_id=session_id,
+                        connection_id=connection_id,
                         pipeline_ids=pipeline_ids,
                         user_id=user_id,
                         error=error,
                         metadata=metadata,
+                        connection_info=connection_info,
                     ),
                     self._event_loop,
                 )
@@ -265,10 +280,12 @@ def set_kafka_publisher(publisher: KafkaPublisher | None):
 def publish_event(
     event_type: str,
     session_id: str | None = None,
+    connection_id: str | None = None,
     pipeline_ids: list[str] | None = None,
     user_id: str | None = None,
     error: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    connection_info: dict[str, Any] | None = None,
 ) -> None:
     """Convenience function to publish an event using the global publisher.
 
@@ -278,30 +295,36 @@ def publish_event(
     Args:
         event_type: Type of event (e.g., "stream_started", "stream_stopped")
         session_id: Optional session ID associated with the event
+        connection_id: Optional connection ID from fal.ai WebSocket for event correlation
         pipeline_ids: Optional list of pipeline IDs associated with the event
         user_id: Optional user ID associated with the event
         error: Optional error details for error events
         metadata: Optional additional metadata
+        connection_info: Optional connection metadata (e.g., gpu_type, region)
     """
     publisher = get_kafka_publisher()
     if publisher and publisher.is_running:
         publisher.publish(
             event_type=event_type,
             session_id=session_id,
+            connection_id=connection_id,
             pipeline_ids=pipeline_ids,
             user_id=user_id,
             error=error,
             metadata=metadata,
+            connection_info=connection_info,
         )
 
 
 async def publish_event_async(
     event_type: str,
     session_id: str | None = None,
+    connection_id: str | None = None,
     pipeline_ids: list[str] | None = None,
     user_id: str | None = None,
     error: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    connection_info: dict[str, Any] | None = None,
 ) -> bool:
     """Async convenience function to publish an event using the global publisher.
 
@@ -311,10 +334,12 @@ async def publish_event_async(
     Args:
         event_type: Type of event (e.g., "stream_started", "stream_stopped")
         session_id: Optional session ID associated with the event
+        connection_id: Optional connection ID from fal.ai WebSocket for event correlation
         pipeline_ids: Optional list of pipeline IDs associated with the event
         user_id: Optional user ID associated with the event
         error: Optional error details for error events
         metadata: Optional additional metadata
+        connection_info: Optional connection metadata (e.g., gpu_type, region)
 
     Returns:
         True if published successfully, False otherwise.
@@ -324,9 +349,11 @@ async def publish_event_async(
         return await publisher.publish_async(
             event_type=event_type,
             session_id=session_id,
+            connection_id=connection_id,
             pipeline_ids=pipeline_ids,
             user_id=user_id,
             error=error,
             metadata=metadata,
+            connection_info=connection_info,
         )
     return False

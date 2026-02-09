@@ -58,6 +58,8 @@ class Session:
         relay: MediaRelay | None = None,
         recording_manager: RecordingManager | None = None,
         user_id: str | None = None,
+        connection_id: str | None = None,
+        connection_info: dict | None = None,
     ):
         self.id = str(uuid.uuid4())
         self.pc = pc
@@ -66,6 +68,8 @@ class Session:
         self.relay = relay
         self.recording_manager = recording_manager
         self.user_id = user_id
+        self.connection_id = connection_id
+        self.connection_info = connection_info
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -176,7 +180,12 @@ class WebRTCManager:
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
-            session = Session(pc, user_id=request.user_id)
+            session = Session(
+                pc,
+                user_id=request.user_id,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
+            )
             self.sessions[session.id] = session
 
             # Create NotificationSender for this session to send notifications to the frontend
@@ -188,6 +197,8 @@ class WebRTCManager:
                 notification_callback=notification_sender.call,
                 session_id=session.id,
                 user_id=request.user_id,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
             )
             session.video_track = video_track
 
@@ -321,9 +332,11 @@ class WebRTCManager:
             await publish_event_async(
                 event_type="session_created",
                 session_id=session.id,
+                connection_id=request.connection_id,
                 pipeline_ids=pipeline_ids if pipeline_ids else None,
                 user_id=request.user_id,
                 metadata={"mode": "local"},
+                connection_info=request.connection_info,
             )
 
             return {
@@ -367,7 +380,12 @@ class WebRTCManager:
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
-            session = Session(pc, user_id=request.user_id)
+            session = Session(
+                pc,
+                user_id=request.user_id,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
+            )
             self.sessions[session.id] = session
 
             # Create CloudTrack instead of VideoProcessingTrack
@@ -375,6 +393,9 @@ class WebRTCManager:
                 cloud_manager=cloud_manager,
                 initial_parameters=initial_parameters,
                 user_id=request.user_id,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
+                session_id=session.id,
             )
             session.video_track = cloud_track
 
@@ -449,9 +470,11 @@ class WebRTCManager:
             await publish_event_async(
                 event_type="session_created",
                 session_id=session.id,
+                connection_id=request.connection_id,
                 pipeline_ids=pipeline_ids if pipeline_ids else None,
                 user_id=request.user_id,
                 metadata={"mode": "relay"},
+                connection_info=request.connection_info,
             )
 
             return {
@@ -482,7 +505,9 @@ class WebRTCManager:
             await publish_event_async(
                 event_type="session_closed",
                 session_id=session_id,
+                connection_id=session.connection_id,
                 user_id=session.user_id,
+                connection_info=session.connection_info,
             )
         else:
             logger.warning(f"Attempted to remove non-existent session: {session_id}")

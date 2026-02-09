@@ -180,6 +180,14 @@ class WebRTCOfferRequest(BaseModel):
     user_id: str | None = Field(
         default=None, description="User ID for event tracking in cloud mode"
     )
+    connection_id: str | None = Field(
+        default=None,
+        description="Connection ID from fal.ai WebSocket for event correlation",
+    )
+    connection_info: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional connection metadata (e.g., gpu_type, region) from cloud infrastructure",
+    )
 
 
 class WebRTCOfferResponse(BaseModel):
@@ -450,6 +458,14 @@ class PipelineLoadRequest(BaseModel):
         default=None,
         description="Pipeline-specific load parameters (applies to all pipelines). "
         "Accepts raw dict; keys match pipeline config (e.g. base_seed).",
+    )
+    connection_id: str | None = Field(
+        default=None,
+        description="Connection ID from fal.ai WebSocket for event correlation",
+    )
+    connection_info: dict[str, Any] | None = Field(
+        default=None,
+        description="Connection info (gpu_type, fal_host) for event correlation",
     )
 
 

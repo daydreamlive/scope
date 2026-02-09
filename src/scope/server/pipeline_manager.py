@@ -4,6 +4,7 @@ import asyncio
 import gc
 import logging
 import threading
+import time
 from enum import Enum
 from typing import Any
 
@@ -104,7 +105,11 @@ class PipelineManager:
             return self._pipelines[pipeline_id]
 
     async def _load_pipeline_by_id(
-        self, pipeline_id: str, load_params: dict | None = None
+        self,
+        pipeline_id: str,
+        load_params: dict | None = None,
+        connection_id: str | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> bool:
         """
         Load a pipeline by ID asynchronously (private method).
@@ -112,17 +117,27 @@ class PipelineManager:
         Args:
             pipeline_id: ID of pipeline to load
             load_params: Pipeline-specific load parameters
+            connection_info: Optional connection info (gpu_type, fal_host) for event correlation
 
         Returns:
             bool: True if loaded successfully, False otherwise.
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._load_pipeline_by_id_sync, pipeline_id, load_params
+            None,
+            self._load_pipeline_by_id_sync,
+            pipeline_id,
+            load_params,
+            connection_id,
+            connection_info,
         )
 
     def _load_pipeline_by_id_sync(
-        self, pipeline_id: str, load_params: dict | None = None
+        self,
+        pipeline_id: str,
+        load_params: dict | None = None,
+        connection_id: str | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> bool:
         """Synchronous wrapper for loading a pipeline by ID."""
         with self._lock:
@@ -170,6 +185,16 @@ class PipelineManager:
         logger.info(f"Loading pipeline: {pipeline_id}")
         logger.info("Initial load params: %s", load_params or {})
 
+        # Publish pipeline_load_start event
+        load_start_time = time.monotonic()
+        publish_event(
+            event_type="pipeline_load_start",
+            connection_id=connection_id,
+            connection_info=connection_info,
+            pipeline_ids=[pipeline_id],
+            metadata={"load_params": load_params} if load_params else None,
+        )
+
         try:
             # Load the pipeline synchronously
             pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
@@ -182,11 +207,20 @@ class PipelineManager:
 
             logger.info(f"Pipeline {pipeline_id} loaded successfully")
 
-            # Publish pipeline_loaded event
+            # Publish pipeline_loaded event with load duration
+            load_duration_ms = int((time.monotonic() - load_start_time) * 1000)
+            metadata = {
+                "load_duration_ms": load_duration_ms,
+                "load_start_time_ms": load_start_time,
+            }
+            if load_params:
+                metadata["load_params"] = load_params
             publish_event(
                 event_type="pipeline_loaded",
+                connection_id=connection_id,
+                connection_info=connection_info,
                 pipeline_ids=[pipeline_id],
-                metadata={"load_params": load_params} if load_params else None,
+                metadata=metadata,
             )
             return True
 
@@ -211,6 +245,8 @@ class PipelineManager:
             # Publish pipeline_error event
             publish_event(
                 event_type="pipeline_error",
+                connection_id=connection_id,
+                connection_info=connection_info,
                 pipeline_ids=[pipeline_id],
                 error={
                     "message": str(e),
@@ -321,7 +357,11 @@ class PipelineManager:
         return await loop.run_in_executor(None, self.get_status_info)
 
     async def load_pipelines(
-        self, pipeline_ids: list[str], load_params: dict | None = None
+        self,
+        pipeline_ids: list[str],
+        load_params: dict | None = None,
+        connection_id: str | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> bool:
         """
         Load multiple pipelines asynchronously.
@@ -329,17 +369,28 @@ class PipelineManager:
         Args:
             pipeline_ids: List of pipeline IDs to load
             load_params: Pipeline-specific load parameters (applies to all pipelines)
+            connection_id: Optional connection ID from fal.ai WebSocket for event correlation
+            connection_info: Optional connection info (gpu_type, fal_host) for event correlation
 
         Returns:
             bool: True if all pipelines loaded successfully, False otherwise.
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._load_pipelines_sync, pipeline_ids, load_params
+            None,
+            self._load_pipelines_sync,
+            pipeline_ids,
+            load_params,
+            connection_id,
+            connection_info,
         )
 
     def _load_pipelines_sync(
-        self, pipeline_ids: list[str], load_params: dict | None = None
+        self,
+        pipeline_ids: list[str],
+        load_params: dict | None = None,
+        connection_id: str | None = None,
+        connection_info: dict[str, Any] | None = None,
     ) -> bool:
         """Synchronous wrapper for loading multiple pipelines."""
         if not pipeline_ids:
@@ -371,13 +422,22 @@ class PipelineManager:
 
             # Unload pipelines that need to be unloaded
             for pipeline_id_to_unload in pipelines_to_unload:
-                self._unload_pipeline_by_id_unsafe(pipeline_id_to_unload)
+                self._unload_pipeline_by_id_unsafe(
+                    pipeline_id_to_unload,
+                    connection_id=connection_id,
+                    connection_info=connection_info,
+                )
 
         # Load all pipelines
         success = True
         for pipeline_id in pipeline_ids:
             try:
-                result = self._load_pipeline_by_id_sync(pipeline_id, load_params)
+                result = self._load_pipeline_by_id_sync(
+                    pipeline_id,
+                    load_params,
+                    connection_id=connection_id,
+                    connection_info=connection_info,
+                )
                 if not result:
                     logger.error(f"Failed to load pipeline: {pipeline_id}")
                     success = False
@@ -474,10 +534,19 @@ class PipelineManager:
         # Pass merge_mode directly to mixin, not via config
         config["_lora_merge_mode"] = lora_merge_mode
 
-    def unload_pipeline_by_id(self, pipeline_id: str):
+    def unload_pipeline_by_id(
+        self,
+        pipeline_id: str,
+        connection_id: str | None = None,
+        connection_info: dict[str, Any] | None = None,
+    ):
         """Unload a specific pipeline by ID (thread-safe)."""
         with self._lock:
-            self._unload_pipeline_by_id_unsafe(pipeline_id)
+            self._unload_pipeline_by_id_unsafe(
+                pipeline_id,
+                connection_id=connection_id,
+                connection_info=connection_info,
+            )
 
     def unload_all_pipelines(self):
         """Unload all pipelines (thread-safe)."""
@@ -491,7 +560,12 @@ class PipelineManager:
             for pipeline_id in pipeline_ids_to_unload:
                 self._unload_pipeline_by_id_unsafe(pipeline_id)
 
-    def _unload_pipeline_by_id_unsafe(self, pipeline_id: str):
+    def _unload_pipeline_by_id_unsafe(
+        self,
+        pipeline_id: str,
+        connection_id: str | None = None,
+        connection_info: dict[str, Any] | None = None,
+    ):
         """Unload a specific pipeline by ID. Must be called with lock held."""
         # Check if pipeline exists (either in _pipelines or as main pipeline)
         pipeline_exists = (
@@ -531,6 +605,8 @@ class PipelineManager:
         # Publish pipeline_unloaded event
         publish_event(
             event_type="pipeline_unloaded",
+            connection_id=connection_id,
+            connection_info=connection_info,
             pipeline_ids=[pipeline_id],
         )
 

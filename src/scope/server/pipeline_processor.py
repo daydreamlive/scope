@@ -12,6 +12,7 @@ import torch
 from scope.core.pipelines.controller import parse_ctrl_input
 from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
+from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,10 @@ class PipelineProcessor:
         pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        connection_id: str | None = None,
+        connection_info: dict | None = None,
     ):
         """Initialize a pipeline processor.
 
@@ -43,9 +48,17 @@ class PipelineProcessor:
             pipeline: Pipeline instance to process frames with
             pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
+            session_id: Session ID for event tracking
+            user_id: User ID for event tracking
+            connection_id: Connection ID from fal.ai WebSocket for event correlation
+            connection_info: Connection metadata (gpu_type, region, etc.)
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
+        self.session_id = session_id
+        self.user_id = user_id
+        self.connection_id = connection_id
+        self.connection_info = connection_info
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
@@ -220,6 +233,20 @@ class PipelineProcessor:
                 else:
                     logger.error(
                         f"Non-recoverable error in worker loop for {self.pipeline_id}: {e}, stopping"
+                    )
+                    # Publish stream_error event for non-recoverable errors
+                    publish_event(
+                        event_type="stream_error",
+                        session_id=self.session_id,
+                        connection_id=self.connection_id,
+                        pipeline_ids=[self.pipeline_id],
+                        user_id=self.user_id,
+                        error={
+                            "message": str(e),
+                            "type": type(e).__name__,
+                            "recoverable": False,
+                        },
+                        connection_info=self.connection_info,
                     )
                     break
 

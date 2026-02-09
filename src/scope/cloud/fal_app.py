@@ -147,7 +147,12 @@ class KafkaPublisher:
             "id": event_id,
             "type": "stream_trace",
             "timestamp": timestamp_ms,
-            "data": {"event_type": event_type, "client_source": "scope", **data},
+            "data": {
+                "type": event_type,
+                "client_source": "scope",
+                "timestamp": timestamp_ms,
+                **data,
+            },
         }
 
         try:
@@ -208,7 +213,7 @@ def cleanup_session_data():
 # 2. switch to python 3.10 to match the scope image
 # 3. pip install fal
 # 4. fal auth login
-# 5. fal deploy fal_app.py --auth public
+# 5. fal deploy --env (main/staging/prod) (--app-name X) fal_app.py --auth public
 
 # Get git SHA at deploy time (this runs when the file is loaded during fal deploy)
 
@@ -461,40 +466,55 @@ class ScopeApp(fal.App, keep_alive=300):
                     "status": response.status_code,
                 }
 
+        # Build connection_info with GPU type and any available infrastructure info
+        connection_info = {
+            "gpu_type": ScopeApp.machine_type,
+            "fal_region": os.getenv("NOMAD_DC", "unknown"),
+        }
+
         async def handle_offer(payload: dict):
             """Proxy POST /api/v1/webrtc/offer"""
             nonlocal session_id
             request_id = payload.get("request_id")
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
-                    json={
-                        "sdp": payload.get("sdp"),
-                        "type": payload.get("sdp_type", "offer"),
-                        "initialParameters": payload.get("initialParameters"),
-                        "user_id": payload.get("user_id"),
-                    },
-                    timeout=30.0,
-                )
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
+                        json={
+                            "sdp": payload.get("sdp"),
+                            "type": payload.get("sdp_type", "offer"),
+                            "initialParameters": payload.get("initialParameters"),
+                            "user_id": payload.get("user_id"),
+                            "connection_id": connection_id,
+                            "connection_info": connection_info,
+                        },
+                        timeout=30.0,
+                    )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    session_id = data.get("sessionId")
-                    return {
-                        "type": "answer",
-                        "request_id": request_id,
-                        "sdp": data.get("sdp"),
-                        "sdp_type": data.get("type"),
-                        "sessionId": session_id,
-                    }
-                else:
-                    return {
-                        "type": "error",
-                        "request_id": request_id,
-                        "error": f"Offer failed: {response.status_code}",
-                        "detail": response.text,
-                    }
+                    if response.status_code == 200:
+                        data = response.json()
+                        session_id = data.get("sessionId")
+                        return {
+                            "type": "answer",
+                            "request_id": request_id,
+                            "sdp": data.get("sdp"),
+                            "sdp_type": data.get("type"),
+                            "sessionId": session_id,
+                        }
+                    else:
+                        return {
+                            "type": "error",
+                            "request_id": request_id,
+                            "error": f"Offer failed: {response.status_code}",
+                            "detail": response.text,
+                        }
+            except (httpx.TimeoutException, TimeoutError):
+                return {
+                    "type": "error",
+                    "request_id": request_id,
+                    "error": "WebRTC offer timeout - Scope server may be overloaded",
+                }
 
         async def handle_icecandidate(payload: dict):
             """Proxy PATCH /api/v1/webrtc/offer/{session_id} for ICE candidates"""
@@ -570,6 +590,15 @@ class ScopeApp(fal.App, keep_alive=300):
             path = payload.get("path", "")
             body = payload.get("body")
             request_id = payload.get("request_id")
+
+            # Inject connection_id into pipeline load requests for event correlation
+            if (
+                method == "POST"
+                and path == "/api/v1/pipeline/load"
+                and isinstance(body, dict)
+            ):
+                body["connection_id"] = connection_id
+                body["connection_info"] = connection_info
 
             async with httpx.AsyncClient() as client:
                 try:
@@ -712,6 +741,7 @@ class ScopeApp(fal.App, keep_alive=300):
                         {
                             "user_id": user_id,
                             "connection_id": connection_id,
+                            "connection_info": connection_info,
                         },
                     )
                 return {"type": "user_id_set", "user_id": user_id}
@@ -773,15 +803,16 @@ class ScopeApp(fal.App, keep_alive=300):
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
-                elapsed_ms = end_time * 1000 - connection_start_time * 1000
+                elapsed_ms = int((end_time - connection_start_time) * 1000)
                 await kafka_publisher.publish(
                     "websocket_disconnected",
                     {
                         "user_id": user_id,
                         "connection_id": connection_id,
+                        "connection_info": connection_info,
                         "duration_ms": elapsed_ms,
-                        "session_start_time_ms": connection_start_time * 1000,
-                        "session_end_time_ms": end_time * 1000,
+                        "session_start_time_ms": int(connection_start_time * 1000),
+                        "session_end_time_ms": int(end_time * 1000),
                     },
                 )
             # Clean up session data to prevent data leakage between users

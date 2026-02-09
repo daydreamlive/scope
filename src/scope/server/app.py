@@ -522,7 +522,12 @@ async def load_pipeline(
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(
-            pipeline_manager.load_pipelines(pipeline_ids, load_params_dict)
+            pipeline_manager.load_pipelines(
+                pipeline_ids,
+                load_params_dict,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
+            )
         )
         return {"message": "Pipeline loading initiated successfully"}
     except HTTPException:
