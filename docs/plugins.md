@@ -44,6 +44,18 @@ The Plugins tab displays a list of all installed plugins.
 
 3. Wait for the uninstallation to complete and the server to restart.
 
+#### Updating a Plugin
+
+Scope automatically checks for updates when you open the Plugins tab.
+
+1. Open the Plugins tab — any plugin with a newer version available shows an update button.
+
+2. Click the **Update** button next to the plugin.
+
+3. Wait for the update to complete and the server to restart.
+
+> **Note:** Local plugins do not support update detection. To pick up code changes for a local plugin, use [Reload](#reloading-a-plugin-local-plugins-only) instead.
+
 #### Reloading a Plugin (Local Plugins Only)
 
 When using a local plugin directory, you can reload it after making code changes without reinstalling:
@@ -63,7 +75,53 @@ When using a local plugin directory, you can reload it after making code changes
 The experience of using plugins with a manual installation of Scope is very similar to the experience in the desktop app with the following exceptions:
 
 - No deep link support eg a website cannot auto-open the UI to facilitate plugin installation
-- No local plugin support
+- No browse button for selecting local plugin directories (you can still type a local path manually into the install field)
+
+### Using Plugins from the CLI
+
+The `daydream-scope` CLI provides commands for managing plugins and pipelines directly from the terminal.
+
+#### Listing Installed Plugins
+
+```
+uv run daydream-scope plugins
+```
+
+Shows all installed plugins with their name, version, source, and registered pipelines.
+
+#### Installing a Plugin
+
+```
+uv run daydream-scope install <package>
+```
+
+Examples for each source type:
+
+```bash
+# From a Git repository
+uv run daydream-scope install https://github.com/user/plugin-repo
+
+# From PyPI
+uv run daydream-scope install my-scope-plugin
+
+# From a local directory (editable mode)
+uv run daydream-scope install -e /path/to/my-plugin
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--upgrade` | Upgrade the plugin to the latest version |
+| `-e`, `--editable` | Install a project in editable mode from a local path |
+
+#### Uninstalling a Plugin
+
+```
+uv run daydream-scope uninstall <name>
+```
+
+Removes the plugin and unloads any active pipelines it provided.
 
 ## Plugin Sources
 
@@ -157,6 +215,8 @@ build-backend = "hatchling.build"
 ```
 
 The `[project.entry-points."scope"]` section registers your plugin with Scope. The key (`my_scope_plugin`) is your plugin name, and the value points to the module containing your hook implementation.
+
+If your plugin needs additional third-party packages, add them to `[project.dependencies]` in `pyproject.toml` — Scope installs them automatically. You don't need to declare packages that Scope already provides (e.g. `torch`, `pydantic`) since they're available from the host environment.
 
 #### plugin.py
 
@@ -475,3 +535,5 @@ def __init__(self, intensity: float = 1.0, **kwargs):
 ### Testing Your Plugin
 
 Make code changes and then see the section on [reloading local plugins](#reloading-a-plugin-local-plugins-only).
+
+> **Tip:** In the desktop app, you can use the browse button to select your local plugin directory. Without the desktop app, you can run `pwd` in the plugin directory to get the full path to paste into the install field which also works if you are running the server on a remote machine (eg. Runpod).

@@ -38,6 +38,12 @@ from .kafka_publisher import (
     is_kafka_enabled,
     set_kafka_publisher,
 )
+from .file_utils import (
+    IMAGE_EXTENSIONS,
+    LORA_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    iter_files,
+)
 from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
@@ -879,11 +885,8 @@ async def list_lora_files():
         lora_dir = get_models_dir() / "lora"
         lora_files: list[LoRAFileInfo] = []
 
-        if lora_dir.exists() and lora_dir.is_dir():
-            for pattern in ("*.safetensors", "*.bin", "*.pt"):
-                for file_path in lora_dir.rglob(pattern):
-                    if file_path.is_file():
-                        lora_files.append(process_lora_file(file_path, lora_dir))
+        for file_path in iter_files(lora_dir, LORA_EXTENSIONS):
+            lora_files.append(process_lora_file(file_path, lora_dir))
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)
@@ -959,25 +962,17 @@ async def list_assets(
         assets_dir = get_assets_dir()
         asset_files: list[AssetFileInfo] = []
 
-        if assets_dir.exists() and assets_dir.is_dir():
-            # Define patterns based on type filter
-            if type == "image" or type is None:
-                image_patterns = ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp")
-                for pattern in image_patterns:
-                    for file_path in assets_dir.rglob(pattern):
-                        if file_path.is_file():
-                            asset_files.append(
-                                process_asset_file(file_path, assets_dir, "image")
-                            )
+        if type == "image":
+            extensions = IMAGE_EXTENSIONS
+        elif type == "video":
+            extensions = VIDEO_EXTENSIONS
+        else:
+            extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
-            if type == "video" or type is None:
-                video_patterns = ("*.mp4", "*.avi", "*.mov", "*.mkv", "*.webm")
-                for pattern in video_patterns:
-                    for file_path in assets_dir.rglob(pattern):
-                        if file_path.is_file():
-                            asset_files.append(
-                                process_asset_file(file_path, assets_dir, "video")
-                            )
+        for file_path in iter_files(assets_dir, extensions):
+            ext = file_path.suffix.lower()
+            asset_type = "image" if ext in IMAGE_EXTENSIONS else "video"
+            asset_files.append(process_asset_file(file_path, assets_dir, asset_type))
 
         # Sort by created_at (most recent first), then by folder and name
         asset_files.sort(key=lambda x: (-x.created_at, x.folder or "", x.name))
@@ -1002,9 +997,7 @@ async def upload_asset(
 
     try:
         # Validate file type - support both images and videos
-        allowed_image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-        allowed_video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
-        allowed_extensions = allowed_image_extensions | allowed_video_extensions
+        allowed_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
         file_extension = Path(filename).suffix.lower()
         if file_extension not in allowed_extensions:
@@ -1013,8 +1006,8 @@ async def upload_asset(
                 detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
             )
 
-        # Determine asset type and content type
-        if file_extension in allowed_image_extensions:
+        # Determine asset type
+        if file_extension in IMAGE_EXTENSIONS:
             asset_type = "image"
             content_type_map = {
                 ".png": "image/png",

@@ -347,18 +347,28 @@ export function PromptTimeline({
     );
   }, [currentTime, timelineWidth, visibleStartTime, pixelsPerSecond]);
 
-  // Memoized time markers for better performance
   const timeMarkers = useMemo(() => {
-    return Array.from(
-      {
-        length: Math.ceil((visibleEndTime - visibleStartTime) / 10) + 1,
-      },
-      (_, i) => {
-        const time = Math.round(visibleStartTime + i * 10);
-        const position = (time - visibleStartTime) * pixelsPerSecond;
-        return { time, position, index: i };
+    const targetPixelGap = 100;
+    const idealInterval = targetPixelGap / pixelsPerSecond;
+
+    const niceIntervals = [1, 2, 5, 10, 15, 30, 60];
+    let interval = niceIntervals[niceIntervals.length - 1];
+    for (const nice of niceIntervals) {
+      if (nice >= idealInterval) {
+        interval = nice;
+        break;
       }
-    );
+    }
+
+    const startTime = Math.floor(visibleStartTime / interval) * interval;
+    const endTime = Math.ceil(visibleEndTime / interval) * interval;
+
+    const markers = [];
+    for (let time = startTime; time <= endTime; time += interval) {
+      const position = (time - visibleStartTime) * pixelsPerSecond;
+      markers.push({ time, position });
+    }
+    return markers;
   }, [visibleEndTime, visibleStartTime, pixelsPerSecond]);
 
   const handlePromptClick = useCallback(
@@ -792,9 +802,9 @@ export function PromptTimeline({
           <div className="relative overflow-hidden w-full" ref={timelineRef}>
             {/* Time markers */}
             <div className="relative mb-1 w-full" style={{ height: "30px" }}>
-              {timeMarkers.map(({ time, position, index }) => (
+              {timeMarkers.map(({ time, position }) => (
                 <div
-                  key={index}
+                  key={time}
                   className="absolute top-0 flex items-center justify-center"
                   style={{
                     left: time === 0 ? position + 10 : position,

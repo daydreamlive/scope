@@ -69,11 +69,7 @@ export function PluginsTab({
           <Input
             value={installPath}
             onChange={e => onInstallPathChange(e.target.value)}
-            placeholder={
-              isElectron
-                ? "PyPI package name, Git URL or local path"
-                : "PyPI package name or Git URL"
-            }
+            placeholder="PyPI package name, Git URL or local path"
             className="flex-1"
           />
           {isElectron && (

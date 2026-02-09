@@ -839,6 +839,15 @@ class PluginManager:
         from .venv_snapshot import VenvSnapshot
 
         # Resolve package name early so we can clean up plugins.txt
+        # Convert Git Bash POSIX-style paths (e.g. /c/Users/...) to Windows paths
+        if (
+            sys.platform == "win32"
+            and len(package) >= 3
+            and package[0] == "/"
+            and package[1].isalpha()
+            and package[2] == "/"
+        ):
+            package = f"{package[1].upper()}:{package[2:]}"
         package_path = Path(package).resolve()
         package_name = self._get_package_name_from_path(package_path)
         normalized_name = self._normalize_package_name(package_name)
@@ -870,7 +879,7 @@ class PluginManager:
             "install",
             *_get_torch_backend_args(),
             "--editable",
-            package,
+            str(package_path),
         ]
 
         env = {**os.environ, "PYTHONUTF8": "1"}

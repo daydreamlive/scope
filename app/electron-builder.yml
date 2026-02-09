@@ -102,7 +102,7 @@ nsis:
   displayLanguageSelector: false
   menuCategory: false
   runAfterFinish: true
-  artifactName: Daydream.Scope-Setup-${version}-${arch}.${ext}
+  artifactName: DaydreamScope-Setup.${ext}
   include: build/win/installer.nsh # Custom script for UV installation during setup
   differentialPackage: false # Disable differential updates (no blockmap generation)
 
