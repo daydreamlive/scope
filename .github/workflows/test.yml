@@ -18,8 +18,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22.19.0'
-          cache: 'npm'
+          node-version: "22.19.0"
+          cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install uv
@@ -33,6 +33,10 @@ jobs:
 
       - name: Run pytest tests
         run: uv run pytest -v --tb=short
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm install && npm test
 
       - name: Run build
         run: uv run build
@@ -51,8 +55,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22.19.0'
-          cache: 'npm'
+          node-version: "22.19.0"
+          cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install uv
@@ -66,6 +70,10 @@ jobs:
 
       - name: Run pytest tests
         run: uv run pytest -v --tb=short
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm install && npm test
 
       - name: Run build
         run: uv run build
