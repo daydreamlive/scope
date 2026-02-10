@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import contextlib
 import io
 import logging
@@ -32,6 +31,12 @@ if TYPE_CHECKING:
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
+from .cloud_proxy import (
+    cloud_proxy,
+    get_hardware_info_from_cloud,
+    recording_download_cloud_path,
+    upload_asset_to_cloud,
+)
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
 from .file_utils import (
@@ -478,8 +483,10 @@ async def root():
 
 
 @app.post("/api/v1/pipeline/load")
+@cloud_proxy(timeout=60.0)
 async def load_pipeline(
     request: PipelineLoadRequest,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
@@ -500,27 +507,6 @@ async def load_pipeline(
         # load_params is already a dict (or None)
         load_params_dict = request.load_params
 
-        # If connected to cloud, proxy the request
-        if cloud_manager.is_connected:
-            logger.info(f"Proxying pipeline load to cloud: {pipeline_ids}")
-            body = {"pipeline_ids": pipeline_ids}
-            if load_params_dict:
-                body["load_params"] = load_params_dict
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/pipeline/load",
-                body=body,
-                timeout=60.0,  # Pipeline loading can take a while
-            )
-            if response.get("status", 200) >= 400:
-                raise HTTPException(
-                    status_code=response.get("status", 500),
-                    detail=response.get("error", "Pipeline load failed on cloud"),
-                )
-            return response.get(
-                "data", {"message": "Pipeline loading initiated on cloud"}
-            )
-
         # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(
@@ -539,7 +525,9 @@ async def load_pipeline(
 
 
 @app.get("/api/v1/pipeline/status", response_model=PipelineStatusResponse)
+@cloud_proxy()
 async def get_pipeline_status(
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
@@ -549,20 +537,6 @@ async def get_pipeline_status(
     cloud-hosted scope backend.
     """
     try:
-        # If connected to cloud, proxy the request
-        if cloud_manager.is_connected:
-            response = await cloud_manager.api_request(
-                method="GET",
-                path="/api/v1/pipeline/status",
-            )
-            if response.get("status", 200) >= 400:
-                raise HTTPException(
-                    status_code=response.get("status", 500),
-                    detail=response.get("error", "Pipeline status failed on cloud"),
-                )
-            return PipelineStatusResponse(**response.get("data", {}))
-
-        # Local mode
         status_info = await pipeline_manager.get_status_info_async()
         return PipelineStatusResponse(**status_info)
     except HTTPException:
@@ -573,7 +547,9 @@ async def get_pipeline_status(
 
 
 @app.get("/api/v1/pipelines/schemas", response_model=PipelineSchemasResponse)
+@cloud_proxy()
 async def get_pipeline_schemas(
+    http_request: Request,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Get configuration schemas and defaults for all available pipelines.
@@ -591,27 +567,6 @@ async def get_pipeline_schemas(
     In cloud mode (when connected to cloud), this proxies the request to the
     cloud-hosted scope backend to get the available pipelines there.
     """
-    # If connected to cloud, proxy the request to get cloud's available pipelines
-    if cloud_manager.is_connected:
-        logger.info("Proxying pipeline schemas request to cloud")
-        response = await cloud_manager.api_request(
-            method="GET",
-            path="/api/v1/pipelines/schemas",
-            timeout=30.0,
-        )
-        if response.get("status", 200) >= 400:
-            raise HTTPException(
-                status_code=response.get("status", 500),
-                detail=response.get(
-                    "error", "Failed to get pipeline schemas from cloud"
-                ),
-            )
-        # Return the cloud response data directly
-        return PipelineSchemasResponse(
-            pipelines=response.get("data", {}).get("pipelines", {})
-        )
-
-    # Local mode: get schemas from local registry
     from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
@@ -756,7 +711,9 @@ async def add_ice_candidate(
 
 
 @app.get("/api/v1/recordings/{session_id}")
+@cloud_proxy(recording_download_cloud_path, timeout=120.0)
 async def download_recording(
+    http_request: Request,
     session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
@@ -769,56 +726,6 @@ async def download_recording(
     In cloud mode, this proxies the download request to cloud.
     """
     try:
-        # If cloud mode is active, proxy to cloud
-        if cloud_manager.is_connected:
-            logger.info(f"[CLOUD] Downloading recording for session {session_id}")
-
-            # Use the cloud session ID if we have an active WebRTC connection
-            cloud_session_id = cloud_manager._webrtc_client.session_id
-            if not cloud_session_id:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No active cloud session for recording download",
-                )
-
-            # Proxy to cloud
-            response = await cloud_manager.api_request(
-                method="GET",
-                path=f"/api/v1/recordings/{cloud_session_id}",
-                timeout=120.0,  # Longer timeout for large files
-            )
-
-            # Check for errors
-            if response.get("status", 200) >= 400:
-                raise HTTPException(
-                    status_code=response.get("status", 404),
-                    detail=response.get("error", "Recording not available from cloud"),
-                )
-
-            # Handle base64-encoded binary response from cloud proxy
-            if not response.get("_base64_content"):
-                raise HTTPException(
-                    status_code=404,
-                    detail="Recording not available from cloud",
-                )
-
-            content = base64.b64decode(response["_base64_content"])
-
-            # Generate filename with datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"recording-{timestamp}.mp4"
-
-            # Return as streaming response
-            return Response(
-                content=content,
-                media_type="video/mp4",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "Content-Length": str(len(content)),
-                },
-            )
-
-        # Local mode: use local recording manager
         session = webrtc_manager.get_session(session_id)
         if not session:
             raise HTTPException(
@@ -918,7 +825,9 @@ async def list_lora_files():
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
+@cloud_proxy()
 async def list_assets(
+    http_request: Request,
     type: str | None = Query(None, description="Filter by asset type (image, video)"),
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
@@ -947,39 +856,6 @@ async def list_assets(
         )
 
     try:
-        # If cloud mode is active, proxy to cloud
-        if cloud_manager.is_connected:
-            logger.info("[CLOUD] Fetching assets list from cloud")
-            path = "/api/v1/assets"
-            if type:
-                path = f"{path}?type={type}"
-
-            response = await cloud_manager.api_request(
-                method="GET",
-                path=path,
-                timeout=30.0,
-            )
-
-            # Parse response data
-            data = response.get("data", {})
-            assets_data = data.get("assets", [])
-
-            asset_files = [
-                AssetFileInfo(
-                    name=a.get("name", ""),
-                    path=a.get("path", ""),
-                    size_mb=a.get("size_mb", 0),
-                    folder=a.get("folder"),
-                    type=a.get("type", "image"),
-                    created_at=a.get("created_at", 0),
-                )
-                for a in assets_data
-            ]
-
-            logger.info(f"[CLOUD] Found {len(asset_files)} assets on cloud")
-            return AssetsResponse(assets=asset_files)
-
-        # Local mode: list local assets
         assets_dir = get_assets_dir()
         asset_files: list[AssetFileInfo] = []
 
@@ -1014,7 +890,6 @@ async def upload_asset(
 
     When cloud mode is active, the file is uploaded to the cloud server instead.
     """
-    import base64
 
     try:
         # Validate file type - support both images and videos
@@ -1061,46 +936,12 @@ async def upload_asset(
 
         # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:
-            logger.info(
-                f"upload_asset: Uploading {asset_type} to cloud and locally: {filename}"
-            )
-
-            # Also save locally for thumbnail serving
-            assets_dir = get_assets_dir()
-            assets_dir.mkdir(parents=True, exist_ok=True)
-            local_file_path = assets_dir / filename
-            local_file_path.write_bytes(content)
-            logger.info(
-                f"upload_asset: Saved local copy for thumbnails: {local_file_path}"
-            )
-
-            # Base64 encode the content for JSON transport to cloud
-            base64_content = base64.b64encode(content).decode("utf-8")
-
-            # Send to cloud via WebSocket proxy
-            response = await cloud_manager.api_request(
-                method="POST",
-                path=f"/api/v1/assets?filename={filename}",
-                body={
-                    "_base64_content": base64_content,
-                    "_content_type": content_type,
-                },
-                timeout=60.0,  # Longer timeout for uploads
-            )
-
-            # Extract data from response - this is the cloud path
-            data = response.get("data", {})
-            cloud_path = data.get("path", "")
-            logger.info(f"upload_asset: Uploaded to cloud: {cloud_path}")
-
-            # Return the cloud path (which cloud will use for processing)
-            return AssetFileInfo(
-                name=data.get("name", filename),
-                path=cloud_path,  # Use cloud path for parameters sent to cloud
-                size_mb=data.get("size_mb", round(len(content) / (1024 * 1024), 2)),
-                folder=data.get("folder"),
-                type=data.get("type", asset_type),
-                created_at=data.get("created_at", time.time()),
+            return await upload_asset_to_cloud(
+                cloud_manager,
+                content,
+                filename,
+                content_type,
+                asset_type,
             )
 
         # Local mode: save to local assets directory
@@ -1196,27 +1037,14 @@ async def serve_asset(asset_path: str):
 
 
 @app.get("/api/v1/models/status")
+@cloud_proxy()
 async def get_model_status(
+    http_request: Request,
     pipeline_id: str,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Check if models for a pipeline are downloaded and get download progress."""
     try:
-        # If connected to cloud, proxy the request to cloud backend
-        if cloud_manager.is_connected:
-            logger.info(f"Proxying model status check to cloud: {pipeline_id}")
-            response = await cloud_manager.api_request(
-                method="GET",
-                path=f"/api/v1/models/status?pipeline_id={pipeline_id}",
-            )
-            if response.get("status", 200) >= 400:
-                raise HTTPException(
-                    status_code=response.get("status", 500),
-                    detail=response.get("error", "Model status check failed on cloud"),
-                )
-            return response.get("data", {"downloaded": True, "progress": None})
-
-        # Local mode: check local files
         progress = download_progress_manager.get_progress(pipeline_id)
 
         # If download is in progress, always report as not downloaded
@@ -1240,8 +1068,10 @@ async def get_model_status(
 
 
 @app.post("/api/v1/models/download")
+@cloud_proxy(timeout=60.0)
 async def download_pipeline_models(
     request: DownloadModelsRequest,
+    http_request: Request,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Download models for a specific pipeline."""
@@ -1250,25 +1080,6 @@ async def download_pipeline_models(
             raise HTTPException(status_code=400, detail="pipeline_id is required")
 
         pipeline_id = request.pipeline_id
-
-        # If connected to cloud, proxy the download request to cloud backend
-        if cloud_manager.is_connected:
-            logger.info(f"Proxying model download to cloud: {pipeline_id}")
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/models/download",
-                body={"pipeline_id": pipeline_id},
-                timeout=60.0,  # Model downloads can take a while to start
-            )
-            if response.get("status", 200) >= 400:
-                raise HTTPException(
-                    status_code=response.get("status", 500),
-                    detail=response.get("error", "Model download failed on cloud"),
-                )
-            return response.get(
-                "data",
-                {"message": f"Model download started on cloud for {pipeline_id}"},
-            )
 
         # Local mode: check if download already in progress
         existing_progress = download_progress_manager.get_progress(pipeline_id)
@@ -1332,25 +1143,9 @@ async def get_hardware_info(
     try:
         # If connected to cloud, proxy the request to get cloud's hardware info
         if cloud_manager.is_connected:
-            logger.info("Proxying hardware info request to cloud")
-            response = await cloud_manager.api_request(
-                method="GET",
-                path="/api/v1/hardware/info",
-                timeout=30.0,
-            )
-            if response.get("status", 200) >= 400:
-                raise HTTPException(
-                    status_code=response.get("status", 500),
-                    detail=response.get(
-                        "error", "Failed to get hardware info from cloud"
-                    ),
-                )
-            data = response.get("data", {})
-            # Use cloud VRAM, but LOCAL Spout availability
-            # (Spout frames flow through local backend to cloud, so local Spout support matters)
-            return HardwareInfoResponse(
-                vram_gb=data.get("vram_gb"),
-                spout_available=is_spout_available(),
+            return await get_hardware_info_from_cloud(
+                cloud_manager,
+                is_spout_available(),
             )
 
         # Local mode: get local hardware info
