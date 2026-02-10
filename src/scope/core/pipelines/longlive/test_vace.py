@@ -59,16 +59,16 @@ CONFIG = {
     # ===== INPUT PATHS =====
     # R2V: List of reference image paths (condition entire video, don't appear in output)
     "ref_images": [
-        "frontend/public/assets/example.png",  # path/to/image.png
+        "path/to/reference_image.png",
     ],
     # Depth: Path to depth map video (grayscale or RGB, will be converted)
-    "depth_video": "tests/fixtures/white_square_moving.mp4",  # path/to/depth_video.mp4
+    "depth_video": "tests/fixtures/white_square_moving.mp4",
     # Inpainting: Input video and mask video paths
-    "input_video": "frontend/public/assets/test.mp4",  # path/to/input_video.mp4
-    "mask_video": "tests/fixtures/static_mask_half_white_half_black.mp4",  # path/to/mask_video.mp4
+    "input_video": "frontend/public/assets/test.mp4",
+    "mask_video": "tests/fixtures/static_mask_half_white_half_black.mp4",
     # Extension: Frame images (appear in output video as actual frames)
-    "first_frame_image": "frontend/public/assets/example.png",  # For firstframe or firstlastframe modes
-    "last_frame_image": "frontend/public/assets/woman2.jpg",  # For lastframe or firstlastframe modes
+    "first_frame_image": "path/to/first_frame.png",
+    "last_frame_image": "path/to/last_frame.png",
     "extension_mode": "firstframe",  # "firstframe", "lastframe", or "firstlastframe"
     # ===== GENERATION PARAMETERS =====
     "prompt": None,  # Set to override mode-specific prompts, or None to use defaults
