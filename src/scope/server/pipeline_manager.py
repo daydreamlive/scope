@@ -1072,6 +1072,7 @@ class PipelineManager:
                 device=get_device(),
             )
             logger.info("Gray pipeline initialized")
+            return pipeline
 
         elif pipeline_id == "optical-flow":
             from scope.core.pipelines import OpticalFlowPipeline
