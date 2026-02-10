@@ -3,7 +3,7 @@ import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { CloudProvider } from "./lib/cloudContext";
-import { CloudStatusProvider } from "./hooks/useCloudStatus";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { handleOAuthCallback, initElectronAuthListener } from "./lib/auth";
 import { toast } from "sonner";
 import "./index.css";
@@ -93,14 +93,14 @@ function App() {
   }
 
   return (
-    <CloudStatusProvider>
+    <ErrorBoundary>
       <PipelinesProvider>
         <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
           <StreamPage />
         </CloudProvider>
         <Toaster />
       </PipelinesProvider>
-    </CloudStatusProvider>
+    </ErrorBoundary>
   );
 }
 
