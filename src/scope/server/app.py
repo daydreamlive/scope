@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import contextlib
 import io
 import logging
@@ -780,13 +781,28 @@ async def download_recording(
                     detail="No active cloud session for recording download",
                 )
 
-            # Download from cloud
-            content = await cloud_manager.download_recording(cloud_session_id)
-            if not content:
+            # Proxy to cloud
+            response = await cloud_manager.api_request(
+                method="GET",
+                path=f"/api/v1/recordings/{cloud_session_id}",
+                timeout=120.0,  # Longer timeout for large files
+            )
+
+            # Check for errors
+            if response.get("status", 200) >= 400:
+                raise HTTPException(
+                    status_code=response.get("status", 404),
+                    detail=response.get("error", "Recording not available from cloud"),
+                )
+
+            # Handle base64-encoded binary response from cloud proxy
+            if not response.get("_base64_content"):
                 raise HTTPException(
                     status_code=404,
                     detail="Recording not available from cloud",
                 )
+
+            content = base64.b64decode(response["_base64_content"])
 
             # Generate filename with datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
