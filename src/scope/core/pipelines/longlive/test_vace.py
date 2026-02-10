@@ -62,10 +62,10 @@ CONFIG = {
         "frontend/public/assets/example.png",  # path/to/image.png
     ],
     # Depth: Path to depth map video (grayscale or RGB, will be converted)
-    "depth_video": "vace_tests/white_square_moving.mp4",  # path/to/depth_video.mp4
+    "depth_video": "tests/fixtures/white_square_moving.mp4",  # path/to/depth_video.mp4
     # Inpainting: Input video and mask video paths
     "input_video": "frontend/public/assets/test.mp4",  # path/to/input_video.mp4
-    "mask_video": "vace_tests/static_mask_half_white_half_black.mp4",  # path/to/mask_video.mp4
+    "mask_video": "tests/fixtures/static_mask_half_white_half_black.mp4",  # path/to/mask_video.mp4
     # Extension: Frame images (appear in output video as actual frames)
     "first_frame_image": "frontend/public/assets/example.png",  # For firstframe or firstlastframe modes
     "last_frame_image": "frontend/public/assets/woman2.jpg",  # For lastframe or firstlastframe modes
@@ -494,7 +494,7 @@ def main():
     print("Initializing pipeline...")
 
     vace_path = str(
-        get_model_file_path("Wan2.1-VACE-1.3B/diffusion_pytorch_model.safetensors")
+        get_model_file_path("WanVideo_comfy/Wan2_1-VACE_module_1_3B_bf16.safetensors")
     )
 
     pipeline_config = OmegaConf.create(
@@ -595,7 +595,7 @@ def main():
     # Load depth video
     if use_depth:
         print("=== Preparing Depth Inputs ===")
-        depth_video_path = resolve_path(config["depth_video"], script_dir)
+        depth_video_path = resolve_path(config["depth_video"], project_root)
         if not depth_video_path.exists():
             raise FileNotFoundError(f"Depth video not found: {depth_video_path}")
 
@@ -625,7 +625,7 @@ def main():
         )
 
         # Load mask video
-        mask_video_path = resolve_path(config["mask_video"], script_dir)
+        mask_video_path = resolve_path(config["mask_video"], project_root)
         if not mask_video_path.exists():
             raise FileNotFoundError(f"Mask video not found: {mask_video_path}")
 

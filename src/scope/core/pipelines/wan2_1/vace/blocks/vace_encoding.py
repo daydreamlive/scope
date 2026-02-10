@@ -350,7 +350,9 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             if input_frames.dim() == 5:
                 # [B, C, F, H, W] -> [C, F, H, W] (take first batch)
                 input_frames = input_frames[0]
-            conditioning_frames = input_frames.to(dtype=vae_dtype)
+            conditioning_frames = input_frames.to(
+                device=components.config.device, dtype=vae_dtype
+            )
 
             # Also get conditioning masks if provided
             if block_state.vace_input_masks is not None:
@@ -358,7 +360,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 if input_masks.dim() == 5:
                     # [B, 1, F, H, W] -> [1, F, H, W] (take first batch)
                     input_masks = input_masks[0]
-                conditioning_masks = input_masks.to(dtype=vae_dtype)
+                conditioning_masks = input_masks.to(device=components.config.device)
 
         frames, masks = self._build_extension_frames_and_masks(
             prepared_refs=prepared_refs,
@@ -488,6 +490,10 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         )
 
         # Stage 2: Overlay references at anchor positions
+        # Clone once here so _overlay_reference_at can mutate in-place
+        frames = frames.clone()
+        masks = masks.clone()
+
         first_spatial = spatial_masks[0] if spatial_masks else None
         last_spatial = (
             spatial_masks[1]
@@ -635,10 +641,6 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         """
         end_idx = start_idx + temporal_group_size
         ref_replicated = ref_tensor.repeat(1, temporal_group_size, 1, 1)
-
-        # Clone to avoid modifying input tensors
-        frames = frames.clone()
-        masks = masks.clone()
 
         if conditioning_masks is not None:
             # Inpainting mode: composite reference into masked regions only
