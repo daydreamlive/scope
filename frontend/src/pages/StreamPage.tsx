@@ -16,6 +16,7 @@ import { useStreamState } from "../hooks/useStreamState";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useApi } from "../hooks/useApi";
 import { useCloudContext } from "../lib/cloudContext";
+import { useCloudStatus } from "../hooks/useCloudStatus";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -72,8 +73,11 @@ export function StreamPage() {
   const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
     useCloudContext();
 
-  // Track backend cloud relay mode (local backend connected to cloud)
-  const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
+  // Track backend cloud relay mode (local backend connected to cloud or connecting)
+  const {
+    isConnected: isBackendCloudConnected,
+    isConnecting: isBackendCloudConnecting,
+  } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
@@ -927,31 +931,34 @@ export function StreamPage() {
       }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
-      // Collect all missing pipelines/preprocessors
-      const missingPipelines: string[] = [];
-      for (const pipelineId of pipelineIds) {
-        const pipelineInfo = pipelines?.[pipelineId];
-        if (pipelineInfo?.requiresModels) {
-          try {
-            const status = await api.checkModelStatus(pipelineId);
-            if (!status.downloaded) {
-              missingPipelines.push(pipelineId);
+      // Skip this check if cloud is connecting - we'll wait for connection and then
+      // the model check will happen on the cloud side
+      if (!isBackendCloudConnecting) {
+        const missingPipelines: string[] = [];
+        for (const pipelineId of pipelineIds) {
+          const pipelineInfo = pipelines?.[pipelineId];
+          if (pipelineInfo?.requiresModels) {
+            try {
+              const status = await api.checkModelStatus(pipelineId);
+              if (!status.downloaded) {
+                missingPipelines.push(pipelineId);
+              }
+            } catch (error) {
+              console.error(
+                `Error checking model status for ${pipelineId}:`,
+                error
+              );
+              // Continue anyway if check fails
             }
-          } catch (error) {
-            console.error(
-              `Error checking model status for ${pipelineId}:`,
-              error
-            );
-            // Continue anyway if check fails
           }
         }
-      }
 
-      // If any pipelines are missing models, show download dialog
-      if (missingPipelines.length > 0) {
-        setPipelinesNeedingModels(missingPipelines);
-        setShowDownloadDialog(true);
-        return false; // Stream did not start
+        // If any pipelines are missing models, show download dialog
+        if (missingPipelines.length > 0) {
+          setPipelinesNeedingModels(missingPipelines);
+          setShowDownloadDialog(true);
+          return false; // Stream did not start
+        }
       }
 
       // If cloud connection is in progress, wait for it before loading pipeline
@@ -1228,7 +1235,6 @@ export function StreamPage() {
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <Header
-        onCloudStatusChange={setIsBackendCloudConnected}
         onPipelinesRefresh={handlePipelinesRefresh}
         cloudDisabled={isStreaming}
         openSettingsTab={openSettingsTab}
