@@ -5,7 +5,7 @@
 !include "FileFunc.nsh"
 
 ; Define paths
-!define UV_DOWNLOAD_URL "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
+!define UV_DOWNLOAD_URL "https://github.com/astral-sh/uv/releases/download/0.9.11/uv-x86_64-pc-windows-msvc.zip"
 
 ; Helper macro to write log message to file
 ; Usage: !insertmacro WriteLog "message"

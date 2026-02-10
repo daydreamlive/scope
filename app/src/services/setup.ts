@@ -173,7 +173,7 @@ export class ScopeSetupService implements SetupService {
     logger.info(`Virtual environment path: ${venvPath}`);
 
     return new Promise((resolve, reject) => {
-      const proc = spawn(uvCommand, ['sync'], {
+      const proc = spawn(uvCommand, ['sync', '--inexact'], {
         cwd: projectRoot,
         stdio: 'pipe',
         shell: false,
