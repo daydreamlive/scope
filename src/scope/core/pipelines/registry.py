@@ -219,14 +219,24 @@ def _initialize_registry():
     # Register built-in pipelines first
     _register_pipelines()
 
-    # Load and register plugin pipelines
-    from scope.core.plugins import load_plugins, register_plugin_pipelines
+    # Load and register plugin pipelines and input sources
+    from scope.core.inputs import input_source_registry
+    from scope.core.plugins import (
+        load_plugins,
+        register_plugin_input_sources,
+        register_plugin_pipelines,
+    )
 
     load_plugins()
     register_plugin_pipelines(PipelineRegistry)
+    register_plugin_input_sources(input_source_registry)
 
     pipeline_count = len(PipelineRegistry.list_pipelines())
-    logger.info(f"Registry initialized with {pipeline_count} pipeline(s)")
+    input_source_count = len(input_source_registry.list_available())
+    logger.info(
+        f"Registry initialized with {pipeline_count} pipeline(s) "
+        f"and {input_source_count} input source(s)"
+    )
 
 
 # Auto-register pipelines on module import

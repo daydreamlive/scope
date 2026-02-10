@@ -1277,3 +1277,18 @@ def register_plugin_pipelines(registry: "PipelineRegistry") -> None:
         registry: PipelineRegistry to register pipelines with
     """
     get_plugin_manager().register_plugin_pipelines(registry)
+
+
+def register_plugin_input_sources(registry) -> None:
+    """Call register_input_sources hook for all plugins.
+
+    Args:
+        registry: InputSourceRegistry to register input sources with
+    """
+
+    def register_callback(input_source_class):
+        """Callback function passed to plugins."""
+        registry.register(input_source_class)
+        logger.info(f"Registered plugin input source: {input_source_class.source_type}")
+
+    get_plugin_manager().pm.hook.register_input_sources(register=register_callback)

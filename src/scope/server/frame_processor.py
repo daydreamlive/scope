@@ -13,6 +13,8 @@ from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
 if TYPE_CHECKING:
+    from scope.core.inputs import InputSource
+
     from .cloud_connection import CloudConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,12 @@ class FrameProcessor:
         self.spout_receiver_name = ""
         self.spout_receiver_thread = None
 
+        # Generic input source (plugin-based)
+        self.input_source: "InputSource | None" = None
+        self.input_source_enabled = False
+        self.input_source_type = ""
+        self.input_source_thread = None
+
         # Input mode is signaled by the frontend at stream start.
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
@@ -146,6 +154,11 @@ class FrameProcessor:
         if "spout_receiver" in self.parameters:
             spout_config = self.parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
+
+        # Process generic input source settings (plugin-based)
+        if "input_source" in self.parameters:
+            input_source_config = self.parameters.pop("input_source")
+            self._update_input_source(input_source_config)
 
         # Reset frame counters on start
         self._frames_in = 0
@@ -243,6 +256,15 @@ class FrameProcessor:
             except Exception as e:
                 logger.error(f"Error releasing Spout receiver: {e}")
             self.spout_receiver = None
+
+        # Clean up generic input source
+        self.input_source_enabled = False
+        if self.input_source is not None:
+            try:
+                self.input_source.close()
+            except Exception as e:
+                logger.error(f"Error closing input source: {e}")
+            self.input_source = None
 
         # Clean up cloud callback in cloud mode
         if self._cloud_mode and self.cloud_manager:
@@ -584,6 +606,11 @@ class FrameProcessor:
             spout_config = parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
 
+        # Handle generic input source settings (plugin-based)
+        if "input_source" in parameters:
+            input_source_config = parameters.pop("input_source")
+            self._update_input_source(input_source_config)
+
         # Update parameters for all pipeline processors
         for processor in self.pipeline_processors:
             processor.update_parameters(parameters)
@@ -862,6 +889,185 @@ class FrameProcessor:
                 time.sleep(0.01)
 
         logger.info(f"Spout input thread stopped after {frame_count} frames")
+
+    def _update_input_source(self, config: dict):
+        """Update generic input source configuration (plugin-based).
+
+        Config format:
+            {
+                "enabled": bool,
+                "source_type": str,  # e.g., "ndi"
+                "source_name": str,  # e.g., "OBS (MacBook)"
+            }
+        """
+        enabled = config.get("enabled", False)
+        source_type = config.get("source_type", "")
+        source_name = config.get("source_name", "")
+
+        logger.info(
+            f"Input source config: enabled={enabled}, "
+            f"type={source_type}, name={source_name}"
+        )
+
+        if enabled and not self.input_source_enabled:
+            # Enable input source
+            try:
+                from scope.core.inputs import input_source_registry
+
+                self.input_source = input_source_registry.create_instance(source_type)
+                if self.input_source is None:
+                    logger.error(f"Input source '{source_type}' not available")
+                    return
+
+                if self.input_source.connect(source_name):
+                    self.input_source_enabled = True
+                    self.input_source_type = source_type
+                    # Start receiving thread
+                    self.input_source_thread = threading.Thread(
+                        target=self._input_source_receiver_loop, daemon=True
+                    )
+                    self.input_source_thread.start()
+                    logger.info(
+                        f"Input source enabled: {source_type} -> '{source_name}'"
+                    )
+                else:
+                    logger.error(
+                        f"Failed to connect to input source: {source_type} -> '{source_name}'"
+                    )
+                    self.input_source.close()
+                    self.input_source = None
+            except Exception as e:
+                logger.error(f"Error creating input source: {e}")
+                if self.input_source:
+                    self.input_source.close()
+                self.input_source = None
+
+        elif not enabled and self.input_source_enabled:
+            # Disable input source
+            self.input_source_enabled = False
+            if self.input_source is not None:
+                self.input_source.close()
+                self.input_source = None
+            logger.info("Input source disabled")
+
+        elif enabled and (
+            source_type != self.input_source_type or config.get("reconnect", False)
+        ):
+            # Source type changed or reconnect requested, recreate
+            self.input_source_enabled = False
+            if self.input_source is not None:
+                self.input_source.close()
+                self.input_source = None
+
+            try:
+                from scope.core.inputs import input_source_registry
+
+                self.input_source = input_source_registry.create_instance(source_type)
+                if self.input_source is None:
+                    logger.error(f"Input source '{source_type}' not available")
+                    return
+
+                if self.input_source.connect(source_name):
+                    self.input_source_enabled = True
+                    self.input_source_type = source_type
+                    # Restart receiving thread if not running
+                    if (
+                        self.input_source_thread is None
+                        or not self.input_source_thread.is_alive()
+                    ):
+                        self.input_source_thread = threading.Thread(
+                            target=self._input_source_receiver_loop, daemon=True
+                        )
+                        self.input_source_thread.start()
+                    logger.info(
+                        f"Input source changed: {source_type} -> '{source_name}'"
+                    )
+                else:
+                    logger.error(f"Failed to reconnect input source")
+                    self.input_source.close()
+                    self.input_source = None
+            except Exception as e:
+                logger.error(f"Error recreating input source: {e}")
+                if self.input_source:
+                    self.input_source.close()
+                self.input_source = None
+
+    def _input_source_receiver_loop(self):
+        """Background thread that receives frames from a generic input source."""
+        logger.info(f"Input source thread started ({self.input_source_type})")
+
+        # Initial target frame rate
+        target_fps = self.get_fps()
+        frame_interval = 1.0 / target_fps
+        last_frame_time = 0.0
+        frame_count = 0
+
+        while (
+            self.running
+            and self.input_source_enabled
+            and self.input_source is not None
+        ):
+            try:
+                # Update target FPS dynamically from pipeline performance
+                current_pipeline_fps = self.get_fps()
+                if current_pipeline_fps > 0:
+                    target_fps = current_pipeline_fps
+                    frame_interval = 1.0 / target_fps
+
+                current_time = time.time()
+
+                # Frame rate limiting - don't receive faster than target FPS
+                time_since_last = current_time - last_frame_time
+                if time_since_last < frame_interval:
+                    time.sleep(frame_interval - time_since_last)
+                    continue
+
+                # Receive frame from input source
+                rgb_frame = self.input_source.receive_frame(timeout_ms=100)
+                if rgb_frame is not None:
+                    last_frame_time = time.time()
+
+                    # Convert to tensor and put into first processor's input queue
+                    if self.pipeline_processors:
+                        first_processor = self.pipeline_processors[0]
+
+                        if torch.cuda.is_available():
+                            shape = rgb_frame.shape
+                            pinned_buffer = self._get_or_create_pinned_buffer(shape)
+                            pinned_buffer.copy_(
+                                torch.as_tensor(rgb_frame, dtype=torch.uint8)
+                            )
+                            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+                        else:
+                            frame_tensor = torch.as_tensor(rgb_frame, dtype=torch.uint8)
+
+                        frame_tensor = frame_tensor.unsqueeze(0)
+
+                        try:
+                            first_processor.input_queue.put_nowait(frame_tensor)
+                        except queue.Full:
+                            logger.debug(
+                                f"First processor input queue full, "
+                                f"dropping {self.input_source_type} frame"
+                            )
+
+                    frame_count += 1
+                    if frame_count % 100 == 0:
+                        logger.debug(
+                            f"Input source ({self.input_source_type}) "
+                            f"received {frame_count} frames"
+                        )
+                else:
+                    time.sleep(0.001)  # Small sleep when no frame available
+
+            except Exception as e:
+                logger.error(f"Error in input source loop: {e}")
+                time.sleep(0.01)
+
+        logger.info(
+            f"Input source thread stopped ({self.input_source_type}) "
+            f"after {frame_count} frames"
+        )
 
     def _setup_pipeline_chain_sync(self):
         """Create pipeline processor chain (synchronous).

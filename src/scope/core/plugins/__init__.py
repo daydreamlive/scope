@@ -12,6 +12,7 @@ from .manager import (
     get_plugin_manager,
     load_plugins,
     pm,
+    register_plugin_input_sources,
     register_plugin_pipelines,
 )
 
@@ -19,6 +20,7 @@ __all__ = [
     "hookimpl",
     "load_plugins",
     "pm",
+    "register_plugin_input_sources",
     "register_plugin_pipelines",
     "get_plugin_manager",
     "PluginManager",
