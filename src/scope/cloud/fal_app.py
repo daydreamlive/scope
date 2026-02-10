@@ -325,7 +325,7 @@ class ScopeApp(fal.App, keep_alive=300):
         def start_server():
             print("Starting Scope server...")
             try:
-                subprocess.run(
+                result = subprocess.run(
                     [
                         "uv",
                         "run",
@@ -336,11 +336,17 @@ class ScopeApp(fal.App, keep_alive=300):
                         "--port",
                         "8000",
                     ],
-                    check=True,
                     env=scope_env,
                 )
+                # Log when process exits (regardless of exit code)
+                if result.returncode == 0:
+                    print("Scope server process exited normally (exit code 0)")
+                else:
+                    print(
+                        f"❌ Scope server process exited with code {result.returncode}"
+                    )
             except Exception as e:
-                print(f"Failed to start Scope server: {e}")
+                print(f"❌ Failed to start Scope server: {e}")
                 raise
 
         server_thread = threading.Thread(target=start_server, daemon=True)
