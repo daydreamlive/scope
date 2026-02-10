@@ -22,6 +22,11 @@ export class ScopeSetupService implements SetupService {
       return true;
     }
 
+    // Check if venv exists (required since uv run uses --no-sync)
+    if (!fs.existsSync(paths.venvPath)) {
+      return true;
+    }
+
     return false;
   }
 
