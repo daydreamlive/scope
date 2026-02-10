@@ -23,10 +23,6 @@ import {
 import { useCloudStatus } from "../../hooks/useCloudStatus";
 
 interface DaydreamAccountSectionProps {
-  /** Callback when cloud mode status changes */
-  onStatusChange?: (connected: boolean) => void;
-  /** Callback when connecting state changes */
-  onConnectingChange?: (connecting: boolean) => void;
   /** Callback to refresh pipeline list after cloud mode toggle */
   onPipelinesRefresh?: () => Promise<unknown>;
   /** Disable the toggle (e.g., when streaming) */
@@ -34,8 +30,6 @@ interface DaydreamAccountSectionProps {
 }
 
 export function DaydreamAccountSection({
-  onStatusChange,
-  onConnectingChange,
   onPipelinesRefresh,
   disabled = false,
 }: DaydreamAccountSectionProps) {
@@ -77,16 +71,6 @@ export function DaydreamAccountSection({
       window.removeEventListener("daydream-auth-change", handleAuthChange);
     };
   }, []);
-
-  // Notify parent when status changes
-  useEffect(() => {
-    onStatusChange?.(status.connected);
-  }, [status.connected, onStatusChange]);
-
-  // Notify parent when connecting/disconnecting state changes
-  useEffect(() => {
-    onConnectingChange?.(status.connecting || isDisconnecting);
-  }, [status.connecting, isDisconnecting, onConnectingChange]);
 
   // Detect connection completion (connecting → connected) to trigger pipeline refresh
   useEffect(() => {

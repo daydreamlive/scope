@@ -23,9 +23,6 @@ interface SettingsDialogProps {
   onClose: () => void;
   initialTab?: "general" | "account" | "api-keys" | "plugins";
   initialPluginPath?: string;
-  // Cloud mode callbacks
-  onCloudStatusChange?: (connected: boolean) => void;
-  onCloudConnectingChange?: (connecting: boolean) => void;
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
 }
@@ -62,8 +59,6 @@ export function SettingsDialog({
   onClose,
   initialTab = "general",
   initialPluginPath = "",
-  onCloudStatusChange,
-  onCloudConnectingChange,
   onPipelinesRefresh,
   cloudDisabled,
 }: SettingsDialogProps) {
@@ -372,8 +367,6 @@ export function SettingsDialog({
             </TabsContent>
             <TabsContent value="account" className="mt-0">
               <AccountTab
-                onCloudStatusChange={onCloudStatusChange}
-                onCloudConnectingChange={onCloudConnectingChange}
                 onPipelinesRefresh={onPipelinesRefresh ?? refetchPipelines}
                 cloudDisabled={cloudDisabled}
               />
