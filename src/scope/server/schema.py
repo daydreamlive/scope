@@ -565,11 +565,28 @@ class PluginInfo(BaseModel):
     )
 
 
+class FailedPluginInfoSchema(BaseModel):
+    """Information about a plugin entry point that failed to load."""
+
+    package_name: str = Field(..., description="Package name of the failed plugin")
+    entry_point_name: str = Field(
+        ..., description="Entry point name that failed to load"
+    )
+    error_type: str = Field(
+        ..., description="Exception type (e.g. ModuleNotFoundError)"
+    )
+    error_message: str = Field(..., description="Error message from the exception")
+
+
 class PluginListResponse(BaseModel):
     """Response containing list of all installed plugins."""
 
     plugins: list[PluginInfo] = Field(..., description="List of installed plugins")
     total: int = Field(..., description="Total number of plugins")
+    failed_plugins: list[FailedPluginInfoSchema] = Field(
+        default_factory=list,
+        description="Plugins that failed to load at startup",
+    )
 
 
 class PluginInstallRequest(BaseModel):

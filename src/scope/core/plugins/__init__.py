@@ -2,6 +2,7 @@
 
 from .hookspecs import hookimpl
 from .manager import (
+    FailedPluginInfo,
     PluginDependencyError,
     PluginInstallError,
     PluginInUseError,
@@ -21,6 +22,7 @@ __all__ = [
     "pm",
     "register_plugin_pipelines",
     "get_plugin_manager",
+    "FailedPluginInfo",
     "PluginManager",
     "PluginNotFoundError",
     "PluginNotEditableError",

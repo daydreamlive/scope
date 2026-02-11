@@ -467,9 +467,17 @@ export interface PluginInfo {
   package_spec: string | null;
 }
 
+export interface FailedPluginInfo {
+  package_name: string;
+  entry_point_name: string;
+  error_type: string;
+  error_message: string;
+}
+
 export interface PluginListResponse {
   plugins: PluginInfo[];
   total: number;
+  failed_plugins: FailedPluginInfo[];
 }
 
 export interface PluginInstallRequest {
