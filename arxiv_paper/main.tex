@@ -174,11 +174,12 @@ Most VACE primitives transfer to streaming contexts with minimal adaptation. Mas
 \toprule
 \textbf{Component} & \textbf{Compatibility} & \textbf{Notes} \\
 \midrule
-Masks & Full & Cache management for temporal autoencoders \\
+Masks & Full & Separate temporal autoencoder caches for inactive/reactive streams \\
 Control signals (depth, pose) & Full & Per-chunk processing, same encoding \\
 Dual-stream encoding & Full & Cache separation prevents contamination \\
 Hint injection & Full & Residual addition unchanged \\
-Reference images & Requires adaptation & Architectural change (Section~3.2) \\
+Reference images & Requires adaptation & Architectural change (Section~\ref{sec:adaptation}) \\
+Temporal extension & Partial & Fixed chunk sizes limit first+last frame utility \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -310,7 +311,10 @@ Reward Forcing & \citep{lu2025rewardforcing} \\
 \end{tabular}
 \end{table}
 
-Key design decisions include: separate VAE encoder caches for dual-stream encoding without temporal contamination; zero-initialized hint projections enabling safe composition with LoRA and quantization; implicit mode detection from provided inputs; crop-to-fill resizing to avoid padding artifacts; and cached hint computation where reference hints are computed once and reused across chunks.
+Key design decisions include: zero-initialized hint projections enabling safe composition with LoRA and quantization; implicit mode detection from provided inputs; crop-to-fill resizing to avoid padding artifacts; and cached hint computation where reference hints are computed once and reused across chunks.
+
+\paragraph{Cache management for dual-stream encoding.}
+VACE encodes conditioning frames into two streams: \emph{inactive} (preserved regions, masked to zero where generation occurs) and \emph{reactive} (generated regions, masked to zero where content is preserved). These are channel-concatenated before entering Context Blocks. In streaming contexts, the temporal autoencoder (TAE/3D VAE) maintains internal state across chunks. We allocate separate encoder caches for the inactive and reactive streams to prevent cross-contamination of temporal statistics. For inpainting and outpainting, the reactive stream cache is additionally skipped: because reactive regions contain newly generated content each chunk, temporal blending from cached state introduces ghosting artifacts. Conditioning mode (depth, pose, etc.) caches both streams normally, as both carry temporally coherent signals.
 
 \section{Performance}
 
