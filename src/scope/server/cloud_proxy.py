@@ -130,6 +130,7 @@ async def get_hardware_info_from_cloud(
     return HardwareInfoResponse(
         vram_gb=data.get("vram_gb"),
         spout_available=spout_available,
+        supports_nvfp4=data.get("supports_nvfp4", False),
     )
 
 

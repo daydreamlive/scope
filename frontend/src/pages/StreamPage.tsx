@@ -104,6 +104,7 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    hardwareInfo,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   } = useStreamState();
@@ -1532,6 +1533,7 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
+            supportsNvfp4={hardwareInfo?.supports_nvfp4 ?? false}
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}

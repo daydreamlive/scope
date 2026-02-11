@@ -206,6 +206,7 @@ export const downloadPipelineModels = async (
 export interface HardwareInfoResponse {
   vram_gb: number | null;
   spout_available: boolean;
+  supports_nvfp4: boolean;
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {

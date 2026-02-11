@@ -90,6 +90,8 @@ interface SettingsPanelProps {
   // Spout settings
   spoutSender?: SettingsState["spoutSender"];
   onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
+  // Whether GPU supports NVFP4 quantization (Blackwell SM >= 10.0)
+  supportsNvfp4?: boolean;
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
   // VACE settings
@@ -143,6 +145,7 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
+  supportsNvfp4 = false,
   spoutSender,
   onSpoutSenderChange,
   spoutAvailable = false,
@@ -525,6 +528,7 @@ export function SettingsPanel({
               supportsNoiseControls,
               supportsQuantization:
                 pipelines?.[pipelineId]?.supportsQuantization,
+              supportsNvfp4,
               supportsCacheManagement:
                 pipelines?.[pipelineId]?.supportsCacheManagement,
               supportsKvCacheBias: pipelines?.[pipelineId]?.supportsKvCacheBias,
@@ -964,9 +968,11 @@ export function SettingsPanel({
                             <SelectItem value="fp8_e4m3fn">
                               fp8_e4m3fn (Dynamic)
                             </SelectItem>
-                            <SelectItem value="nvfp4">
-                              nvfp4 (Blackwell)
-                            </SelectItem>
+                            {supportsNvfp4 && (
+                              <SelectItem value="nvfp4">
+                                nvfp4 (Blackwell)
+                              </SelectItem>
+                            )}
                           </SelectContent>
                         </Select>
                       </div>

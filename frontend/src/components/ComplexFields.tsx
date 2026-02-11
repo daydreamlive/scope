@@ -67,6 +67,7 @@ export interface SchemaComplexFieldContext {
   inputMode?: "text" | "video";
   supportsNoiseControls?: boolean;
   supportsQuantization?: boolean;
+  supportsNvfp4?: boolean;
   supportsCacheManagement?: boolean;
   supportsKvCacheBias?: boolean;
   isStreaming?: boolean;
@@ -497,9 +498,11 @@ export function SchemaComplexField({
                   <SelectItem value="fp8_e4m3fn">
                     fp8_e4m3fn (Dynamic)
                   </SelectItem>
-                  <SelectItem value="nvfp4">
-                    nvfp4 (Blackwell)
-                  </SelectItem>
+                  {ctx.supportsNvfp4 && (
+                    <SelectItem value="nvfp4">
+                      nvfp4 (Blackwell)
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
