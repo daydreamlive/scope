@@ -459,7 +459,6 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       kv_cache_attention_bias?: number;
       paused?: boolean;
       spout_sender?: { enabled: boolean; name: string };
-      spout_receiver?: { enabled: boolean; name: string };
       vace_ref_images?: string[];
       vace_use_input_video?: boolean;
       vace_context_scale?: number;

@@ -753,11 +753,12 @@ export function StreamPage() {
   };
 
   // Handle Spout input name change from InputAndControlsPanel
-  const handleSpoutReceiverChange = (name: string) => {
+  const handleSpoutSourceChange = (name: string) => {
     updateSettings({
-      spoutReceiver: {
+      inputSource: {
         enabled: mode === "spout",
-        name: name,
+        source_type: "spout",
+        source_name: name,
       },
     });
   };
@@ -766,18 +767,14 @@ export function StreamPage() {
   const handleModeChange = (newMode: typeof mode) => {
     if (newMode === "spout") {
       updateSettings({
-        spoutReceiver: {
+        inputSource: {
           enabled: true,
-          name: settings.spoutReceiver?.name ?? "",
+          source_type: "spout",
+          source_name: settings.inputSource?.source_name ?? "",
         },
-        inputSource: { enabled: false, source_type: "", source_name: "" },
       });
     } else if (newMode === "ndi") {
       updateSettings({
-        spoutReceiver: {
-          enabled: false,
-          name: settings.spoutReceiver?.name ?? "",
-        },
         inputSource: {
           enabled: true,
           source_type: "ndi",
@@ -786,10 +783,6 @@ export function StreamPage() {
       });
     } else {
       updateSettings({
-        spoutReceiver: {
-          enabled: false,
-          name: settings.spoutReceiver?.name ?? "",
-        },
         inputSource: { enabled: false, source_type: "", source_name: "" },
       });
     }
@@ -1119,8 +1112,10 @@ export function StreamPage() {
 
       // Check video requirements based on input mode
       const needsVideoInput = currentMode === "video";
-      const isSpoutMode = mode === "spout" && settings.spoutReceiver?.enabled;
-      const isNdiMode = mode === "ndi" && settings.inputSource?.enabled;
+      const isSpoutMode =
+        mode === "spout" && settings.inputSource?.source_type === "spout";
+      const isNdiMode =
+        mode === "ndi" && settings.inputSource?.source_type === "ndi";
       const isServerSideInput = isSpoutMode || isNdiMode;
 
       // Only send video stream for pipelines that need video input (not in Spout/NDI mode)
@@ -1145,7 +1140,6 @@ export function StreamPage() {
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
         spout_sender?: { enabled: boolean; name: string };
-        spout_receiver?: { enabled: boolean; name: string };
         vace_ref_images?: string[];
         vace_use_input_video?: boolean;
         vace_context_scale?: number;
@@ -1227,15 +1221,12 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
-      // Spout settings - send if enabled
+      // Spout output settings - send if enabled
       if (settings.spoutSender?.enabled) {
         initialParameters.spout_sender = settings.spoutSender;
       }
-      if (settings.spoutReceiver?.enabled) {
-        initialParameters.spout_receiver = settings.spoutReceiver;
-      }
 
-      // Generic input source (NDI, etc.) - send if enabled
+      // Generic input source (NDI, Spout, etc.) - send if enabled
       if (settings.inputSource?.enabled) {
         initialParameters.input_source = settings.inputSource;
       }
@@ -1340,8 +1331,12 @@ export function StreamPage() {
             timelinePrompts={timelinePrompts}
             transitionSteps={transitionSteps}
             onTransitionStepsChange={setTransitionSteps}
-            spoutReceiverName={settings.spoutReceiver?.name ?? ""}
-            onSpoutReceiverChange={handleSpoutReceiverChange}
+            spoutReceiverName={
+              settings.inputSource?.source_type === "spout"
+                ? (settings.inputSource?.source_name ?? "")
+                : ""
+            }
+            onSpoutReceiverChange={handleSpoutSourceChange}
             inputMode={
               settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
             }

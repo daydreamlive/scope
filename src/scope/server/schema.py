@@ -118,10 +118,6 @@ class Parameters(BaseModel):
         default=None,
         description="Spout output configuration for sending frames to external apps",
     )
-    spout_receiver: "SpoutConfig | None" = Field(
-        default=None,
-        description="Spout input configuration for receiving frames from external apps",
-    )
     vace_enabled: bool | None = Field(
         default=None,
         description="Enable VACE (Video All-In-One Creation and Editing) for reference image conditioning and structural guidance. Must be enabled at pipeline load time for VACE to be available.",

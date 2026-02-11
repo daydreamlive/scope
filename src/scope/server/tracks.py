@@ -47,15 +47,10 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused_lock = threading.Lock()
         self._last_frame = None
 
-        # Server-side input modes - when enabled, frames come from the backend
+        # Server-side input mode - when enabled, frames come from the backend
         # instead of WebRTC (no browser video track needed)
-        self._spout_receiver_enabled = False
         self._input_source_enabled = False
         if initial_parameters:
-            spout_receiver = initial_parameters.get("spout_receiver")
-            if spout_receiver and spout_receiver.get("enabled"):
-                self._spout_receiver_enabled = True
-                logger.info("Spout input mode enabled")
             input_source = initial_parameters.get("input_source")
             if input_source and input_source.get("enabled"):
                 self._input_source_enabled = True
@@ -132,11 +127,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.initialize_output_processing()
 
         # Keep running while any input source is active
-        while (
-            self.input_task_running
-            or self._spout_receiver_enabled
-            or self._input_source_enabled
-        ):
+        while self.input_task_running or self._input_source_enabled:
             try:
                 # Update FPS: use the FPS from the pipeline chain
                 if self.frame_processor:
@@ -185,7 +176,6 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     async def stop(self):
         self.input_task_running = False
-        self._spout_receiver_enabled = False
         self._input_source_enabled = False
 
         if self.input_task is not None:
