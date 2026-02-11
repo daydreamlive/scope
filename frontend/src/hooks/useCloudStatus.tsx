@@ -5,7 +5,13 @@
  * Uses a React context to share state, so when one component refreshes the status,
  * all components see the updated value immediately.
  *
- * Polling is smart and based on current status:
+ * Supports two cloud modes:
+ * - Direct mode (VITE_CLOUD_WS_URL): Frontend connects directly to cloud via WebSocket.
+ *   Status comes from CloudContext instead of polling.
+ * - Proxy mode: Frontend talks to local backend which proxies to cloud.
+ *   Status is polled from /api/v1/cloud/status.
+ *
+ * Polling (proxy mode only) is smart and based on current status:
  * - Disconnected: no polling (state changes only via explicit user actions)
  * - Connecting: poll every 1s to quickly detect when connection completes
  * - Connected: poll every 5s to detect unexpected disconnection
@@ -20,6 +26,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
+import { useCloudContext } from "../lib/cloudContext";
 
 export interface CloudStatus {
   connected: boolean;
@@ -30,6 +37,8 @@ export interface CloudStatus {
   credentials_configured: boolean;
   last_close_code: number | null;
   last_close_reason: string | null;
+  /** Whether this status is from direct cloud mode (VITE_CLOUD_WS_URL) */
+  is_direct_mode?: boolean;
 }
 
 const DEFAULT_STATUS: CloudStatus = {
@@ -41,6 +50,7 @@ const DEFAULT_STATUS: CloudStatus = {
   credentials_configured: false,
   last_close_code: null,
   last_close_reason: null,
+  is_direct_mode: false,
 };
 
 // Polling intervals based on connection state
@@ -137,6 +147,9 @@ export function CloudStatusProvider({ children }: CloudStatusProviderProps) {
  * All components using this hook share the same status state.
  * When one component calls refresh(), all components see the updated value immediately.
  *
+ * Automatically uses direct cloud mode status when VITE_CLOUD_WS_URL is set,
+ * otherwise falls back to proxy mode status from the backend.
+ *
  * Must be used within a CloudStatusProvider.
  */
 export function useCloudStatus() {
@@ -146,12 +159,39 @@ export function useCloudStatus() {
     throw new Error("useCloudStatus must be used within a CloudStatusProvider");
   }
 
-  const { status, isLoading, refresh } = context;
+  const { status: proxyStatus, isLoading, refresh } = context;
+
+  // Check for direct cloud mode (VITE_CLOUD_WS_URL)
+  // This context is optional - if CloudProvider is not in the tree, we just use proxy status
+  let cloudContext: ReturnType<typeof useCloudContext> | null = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    cloudContext = useCloudContext();
+  } catch {
+    // CloudProvider not in tree, use proxy status
+  }
+
+  // If in direct cloud mode, use that status instead of proxy status
+  const isDirectMode = cloudContext?.isCloudMode ?? false;
+
+  const status: CloudStatus = isDirectMode
+    ? {
+        connected: cloudContext?.isReady ?? false,
+        connecting: cloudContext?.isConnecting ?? false,
+        error: cloudContext?.error?.message ?? null,
+        app_id: null, // Not available in direct mode
+        connection_id: cloudContext?.connectionId ?? null,
+        credentials_configured: true, // Credentials are in env vars for direct mode
+        last_close_code: cloudContext?.lastCloseCode ?? null,
+        last_close_reason: cloudContext?.lastCloseReason ?? null,
+        is_direct_mode: true,
+      }
+    : proxyStatus;
 
   return {
     status,
-    isLoading,
-    refresh,
+    isLoading: isDirectMode ? false : isLoading,
+    refresh: isDirectMode ? async () => {} : refresh, // No-op refresh in direct mode
     // Convenience accessors
     isConnected: status.connected,
     isConnecting: status.connecting,
@@ -159,5 +199,6 @@ export function useCloudStatus() {
     error: status.error,
     lastCloseCode: status.last_close_code,
     lastCloseReason: status.last_close_reason,
+    isDirectMode,
   };
 }

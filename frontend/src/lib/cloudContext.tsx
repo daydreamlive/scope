@@ -6,25 +6,43 @@
  * go through the CloudAdapter WebSocket connection.
  */
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useRef,
+} from "react";
 import { CloudAdapter } from "./cloudAdapter";
 
 interface CloudContextValue {
-  /** Whether we're in cloud mode */
+  /** Whether we're in direct cloud mode (VITE_CLOUD_WS_URL is set) */
   isCloudMode: boolean;
   /** The CloudAdapter instance (null if not in cloud mode) */
   adapter: CloudAdapter | null;
+  /** Whether we're currently connecting (waiting for ready message) */
+  isConnecting: boolean;
   /** Whether the adapter is connected and ready */
   isReady: boolean;
   /** Connection error if any */
   error: Error | null;
+  /** Connection ID assigned by the cloud server */
+  connectionId: string | null;
+  /** Last close code if connection was closed unexpectedly */
+  lastCloseCode: number | null;
+  /** Last close reason if connection was closed unexpectedly */
+  lastCloseReason: string | null;
 }
 
 const CloudContext = createContext<CloudContextValue>({
   isCloudMode: false,
   adapter: null,
+  isConnecting: false,
   isReady: false,
   error: null,
+  connectionId: null,
+  lastCloseCode: null,
+  lastCloseReason: null,
 });
 
 interface CloudProviderProps {
@@ -32,50 +50,103 @@ interface CloudProviderProps {
   wsUrl?: string;
   /** cloud API key for authentication */
   apiKey?: string;
+  /** User ID for log correlation (sent to cloud after connection) */
+  userId?: string;
   children: React.ReactNode;
 }
 
-export function CloudProvider({ wsUrl, apiKey, children }: CloudProviderProps) {
+export function CloudProvider({
+  wsUrl,
+  apiKey,
+  userId,
+  children,
+}: CloudProviderProps) {
   const [adapter, setAdapter] = useState<CloudAdapter | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [connectionId, setConnectionId] = useState<string | null>(null);
+  const [lastCloseCode, setLastCloseCode] = useState<number | null>(null);
+  const [lastCloseReason, setLastCloseReason] = useState<string | null>(null);
+  // Track if the effect is still active to prevent state updates after cleanup
+  // This is important for React StrictMode which double-mounts components
+  const isActiveRef = useRef(true);
 
   useEffect(() => {
+    // Reset active flag on each effect run
+    isActiveRef.current = true;
+
     if (!wsUrl) {
       setAdapter(null);
+      setIsConnecting(false);
       setIsReady(false);
       setError(null);
+      setConnectionId(null);
+      setLastCloseCode(null);
+      setLastCloseReason(null);
       return;
     }
 
     console.log("[CloudProvider] Connecting to cloud:", wsUrl);
-    const cloudAdapter = new CloudAdapter(wsUrl, apiKey);
+    const cloudAdapter = new CloudAdapter(wsUrl, apiKey, userId);
     setAdapter(cloudAdapter);
+    // Set connecting state while waiting for ready message
+    setIsConnecting(true);
+    setIsReady(false);
+    setError(null);
 
     cloudAdapter
       .connect()
       .then(() => {
-        console.log("[CloudProvider] Connected to cloud");
-        setIsReady(true);
-        setError(null);
+        // Only update state if this effect is still active
+        if (isActiveRef.current) {
+          console.log("[CloudProvider] Connected to cloud");
+          setIsConnecting(false);
+          setIsReady(true);
+          setError(null);
+          setConnectionId(cloudAdapter.connectionId);
+          // Clear close info on successful connection
+          setLastCloseCode(null);
+          setLastCloseReason(null);
+        } else {
+          // Effect was cleaned up while connecting, disconnect immediately
+          console.log(
+            "[CloudProvider] Connection completed but effect was cleaned up, disconnecting"
+          );
+          cloudAdapter.disconnect();
+        }
       })
       .catch(err => {
-        console.error("[CloudProvider] Connection failed:", err);
-        setError(err);
-        setIsReady(false);
+        // Only update state if this effect is still active
+        if (isActiveRef.current) {
+          console.error("[CloudProvider] Connection failed:", err);
+          setIsConnecting(false);
+          setError(err);
+          setIsReady(false);
+          setConnectionId(null);
+          // Update close info from adapter
+          setLastCloseCode(cloudAdapter.lastCloseCode);
+          setLastCloseReason(cloudAdapter.lastCloseReason);
+        }
       });
 
     return () => {
       console.log("[CloudProvider] Disconnecting from cloud");
+      // Mark effect as inactive before disconnecting
+      isActiveRef.current = false;
       cloudAdapter.disconnect();
     };
-  }, [wsUrl, apiKey]);
+  }, [wsUrl, apiKey, userId]);
 
   const value: CloudContextValue = {
     isCloudMode: !!wsUrl,
     adapter,
+    isConnecting: !!wsUrl && isConnecting,
     isReady: !!wsUrl && isReady,
     error,
+    connectionId,
+    lastCloseCode,
+    lastCloseReason,
   };
 
   return (
@@ -94,6 +165,24 @@ export function useCloudContext() {
  * Hook that returns the adapter if in cloud mode
  */
 export function useCloudAdapter() {
-  const { adapter, isCloudMode, isReady, error } = useCloudContext();
-  return { adapter, isCloudMode, isReady, error };
+  const {
+    adapter,
+    isCloudMode,
+    isConnecting,
+    isReady,
+    error,
+    connectionId,
+    lastCloseCode,
+    lastCloseReason,
+  } = useCloudContext();
+  return {
+    adapter,
+    isCloudMode,
+    isConnecting,
+    isReady,
+    error,
+    connectionId,
+    lastCloseCode,
+    lastCloseReason,
+  };
 }

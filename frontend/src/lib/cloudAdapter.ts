@@ -60,6 +60,7 @@ export class CloudAdapter {
   private ws: WebSocket | null = null;
   private wsUrl: string;
   private apiKey: string | null = null;
+  private userId: string | null = null;
   private pendingRequests: Map<string, PendingRequest> = new Map();
   private requestCounter = 0;
   private isReady = false;
@@ -68,18 +69,44 @@ export class CloudAdapter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private messageHandlers: Set<MessageHandler> = new Set();
+  // Flag to prevent auto-reconnect when intentionally disconnected
+  private intentionalDisconnect = false;
 
   // Current WebRTC session ID (set after offer/answer exchange)
   private currentSessionId: string | null = null;
+
+  // Connection ID from cloud server (received in ready message)
+  private _connectionId: string | null = null;
+
+  // Last close info for reporting
+  private _lastCloseCode: number | null = null;
+  private _lastCloseReason: string | null = null;
 
   /**
    * Create a CloudAdapter instance.
    * @param wsUrl - WebSocket URL for the cloud endpoint
    * @param apiKey - Optional cloud API key for authentication
+   * @param userId - Optional user ID for log correlation (sent to cloud after connection)
    */
-  constructor(wsUrl: string, apiKey?: string) {
+  constructor(wsUrl: string, apiKey?: string, userId?: string) {
     this.wsUrl = wsUrl;
     this.apiKey = apiKey || null;
+    this.userId = userId || null;
+  }
+
+  /** Get the connection ID assigned by the cloud server */
+  get connectionId(): string | null {
+    return this._connectionId;
+  }
+
+  /** Get the last close code (if connection was closed unexpectedly) */
+  get lastCloseCode(): number | null {
+    return this._lastCloseCode;
+  }
+
+  /** Get the last close reason (if connection was closed unexpectedly) */
+  get lastCloseReason(): string | null {
+    return this._lastCloseReason;
   }
 
   /**
@@ -89,6 +116,12 @@ export class CloudAdapter {
     if (this.ws?.readyState === WebSocket.OPEN) {
       return;
     }
+
+    // Reset the intentional disconnect flag when connecting
+    this.intentionalDisconnect = false;
+    // Clear previous close info on new connection attempt
+    this._lastCloseCode = null;
+    this._lastCloseReason = null;
 
     this.readyPromise = new Promise(resolve => {
       this.readyResolve = resolve;
@@ -118,6 +151,21 @@ export class CloudAdapter {
 
             // Check for ready message
             if (message.type === "ready") {
+              // Extract connection_id from ready message (like Python backend does)
+              this._connectionId = (message as { connection_id?: string })
+                .connection_id || null;
+              console.log(
+                `[CloudAdapter] Cloud server ready (connection_id: ${this._connectionId})`
+              );
+
+              // Send user_id to cloud for log correlation (like Python backend does)
+              if (this.userId && this.ws) {
+                this.ws.send(
+                  JSON.stringify({ type: "set_user_id", user_id: this.userId })
+                );
+                console.log(`[CloudAdapter] Sent user_id to cloud: ${this.userId}`);
+              }
+
               this.isReady = true;
               this.readyResolve?.();
               resolve();
@@ -141,6 +189,15 @@ export class CloudAdapter {
           this.isReady = false;
           this.ws = null;
 
+          // Store close info for unexpected closes (not code 1000)
+          if (event.code !== 1000 && !this.intentionalDisconnect) {
+            this._lastCloseCode = event.code;
+            this._lastCloseReason = event.reason || null;
+          }
+
+          // Clear connection ID on disconnect
+          this._connectionId = null;
+
           // Reject all pending requests
           for (const [requestId, pending] of this.pendingRequests) {
             clearTimeout(pending.timeout);
@@ -149,7 +206,10 @@ export class CloudAdapter {
           }
 
           // Attempt reconnect if not intentional close
+          // Check intentionalDisconnect flag in addition to close code,
+          // because closing during CONNECTING state may not use code 1000
           if (
+            !this.intentionalDisconnect &&
             event.code !== 1000 &&
             this.reconnectAttempts < this.maxReconnectAttempts
           ) {
@@ -182,6 +242,8 @@ export class CloudAdapter {
    * Disconnect from the WebSocket
    */
   disconnect(): void {
+    // Set flag before closing to prevent auto-reconnect
+    this.intentionalDisconnect = true;
     if (this.ws) {
       this.ws.close(1000, "Client disconnect");
       this.ws = null;

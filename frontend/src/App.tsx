@@ -4,7 +4,11 @@ import { Toaster } from "./components/ui/sonner";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
-import { handleOAuthCallback, initElectronAuthListener } from "./lib/auth";
+import {
+  handleOAuthCallback,
+  initElectronAuthListener,
+  getDaydreamUserId,
+} from "./lib/auth";
 import { toast } from "sonner";
 import "./index.css";
 
@@ -92,14 +96,17 @@ function App() {
     );
   }
 
+  // Get user ID for direct cloud mode (sent to cloud for log correlation)
+  const userId = getDaydreamUserId() ?? undefined;
+
   return (
     <CloudStatusProvider>
-      <PipelinesProvider>
-        <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
+      <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY} userId={userId}>
+        <PipelinesProvider>
           <StreamPage />
-        </CloudProvider>
+        </PipelinesProvider>
         <Toaster />
-      </PipelinesProvider>
+      </CloudProvider>
     </CloudStatusProvider>
   );
 }
