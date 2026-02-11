@@ -1131,6 +1131,129 @@ def is_spout_available() -> bool:
     return sys.platform == "win32"
 
 
+@app.get("/api/v1/input-sources")
+async def list_input_source_types():
+    """List available input source types with their availability status."""
+    from scope.core.inputs.ndi import NDIInputSource
+    from scope.core.inputs.spout import SpoutInputSource
+
+    source_classes = [SpoutInputSource, NDIInputSource]
+    sources = []
+
+    for cls in source_classes:
+        sources.append(
+            {
+                "source_id": cls.source_id,
+                "source_name": cls.source_name,
+                "source_description": cls.source_description,
+                "available": cls.is_available(),
+            }
+        )
+
+    return {"input_sources": sources}
+
+
+@app.get("/api/v1/input-sources/{source_type}/sources")
+async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
+    """List discovered sources for a given input source type."""
+    from scope.core.inputs.ndi import NDIInputSource
+    from scope.core.inputs.spout import SpoutInputSource
+
+    source_classes = {
+        NDIInputSource.source_id: NDIInputSource,
+        SpoutInputSource.source_id: SpoutInputSource,
+    }
+
+    source_class = source_classes.get(source_type)
+    if source_class is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown input source type '{source_type}'. "
+            f"Available types: {list(source_classes.keys())}",
+        )
+
+    if not source_class.is_available():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input source '{source_type}' is not available on this system. "
+            f"Required dependencies may not be installed.",
+        )
+
+    try:
+        instance = source_class()
+        try:
+            discovered = instance.list_sources(timeout_ms=timeout_ms)
+            return {
+                "source_type": source_type,
+                "sources": [
+                    {
+                        "name": s.name,
+                        "identifier": s.identifier,
+                        "metadata": s.metadata,
+                    }
+                    for s in discovered
+                ],
+            }
+        finally:
+            instance.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing sources for '{source_type}': {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/resolution")
+async def get_input_source_resolution(
+    source_type: str, identifier: str, timeout_ms: int = Query(5000)
+):
+    """Probe the native resolution of a specific input source."""
+    from scope.core.inputs.ndi import NDIInputSource
+    from scope.core.inputs.spout import SpoutInputSource
+
+    source_classes = {
+        NDIInputSource.source_id: NDIInputSource,
+        SpoutInputSource.source_id: SpoutInputSource,
+    }
+
+    source_class = source_classes.get(source_type)
+    if source_class is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown input source type '{source_type}'.",
+        )
+
+    if not source_class.is_available():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input source '{source_type}' is not available on this system.",
+        )
+
+    try:
+        instance = source_class()
+        try:
+            resolution = instance.get_source_resolution(
+                identifier, timeout_ms=timeout_ms
+            )
+            if resolution is None:
+                raise HTTPException(
+                    status_code=408,
+                    detail=f"Could not determine resolution for '{identifier}' "
+                    f"within {timeout_ms}ms.",
+                )
+            width, height = resolution
+            return {"width": width, "height": height}
+        finally:
+            instance.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error probing resolution for '{source_type}/{identifier}': {e}"
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info(
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),

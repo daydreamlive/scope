@@ -29,6 +29,11 @@ interface InitialParameters {
   images?: string[];
   first_frame_image?: string;
   last_frame_image?: string;
+  input_source?: {
+    enabled: boolean;
+    source_type: string;
+    source_name: string;
+  };
 }
 
 interface UseUnifiedWebRTCOptions {

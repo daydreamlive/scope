@@ -47,13 +47,21 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused_lock = threading.Lock()
         self._last_frame = None
 
-        # Spout input mode - when enabled, frames come from Spout instead of WebRTC
+        # Server-side input modes - when enabled, frames come from the backend
+        # instead of WebRTC (no browser video track needed)
         self._spout_receiver_enabled = False
+        self._input_source_enabled = False
         if initial_parameters:
             spout_receiver = initial_parameters.get("spout_receiver")
             if spout_receiver and spout_receiver.get("enabled"):
                 self._spout_receiver_enabled = True
                 logger.info("Spout input mode enabled")
+            input_source = initial_parameters.get("input_source")
+            if input_source and input_source.get("enabled"):
+                self._input_source_enabled = True
+                logger.info(
+                    f"Input source mode enabled: {input_source.get('source_type')}"
+                )
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
@@ -123,8 +131,12 @@ class VideoProcessingTrack(MediaStreamTrack):
         # Lazy initialization on first call
         self.initialize_output_processing()
 
-        # Keep running while either WebRTC input is active OR Spout input is enabled
-        while self.input_task_running or self._spout_receiver_enabled:
+        # Keep running while any input source is active
+        while (
+            self.input_task_running
+            or self._spout_receiver_enabled
+            or self._input_source_enabled
+        ):
             try:
                 # Update FPS: use the FPS from the pipeline chain
                 if self.frame_processor:
@@ -174,6 +186,7 @@ class VideoProcessingTrack(MediaStreamTrack):
     async def stop(self):
         self.input_task_running = False
         self._spout_receiver_enabled = False
+        self._input_source_enabled = False
 
         if self.input_task is not None:
             self.input_task.cancel()
