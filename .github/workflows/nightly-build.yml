@@ -1,0 +1,67 @@
+name: Nightly Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual triggers
+
+jobs:
+  build:
+    name: Build Windows (Nightly)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: 'npm'
+          cache-dependency-path: |
+            app/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Install app dependencies
+        working-directory: ./app
+        run: npm ci
+
+      - name: Build application
+        working-directory: ./app
+        run: npm run compile
+
+      - name: Build Electron app (Windows)
+        working-directory: ./app
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Upload to Nightly Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nightly
+          name: "Nightly Build (latest main)"
+          body: |
+            **Automated build from the latest `main` branch.**
+
+            This is an unsigned development build. Windows SmartScreen may show a warning — click "More info" → "Run anyway" to proceed.
+
+            Built from commit: ${{ github.sha }}
+            Date: ${{ github.event.head_commit.timestamp }}
+
+            ⚠️ This is NOT a stable release. Use only if the latest official release has issues.
+          prerelease: true
+          files: |
+            app/dist/*.exe
+            app/dist/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
