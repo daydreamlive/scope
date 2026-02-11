@@ -97,9 +97,7 @@ export function InputAndControlsPanel({
   const firstFrameImage = settings.firstFrameImage;
   const lastFrameImage = settings.lastFrameImage;
   const extensionMode = settings.extensionMode || "firstframe";
-  const configSchema = pipeline?.configSchema as
-    | ConfigSchemaLike
-    | undefined;
+  const configSchema = pipeline?.configSchema as ConfigSchemaLike | undefined;
   const schemaFieldOverrides = settings.schemaFieldOverrides ?? {};
   const isMultiMode = (pipeline?.supportedModes?.length ?? 0) > 1;
 
@@ -154,28 +152,26 @@ export function InputAndControlsPanel({
                   : "Select images to send to the pipeline for conditioning."
               }
             />
-            {actions.handleSendHints &&
-              refImages &&
-              refImages.length > 0 && (
-                <div className="flex items-center justify-end mt-2">
-                  <Button
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      actions.handleSendHints(refImages.filter(img => img));
-                    }}
-                    disabled={isDownloading || !isStreaming}
-                    size="sm"
-                    className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={
-                      !isStreaming
-                        ? "Start streaming to send hints"
-                        : "Submit all reference images"
-                    }
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
+            {actions.handleSendHints && refImages && refImages.length > 0 && (
+              <div className="flex items-center justify-end mt-2">
+                <Button
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    actions.handleSendHints(refImages.filter(img => img));
+                  }}
+                  disabled={isDownloading || !isStreaming}
+                  size="sm"
+                  className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !isStreaming
+                      ? "Start streaming to send hints"
+                      : "Submit all reference images"
+                  }
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

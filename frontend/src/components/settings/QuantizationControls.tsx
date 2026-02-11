@@ -45,9 +45,7 @@ export function QuantizationControls({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
-                <SelectItem value="fp8_e4m3fn">
-                  fp8_e4m3fn (Dynamic)
-                </SelectItem>
+                <SelectItem value="fp8_e4m3fn">fp8_e4m3fn (Dynamic)</SelectItem>
               </SelectContent>
             </Select>
           </div>

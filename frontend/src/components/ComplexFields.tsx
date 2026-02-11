@@ -130,9 +130,7 @@ export function SchemaComplexField({
         vaceEnabled={ctx.vaceEnabled ?? false}
         onVaceEnabledChange={ctx.onVaceEnabledChange ?? (() => {})}
         vaceUseInputVideo={ctx.vaceUseInputVideo ?? false}
-        onVaceUseInputVideoChange={
-          ctx.onVaceUseInputVideoChange ?? (() => {})
-        }
+        onVaceUseInputVideoChange={ctx.onVaceUseInputVideoChange ?? (() => {})}
         vaceContextScaleSlider={ctx.vaceContextScaleSlider}
         quantization={ctx.quantization ?? null}
         inputMode={ctx.inputMode}
