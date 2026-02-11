@@ -55,7 +55,7 @@ export interface SettingsState {
   noiseScale?: number;
   noiseController?: boolean;
   manageCache?: boolean;
-  quantization?: "fp8_e4m3fn" | null;
+  quantization?: "fp8_e4m3fn" | "nvfp4" | null;
   kvCacheAttentionBias?: number;
   paused?: boolean;
   loras?: LoRAConfig[];

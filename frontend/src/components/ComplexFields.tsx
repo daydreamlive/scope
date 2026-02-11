@@ -49,7 +49,7 @@ export interface SchemaComplexFieldContext {
   vaceUseInputVideo?: boolean;
   onVaceUseInputVideoChange?: (enabled: boolean) => void;
   vaceContextScaleSlider?: SliderState;
-  quantization?: "fp8_e4m3fn" | null;
+  quantization?: "fp8_e4m3fn" | "nvfp4" | null;
   loras?: LoRAConfig[];
   onLorasChange?: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
@@ -63,7 +63,7 @@ export interface SchemaComplexFieldContext {
   noiseScaleSlider?: SliderState;
   noiseController?: boolean;
   onNoiseControllerChange?: (enabled: boolean) => void;
-  onQuantizationChange?: (q: "fp8_e4m3fn" | null) => void;
+  onQuantizationChange?: (q: "fp8_e4m3fn" | "nvfp4" | null) => void;
   inputMode?: "text" | "video";
   supportsNoiseControls?: boolean;
   supportsQuantization?: boolean;
@@ -156,7 +156,7 @@ export function SchemaComplexField({
             <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
               <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
               <p className="text-xs text-amber-600 dark:text-amber-500">
-                VACE is incompatible with FP8 quantization. Please disable
+                VACE is incompatible with quantization. Please disable
                 quantization to use VACE.
               </p>
             </div>
@@ -482,14 +482,14 @@ export function SchemaComplexField({
                 value={ctx.quantization ?? "none"}
                 onValueChange={v =>
                   ctx.onQuantizationChange?.(
-                    v === "none" ? null : (v as "fp8_e4m3fn")
+                    v === "none" ? null : (v as "fp8_e4m3fn" | "nvfp4")
                   )
                 }
                 disabled={
                   (ctx.isStreaming ?? false) || (ctx.vaceEnabled ?? false)
                 }
               >
-                <SelectTrigger className="w-[140px] h-7">
+                <SelectTrigger className="w-[180px] h-7">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -497,12 +497,15 @@ export function SchemaComplexField({
                   <SelectItem value="fp8_e4m3fn">
                     fp8_e4m3fn (Dynamic)
                   </SelectItem>
+                  <SelectItem value="nvfp4">
+                    nvfp4 (Blackwell)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             {ctx.vaceEnabled && (
               <p className="text-xs text-muted-foreground">
-                Disabled because VACE is enabled. Disable VACE to use FP8
+                Disabled because VACE is enabled. Disable VACE to use
                 quantization.
               </p>
             )}

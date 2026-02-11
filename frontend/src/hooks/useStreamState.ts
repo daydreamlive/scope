@@ -38,7 +38,7 @@ function getFallbackDefaults(mode?: InputMode) {
     noiseController: isVideoMode ? true : undefined,
     defaultTemporalInterpolationSteps: undefined as number | undefined,
     inputMode: effectiveMode,
-    quantization: undefined as "fp8_e4m3fn" | undefined,
+    quantization: undefined as "fp8_e4m3fn" | "nvfp4" | undefined,
   };
 }
 
@@ -125,7 +125,7 @@ export function useStreamState() {
           noiseController,
           defaultTemporalInterpolationSteps,
           inputMode: effectiveMode,
-          quantization: undefined as "fp8_e4m3fn" | undefined,
+          quantization: undefined as "fp8_e4m3fn" | "nvfp4" | undefined,
         };
       }
       // Fallback to derived defaults if schemas not loaded

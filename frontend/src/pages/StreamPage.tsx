@@ -588,7 +588,7 @@ export function StreamPage() {
     });
   };
 
-  const handleQuantizationChange = (quantization: "fp8_e4m3fn" | null) => {
+  const handleQuantizationChange = (quantization: "fp8_e4m3fn" | "nvfp4" | null) => {
     updateSettings({ quantization });
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
