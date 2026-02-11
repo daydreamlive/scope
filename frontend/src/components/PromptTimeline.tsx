@@ -8,22 +8,10 @@ import React, {
 
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
-import {
-  Play,
-  Pause,
-  Circle,
-  Download,
-  Upload,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  ChevronUp,
-  ChevronDown,
-  Trash2,
-  Maximize2,
-  Minimize2,
-} from "lucide-react";
-import { ExportDialog } from "./ExportDialog";
+import { ZoomIn, ZoomOut } from "lucide-react";
+import { TimelineHeader } from "./timeline/TimelineHeader";
+import { useTimelineImportExport } from "../hooks/useTimelineImportExport";
+import { useTimelineDragResize } from "../hooks/useTimelineDragResize";
 
 import type { PromptItem } from "../lib/api";
 import type { SettingsState } from "../types";
@@ -31,7 +19,6 @@ import { generateRandomColor } from "../utils/promptColors";
 
 // Timeline constants
 const BASE_PIXELS_PER_SECOND = 20;
-const MIN_DURATION_SECONDS = 0.5;
 const MAX_ZOOM_LEVEL = 4;
 const MIN_ZOOM_LEVEL = 0.25;
 const DEFAULT_VISIBLE_END_TIME = 20;
@@ -51,7 +38,6 @@ const formatTime = (seconds: number): string => {
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
 
-// Helper function to get adjacent colors for color generation
 const getAdjacentColors = (
   prompts: TimelinePrompt[],
   currentIndex: number
@@ -66,7 +52,6 @@ const getAdjacentColors = (
   return adjacentColors;
 };
 
-// Helper function to calculate prompt box position
 const calculatePromptPosition = (
   prompt: TimelinePrompt,
   index: number,
@@ -87,7 +72,6 @@ const calculatePromptPosition = (
   return leftPosition;
 };
 
-// Helper function to get prompt box styling
 const getPromptBoxStyle = (
   prompt: TimelinePrompt,
   leftPosition: number,
@@ -123,16 +107,7 @@ export interface TimelinePrompt {
   temporalInterpolationMethod?: "linear" | "slerp";
 }
 
-// Timeline reset state
 const TIMELINE_RESET_STATE = {
-  prompts: [],
-  currentTime: 0,
-  isPlaying: false,
-  isLive: false,
-  isCollapsed: false,
-  selectedPromptId: null,
-  externalSelectedPromptId: null,
-  selectedTimelinePrompt: null,
   timelineWidth: 800,
   visibleStartTime: 0,
   visibleEndTime: 20,
@@ -182,7 +157,7 @@ export function PromptTimeline({
   onTimeChange,
   onReset,
   onClear,
-  onPromptSubmit: _onPromptSubmit,
+  onPromptSubmit,
   initialPrompt: _initialPrompt,
   selectedPromptId = null,
   onPromptSelect,
@@ -210,20 +185,17 @@ export function PromptTimeline({
   );
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  // Check if live mode is active
   const isLive = useMemo(() => prompts.some(p => p.isLive), [prompts]);
 
-  // Memoized filtered prompts for better performance
   const visiblePrompts = useMemo(() => {
     return prompts.filter(
       prompt =>
-        prompt.startTime !== prompt.endTime && // Exclude 0-length prompt boxes
+        prompt.startTime !== prompt.endTime &&
         prompt.endTime >= visibleStartTime &&
         prompt.startTime <= visibleEndTime
     );
   }, [prompts, visibleStartTime, visibleEndTime]);
 
-  // Calculate timeline metrics
   const pixelsPerSecond = useMemo(
     () => BASE_PIXELS_PER_SECOND * zoomLevel,
     [zoomLevel]
@@ -242,37 +214,42 @@ export function PromptTimeline({
     [visibleTimeRange]
   );
 
-  // Expose scroll function to parent
   useEffect(() => {
     if (onScrollToTime) {
       onScrollToTime(scrollToTime);
     }
   }, [onScrollToTime, scrollToTime]);
 
-  // Reset timeline UI state to initial values
   const resetTimelineUI = useCallback(() => {
-    // Reset UI state
     setTimelineWidth(TIMELINE_RESET_STATE.timelineWidth);
     setVisibleStartTime(TIMELINE_RESET_STATE.visibleStartTime);
     setVisibleEndTime(TIMELINE_RESET_STATE.visibleEndTime);
     setZoomLevel(TIMELINE_RESET_STATE.zoomLevel);
   }, []);
 
-  // Update visible end time when zoom level or timeline width changes
   useEffect(() => {
     setVisibleEndTime(visibleStartTime + visibleTimeRange);
   }, [visibleStartTime, visibleTimeRange]);
 
-  // Auto-scroll timeline during playback to follow the red line
+  // Hook: drag-to-pan + resize
+  const { beginResize, handleTimelineMouseDown, isDraggingRef } =
+    useTimelineDragResize({
+      pixelsPerSecond,
+      visibleStartTime,
+      setVisibleStartTime,
+      prompts,
+      onPromptsChange,
+      isPlaying,
+      timelineRef,
+    });
+
+  // Auto-scroll timeline during playback
   useEffect(() => {
-    // Don't auto-scroll if user is manually dragging or not playing
     if (isDraggingRef.current || !isPlaying) return;
 
     if (currentTime > visibleEndTime - visibleTimeRange * 0.2) {
-      // When the red line gets close to the right edge, scroll forward
       setVisibleStartTime(Math.max(0, currentTime - visibleTimeRange * 0.8));
     } else if (currentTime < visibleStartTime + visibleTimeRange * 0.2) {
-      // When the red line gets close to the left edge, scroll backward
       setVisibleStartTime(Math.max(0, currentTime - visibleTimeRange * 0.2));
     }
   }, [
@@ -281,9 +258,10 @@ export function PromptTimeline({
     visibleEndTime,
     visibleStartTime,
     visibleTimeRange,
+    isDraggingRef,
   ]);
 
-  // Update timeline width when component mounts or resizes
+  // Update timeline width on mount/resize
   useEffect(() => {
     const updateWidth = () => {
       if (timelineRef.current) {
@@ -296,47 +274,12 @@ export function PromptTimeline({
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
 
-  // Resize state
-  const resizeStateRef = useRef<{
-    promptId: string;
-    edge: "left" | "right";
-    startClientX: number;
-    startPrompt: TimelinePrompt;
-    prevPrompt?: TimelinePrompt;
-    nextPrompt?: TimelinePrompt;
-  } | null>(null);
-
-  const beginResize = useCallback(
-    (
-      e: React.MouseEvent,
-      prompt: TimelinePrompt,
-      edge: "left" | "right",
-      prevPrompt?: TimelinePrompt,
-      nextPrompt?: TimelinePrompt
-    ) => {
-      e.stopPropagation();
-      // Only prevent resizing if the stream is actively playing OR if this is a live prompt box
-      if (isPlaying || prompt.isLive) return;
-      resizeStateRef.current = {
-        promptId: prompt.id,
-        edge,
-        startClientX: e.clientX,
-        startPrompt: { ...prompt },
-        prevPrompt: prevPrompt ? { ...prevPrompt } : undefined,
-        nextPrompt: nextPrompt ? { ...nextPrompt } : undefined,
-      };
-      document.body.style.cursor = "col-resize";
-    },
-    [isPlaying]
-  );
-
-  // Memoized time-to-position conversion
+  // Memoized calculations
   const timeToPositionMemo = useCallback(
     (time: number) => timeToPosition(time, visibleStartTime, pixelsPerSecond),
     [visibleStartTime, pixelsPerSecond]
   );
 
-  // Memoized current time cursor position
   const currentTimePosition = useMemo(() => {
     return Math.max(
       0,
@@ -371,34 +314,27 @@ export function PromptTimeline({
     return markers;
   }, [visibleEndTime, visibleStartTime, pixelsPerSecond]);
 
+  // Prompt interaction handlers
   const handlePromptClick = useCallback(
     (e: React.MouseEvent, prompt: TimelinePrompt) => {
       e.stopPropagation();
-      // Only allow clicking if not playing (paused/stopped) or if already selected
-      // Live prompts can't be clicked
       if (prompt.isLive) return;
       if (isPlaying && selectedPromptId !== prompt.id) return;
 
-      // Check if this prompt is already selected
       const isCurrentlySelected = selectedPromptId === prompt.id;
 
       if (onPromptSelect) {
-        // If already selected, deselect by passing null; otherwise select this prompt
         onPromptSelect(isCurrentlySelected ? null : prompt.id);
       }
       if (onPromptEdit) {
-        // If already selected, pass null to deselect; otherwise pass the prompt
         onPromptEdit(isCurrentlySelected ? null : prompt);
       }
     },
     [selectedPromptId, onPromptSelect, onPromptEdit, isPlaying]
   );
 
-  // Handle timeline clicks to deselect prompts when clicking on empty areas
   const handleTimelineClick = useCallback(
     (_e: React.MouseEvent) => {
-      // Only deselect if clicking on the timeline background (not on a prompt box)
-      // The prompt boxes will handle their own clicks via handlePromptClick
       if (selectedPromptId && onPromptSelect) {
         onPromptSelect(null);
       }
@@ -409,250 +345,24 @@ export function PromptTimeline({
     [selectedPromptId, onPromptSelect, onPromptEdit]
   );
 
-  const [showExportDialog, setShowExportDialog] = useState(false);
-
-  const handleSaveTimeline = useCallback(() => {
-    // Filter out 0-length prompt boxes and only include prompts array and timing
-    const exportPrompts = prompts
-      .filter(prompt => prompt.startTime !== prompt.endTime) // Exclude 0-length prompt boxes
-      .map(prompt => {
-        const { id, text, isLive, color, ...exportPrompt } = prompt;
-
-        // Always include a prompts array - convert single text to prompts format if needed
-        if (!exportPrompt.prompts && text) {
-          exportPrompt.prompts = [{ text, weight: 100 }];
-        }
-
-        // Suppress unused variable warnings for intentionally excluded fields
-        void id;
-        void text;
-        void isLive;
-        void color;
-        return exportPrompt;
-      });
-
-    const timelineData = {
-      prompts: exportPrompts,
-      settings: settings
-        ? {
-            pipelineId: settings.pipelineId,
-            inputMode: settings.inputMode,
-            resolution: settings.resolution,
-            denoisingSteps: settings.denoisingSteps,
-            noiseScale: settings.noiseScale,
-            noiseController: settings.noiseController,
-            manageCache: settings.manageCache,
-            quantization: settings.quantization,
-            kvCacheAttentionBias: settings.kvCacheAttentionBias,
-            loras: settings.loras,
-            loraMergeStrategy: settings.loraMergeStrategy,
-            schemaFieldOverrides: settings.schemaFieldOverrides,
-            // Exclude paused state as it's runtime-specific
-          }
-        : undefined,
-      version: "2.1", // Updated version to indicate inputMode inclusion
-      exportedAt: new Date().toISOString(),
-    };
-
-    const dataStr = JSON.stringify(timelineData, null, 2);
-    const dataBlob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(dataBlob);
-
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `timeline-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [prompts, settings]);
-
-  const handleExport = useCallback(() => {
-    setShowExportDialog(true);
-  }, []);
-
-  const handleImport = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const content = e.target?.result as string;
-          const timelineData = JSON.parse(content);
-
-          if (timelineData.prompts && Array.isArray(timelineData.prompts)) {
-            // Reset timeline UI state to initial values before importing
-            resetTimelineUI();
-
-            // Assign default values for id, text, isLive, and color when importing
-            const importedPrompts = timelineData.prompts.map(
-              (prompt: Partial<TimelinePrompt>, index: number) => ({
-                ...prompt,
-                id: prompt.id || `imported-${Date.now()}-${index}`,
-                text:
-                  prompt.text ||
-                  (prompt.prompts && prompt.prompts.length > 0
-                    ? prompt.prompts
-                        .map((p: { text: string; weight: number }) => p.text)
-                        .join(", ")
-                    : ""),
-                isLive: prompt.isLive || false,
-                color: prompt.color || generateRandomColor(),
-              })
-            );
-            onPromptsChange(importedPrompts);
-
-            // Adjust visible timeline range to show all imported prompts
-            if (importedPrompts.length > 0) {
-              const maxEndTime = Math.max(
-                ...importedPrompts.map((p: TimelinePrompt) => p.endTime || 0)
-              );
-              // Set visible end time to show all prompts, with minimum of default visible range
-              const newVisibleEndTime = Math.max(
-                maxEndTime + 2, // Add 2 seconds buffer
-                DEFAULT_VISIBLE_END_TIME
-              );
-              setVisibleStartTime(0);
-              setVisibleEndTime(newVisibleEndTime);
-            }
-
-            // Import settings if available and callback is provided
-            if (timelineData.settings && onSettingsImport) {
-              onSettingsImport(timelineData.settings);
-            }
-
-            // Automatically move playhead to beginning after import
-            onTimeChange?.(0);
-
-            // Apply the first prompt from the imported timeline
-            if (importedPrompts.length > 0 && _onPromptSubmit) {
-              const firstPrompt = importedPrompts[0];
-              _onPromptSubmit(firstPrompt.text);
-            }
-          } else {
-            alert("Invalid timeline file format");
-          }
-        } catch (error) {
-          alert("Error reading timeline file");
-          console.error("Import error:", error);
-        }
-      };
-      reader.readAsText(file);
-
-      // Reset the input so the same file can be selected again
-      event.target.value = "";
-    },
-    [
-      onPromptsChange,
-      onSettingsImport,
-      resetTimelineUI,
-      onTimeChange,
-      _onPromptSubmit,
-    ]
-  );
-
-  // Drag-to-pan state
-  const isDraggingRef = useRef(false);
-  const dragStartXRef = useRef(0);
-  const dragStartVisibleStartRef = useRef(0);
-
-  // Handle mouse down on the track to begin panning
-  const handleTimelineMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (!timelineRef.current) return;
-      isDraggingRef.current = true;
-      dragStartXRef.current = e.clientX;
-      dragStartVisibleStartRef.current = visibleStartTime;
-      // Change cursor to grabbing while dragging
-      document.body.style.cursor = "grabbing";
-    },
-    [visibleStartTime]
-  );
-
-  // Global listeners to update panning and finish drag
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      // Resize has priority over panning
-      if (resizeStateRef.current) {
-        const state = resizeStateRef.current;
-        const deltaX = e.clientX - state.startClientX;
-        const deltaSeconds = deltaX / pixelsPerSecond;
-
-        // Find the prompt index directly since prompts are in chronological order
-        const index = prompts.findIndex(p => p.id === state.promptId);
-        if (index === -1) return;
-
-        const current = { ...state.startPrompt };
-        const prev = index > 0 ? prompts[index - 1] : null;
-        const next = index < prompts.length - 1 ? prompts[index + 1] : null;
-
-        if (state.edge === "left") {
-          let newStart = current.startTime + deltaSeconds;
-          const leftBound = prev ? prev.startTime + MIN_DURATION_SECONDS : 0;
-          const rightBound = current.endTime - MIN_DURATION_SECONDS;
-          newStart = Math.max(leftBound, Math.min(newStart, rightBound));
-
-          current.startTime = newStart;
-          if (prev) {
-            // Keep adjacency
-            prev.endTime = newStart;
-          }
-        } else {
-          let newEnd = current.endTime + deltaSeconds;
-          const leftBound = current.startTime + MIN_DURATION_SECONDS;
-          const rightBound = next
-            ? next.endTime - MIN_DURATION_SECONDS
-            : Number.POSITIVE_INFINITY;
-          newEnd = Math.max(leftBound, Math.min(newEnd, rightBound));
-
-          current.endTime = newEnd;
-          if (next) {
-            // Keep adjacency
-            next.startTime = newEnd;
-          }
-        }
-
-        const updated = prompts.map((p, i) => {
-          if (i === index) return current;
-          if (state.edge === "left" && prev && i === index - 1) return prev;
-          if (state.edge === "right" && next && i === index + 1) return next;
-          return p;
-        });
-        onPromptsChange(updated);
-        return;
-      }
-
-      if (!isDraggingRef.current) return;
-      const deltaX = e.clientX - dragStartXRef.current;
-      const deltaSeconds = -deltaX / pixelsPerSecond;
-      const nextStart = Math.max(
-        0,
-        dragStartVisibleStartRef.current + deltaSeconds
-      );
-      setVisibleStartTime(nextStart);
-    };
-
-    const handleMouseUp = () => {
-      if (resizeStateRef.current) {
-        resizeStateRef.current = null;
-        document.body.style.cursor = "";
-        return;
-      }
-      if (isDraggingRef.current) {
-        isDraggingRef.current = false;
-        document.body.style.cursor = "";
-      }
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [pixelsPerSecond, prompts, onPromptsChange]);
+  // Hook: import/export
+  const {
+    showExportDialog,
+    setShowExportDialog,
+    handleExport,
+    handleImport,
+    handleSaveTimeline,
+  } = useTimelineImportExport({
+    prompts,
+    settings,
+    onPromptsChange,
+    onSettingsImport,
+    onTimeChange,
+    onPromptSubmit,
+    resetTimelineUI,
+    setVisibleStartTime,
+    setVisibleEndTime,
+  });
 
   // Zoom functions
   const zoomIn = useCallback(() => {
@@ -666,136 +376,28 @@ export function PromptTimeline({
   return (
     <Card className={`${className}`}>
       <CardContent className={`p-4 ${isCollapsed ? "py-2" : ""}`}>
-        {/* Timeline Header */}
-        <div
-          className={`flex items-center justify-between ${isCollapsed ? "mb-0" : "mb-4"}`}
-        >
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={onPlayPause}
-              disabled={disabled || isLoading || isDownloading}
-              size="sm"
-              variant="outline"
-            >
-              {isPlaying ? (
-                <Pause className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-            </Button>
-            <Button
-              onClick={onReset}
-              disabled={disabled || isLoading || isDownloading}
-              size="sm"
-              variant="outline"
-              title="Reset timeline"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
-            <Button
-              onClick={onRecordingToggle}
-              disabled={disabled || isLoading || isDownloading || isStreaming}
-              size="sm"
-              variant="outline"
-              title={isRecording ? "Stop recording" : "Start recording"}
-              className={
-                isRecording
-                  ? "border-red-500 hover:border-red-400 animate-record-pulse"
-                  : ""
-              }
-            >
-              <Circle
-                className={`h-3.5 w-3.5 ${isRecording ? "fill-red-500 text-red-500" : "fill-muted-foreground text-muted-foreground"}`}
-              />
-            </Button>
-            <Button
-              onClick={onClear}
-              disabled={
-                disabled ||
-                isPlaying ||
-                isStreaming ||
-                isLoading ||
-                isDownloading
-              }
-              size="sm"
-              variant="outline"
-              title="Clear timeline"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex items-center gap-2">
-            {onVideoScaleModeToggle && (
-              <Button
-                onClick={onVideoScaleModeToggle}
-                size="sm"
-                variant="outline"
-                disabled={!isStreaming}
-                title={
-                  videoScaleMode === "fit"
-                    ? "Switch to native resolution"
-                    : "Switch to fit to window"
-                }
-              >
-                {videoScaleMode === "fit" ? (
-                  <Minimize2 className="h-4 w-4" />
-                ) : (
-                  <Maximize2 className="h-4 w-4" />
-                )}
-              </Button>
-            )}
-            <Button
-              onClick={handleExport}
-              disabled={disabled || isLoading || isDownloading}
-              size="sm"
-              variant="outline"
-            >
-              <Upload className="h-4 w-4 mr-1" />
-              Export
-            </Button>
-            <ExportDialog
-              open={showExportDialog}
-              onClose={() => setShowExportDialog(false)}
-              onSaveGeneration={() => {
-                if (onSaveGeneration) {
-                  onSaveGeneration();
-                }
-              }}
-              onSaveTimeline={handleSaveTimeline}
-              isRecording={isRecording}
-            />
-            <div className="relative">
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImport}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={disabled || isStreaming || isLoading || isDownloading}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={disabled || isStreaming || isLoading || isDownloading}
-              >
-                <Download className="h-4 w-4 mr-1" />
-                Import
-              </Button>
-            </div>
-            <Button
-              onClick={() => onCollapseToggle?.(!isCollapsed)}
-              size="sm"
-              variant="outline"
-              disabled={isLoading || isDownloading}
-              title={isCollapsed ? "Expand timeline" : "Collapse timeline"}
-            >
-              {isCollapsed ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronUp className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        </div>
+        <TimelineHeader
+          isPlaying={isPlaying}
+          isCollapsed={isCollapsed}
+          disabled={disabled}
+          isLoading={isLoading}
+          isDownloading={isDownloading}
+          isStreaming={isStreaming}
+          isRecording={isRecording}
+          videoScaleMode={videoScaleMode}
+          showExportDialog={showExportDialog}
+          onPlayPause={onPlayPause}
+          onReset={onReset}
+          onRecordingToggle={onRecordingToggle}
+          onClear={onClear}
+          onVideoScaleModeToggle={onVideoScaleModeToggle}
+          onExport={handleExport}
+          onCloseExportDialog={() => setShowExportDialog(false)}
+          onSaveGeneration={onSaveGeneration}
+          onSaveTimeline={handleSaveTimeline}
+          onImport={handleImport}
+          onCollapseToggle={onCollapseToggle}
+        />
 
         {/* Timeline */}
         {!isCollapsed && (
@@ -821,11 +423,11 @@ export function PromptTimeline({
             {/* Timeline track */}
             <div
               className="relative bg-muted rounded-lg border overflow-hidden cursor-grab w-full"
-              style={{ height: "80px" }} // Compact height for timeline display
+              style={{ height: "80px" }}
               onClick={handleTimelineClick}
               onMouseDown={handleTimelineMouseDown}
             >
-              {/* Zoom controls positioned at bottom right */}
+              {/* Zoom controls */}
               <div className="absolute bottom-2 right-2 flex items-center gap-1 z-50">
                 <Button
                   onClick={zoomOut}
@@ -851,6 +453,7 @@ export function PromptTimeline({
                   <ZoomIn className="h-3 w-3" />
                 </Button>
               </div>
+
               {/* Current time cursor */}
               <div
                 className="absolute top-0 bottom-0 w-1 bg-red-500 z-30 shadow-lg"
@@ -859,7 +462,6 @@ export function PromptTimeline({
                   display: "block",
                 }}
               />
-              {/* Removed debug time overlay */}
 
               {/* Prompt blocks */}
               {visiblePrompts.map((prompt, index) => {
@@ -870,7 +472,6 @@ export function PromptTimeline({
                 const isLiveActive = isLive && currentTime >= prompt.startTime;
                 const isLivePrompt = prompt.isLive;
 
-                // Use the prompt's color, only generate if it doesn't exist
                 let boxColor = prompt.color;
                 if (!boxColor) {
                   const adjacentColors = getAdjacentColors(
@@ -879,7 +480,6 @@ export function PromptTimeline({
                   );
                   boxColor = generateRandomColor(adjacentColors);
 
-                  // Update the prompt with the new color to persist it
                   const updatedPrompt = { ...prompt, color: boxColor };
                   const updatedPrompts = prompts.map(p =>
                     p.id === prompt.id ? updatedPrompt : p
@@ -887,7 +487,6 @@ export function PromptTimeline({
                   onPromptsChange(updatedPrompts);
                 }
 
-                // Calculate position - boxes should be adjacent with no gaps
                 const leftPosition = calculatePromptPosition(
                   prompt,
                   index,
@@ -902,7 +501,6 @@ export function PromptTimeline({
                     ? visiblePrompts[index + 1]
                     : undefined;
 
-                // Determine if this prompt box is editable
                 const isEditable = !isPlaying || isSelected || isLivePrompt;
 
                 return (
@@ -964,7 +562,6 @@ export function PromptTimeline({
                     <div className="flex flex-col justify-center h-full">
                       <div className="flex-1 flex flex-col justify-center">
                         {prompt.prompts && prompt.prompts.length > 1 ? (
-                          // Display blend prompts vertically
                           prompt.prompts.map((promptItem, idx) => (
                             <div
                               key={idx}
@@ -974,7 +571,6 @@ export function PromptTimeline({
                             </div>
                           ))
                         ) : (
-                          // Single prompt display
                           <span className="text-xs text-white font-medium truncate">
                             {prompt.text}
                           </span>
