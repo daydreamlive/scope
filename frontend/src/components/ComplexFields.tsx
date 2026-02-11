@@ -499,9 +499,7 @@ export function SchemaComplexField({
                     fp8_e4m3fn (Dynamic)
                   </SelectItem>
                   {ctx.supportsNvfp4 && (
-                    <SelectItem value="nvfp4">
-                      nvfp4 (Blackwell)
-                    </SelectItem>
+                    <SelectItem value="nvfp4">nvfp4 (Blackwell)</SelectItem>
                   )}
                 </SelectContent>
               </Select>

@@ -621,8 +621,8 @@ export function SettingsPanel({
                     <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
                       <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
                       <p className="text-xs text-amber-600 dark:text-amber-500">
-                        VACE is incompatible with quantization. Please
-                        disable quantization to use VACE.
+                        VACE is incompatible with quantization. Please disable
+                        quantization to use VACE.
                       </p>
                     </div>
                   )}
@@ -955,7 +955,9 @@ export function SettingsPanel({
                           value={quantization || "none"}
                           onValueChange={value => {
                             onQuantizationChange?.(
-                              value === "none" ? null : (value as "fp8_e4m3fn" | "nvfp4")
+                              value === "none"
+                                ? null
+                                : (value as "fp8_e4m3fn" | "nvfp4")
                             );
                           }}
                           disabled={isStreaming || vaceEnabled}
