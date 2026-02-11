@@ -16,6 +16,12 @@ from omegaconf import OmegaConf
 from scope.core.config import get_model_file_path, get_models_dir
 
 
+def get_artifact_path(artifact, file_index=0) -> str:
+    """Resolve an artifact to its local file path using the same logic as Scope."""
+    repo_name = artifact.repo_id.split("/")[-1]
+    return str(get_model_file_path(f"{repo_name}/{artifact.files[file_index]}"))
+
+
 @dataclass
 class BenchmarkResult:
     name: str
@@ -207,138 +213,24 @@ def make_inpaint_frames(device, dtype, height, width, frames_per_chunk):
     return frames
 
 
-def run_benchmark_sdv2(
-    name: str,
-    vace_path: str | None,
-    vace_in_dim: int | None,
-    vace_input_frames_fn=None,
-    vace_input_masks_fn=None,
-    extension_mode: str | None = None,
-    first_frame_image: str | None = None,
-    prompt: str = "",
-    height: int = 368,
-    width: int = 640,
-    num_chunks: int = 5,
-    frames_per_chunk: int = 12,
-    warmup_chunks: int = 2,
-    vace_context_scale: float = 1.0,
-) -> BenchmarkResult:
-    """Run a single benchmark configuration for StreamDiffusionV2."""
-    from scope.core.pipelines.streamdiffusionv2.pipeline import (
-        StreamDiffusionV2Pipeline,
-    )
+def make_synthetic_first_frame(height, width):
+    """Create a synthetic first frame image and return its path as a temp file."""
+    import tempfile
 
-    print(f"\n{'=' * 70}")
-    print(f"  {name}")
-    print(f"{'=' * 70}")
+    from PIL import Image
 
-    device = torch.device("cuda")
-    dtype = torch.bfloat16
-
-    script_dir = (
-        Path(__file__).parent.parent
-        / "src"
-        / "scope"
-        / "core"
-        / "pipelines"
-        / "streamdiffusionv2"
-    )
-
-    pipeline_config = OmegaConf.create(
-        {
-            "model_dir": str(get_models_dir()),
-            "generator_path": str(
-                get_model_file_path("StreamDiffusionV2/wan_causal_dmd_v2v/model.pt")
-            ),
-            "vace_path": vace_path,
-            "text_encoder_path": str(
-                get_model_file_path(
-                    "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                )
-            ),
-            "tokenizer_path": str(
-                get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
-            ),
-            "model_config": OmegaConf.load(script_dir / "model.yaml"),
-            "height": height,
-            "width": width,
-            "vae_type": "tae",
-        }
-    )
-
-    if vace_in_dim is not None:
-        if "base_model_kwargs" not in pipeline_config.model_config:
-            OmegaConf.update(pipeline_config, "model_config.base_model_kwargs", {})
-        pipeline_config.model_config.base_model_kwargs["vace_in_dim"] = vace_in_dim
-
-    torch.cuda.reset_peak_memory_stats()
-    torch.cuda.empty_cache()
-
-    pipeline = StreamDiffusionV2Pipeline(pipeline_config, device=device, dtype=dtype)
-    print(f"  Pipeline loaded. VACE: {'enabled' if vace_path else 'disabled'}")
-
-    result = BenchmarkResult(name=name, frames_per_chunk=frames_per_chunk)
-    total_chunks = warmup_chunks + num_chunks
-
-    for chunk_idx in range(total_chunks):
-        is_warmup = chunk_idx < warmup_chunks
-        is_first = chunk_idx == 0
-
-        kwargs = {
-            "prompts": [{"text": prompt, "weight": 100}],
-        }
-
-        if vace_path:
-            kwargs["vace_context_scale"] = vace_context_scale
-
-        if vace_input_frames_fn is not None and vace_path:
-            kwargs["vace_input_frames"] = vace_input_frames_fn(
-                device, dtype, height, width, frames_per_chunk
+    img = Image.new("RGB", (width, height))
+    pixels = img.load()
+    for y in range(height):
+        for x in range(width):
+            pixels[x, y] = (
+                int(255 * x / width),
+                int(255 * y / height),
+                128,
             )
-
-        if vace_input_masks_fn is not None and vace_path:
-            kwargs["vace_input_masks"] = vace_input_masks_fn(
-                device, dtype, height, width, frames_per_chunk
-            )
-
-        if extension_mode is not None and vace_path and is_first:
-            kwargs["extension_mode"] = extension_mode
-            if first_frame_image:
-                kwargs["first_frame_image"] = first_frame_image
-
-        torch.cuda.synchronize()
-        start = time.perf_counter()
-
-        result_dict = pipeline(**kwargs)
-        output = result_dict["video"] if isinstance(result_dict, dict) else result_dict
-
-        torch.cuda.synchronize()
-        elapsed_ms = (time.perf_counter() - start) * 1000
-
-        num_frames = output.shape[0]
-        fps = (num_frames / elapsed_ms) * 1000
-
-        label = "WARMUP" if is_warmup else "BENCH"
-        print(
-            f"  [{label}] Chunk {chunk_idx}: {elapsed_ms:.0f}ms, {fps:.1f} fps ({num_frames} frames)"
-        )
-
-        if not is_warmup:
-            result.latencies_ms.append(elapsed_ms)
-            result.fps_values.append(fps)
-
-    result.peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
-
-    print(
-        f"\n  Results: avg {result.avg_latency_ms:.0f}ms, avg {result.avg_fps:.1f} fps, peak {result.peak_fps:.1f} fps"
-    )
-    print(f"  Peak VRAM: {result.peak_vram_mb:.0f} MB")
-
-    del pipeline
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    return result
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    img.save(tmp.name)
+    return tmp.name
 
 
 def main():
@@ -359,9 +251,9 @@ def main():
     print(f"  Chunks: {warmup_chunks} warmup + {num_chunks} measured")
     print(f"  Frames/chunk: {frames_per_chunk}")
 
-    vace_path = str(
-        get_model_file_path("Wan2.1-VACE-1.3B/diffusion_pytorch_model.safetensors")
-    )
+    from scope.core.pipelines.common_artifacts import VACE_ARTIFACT
+
+    vace_path = get_artifact_path(VACE_ARTIFACT)
 
     results = []
 
@@ -413,70 +305,16 @@ def main():
         )
     )
 
-    # 4. VACE + Extension (firstframe)
-    # Use a simple test image for the first frame
-    first_frame = "frontend/public/assets/woman1.jpg"
-    first_frame_path = Path(__file__).parent.parent / first_frame
-    if first_frame_path.exists():
-        results.append(
-            run_benchmark(
-                name="LongLive + Extension (I2V)",
-                vace_path=vace_path,
-                vace_in_dim=96,
-                extension_mode="firstframe",
-                first_frame_image=str(first_frame_path),
-                prompt="",
-                height=height,
-                width=width,
-                num_chunks=num_chunks,
-                warmup_chunks=warmup_chunks,
-                frames_per_chunk=frames_per_chunk,
-            )
-        )
-    else:
-        print(f"\n  Skipping extension test: {first_frame_path} not found")
-
-    # ===== StreamDiffusionV2 =====
-    # 5. SDV2 Baseline
+    # 4. VACE + Extension (firstframe) - synthetic test image
+    first_frame_path = make_synthetic_first_frame(height, width)
     results.append(
-        run_benchmark_sdv2(
-            name="SDV2 Baseline (no VACE)",
-            vace_path=None,
-            vace_in_dim=None,
-            prompt="a beautiful landscape with mountains and clouds",
-            height=height,
-            width=width,
-            num_chunks=num_chunks,
-            warmup_chunks=warmup_chunks,
-            frames_per_chunk=frames_per_chunk,
-        )
-    )
-
-    # 6. SDV2 + Depth Control
-    results.append(
-        run_benchmark_sdv2(
-            name="SDV2 + Depth Control",
+        run_benchmark(
+            name="LongLive + Extension (I2V)",
             vace_path=vace_path,
             vace_in_dim=96,
-            vace_input_frames_fn=make_depth_frames,
-            prompt="a beautiful landscape with mountains and clouds",
-            height=height,
-            width=width,
-            num_chunks=num_chunks,
-            warmup_chunks=warmup_chunks,
-            frames_per_chunk=frames_per_chunk,
-        )
-    )
-
-    # 7. SDV2 + Inpainting
-    results.append(
-        run_benchmark_sdv2(
-            name="SDV2 + Inpainting",
-            vace_path=vace_path,
-            vace_in_dim=96,
-            vace_input_frames_fn=make_inpaint_frames,
-            vace_input_masks_fn=make_inpaint_mask,
-            prompt="a fireball",
+            extension_mode="firstframe",
+            first_frame_image=first_frame_path,
+            prompt="",
             height=height,
             width=width,
             num_chunks=num_chunks,

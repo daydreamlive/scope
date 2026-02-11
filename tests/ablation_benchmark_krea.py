@@ -5,6 +5,7 @@ Records: per-chunk latency, FPS, peak VRAM. Saves output videos.
 """
 
 import gc
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,14 @@ import torch
 from omegaconf import OmegaConf
 
 from scope.core.config import get_model_file_path, get_models_dir
+from scope.core.pipelines.common_artifacts import VACE_14B_ARTIFACT
+from scope.core.pipelines.krea_realtime_video.schema import KreaRealtimeVideoConfig
+
+
+def get_artifact_path(artifact, file_index=0) -> str:
+    """Resolve an artifact to its local file path using the same logic as Scope."""
+    repo_name = artifact.repo_id.split("/")[-1]
+    return str(get_model_file_path(f"{repo_name}/{artifact.files[file_index]}"))
 
 
 @dataclass
@@ -61,6 +70,24 @@ def make_inpaint_frames(device, dtype, height, width, frames_per_chunk):
         1, 3, frames_per_chunk, height, width, device=device, dtype=dtype
     )
     return frames.clamp(-1, 1)
+
+
+def make_synthetic_first_frame(height, width):
+    """Create a synthetic first frame image and return its path as a temp file."""
+    from PIL import Image
+
+    img = Image.new("RGB", (width, height))
+    pixels = img.load()
+    for y in range(height):
+        for x in range(width):
+            pixels[x, y] = (
+                int(255 * x / width),
+                int(255 * y / height),
+                128,
+            )
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    img.save(tmp.name)
+    return tmp.name
 
 
 def save_video(frames_list, output_path, fps=16):
@@ -228,9 +255,9 @@ def main():
     print("  Krea Realtime Video (14B) Ablation Benchmark")
     print("=" * 70)
     print(f"  GPU: {torch.cuda.get_device_name()}")
-    print(
-        f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB"
-    )
+
+    total_vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    print(f"  VRAM: {total_vram_gb:.1f} GB")
 
     # Small resolution to fit 14B model in VRAM
     height, width = 320, 576
@@ -242,9 +269,16 @@ def main():
     print(f"  Chunks: {warmup_chunks} warmup + {num_chunks} measured")
     print(f"  Frames/chunk: {frames_per_chunk}")
 
-    vace_path = str(
-        get_model_file_path("WanVideo_comfy/Wan2_1-VACE_module_14B_bf16.safetensors")
-    )
+    vace_path = get_artifact_path(VACE_14B_ARTIFACT)
+
+    # VACE requires VRAM above the recommended quantization threshold
+    # (e.g. 40GB for Krea) — below that, FP8 is needed and VACE is not supported
+    vram_threshold = KreaRealtimeVideoConfig.recommended_quantization_vram_threshold
+    vace_supported = vram_threshold is None or total_vram_gb >= vram_threshold
+    if not vace_supported:
+        print(
+            f"  VACE: skipped ({total_vram_gb:.0f} GB VRAM < {vram_threshold:.0f} GB required)"
+        )
 
     output_dir = Path(__file__).parent / "ablation_krea_output"
     output_dir.mkdir(exist_ok=True)
@@ -266,48 +300,47 @@ def main():
         )
     )
 
-    # 2. VACE + Depth Control
-    results.append(
-        run_krea(
-            "Krea + Depth Control",
-            vace_path=vace_path,
-            vace_input_frames_fn=make_depth_frames,
-            prompt="a beautiful landscape with mountains and clouds",
-            height=height,
-            width=width,
-            num_chunks=num_chunks,
-            warmup_chunks=warmup_chunks,
-            frames_per_chunk=frames_per_chunk,
-            output_dir=output_dir,
+    if vace_supported:
+        # 2. VACE + Depth Control
+        results.append(
+            run_krea(
+                "Krea + Depth Control",
+                vace_path=vace_path,
+                vace_input_frames_fn=make_depth_frames,
+                prompt="a beautiful landscape with mountains and clouds",
+                height=height,
+                width=width,
+                num_chunks=num_chunks,
+                warmup_chunks=warmup_chunks,
+                frames_per_chunk=frames_per_chunk,
+                output_dir=output_dir,
+            )
         )
-    )
 
-    # 3. VACE + Inpainting
-    results.append(
-        run_krea(
-            "Krea + Inpainting",
-            vace_path=vace_path,
-            vace_input_frames_fn=make_inpaint_frames,
-            vace_input_masks_fn=make_inpaint_mask,
-            prompt="a fireball",
-            height=height,
-            width=width,
-            num_chunks=num_chunks,
-            warmup_chunks=warmup_chunks,
-            frames_per_chunk=frames_per_chunk,
-            output_dir=output_dir,
+        # 3. VACE + Inpainting
+        results.append(
+            run_krea(
+                "Krea + Inpainting",
+                vace_path=vace_path,
+                vace_input_frames_fn=make_inpaint_frames,
+                vace_input_masks_fn=make_inpaint_mask,
+                prompt="a fireball",
+                height=height,
+                width=width,
+                num_chunks=num_chunks,
+                warmup_chunks=warmup_chunks,
+                frames_per_chunk=frames_per_chunk,
+                output_dir=output_dir,
+            )
         )
-    )
 
-    # 4. VACE + Extension (I2V)
-    first_frame = "frontend/public/assets/woman1.jpg"
-    first_frame_path = Path(__file__).parent.parent / first_frame
-    if first_frame_path.exists():
+        # 4. VACE + Extension (I2V) - synthetic test image
+        first_frame_path = make_synthetic_first_frame(height, width)
         results.append(
             run_krea(
                 "Krea + Extension (I2V)",
                 vace_path=vace_path,
-                first_frame_image=str(first_frame_path),
+                first_frame_image=first_frame_path,
                 prompt="",
                 height=height,
                 width=width,
@@ -317,8 +350,6 @@ def main():
                 output_dir=output_dir,
             )
         )
-    else:
-        print(f"\n  Skipping extension test: {first_frame_path} not found")
 
     # Print summary table
     print("\n\n" + "=" * 70)
