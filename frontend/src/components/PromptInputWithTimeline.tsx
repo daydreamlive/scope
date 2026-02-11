@@ -139,25 +139,25 @@ export function PromptInputWithTimeline({
   // Hook: timeline resets
   const { handleRewind, handleEnhancedDisconnect, resetTimelineCompletely } =
     useTimelineResets({
-    prompts,
-    setPrompts,
-    currentTime,
-    updateCurrentTime,
-    isPlaying,
-    isActuallyPlaying,
-    pausePlayback,
-    startPlayback,
-    togglePlayback,
-    resetPlayback,
-    scrollToTimeFn,
-    isLive,
-    setIsLive,
-    onLiveStateChange,
-    selectedPromptId,
-    setSelectedPromptId,
-    onPromptSubmit,
-    onPromptItemsSubmit,
-  });
+      prompts,
+      setPrompts,
+      currentTime,
+      updateCurrentTime,
+      isPlaying,
+      isActuallyPlaying,
+      pausePlayback,
+      startPlayback,
+      togglePlayback,
+      resetPlayback,
+      scrollToTimeFn,
+      isLive,
+      setIsLive,
+      onLiveStateChange,
+      selectedPromptId,
+      setSelectedPromptId,
+      onPromptSubmit,
+      onPromptItemsSubmit,
+    });
 
   // Hook: playback control
   const { handlePlayPause } = usePlaybackControl({

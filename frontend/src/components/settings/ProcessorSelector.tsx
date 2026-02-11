@@ -52,9 +52,7 @@ export function ProcessorSelector({
         />
         <Select
           value={selectedIds.length > 0 ? selectedIds[0] : "none"}
-          onValueChange={value =>
-            onChange(value === "none" ? [] : [value])
-          }
+          onValueChange={value => onChange(value === "none" ? [] : [value])}
           disabled={disabled}
         >
           <SelectTrigger className="w-[140px] h-7">

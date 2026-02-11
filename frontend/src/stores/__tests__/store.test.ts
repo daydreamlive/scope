@@ -63,9 +63,7 @@ describe("timelineSlice", () => {
   });
 
   it("sets timeline prompts", () => {
-    const prompts = [
-      { id: "1", text: "test", startTime: 0, endTime: 5 },
-    ];
+    const prompts = [{ id: "1", text: "test", startTime: 0, endTime: 5 }];
     useAppStore.getState().setTimelinePrompts(prompts);
     expect(useAppStore.getState().timelinePrompts).toEqual(prompts);
   });
@@ -92,7 +90,9 @@ describe("videoSlice", () => {
   });
 
   it("sets custom video resolution", () => {
-    useAppStore.getState().setCustomVideoResolution({ width: 1920, height: 1080 });
+    useAppStore
+      .getState()
+      .setCustomVideoResolution({ width: 1920, height: 1080 });
     expect(useAppStore.getState().customVideoResolution).toEqual({
       width: 1920,
       height: 1080,

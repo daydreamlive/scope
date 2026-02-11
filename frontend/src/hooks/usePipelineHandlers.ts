@@ -37,8 +37,13 @@ interface UsePipelineHandlersParams {
 }
 
 export function usePipelineHandlers(params: UsePipelineHandlersParams) {
-  const { sendParameterUpdate, isStreaming, stopStream, switchMode, timelineRef } =
-    params;
+  const {
+    sendParameterUpdate,
+    isStreaming,
+    stopStream,
+    switchMode,
+    timelineRef,
+  } = params;
 
   const { pipelines, refreshPipelines } = usePipelinesContext();
   const {

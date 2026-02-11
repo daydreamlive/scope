@@ -59,10 +59,7 @@ export function ResolutionControls({
   };
 
   const decrement = (dimension: "height" | "width") => {
-    handleChange(
-      dimension,
-      Math.max(minDimension, resolution[dimension] - 1)
-    );
+    handleChange(dimension, Math.max(minDimension, resolution[dimension] - 1));
   };
 
   return (
@@ -178,9 +175,7 @@ function DimensionInput({
           </Button>
         </div>
       </div>
-      {error && (
-        <p className="text-xs text-red-500 ml-16">{error}</p>
-      )}
+      {error && <p className="text-xs text-red-500 ml-16">{error}</p>}
     </div>
   );
 }
