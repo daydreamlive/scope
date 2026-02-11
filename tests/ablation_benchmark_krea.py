@@ -121,7 +121,6 @@ def run_krea(
     from scope.core.pipelines.krea_realtime_video.pipeline import (
         KreaRealtimeVideoPipeline,
     )
-    from scope.core.pipelines.utils import Quantization
 
     print(f"\n{'=' * 70}")
     print(f"  {name}")
@@ -155,22 +154,21 @@ def run_krea(
             "tokenizer_path": str(
                 get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
             ),
-            "vae_path": str(get_model_file_path("Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")),
+            "vae_path": str(get_model_file_path("Autoencoders/taew2_1.pth")),
             "model_config": OmegaConf.load(script_dir / "model.yaml"),
             "height": height,
             "width": width,
-            "vae_type": "wan",
+            "vae_type": "tae",
         }
     )
 
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.empty_cache()
 
-    # Krea 14B needs FP8 quantization to fit on 32GB VRAM
     pipeline = KreaRealtimeVideoPipeline(
         pipeline_config,
-        quantization=Quantization.FP8_E4M3FN,
-        compile=False,
+        quantization=None,
+        compile=True,
         device=device,
         dtype=dtype,
     )
