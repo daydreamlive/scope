@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { AccountTab } from "./settings/AccountTab";
@@ -7,16 +7,8 @@ import { GeneralTab } from "./settings/GeneralTab";
 import { PluginsTab } from "./settings/PluginsTab";
 import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
-import type { InstalledPlugin } from "@/types/settings";
-import {
-  listPlugins,
-  installPlugin,
-  uninstallPlugin,
-  restartServer,
-  waitForServer,
-  getServerInfo,
-} from "@/lib/api";
-import { toast } from "sonner";
+import { getServerInfo } from "@/lib/api";
+import { usePluginOperations } from "@/hooks/usePluginOperations";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -26,19 +18,6 @@ interface SettingsDialogProps {
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
 }
-
-const isLocalPath = (spec: string): boolean => {
-  const s = spec.trim();
-  return (
-    s.startsWith("/") ||
-    /^[A-Za-z]:[\\/]/.test(s) ||
-    s.startsWith("./") ||
-    s.startsWith(".\\") ||
-    s.startsWith("../") ||
-    s.startsWith("..\\") ||
-    s.startsWith("~/")
-  );
-};
 
 // Electron preload exposes scope API on window
 interface ScopeAPI {
@@ -68,25 +47,21 @@ export function SettingsDialog({
   );
   const [logsDirectory, setLogsDirectory] = useState("~/.daydream-scope/logs");
   const [reportBugOpen, setReportBugOpen] = useState(false);
-  const [pluginInstallPath, setPluginInstallPath] = useState(initialPluginPath);
-  const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
-  const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
-  const [isInstalling, setIsInstalling] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [version, setVersion] = useState<string>("");
   const [gitCommit, setGitCommit] = useState<string>("");
-  // Track install/update/uninstall operations to suppress spurious error toasts
-  const isModifyingPluginsRef = useRef(false);
+
+  const pluginOps = usePluginOperations(refetchPipelines);
 
   // Sync state when dialog opens with initial values from props
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab);
       if (initialPluginPath) {
-        setPluginInstallPath(initialPluginPath);
+        pluginOps.setPluginInstallPath(initialPluginPath);
       }
     }
-  }, [open, initialTab, initialPluginPath]);
+  }, [open, initialTab, initialPluginPath, pluginOps.setPluginInstallPath]);
 
   // Fetch version when dialog opens
   useEffect(() => {
@@ -100,41 +75,12 @@ export function SettingsDialog({
     }
   }, [open]);
 
-  const fetchPlugins = useCallback(async () => {
-    setIsLoadingPlugins(true);
-    try {
-      const response = await listPlugins();
-      setPlugins(
-        response.plugins.map(p => ({
-          name: p.name,
-          version: p.version,
-          author: p.author,
-          description: p.description,
-          source: p.source,
-          editable: p.editable,
-          latest_version: p.latest_version,
-          update_available: p.update_available,
-          package_spec: p.package_spec,
-        }))
-      );
-    } catch (error) {
-      console.error("Failed to fetch plugins:", error);
-      // Don't show error toast during install/update/uninstall operations
-      // as the server may be busy or restarting
-      if (!isModifyingPluginsRef.current) {
-        toast.error("Failed to load plugins");
-      }
-    } finally {
-      setIsLoadingPlugins(false);
-    }
-  }, []);
-
   // Fetch plugins when dialog opens or when switching to plugins tab
   useEffect(() => {
     if (open && activeTab === "plugins") {
-      fetchPlugins();
+      pluginOps.fetchPlugins();
     }
-  }, [open, activeTab, fetchPlugins]);
+  }, [open, activeTab, pluginOps.fetchPlugins]);
 
   const handleModelsDirectoryChange = (value: string) => {
     console.log("Models directory changed:", value);
@@ -144,174 +90,6 @@ export function SettingsDialog({
   const handleLogsDirectoryChange = (value: string) => {
     console.log("Logs directory changed:", value);
     setLogsDirectory(value);
-  };
-
-  const handleBrowseLocalPlugin = async () => {
-    if (window.scope?.browseDirectory) {
-      const path = await window.scope.browseDirectory(
-        "Select Plugin Directory"
-      );
-      if (path) setPluginInstallPath(path);
-    }
-  };
-
-  const handleInstallPlugin = async (packageSpec: string) => {
-    setIsInstalling(true);
-    isModifyingPluginsRef.current = true;
-    try {
-      const response = await installPlugin({
-        package: packageSpec,
-        editable: isLocalPath(packageSpec),
-      });
-      if (response.success) {
-        const pluginName = response.plugin?.name || packageSpec;
-        toast.success(`Installed ${pluginName}. Restarting server...`);
-        setPluginInstallPath("");
-
-        // Optimistically add plugin to local state
-        if (response.plugin) {
-          setPlugins(prev => [
-            ...prev,
-            {
-              name: response.plugin!.name,
-              version: response.plugin!.version,
-              author: response.plugin!.author,
-              description: response.plugin!.description,
-              source: response.plugin!.source,
-              editable: response.plugin!.editable,
-              latest_version: response.plugin!.latest_version,
-              update_available: response.plugin!.update_available,
-              package_spec: response.plugin!.package_spec,
-            },
-          ]);
-        }
-
-        // Trigger restart and wait for server to come back
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted");
-
-        // Sync with server after restart
-        await fetchPlugins();
-        await refetchPipelines();
-      } else {
-        toast.error(response.message);
-      }
-    } catch (error) {
-      console.error("Failed to install plugin:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to install plugin"
-      );
-    } finally {
-      setIsInstalling(false);
-      isModifyingPluginsRef.current = false;
-    }
-  };
-
-  const handleUpdatePlugin = async (
-    pluginName: string,
-    packageSpec: string
-  ) => {
-    setIsInstalling(true);
-    isModifyingPluginsRef.current = true;
-    try {
-      const response = await installPlugin({
-        package: packageSpec,
-        upgrade: true,
-      });
-      if (response.success) {
-        toast.success(`Updated ${pluginName}. Restarting server...`);
-
-        // Optimistically update plugin in local state
-        if (response.plugin) {
-          setPlugins(prev =>
-            prev.map(p =>
-              p.name === pluginName
-                ? {
-                    name: response.plugin!.name,
-                    version: response.plugin!.version,
-                    author: response.plugin!.author,
-                    description: response.plugin!.description,
-                    source: response.plugin!.source,
-                    editable: response.plugin!.editable,
-                    latest_version: response.plugin!.latest_version,
-                    update_available: response.plugin!.update_available,
-                    package_spec: response.plugin!.package_spec,
-                  }
-                : p
-            )
-          );
-        }
-
-        // Trigger restart and wait for server to come back
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted");
-
-        // Sync with server after restart
-        await fetchPlugins();
-        await refetchPipelines();
-      } else {
-        toast.error(response.message);
-      }
-    } catch (error) {
-      console.error("Failed to update plugin:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to update plugin"
-      );
-    } finally {
-      setIsInstalling(false);
-      isModifyingPluginsRef.current = false;
-    }
-  };
-
-  const handleDeletePlugin = async (pluginName: string) => {
-    isModifyingPluginsRef.current = true;
-    try {
-      const response = await uninstallPlugin(pluginName);
-      if (response.success) {
-        toast.success(`Uninstalled ${pluginName}. Restarting server...`);
-
-        // Optimistically remove plugin from local state
-        setPlugins(prev => prev.filter(p => p.name !== pluginName));
-
-        // Trigger restart and wait for server to come back
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted");
-
-        // Sync with server after restart
-        await fetchPlugins();
-        await refetchPipelines();
-      } else {
-        toast.error(response.message);
-      }
-    } catch (error) {
-      console.error("Failed to uninstall plugin:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to uninstall plugin"
-      );
-    } finally {
-      isModifyingPluginsRef.current = false;
-    }
-  };
-
-  const handleReloadPlugin = async (pluginName: string) => {
-    isModifyingPluginsRef.current = true;
-    try {
-      toast.info(`Reloading ${pluginName}. Restarting server...`);
-      const oldStartTime = await restartServer();
-      await waitForServer(oldStartTime);
-      toast.success("Server restarted");
-      await fetchPlugins();
-      await refetchPipelines();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to reload plugin"
-      );
-    } finally {
-      isModifyingPluginsRef.current = false;
-    }
   };
 
   return (
@@ -376,16 +154,16 @@ export function SettingsDialog({
             </TabsContent>
             <TabsContent value="plugins" className="mt-0">
               <PluginsTab
-                plugins={plugins}
-                installPath={pluginInstallPath}
-                onInstallPathChange={setPluginInstallPath}
-                onBrowse={handleBrowseLocalPlugin}
-                onInstall={handleInstallPlugin}
-                onUpdate={handleUpdatePlugin}
-                onDelete={handleDeletePlugin}
-                onReload={handleReloadPlugin}
-                isLoading={isLoadingPlugins}
-                isInstalling={isInstalling}
+                plugins={pluginOps.plugins}
+                installPath={pluginOps.pluginInstallPath}
+                onInstallPathChange={pluginOps.setPluginInstallPath}
+                onBrowse={pluginOps.handleBrowseLocalPlugin}
+                onInstall={pluginOps.handleInstallPlugin}
+                onUpdate={pluginOps.handleUpdatePlugin}
+                onDelete={pluginOps.handleDeletePlugin}
+                onReload={pluginOps.handleReloadPlugin}
+                isLoading={pluginOps.isLoadingPlugins}
+                isInstalling={pluginOps.isInstalling}
               />
             </TabsContent>
           </div>
