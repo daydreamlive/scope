@@ -2,12 +2,12 @@
  * Utility functions for LoRA adapter management
  */
 
-export interface LoRAScaleData {
+interface LoRAScaleData {
   path: string;
   scale: number;
 }
 
-export interface LoadedAdapter {
+interface LoadedAdapter {
   path: string;
   scale: number;
 }

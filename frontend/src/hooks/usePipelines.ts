@@ -1,140 +1,79 @@
-import { useState, useEffect, useCallback } from "react";
-import { getPipelineSchemas } from "../lib/api";
-import { useCloudContext } from "../lib/cloudContext";
+import { useMemo, useCallback } from "react";
+import { usePipelineSchemas } from "./queries/usePipelineSchemas";
 import type { InputMode, PipelineInfo } from "../types";
+import type { PipelineSchemasResponse } from "../lib/api";
+
+function transformSchemas(
+  schemas: PipelineSchemasResponse
+): Record<string, PipelineInfo> {
+  const transformed: Record<string, PipelineInfo> = {};
+  for (const [id, schema] of Object.entries(schemas.pipelines)) {
+    // Check if pipeline supports controller input (has ctrl_input field in schema)
+    const supportsControllerInput =
+      schema.config_schema?.properties?.ctrl_input !== undefined;
+
+    // Check if pipeline supports images input (has images field in schema)
+    const supportsImages =
+      schema.config_schema?.properties?.images !== undefined;
+
+    transformed[id] = {
+      name: schema.name,
+      about: schema.description,
+      supportedModes: schema.supported_modes as InputMode[],
+      defaultMode: schema.default_mode as InputMode,
+      supportsPrompts: schema.supports_prompts,
+      defaultTemporalInterpolationMethod:
+        schema.default_temporal_interpolation_method,
+      defaultTemporalInterpolationSteps:
+        schema.default_temporal_interpolation_steps,
+      defaultSpatialInterpolationMethod:
+        schema.default_spatial_interpolation_method,
+      docsUrl: schema.docs_url ?? undefined,
+      estimatedVram: schema.estimated_vram_gb ?? undefined,
+      requiresModels: schema.requires_models,
+      supportsLoRA: schema.supports_lora,
+      supportsVACE: schema.supports_vace,
+      usage: schema.usage,
+      supportsCacheManagement: schema.supports_cache_management,
+      supportsKvCacheBias: schema.supports_kv_cache_bias,
+      supportsQuantization: schema.supports_quantization,
+      minDimension: schema.min_dimension,
+      recommendedQuantizationVramThreshold:
+        schema.recommended_quantization_vram_threshold ?? undefined,
+      modified: schema.modified,
+      pluginName: schema.plugin_name ?? undefined,
+      supportsControllerInput,
+      supportsImages,
+      configSchema: schema.config_schema,
+    };
+  }
+  return transformed;
+}
 
 export function usePipelines() {
-  const { adapter, isCloudMode, isReady } = useCloudContext();
+  const { data, isLoading, error, refetch } = usePipelineSchemas();
 
-  const [pipelines, setPipelines] = useState<Record<
-    string,
-    PipelineInfo
-  > | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Transform schemas to PipelineInfo format
-  const transformSchemas = useCallback(
-    (schemas: Awaited<ReturnType<typeof getPipelineSchemas>>) => {
-      const transformed: Record<string, PipelineInfo> = {};
-      for (const [id, schema] of Object.entries(schemas.pipelines)) {
-        // Check if pipeline supports controller input (has ctrl_input field in schema)
-        const supportsControllerInput =
-          schema.config_schema?.properties?.ctrl_input !== undefined;
-
-        // Check if pipeline supports images input (has images field in schema)
-        const supportsImages =
-          schema.config_schema?.properties?.images !== undefined;
-
-        transformed[id] = {
-          name: schema.name,
-          about: schema.description,
-          supportedModes: schema.supported_modes as InputMode[],
-          defaultMode: schema.default_mode as InputMode,
-          supportsPrompts: schema.supports_prompts,
-          defaultTemporalInterpolationMethod:
-            schema.default_temporal_interpolation_method,
-          defaultTemporalInterpolationSteps:
-            schema.default_temporal_interpolation_steps,
-          defaultSpatialInterpolationMethod:
-            schema.default_spatial_interpolation_method,
-          docsUrl: schema.docs_url ?? undefined,
-          estimatedVram: schema.estimated_vram_gb ?? undefined,
-          requiresModels: schema.requires_models,
-          supportsLoRA: schema.supports_lora,
-          supportsVACE: schema.supports_vace,
-          usage: schema.usage,
-          supportsCacheManagement: schema.supports_cache_management,
-          supportsKvCacheBias: schema.supports_kv_cache_bias,
-          supportsQuantization: schema.supports_quantization,
-          minDimension: schema.min_dimension,
-          recommendedQuantizationVramThreshold:
-            schema.recommended_quantization_vram_threshold ?? undefined,
-          modified: schema.modified,
-          pluginName: schema.plugin_name ?? undefined,
-          supportsControllerInput,
-          supportsImages,
-          configSchema: schema.config_schema,
-        };
-      }
-      return transformed;
-    },
-    []
+  const pipelines = useMemo(
+    () => (data ? transformSchemas(data) : null),
+    [data]
   );
 
-  // Refresh pipelines (can be called externally)
   const refreshPipelines = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      // Use adapter if in cloud mode, otherwise direct API
-      const schemas =
-        isCloudMode && adapter
-          ? await adapter.api.getPipelineSchemas()
-          : await getPipelineSchemas();
-
-      const transformed = transformSchemas(schemas);
-      setPipelines(transformed);
-      return transformed;
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to fetch pipelines";
-      setError(errorMessage);
-      console.error("Failed to refresh pipelines:", err);
-      throw err;
-    } finally {
-      setIsLoading(false);
+    const result = await refetch();
+    if (result.data) {
+      return transformSchemas(result.data);
     }
-  }, [adapter, isCloudMode, transformSchemas]);
-
-  useEffect(() => {
-    // In cloud mode, wait until adapter is ready
-    if (isCloudMode && !isReady) {
-      return;
-    }
-
-    let mounted = true;
-
-    async function fetchPipelines() {
-      try {
-        setIsLoading(true);
-        setError(null);
-
-        // Use adapter if in cloud mode, otherwise direct API
-        const schemas =
-          isCloudMode && adapter
-            ? await adapter.api.getPipelineSchemas()
-            : await getPipelineSchemas();
-
-        if (!mounted) return;
-
-        const transformed = transformSchemas(schemas);
-        setPipelines(transformed);
-      } catch (err) {
-        if (!mounted) return;
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to fetch pipelines";
-        setError(errorMessage);
-        console.error("Failed to fetch pipelines:", err);
-      } finally {
-        if (mounted) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    fetchPipelines();
-
-    return () => {
-      mounted = false;
-    };
-  }, [adapter, isCloudMode, isReady, transformSchemas]);
+    throw new Error("Failed to refresh pipelines");
+  }, [refetch]);
 
   return {
     pipelines,
     isLoading,
-    error,
+    error: error
+      ? error instanceof Error
+        ? error.message
+        : "Failed to fetch pipelines"
+      : null,
     refreshPipelines,
     refetch: refreshPipelines,
   };

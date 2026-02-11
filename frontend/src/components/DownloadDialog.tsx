@@ -15,37 +15,42 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Progress } from "./ui/progress";
-import type { DownloadProgress, PipelineInfo } from "../types";
+import { useAppStore } from "../stores";
+import { useShallow } from "zustand/react/shallow";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { useStreamContext } from "../contexts/StreamContext";
 
-interface DownloadDialogProps {
-  open: boolean;
-  pipelines: Record<string, PipelineInfo> | null;
-  pipelineIds: string[];
-  currentDownloadPipeline: string | null;
-  onClose: () => void;
-  onDownload: () => void;
-  isDownloading?: boolean;
-  progress?: DownloadProgress | null;
-  error?: string | null;
-  onOpenSettings?: (tab: string) => void;
-}
+export function DownloadDialog() {
+  const {
+    showDownloadDialog,
+    isDownloading,
+    downloadProgress,
+    pipelinesNeedingModels,
+    currentDownloadPipeline,
+    downloadError,
+    setShowDownloadDialog,
+    setOpenSettingsTab,
+  } = useAppStore(
+    useShallow(s => ({
+      showDownloadDialog: s.showDownloadDialog,
+      isDownloading: s.isDownloading,
+      downloadProgress: s.downloadProgress,
+      pipelinesNeedingModels: s.pipelinesNeedingModels,
+      currentDownloadPipeline: s.currentDownloadPipeline,
+      downloadError: s.downloadError,
+      setShowDownloadDialog: s.setShowDownloadDialog,
+      setOpenSettingsTab: s.setOpenSettingsTab,
+    }))
+  );
 
-export function DownloadDialog({
-  open,
-  pipelines,
-  pipelineIds,
-  currentDownloadPipeline,
-  onClose,
-  onDownload,
-  isDownloading = false,
-  progress = null,
-  error = null,
-  onOpenSettings,
-}: DownloadDialogProps) {
-  if (pipelineIds.length === 0) return null;
+  // Read from contexts
+  const { pipelines } = usePipelinesContext();
+  const { actions } = useStreamContext();
+
+  if (pipelinesNeedingModels.length === 0) return null;
 
   // Calculate total estimated VRAM for all pipelines
-  const totalVram = pipelineIds.reduce((sum, id) => {
+  const totalVram = pipelinesNeedingModels.reduce((sum, id) => {
     const info = pipelines?.[id];
     return sum + (info?.estimatedVram ?? 0);
   }, 0);
@@ -55,22 +60,29 @@ export function DownloadDialog({
     ? (pipelines?.[currentDownloadPipeline] ?? null)
     : null;
 
+  const handleOpenSettings = (tab: string) => {
+    setShowDownloadDialog(false);
+    setOpenSettingsTab(tab);
+  };
+
   return (
     <Dialog
-      open={open}
-      onOpenChange={isOpen => !isOpen && !isDownloading && onClose()}
+      open={showDownloadDialog}
+      onOpenChange={isOpen =>
+        !isOpen && !isDownloading && actions.handleDialogClose()
+      }
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {error
+            {downloadError
               ? "Download Failed"
               : isDownloading
                 ? "Downloading Models..."
                 : "Download Models"}
           </DialogTitle>
           <DialogDescription className="mt-3">
-            {error
+            {downloadError
               ? "An error occurred while downloading models."
               : isDownloading
                 ? currentDownloadPipeline
@@ -81,9 +93,9 @@ export function DownloadDialog({
         </DialogHeader>
 
         {/* List of missing pipelines/preprocessors */}
-        {!isDownloading && !error && (
+        {!isDownloading && !downloadError && (
           <div className="space-y-2 mb-3">
-            {pipelineIds.map(id => {
+            {pipelinesNeedingModels.map(id => {
               const info = pipelines?.[id];
               const isPreprocessor =
                 info?.usage?.includes("preprocessor") ?? false;
@@ -113,7 +125,7 @@ export function DownloadDialog({
           </div>
         )}
 
-        {!isDownloading && !error && totalVram > 0 && (
+        {!isDownloading && !downloadError && totalVram > 0 && (
           <p className="text-sm text-muted-foreground mb-3">
             <span className="font-semibold">Total Estimated GPU VRAM:</span>{" "}
             {totalVram} GB
@@ -121,71 +133,74 @@ export function DownloadDialog({
         )}
 
         {/* Progress UI */}
-        {isDownloading && progress && progress.current_artifact && (
-          <div className="">
-            <div className="text-sm text-muted-foreground"></div>
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-muted-foreground font-sm">
-                  {progress.current_artifact}{" "}
-                </span>
-                <span className="text-muted-foreground">
-                  {progress.percentage.toFixed(1)}%
-                </span>
+        {isDownloading &&
+          downloadProgress &&
+          downloadProgress.current_artifact && (
+            <div className="">
+              <div className="text-sm text-muted-foreground"></div>
+              <div>
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-muted-foreground font-sm">
+                    {downloadProgress.current_artifact}{" "}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {downloadProgress.percentage.toFixed(1)}%
+                  </span>
+                </div>
+                <Progress value={downloadProgress.percentage} />
               </div>
-              <Progress value={progress.percentage} />
             </div>
-          </div>
-        )}
+          )}
 
         {/* Loading State (no progress data yet) */}
-        {isDownloading && !progress && !error && (
+        {isDownloading && !downloadProgress && !downloadError && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {/* Error State */}
-        {error && (
+        {downloadError && (
           <div className="rounded border border-destructive/50 bg-destructive/10 p-3">
             <div className="flex items-start gap-2">
               <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
               <div className="space-y-2">
-                <p className="text-sm text-destructive">{error}</p>
-                {error.toLowerCase().includes("authentication") &&
-                  onOpenSettings && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onOpenSettings("api-keys")}
-                      className="gap-1.5"
-                    >
-                      <Settings className="h-3.5 w-3.5" />
-                      Open Settings &gt; API Keys
-                    </Button>
-                  )}
+                <p className="text-sm text-destructive">{downloadError}</p>
+                {downloadError.toLowerCase().includes("authentication") && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenSettings("api-keys")}
+                    className="gap-1.5"
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                    Open Settings &gt; API Keys
+                  </Button>
+                )}
               </div>
             </div>
           </div>
         )}
 
         {/* Show remaining pipelines count if downloading */}
-        {isDownloading && currentDownloadPipeline && pipelineIds.length > 1 && (
-          <p className="text-sm text-muted-foreground">
-            {pipelineIds.length - 1} more pipeline(s) will be downloaded after
-            this one.
-          </p>
-        )}
+        {isDownloading &&
+          currentDownloadPipeline &&
+          pipelinesNeedingModels.length > 1 && (
+            <p className="text-sm text-muted-foreground">
+              {pipelinesNeedingModels.length - 1} more pipeline(s) will be
+              downloaded after this one.
+            </p>
+          )}
 
         <DialogFooter>
-          {error && (
-            <Button onClick={onDownload} className="gap-2">
+          {downloadError && (
+            <Button onClick={actions.handleDownloadModels} className="gap-2">
               <RotateCcw className="h-4 w-4" />
               Retry Download
             </Button>
           )}
-          {!isDownloading && !error && (
-            <Button onClick={onDownload} className="gap-2">
+          {!isDownloading && !downloadError && (
+            <Button onClick={actions.handleDownloadModels} className="gap-2">
               <Download className="h-4 w-4" />
               Download All
             </Button>

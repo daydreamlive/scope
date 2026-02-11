@@ -6,7 +6,7 @@
  * parameter descriptions across the application.
  */
 
-export interface ParameterMetadata {
+interface ParameterMetadata {
   label: string;
   tooltip: string;
 }

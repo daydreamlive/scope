@@ -1,5 +1,3 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
   SelectContent,
@@ -10,34 +8,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Badge } from "./ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "./ui/tooltip";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
-import { Input } from "./ui/input";
-import { Button } from "./ui/button";
-import { Toggle } from "./ui/toggle";
-import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
-import {
-  getResolutionScaleFactor,
-  adjustResolutionForPipeline,
-} from "../lib/utils";
 import { useLocalSliderValue } from "../hooks/useLocalSliderValue";
-import type {
-  PipelineId,
-  LoRAConfig,
-  LoraMergeStrategy,
-  SettingsState,
-  InputMode,
-  PipelineInfo,
-} from "../types";
+import type { PipelineId } from "../types";
 import { LoRAManager } from "./LoRAManager";
 import {
   parseConfigurationFields,
@@ -48,145 +24,87 @@ import {
   type SchemaComplexFieldContext,
 } from "./ComplexFields";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
+import { useAppStore } from "../stores";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { useStreamContext } from "../contexts/StreamContext";
+import { PipelineInfoCard } from "./settings/PipelineInfoCard";
+import { ProcessorSelector } from "./settings/ProcessorSelector";
+import { ResolutionControls } from "./settings/ResolutionControls";
+import { VACEControls } from "./settings/VACEControls";
+import { CacheControls } from "./settings/CacheControls";
+import { NoiseControls } from "./settings/NoiseControls";
+import { SpoutSenderSettings } from "./settings/SpoutSenderSettings";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
 
 interface SettingsPanelProps {
   className?: string;
-  pipelines: Record<string, PipelineInfo> | null;
-  pipelineId: PipelineId;
-  onPipelineIdChange?: (pipelineId: PipelineId) => void;
-  isStreaming?: boolean;
-  isLoading?: boolean;
-  // Resolution is required - parent should always provide from schema defaults
-  resolution: {
-    height: number;
-    width: number;
-  };
-  onResolutionChange?: (resolution: { height: number; width: number }) => void;
-  denoisingSteps?: number[];
-  onDenoisingStepsChange?: (denoisingSteps: number[]) => void;
-  // Default denoising steps for reset functionality - derived from backend schema
-  defaultDenoisingSteps: number[];
-  noiseScale?: number;
-  onNoiseScaleChange?: (noiseScale: number) => void;
-  noiseController?: boolean;
-  onNoiseControllerChange?: (enabled: boolean) => void;
-  manageCache?: boolean;
-  onManageCacheChange?: (enabled: boolean) => void;
-  quantization?: "fp8_e4m3fn" | null;
-  onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
-  kvCacheAttentionBias?: number;
-  onKvCacheAttentionBiasChange?: (bias: number) => void;
-  onResetCache?: () => void;
-  loras?: LoRAConfig[];
-  onLorasChange: (loras: LoRAConfig[]) => void;
-  loraMergeStrategy?: LoraMergeStrategy;
-  // Input mode for conditional rendering of noise controls
-  inputMode?: InputMode;
-  // Whether this pipeline supports noise controls in video mode (schema-derived)
-  supportsNoiseControls?: boolean;
-  // Spout settings
-  spoutSender?: SettingsState["spoutSender"];
-  onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
-  // Whether Spout is available (server-side detection for native Windows, not WSL)
-  spoutAvailable?: boolean;
-  // VACE settings
-  vaceEnabled?: boolean;
-  onVaceEnabledChange?: (enabled: boolean) => void;
-  vaceUseInputVideo?: boolean;
-  onVaceUseInputVideoChange?: (enabled: boolean) => void;
-  vaceContextScale?: number;
-  onVaceContextScaleChange?: (scale: number) => void;
-  // Preprocessors
-  preprocessorIds?: string[];
-  onPreprocessorIdsChange?: (ids: string[]) => void;
-  // Postprocessors
-  postprocessorIds?: string[];
-  onPostprocessorIdsChange?: (ids: string[]) => void;
-  // Dynamic schema-driven primitive fields (key = schema field name)
-  schemaFieldOverrides?: Record<string, unknown>;
-  onSchemaFieldOverrideChange?: (
-    key: string,
-    value: unknown,
-    isRuntimeParam?: boolean
-  ) => void;
-  isCloudMode?: boolean;
 }
 
-export function SettingsPanel({
-  className = "",
-  pipelines,
-  pipelineId,
-  onPipelineIdChange,
-  isStreaming = false,
-  isLoading = false,
-  resolution,
-  onResolutionChange,
-  denoisingSteps = [700, 500],
-  onDenoisingStepsChange,
-  defaultDenoisingSteps,
-  noiseScale = 0.7,
-  onNoiseScaleChange,
-  noiseController = true,
-  onNoiseControllerChange,
-  manageCache = true,
-  onManageCacheChange,
-  quantization = "fp8_e4m3fn",
-  onQuantizationChange,
-  kvCacheAttentionBias = 0.3,
-  onKvCacheAttentionBiasChange,
-  onResetCache,
-  loras = [],
-  onLorasChange,
-  loraMergeStrategy = "permanent_merge",
-  inputMode,
-  supportsNoiseControls = false,
-  spoutSender,
-  onSpoutSenderChange,
-  spoutAvailable = false,
-  vaceEnabled = true,
-  onVaceEnabledChange,
-  vaceUseInputVideo = true,
-  onVaceUseInputVideoChange,
-  vaceContextScale = 1.0,
-  onVaceContextScaleChange,
-  preprocessorIds = [],
-  onPreprocessorIdsChange,
-  postprocessorIds = [],
-  onPostprocessorIdsChange,
-  schemaFieldOverrides,
-  onSchemaFieldOverrideChange,
-  isCloudMode = false,
-}: SettingsPanelProps) {
-  // Local slider state management hooks
-  const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
+export function SettingsPanel({ className = "" }: SettingsPanelProps) {
+  // Read from store
+  const settings = useAppStore(s => s.settings);
+
+  // Read from contexts
+  const { pipelines } = usePipelinesContext();
+  const {
+    actions,
+    updateSettings,
+    isStreaming,
+    isLoading,
+    isCloudMode,
+    spoutAvailable,
+    getDefaults,
+  } = useStreamContext();
+
+  // Derive values with fallbacks (previously computed in StreamPage)
+  const pipelineId = settings.pipelineId;
+  const defaults = getDefaults(pipelineId, settings.inputMode);
+  const resolution = settings.resolution || {
+    height: defaults.height,
+    width: defaults.width,
+  };
+  const denoisingSteps = settings.denoisingSteps ||
+    defaults.denoisingSteps || [750, 250];
+  const defaultDenoisingSteps = defaults.denoisingSteps || [750, 250];
+  const noiseScale = settings.noiseScale ?? 0.7;
+  const noiseController = settings.noiseController ?? true;
+  const manageCache = settings.manageCache ?? true;
+  const quantization =
+    settings.quantization !== undefined ? settings.quantization : "fp8_e4m3fn";
+  const kvCacheAttentionBias = settings.kvCacheAttentionBias ?? 0.3;
+  const loras = settings.loras || [];
+  const loraMergeStrategy = settings.loraMergeStrategy ?? "permanent_merge";
+  const inputMode = settings.inputMode;
+  const supportsNoiseControls = actions.supportsNoiseControls(pipelineId);
+  const spoutSender = settings.spoutSender;
+  const vaceEnabled =
+    settings.vaceEnabled ??
+    (pipelines?.[pipelineId]?.supportsVACE && inputMode !== "video") ??
+    false;
+  const vaceUseInputVideo = settings.vaceUseInputVideo ?? false;
+  const vaceContextScale = settings.vaceContextScale ?? 1.0;
+  const preprocessorIds = settings.preprocessorIds ?? [];
+  const postprocessorIds = settings.postprocessorIds ?? [];
+  const schemaFieldOverrides = settings.schemaFieldOverrides ?? {};
+
+  const noiseScaleSlider = useLocalSliderValue(
+    noiseScale,
+    actions.handleNoiseScaleChange
+  );
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
     kvCacheAttentionBias,
-    onKvCacheAttentionBiasChange
+    actions.handleKvCacheAttentionBiasChange
   );
   const vaceContextScaleSlider = useLocalSliderValue(
     vaceContextScale,
-    onVaceContextScaleChange
+    actions.handleVaceContextScaleChange
   );
-
-  // Validation error states
-  const [heightError, setHeightError] = useState<string | null>(null);
-  const [widthError, setWidthError] = useState<string | null>(null);
-
-  // Check if resolution needs adjustment
-  const scaleFactor = getResolutionScaleFactor(pipelineId);
-  const resolutionWarning =
-    scaleFactor &&
-    (resolution.height % scaleFactor !== 0 ||
-      resolution.width % scaleFactor !== 0)
-      ? `Resolution will be adjusted to ${adjustResolutionForPipeline(pipelineId, resolution).resolution.width}×${adjustResolutionForPipeline(pipelineId, resolution).resolution.height} when starting the stream (must be divisible by ${scaleFactor})`
-      : null;
 
   const handlePipelineIdChange = (value: string) => {
     if (pipelines && value in pipelines) {
-      onPipelineIdChange?.(value as PipelineId);
+      actions.handlePipelineIdChange(value as PipelineId);
     }
   };
 
@@ -194,52 +112,12 @@ export function SettingsPanel({
     dimension: "height" | "width",
     value: number
   ) => {
-    // Get min dimension from pipeline schema, fallback to default
-    const currentPipeline = pipelines?.[pipelineId];
-    const minValue = currentPipeline?.minDimension ?? DEFAULT_MIN_DIMENSION;
-    const maxValue = 2048;
-
-    // Validate and set error state
-    if (value < minValue) {
-      if (dimension === "height") {
-        setHeightError(`Must be at least ${minValue}`);
-      } else {
-        setWidthError(`Must be at least ${minValue}`);
-      }
-    } else if (value > maxValue) {
-      if (dimension === "height") {
-        setHeightError(`Must be at most ${maxValue}`);
-      } else {
-        setWidthError(`Must be at most ${maxValue}`);
-      }
-    } else {
-      // Clear error if valid
-      if (dimension === "height") {
-        setHeightError(null);
-      } else {
-        setWidthError(null);
-      }
-    }
-
-    // Always update the value (even if invalid)
-    onResolutionChange?.({
-      ...resolution,
-      [dimension]: value,
+    updateSettings({
+      resolution: {
+        ...resolution,
+        [dimension]: value,
+      },
     });
-  };
-
-  const incrementResolution = (dimension: "height" | "width") => {
-    const maxValue = 2048;
-    const newValue = Math.min(maxValue, resolution[dimension] + 1);
-    handleResolutionChange(dimension, newValue);
-  };
-
-  const decrementResolution = (dimension: "height" | "width") => {
-    // Get min dimension from pipeline schema, fallback to default
-    const currentPipeline = pipelines?.[pipelineId];
-    const minValue = currentPipeline?.minDimension ?? DEFAULT_MIN_DIMENSION;
-    const newValue = Math.max(minValue, resolution[dimension] - 1);
-    handleResolutionChange(dimension, newValue);
   };
 
   const currentPipeline = pipelines?.[pipelineId];
@@ -250,6 +128,7 @@ export function SettingsPanel({
         <CardTitle className="text-base font-medium">Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+        {/* Pipeline Selector */}
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Pipeline ID</h3>
           <Select
@@ -304,171 +183,26 @@ export function SettingsPanel({
           </Select>
         </div>
 
-        {currentPipeline && (
-          <Card>
-            <CardContent className="p-4 space-y-2">
-              <div>
-                <h4 className="text-sm font-semibold">
-                  {currentPipeline.name}
-                  {currentPipeline.pluginName && (
-                    <span className="font-normal text-muted-foreground">
-                      {" "}
-                      ({currentPipeline.pluginName})
-                    </span>
-                  )}
-                </h4>
-              </div>
+        {currentPipeline && <PipelineInfoCard pipeline={currentPipeline} />}
 
-              <div>
-                {(currentPipeline.about ||
-                  currentPipeline.docsUrl ||
-                  currentPipeline.modified) && (
-                  <div className="flex items-stretch gap-1 h-6">
-                    {currentPipeline.about && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="outline"
-                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
-                            >
-                              <Info className="h-3.5 w-3.5" />
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs">
-                            <p className="text-xs">{currentPipeline.about}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                    {currentPipeline.modified && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="outline"
-                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
-                            >
-                              <Hammer className="h-3.5 w-3.5" />
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>
-                              This pipeline contains modifications based on the
-                              original project.
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                    {currentPipeline.docsUrl && (
-                      <a
-                        href={currentPipeline.docsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block h-full"
-                      >
-                        <Badge
-                          variant="outline"
-                          className="hover:bg-accent cursor-pointer h-full flex items-center"
-                        >
-                          Docs
-                        </Badge>
-                      </a>
-                    )}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <ProcessorSelector
+          type="preprocessor"
+          selectedIds={preprocessorIds}
+          onChange={actions.handlePreprocessorIdsChange}
+          pipelines={pipelines}
+          inputMode={inputMode}
+          disabled={isStreaming || isLoading}
+        />
 
-        {/* Preprocessor Selector */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <LabelWithTooltip
-              label={PARAMETER_METADATA.preprocessor.label}
-              tooltip={PARAMETER_METADATA.preprocessor.tooltip}
-              className="text-sm font-medium"
-            />
-            <Select
-              value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
-              onValueChange={value => {
-                if (value === "none") {
-                  onPreprocessorIdsChange?.([]);
-                } else {
-                  onPreprocessorIdsChange?.([value]);
-                }
-              }}
-              disabled={isStreaming || isLoading}
-            >
-              <SelectTrigger className="w-[140px] h-7">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {Object.entries(pipelines || {})
-                  .filter(([, info]) => {
-                    const isPreprocessor =
-                      info.usage?.includes("preprocessor") ?? false;
-                    if (!isPreprocessor) return false;
-                    if (inputMode) {
-                      return info.supportedModes?.includes(inputMode) ?? false;
-                    }
-                    return true;
-                  })
-                  .map(([pid]) => (
-                    <SelectItem key={pid} value={pid}>
-                      {pid}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+        <ProcessorSelector
+          type="postprocessor"
+          selectedIds={postprocessorIds}
+          onChange={actions.handlePostprocessorIdsChange}
+          pipelines={pipelines}
+          disabled={isStreaming || isLoading}
+        />
 
-        {/* Postprocessor Selector - fixed, always shown */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <LabelWithTooltip
-              label={PARAMETER_METADATA.postprocessor.label}
-              tooltip={PARAMETER_METADATA.postprocessor.tooltip}
-              className="text-sm font-medium"
-            />
-            <Select
-              value={postprocessorIds.length > 0 ? postprocessorIds[0] : "none"}
-              onValueChange={value => {
-                if (value === "none") {
-                  onPostprocessorIdsChange?.([]);
-                } else {
-                  onPostprocessorIdsChange?.([value]);
-                }
-              }}
-              disabled={isStreaming || isLoading}
-            >
-              <SelectTrigger className="w-[140px] h-7">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {Object.entries(pipelines || {})
-                  .filter(([, info]) => {
-                    const isPostprocessor =
-                      info.usage?.includes("postprocessor") ?? false;
-                    if (!isPostprocessor) return false;
-                    return info.supportedModes?.includes("video") ?? false;
-                  })
-                  .map(([pid]) => (
-                    <SelectItem key={pid} value={pid}>
-                      {pid}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* Schema-driven configuration (when configSchema has ui.category===configuration) or legacy */}
+        {/* Schema-driven configuration or legacy controls */}
         {(() => {
           const configSchema = currentPipeline?.configSchema as
             | import("../lib/schemaSettings").ConfigSchemaLike
@@ -493,34 +227,34 @@ export function SettingsPanel({
             const schemaComplexContext: SchemaComplexFieldContext = {
               pipelineId,
               resolution,
-              heightError,
-              widthError,
-              resolutionWarning,
+              heightError: null,
+              widthError: null,
+              resolutionWarning: null,
               minDimension:
                 currentPipeline?.minDimension ?? DEFAULT_MIN_DIMENSION,
               onResolutionChange: handleResolutionChange,
-              decrementResolution,
-              incrementResolution,
+              decrementResolution: () => {},
+              incrementResolution: () => {},
               vaceEnabled,
-              onVaceEnabledChange,
+              onVaceEnabledChange: actions.handleVaceEnabledChange,
               vaceUseInputVideo,
-              onVaceUseInputVideoChange,
+              onVaceUseInputVideoChange: actions.handleVaceUseInputVideoChange,
               vaceContextScaleSlider,
               quantization: quantization ?? null,
               loras,
-              onLorasChange,
+              onLorasChange: actions.handleLorasChange,
               loraMergeStrategy,
               manageCache,
-              onManageCacheChange,
-              onResetCache,
+              onManageCacheChange: actions.handleManageCacheChange,
+              onResetCache: actions.handleResetCache,
               kvCacheAttentionBiasSlider,
               denoisingSteps,
-              onDenoisingStepsChange,
+              onDenoisingStepsChange: actions.handleDenoisingStepsChange,
               defaultDenoisingSteps,
               noiseScaleSlider,
               noiseController,
-              onNoiseControllerChange,
-              onQuantizationChange,
+              onNoiseControllerChange: actions.handleNoiseControllerChange,
+              onQuantizationChange: actions.handleQuantizationChange,
               inputMode,
               supportsNoiseControls,
               supportsQuantization:
@@ -532,7 +266,8 @@ export function SettingsPanel({
               isLoading,
               isCloudMode,
               schemaFieldOverrides,
-              onSchemaFieldOverrideChange,
+              onSchemaFieldOverrideChange:
+                actions.handleSchemaFieldOverrideChange,
             };
             return (
               <>
@@ -558,7 +293,11 @@ export function SettingsPanel({
                     const value = schemaFieldOverrides?.[key] ?? prop.default;
                     const isRuntimeParam = ui.is_load_param === false;
                     const setValue = (v: unknown) =>
-                      onSchemaFieldOverrideChange?.(key, v, isRuntimeParam);
+                      actions.handleSchemaFieldOverrideChange(
+                        key,
+                        v,
+                        isRuntimeParam
+                      );
                     const primitiveDisabled =
                       (isStreaming && !isRuntimeParam) || isLoading;
                     const enumValues =
@@ -595,90 +334,26 @@ export function SettingsPanel({
           return (
             <>
               {currentPipeline?.supportsVACE && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <LabelWithTooltip
-                      label="VACE"
-                      tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, you can use reference images for R2V generation. In Video input mode, a separate toggle controls whether the input video is used for VACE conditioning or for latent initialization. Requires pipeline reload to take effect."
-                      className="text-sm font-medium"
-                    />
-                    <Toggle
-                      pressed={vaceEnabled}
-                      onPressedChange={onVaceEnabledChange || (() => {})}
-                      variant="outline"
-                      size="sm"
-                      className="h-7"
-                      disabled={isStreaming || isLoading}
-                    >
-                      {vaceEnabled ? "ON" : "OFF"}
-                    </Toggle>
-                  </div>
-                  {vaceEnabled && quantization !== null && (
-                    <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
-                      <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
-                      <p className="text-xs text-amber-600 dark:text-amber-500">
-                        VACE is incompatible with FP8 quantization. Please
-                        disable quantization to use VACE.
-                      </p>
-                    </div>
-                  )}
-                  {vaceEnabled && (
-                    <div className="rounded-lg border bg-card p-3 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label="Use Input Video"
-                          tooltip="When enabled in Video input mode, the input video is used for VACE conditioning. When disabled, the input video is used for latent initialization instead, allowing you to use reference images while in Video input mode."
-                          className="text-xs text-muted-foreground"
-                        />
-                        <Toggle
-                          pressed={vaceUseInputVideo}
-                          onPressedChange={
-                            onVaceUseInputVideoChange || (() => {})
-                          }
-                          variant="outline"
-                          size="sm"
-                          className="h-7"
-                          disabled={
-                            isStreaming || isLoading || inputMode !== "video"
-                          }
-                        >
-                          {vaceUseInputVideo ? "ON" : "OFF"}
-                        </Toggle>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <LabelWithTooltip
-                          label="Scale"
-                          tooltip="Scaling factor for VACE hint injection. Higher values make reference images more influential."
-                          className="text-xs text-muted-foreground w-16"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <SliderWithInput
-                            value={vaceContextScaleSlider.localValue}
-                            onValueChange={
-                              vaceContextScaleSlider.handleValueChange
-                            }
-                            onValueCommit={
-                              vaceContextScaleSlider.handleValueCommit
-                            }
-                            min={0}
-                            max={2}
-                            step={0.1}
-                            incrementAmount={0.1}
-                            valueFormatter={vaceContextScaleSlider.formatValue}
-                            inputParser={v => parseFloat(v) || 1.0}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <VACEControls
+                  vaceEnabled={vaceEnabled}
+                  onVaceEnabledChange={actions.handleVaceEnabledChange}
+                  vaceUseInputVideo={vaceUseInputVideo}
+                  onVaceUseInputVideoChange={
+                    actions.handleVaceUseInputVideoChange
+                  }
+                  vaceContextScaleSlider={vaceContextScaleSlider}
+                  quantization={quantization ?? null}
+                  inputMode={inputMode}
+                  isStreaming={isStreaming}
+                  isLoading={isLoading}
+                />
               )}
 
               {currentPipeline?.supportsLoRA && !isCloudMode && (
                 <div className="space-y-4">
                   <LoRAManager
                     loras={loras}
-                    onLorasChange={onLorasChange}
+                    onLorasChange={actions.handleLorasChange}
                     disabled={isLoading}
                     isStreaming={isStreaming}
                     loraMergeStrategy={loraMergeStrategy}
@@ -686,257 +361,48 @@ export function SettingsPanel({
                 </div>
               )}
 
-              {/* Resolution controls - shown for pipelines that support quantization (implies they need resolution config) */}
               {pipelines?.[pipelineId]?.supportsQuantization && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="space-y-2">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <LabelWithTooltip
-                            label={PARAMETER_METADATA.height.label}
-                            tooltip={PARAMETER_METADATA.height.tooltip}
-                            className="text-sm font-medium w-14"
-                          />
-                          <div
-                            className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${heightError ? "border-red-500" : ""}`}
-                          >
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                              onClick={() => decrementResolution("height")}
-                              disabled={isStreaming}
-                            >
-                              <Minus className="h-3.5 w-3.5" />
-                            </Button>
-                            <Input
-                              type="number"
-                              value={resolution.height}
-                              onChange={e => {
-                                const value = parseInt(e.target.value);
-                                if (!isNaN(value)) {
-                                  handleResolutionChange("height", value);
-                                }
-                              }}
-                              disabled={isStreaming}
-                              className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              min={
-                                pipelines?.[pipelineId]?.minDimension ??
-                                DEFAULT_MIN_DIMENSION
-                              }
-                              max={2048}
-                            />
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                              onClick={() => incrementResolution("height")}
-                              disabled={isStreaming}
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-                        {heightError && (
-                          <p className="text-xs text-red-500 ml-16">
-                            {heightError}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <LabelWithTooltip
-                            label={PARAMETER_METADATA.width.label}
-                            tooltip={PARAMETER_METADATA.width.tooltip}
-                            className="text-sm font-medium w-14"
-                          />
-                          <div
-                            className={`flex-1 flex items-center border rounded-full overflow-hidden h-8 ${widthError ? "border-red-500" : ""}`}
-                          >
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                              onClick={() => decrementResolution("width")}
-                              disabled={isStreaming}
-                            >
-                              <Minus className="h-3.5 w-3.5" />
-                            </Button>
-                            <Input
-                              type="number"
-                              value={resolution.width}
-                              onChange={e => {
-                                const value = parseInt(e.target.value);
-                                if (!isNaN(value)) {
-                                  handleResolutionChange("width", value);
-                                }
-                              }}
-                              disabled={isStreaming}
-                              className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              min={
-                                pipelines?.[pipelineId]?.minDimension ??
-                                DEFAULT_MIN_DIMENSION
-                              }
-                              max={2048}
-                            />
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-                              onClick={() => incrementResolution("width")}
-                              disabled={isStreaming}
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-                        {widthError && (
-                          <p className="text-xs text-red-500 ml-16">
-                            {widthError}
-                          </p>
-                        )}
-                      </div>
-                      {resolutionWarning && (
-                        <div className="flex items-start gap-1">
-                          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
-                          <p className="text-xs text-amber-600 dark:text-amber-500">
-                            {resolutionWarning}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <ResolutionControls
+                  pipelineId={pipelineId}
+                  resolution={resolution}
+                  minDimension={
+                    currentPipeline?.minDimension ?? DEFAULT_MIN_DIMENSION
+                  }
+                  isStreaming={isStreaming}
+                  onChange={handleResolutionChange}
+                />
               )}
 
-              {/* Cache management controls - shown for pipelines that support it */}
               {pipelines?.[pipelineId]?.supportsCacheManagement && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="space-y-2 pt-2">
-                      {/* KV Cache bias control - shown for pipelines that support it */}
-                      {pipelines?.[pipelineId]?.supportsKvCacheBias && (
-                        <SliderWithInput
-                          label={PARAMETER_METADATA.kvCacheAttentionBias.label}
-                          tooltip={
-                            PARAMETER_METADATA.kvCacheAttentionBias.tooltip
-                          }
-                          value={kvCacheAttentionBiasSlider.localValue}
-                          onValueChange={
-                            kvCacheAttentionBiasSlider.handleValueChange
-                          }
-                          onValueCommit={
-                            kvCacheAttentionBiasSlider.handleValueCommit
-                          }
-                          min={0.01}
-                          max={1.0}
-                          step={0.01}
-                          incrementAmount={0.01}
-                          labelClassName="text-sm font-medium w-20"
-                          valueFormatter={
-                            kvCacheAttentionBiasSlider.formatValue
-                          }
-                          inputParser={v => parseFloat(v) || 1.0}
-                        />
-                      )}
-
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.manageCache.label}
-                          tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Toggle
-                          pressed={manageCache}
-                          onPressedChange={onManageCacheChange || (() => {})}
-                          variant="outline"
-                          size="sm"
-                          className="h-7"
-                        >
-                          {manageCache ? "ON" : "OFF"}
-                        </Toggle>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.resetCache.label}
-                          tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Button
-                          type="button"
-                          onClick={onResetCache || (() => {})}
-                          disabled={manageCache}
-                          variant="outline"
-                          size="sm"
-                          className="h-7 w-7 p-0"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <CacheControls
+                  manageCache={manageCache}
+                  onManageCacheChange={actions.handleManageCacheChange}
+                  onResetCache={actions.handleResetCache}
+                  kvCacheAttentionBiasSlider={kvCacheAttentionBiasSlider}
+                  supportsKvCacheBias={
+                    pipelines?.[pipelineId]?.supportsKvCacheBias
+                  }
+                />
               )}
 
-              {/* Denoising steps - shown for pipelines that support quantization (implies advanced diffusion features) */}
               {pipelines?.[pipelineId]?.supportsQuantization && (
                 <DenoisingStepsSlider
                   value={denoisingSteps}
-                  onChange={onDenoisingStepsChange || (() => {})}
+                  onChange={actions.handleDenoisingStepsChange}
                   defaultValues={defaultDenoisingSteps}
                   tooltip={PARAMETER_METADATA.denoisingSteps.tooltip}
                 />
               )}
 
-              {/* Noise controls - show for video mode on supported pipelines (schema-derived) */}
               {inputMode === "video" && supportsNoiseControls && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="space-y-2 pt-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.noiseController.label}
-                          tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Toggle
-                          pressed={noiseController}
-                          onPressedChange={
-                            onNoiseControllerChange || (() => {})
-                          }
-                          disabled={isStreaming}
-                          variant="outline"
-                          size="sm"
-                          className="h-7"
-                        >
-                          {noiseController ? "ON" : "OFF"}
-                        </Toggle>
-                      </div>
-                    </div>
-
-                    <SliderWithInput
-                      label={PARAMETER_METADATA.noiseScale.label}
-                      tooltip={PARAMETER_METADATA.noiseScale.tooltip}
-                      value={noiseScaleSlider.localValue}
-                      onValueChange={noiseScaleSlider.handleValueChange}
-                      onValueCommit={noiseScaleSlider.handleValueCommit}
-                      min={0.0}
-                      max={1.0}
-                      step={0.01}
-                      incrementAmount={0.01}
-                      disabled={noiseController}
-                      labelClassName="text-sm font-medium w-20"
-                      valueFormatter={noiseScaleSlider.formatValue}
-                      inputParser={v => parseFloat(v) || 0.0}
-                    />
-                  </div>
-                </div>
+                <NoiseControls
+                  noiseController={noiseController}
+                  onNoiseControllerChange={actions.handleNoiseControllerChange}
+                  noiseScaleSlider={noiseScaleSlider}
+                  isStreaming={isStreaming}
+                />
               )}
 
-              {/* Quantization controls - shown for pipelines that support it */}
               {pipelines?.[pipelineId]?.supportsQuantization && (
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -949,11 +415,11 @@ export function SettingsPanel({
                         />
                         <Select
                           value={quantization || "none"}
-                          onValueChange={value => {
-                            onQuantizationChange?.(
+                          onValueChange={value =>
+                            actions.handleQuantizationChange(
                               value === "none" ? null : (value as "fp8_e4m3fn")
-                            );
-                          }}
+                            )
+                          }
                           disabled={isStreaming || vaceEnabled}
                         >
                           <SelectTrigger className="w-[140px] h-7">
@@ -967,7 +433,6 @@ export function SettingsPanel({
                           </SelectContent>
                         </Select>
                       </div>
-                      {/* Note when quantization is disabled due to VACE */}
                       {vaceEnabled && (
                         <p className="text-xs text-muted-foreground">
                           Disabled because VACE is enabled. Disable VACE to use
@@ -982,54 +447,12 @@ export function SettingsPanel({
           );
         })()}
 
-        {/* Spout Sender Settings (available on native Windows only) */}
         {spoutAvailable && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.spoutSender.label}
-                tooltip={PARAMETER_METADATA.spoutSender.tooltip}
-                className="text-sm font-medium"
-              />
-              <Toggle
-                pressed={spoutSender?.enabled ?? false}
-                onPressedChange={enabled => {
-                  onSpoutSenderChange?.({
-                    enabled,
-                    name: spoutSender?.name ?? "ScopeOut",
-                  });
-                }}
-                variant="outline"
-                size="sm"
-                className="h-7"
-              >
-                {spoutSender?.enabled ? "ON" : "OFF"}
-              </Toggle>
-            </div>
-
-            {spoutSender?.enabled && (
-              <div className="flex items-center gap-3">
-                <LabelWithTooltip
-                  label="Sender Name"
-                  tooltip="The name of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS."
-                  className="text-xs text-muted-foreground whitespace-nowrap"
-                />
-                <Input
-                  type="text"
-                  value={spoutSender?.name ?? "ScopeOut"}
-                  onChange={e => {
-                    onSpoutSenderChange?.({
-                      enabled: spoutSender?.enabled ?? false,
-                      name: e.target.value,
-                    });
-                  }}
-                  disabled={isStreaming}
-                  className="h-8 text-sm flex-1"
-                  placeholder="ScopeOut"
-                />
-              </div>
-            )}
-          </div>
+          <SpoutSenderSettings
+            spoutSender={spoutSender}
+            isStreaming={isStreaming}
+            onChange={actions.handleSpoutSenderChange}
+          />
         )}
       </CardContent>
     </Card>

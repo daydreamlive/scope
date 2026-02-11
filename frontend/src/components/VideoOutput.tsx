@@ -2,55 +2,65 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { useStreamContext } from "../contexts/StreamContext";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { useControllerInput } from "../hooks/useControllerInput";
+import { useAppStore } from "../stores";
+import { useShallow } from "zustand/react/shallow";
 
 interface VideoOutputProps {
   className?: string;
-  remoteStream: MediaStream | null;
-  isPipelineLoading?: boolean;
-  isCloudConnecting?: boolean;
-  isConnecting?: boolean;
   pipelineError?: string | null;
-  isPlaying?: boolean;
-  isDownloading?: boolean;
   onPlayPauseToggle?: () => void;
   onStartStream?: () => void;
   onVideoPlaying?: () => void;
-  // Controller input props
-  supportsControllerInput?: boolean;
-  isPointerLocked?: boolean;
-  onRequestPointerLock?: () => void;
-  /** Ref to expose the video container element for pointer lock */
-  videoContainerRef?: React.RefObject<HTMLDivElement | null>;
-  /** Video scale mode: 'fit' fills available space, 'native' shows at actual resolution */
-  videoScaleMode?: "fit" | "native";
 }
 
 export function VideoOutput({
   className = "",
-  remoteStream,
-  isPipelineLoading = false,
-  isCloudConnecting = false,
-  isConnecting = false,
   pipelineError: _pipelineError = null,
-  isPlaying = true,
-  isDownloading = false,
   onPlayPauseToggle,
   onStartStream,
   onVideoPlaying,
-  supportsControllerInput = false,
-  isPointerLocked = false,
-  onRequestPointerLock,
-  videoContainerRef,
-  videoScaleMode = "fit",
 }: VideoOutputProps) {
+  const {
+    remoteStream,
+    isPipelineLoading,
+    isConnecting,
+    isStreaming,
+    sendParameterUpdate,
+  } = useStreamContext();
+  const { pipelines } = usePipelinesContext();
+  const {
+    isCloudConnecting,
+    isPlaying,
+    isDownloading,
+    videoScaleMode,
+    pipelineId,
+  } = useAppStore(
+    useShallow(s => ({
+      isCloudConnecting: s.isCloudConnecting,
+      isPlaying: !s.settings.paused,
+      isDownloading: s.isDownloading,
+      videoScaleMode: s.videoScaleMode,
+      pipelineId: s.settings.pipelineId,
+    }))
+  );
+
+  const supportsControllerInput =
+    pipelines?.[pipelineId]?.supportsControllerInput ?? false;
+
   const videoRef = useRef<HTMLVideoElement>(null);
-  const internalContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
 
-  // Use external ref if provided, otherwise use internal
-  const containerRef = videoContainerRef || internalContainerRef;
+  const { isPointerLocked, requestPointerLock } = useControllerInput(
+    sendParameterUpdate,
+    isStreaming && supportsControllerInput,
+    containerRef
+  );
 
   useEffect(() => {
     if (videoRef.current && remoteStream) {
@@ -107,8 +117,8 @@ export function VideoOutput({
 
   const handleVideoClick = () => {
     // If controller input is supported and not locked, request pointer lock
-    if (supportsControllerInput && !isPointerLocked && onRequestPointerLock) {
-      onRequestPointerLock();
+    if (supportsControllerInput && !isPointerLocked) {
+      requestPointerLock();
       return;
     }
 

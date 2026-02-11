@@ -13,11 +13,9 @@ import { Input } from "./ui/input";
 import { Upload, ArrowUp } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
-import type { PromptItem, PromptTransition } from "../lib/api";
-import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
+import type { ExtensionMode, InputMode } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
-import type { TimelinePrompt } from "./PromptTimeline";
 import { ImageManager } from "./ImageManager";
 import { Button } from "./ui/button";
 import {
@@ -27,131 +25,107 @@ import {
   parseInputFields,
 } from "../lib/schemaSettings";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
+import { useAppStore } from "../stores";
+import { useShallow } from "zustand/react/shallow";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { useStreamContext } from "../contexts/StreamContext";
 
 interface InputAndControlsPanelProps {
   className?: string;
-  pipelines: Record<string, PipelineInfo> | null;
   localStream: MediaStream | null;
   isInitializing: boolean;
   error: string | null;
   mode: VideoSourceMode;
-  onModeChange: (mode: VideoSourceMode) => void;
-  isStreaming: boolean;
-  isConnecting: boolean;
-  isPipelineLoading: boolean;
-  canStartStream: boolean;
-  onStartStream: () => void;
-  onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
-  pipelineId: string;
-  prompts: PromptItem[];
-  onPromptsChange: (prompts: PromptItem[]) => void;
-  onPromptsSubmit: (prompts: PromptItem[]) => void;
-  onTransitionSubmit: (transition: PromptTransition) => void;
-  interpolationMethod: "linear" | "slerp";
-  onInterpolationMethodChange: (method: "linear" | "slerp") => void;
-  temporalInterpolationMethod: "linear" | "slerp";
-  onTemporalInterpolationMethodChange: (method: "linear" | "slerp") => void;
-  isLive?: boolean;
-  onLivePromptSubmit?: (prompts: PromptItem[]) => void;
-  selectedTimelinePrompt?: TimelinePrompt | null;
-  onTimelinePromptUpdate?: (prompt: TimelinePrompt) => void;
-  isVideoPaused?: boolean;
-  isTimelinePlaying?: boolean;
-  currentTime?: number;
-  timelinePrompts?: TimelinePrompt[];
-  transitionSteps: number;
-  onTransitionStepsChange: (steps: number) => void;
-  // Spout input settings
-  spoutReceiverName?: string;
-  onSpoutReceiverChange?: (name: string) => void;
-  // Input mode (text vs video) for multi-mode pipelines
-  inputMode: InputMode;
-  onInputModeChange: (mode: InputMode) => void;
-  // Whether Spout is available (server-side detection for native Windows, not WSL)
-  spoutAvailable?: boolean;
-  // VACE reference images (only shown when VACE is enabled)
-  vaceEnabled?: boolean;
-  refImages?: string[];
-  onRefImagesChange?: (images: string[]) => void;
-  onSendHints?: (imagePaths: string[]) => void;
-  isDownloading?: boolean;
-  // Images input support - presence of images field in pipeline schema
-  supportsImages?: boolean;
-  // FFLF (First-Frame-Last-Frame) extension mode
-  firstFrameImage?: string;
-  onFirstFrameImageChange?: (imagePath: string | undefined) => void;
-  lastFrameImage?: string;
-  onLastFrameImageChange?: (imagePath: string | undefined) => void;
-  extensionMode?: ExtensionMode;
-  onExtensionModeChange?: (mode: ExtensionMode) => void;
-  onSendExtensionFrames?: () => void;
-  // Schema-driven input fields (category "input"), shown below Prompts
-  configSchema?: ConfigSchemaLike;
-  schemaFieldOverrides?: Record<string, unknown>;
-  onSchemaFieldOverrideChange?: (
-    key: string,
-    value: unknown,
-    isRuntimeParam?: boolean
-  ) => void;
 }
 
 export function InputAndControlsPanel({
   className = "",
-  pipelines,
   localStream,
   isInitializing,
   error,
   mode,
-  onModeChange,
-  isStreaming,
-  isConnecting,
-  isPipelineLoading: _isPipelineLoading,
-  canStartStream: _canStartStream,
-  onStartStream: _onStartStream,
-  onStopStream: _onStopStream,
   onVideoFileUpload,
-  pipelineId,
-  prompts,
-  onPromptsChange,
-  onPromptsSubmit,
-  onTransitionSubmit,
-  interpolationMethod,
-  onInterpolationMethodChange,
-  temporalInterpolationMethod,
-  onTemporalInterpolationMethodChange,
-  isLive = false,
-  onLivePromptSubmit,
-  selectedTimelinePrompt = null,
-  onTimelinePromptUpdate,
-  isVideoPaused = false,
-  isTimelinePlaying: _isTimelinePlaying = false,
-  currentTime: _currentTime = 0,
-  timelinePrompts: _timelinePrompts = [],
-  transitionSteps,
-  onTransitionStepsChange,
-  spoutReceiverName = "",
-  onSpoutReceiverChange,
-  inputMode,
-  onInputModeChange,
-  spoutAvailable = false,
-  vaceEnabled = true,
-  refImages = [],
-  onRefImagesChange,
-  onSendHints,
-  isDownloading = false,
-  supportsImages = false,
-  firstFrameImage,
-  onFirstFrameImageChange,
-  lastFrameImage,
-  onLastFrameImageChange,
-  extensionMode = "firstframe",
-  onExtensionModeChange,
-  onSendExtensionFrames,
-  configSchema,
-  schemaFieldOverrides,
-  onSchemaFieldOverrideChange,
 }: InputAndControlsPanelProps) {
+  const {
+    settings,
+    prompts,
+    onPromptsChange,
+    interpolationMethod,
+    onInterpolationMethodChange,
+    temporalInterpolationMethod,
+    onTemporalInterpolationMethodChange,
+    transitionSteps,
+    onTransitionStepsChange,
+    isLive,
+    selectedTimelinePrompt,
+    _isTimelinePlaying,
+    _currentTime,
+    _timelinePrompts,
+    isDownloading,
+  } = useAppStore(
+    useShallow(s => ({
+      settings: s.settings,
+      prompts: s.promptItems,
+      onPromptsChange: s.setPromptItems,
+      interpolationMethod: s.interpolationMethod,
+      onInterpolationMethodChange: s.setInterpolationMethod,
+      temporalInterpolationMethod: s.temporalInterpolationMethod,
+      onTemporalInterpolationMethodChange: s.setTemporalInterpolationMethod,
+      transitionSteps: s.transitionSteps,
+      onTransitionStepsChange: s.setTransitionSteps,
+      isLive: s.isLive,
+      selectedTimelinePrompt: s.selectedTimelinePrompt,
+      _isTimelinePlaying: s.isTimelinePlaying,
+      _currentTime: s.timelineCurrentTime,
+      _timelinePrompts: s.timelinePrompts,
+      isDownloading: s.isDownloading,
+    }))
+  );
+
+  // Read from contexts
+  const { pipelines } = usePipelinesContext();
+  const {
+    actions,
+    isStreaming,
+    isConnecting,
+    isPipelineLoading: _isPipelineLoading,
+    spoutAvailable,
+  } = useStreamContext();
+
+  // Derive values from settings/pipelines
+  const pipelineId = settings.pipelineId;
+  const inputMode = settings.inputMode || "text";
+  const isVideoPaused = settings.paused ?? false;
+  const spoutReceiverName = settings.spoutReceiver?.name ?? "";
+  const vaceEnabled =
+    settings.vaceEnabled ??
+    (pipelines?.[pipelineId]?.supportsVACE && inputMode !== "video");
+  const refImages = settings.refImages || [];
+  const supportsImages = pipelines?.[pipelineId]?.supportsImages ?? false;
+  const firstFrameImage = settings.firstFrameImage;
+  const lastFrameImage = settings.lastFrameImage;
+  const extensionMode = settings.extensionMode || "firstframe";
+  const configSchema = pipelines?.[pipelineId]?.configSchema as
+    | ConfigSchemaLike
+    | undefined;
+  const schemaFieldOverrides = settings.schemaFieldOverrides ?? {};
+
+  // Alias action handlers to match existing variable names
+  const onModeChange = actions.handleModeChange;
+  const onPromptsSubmit = onPromptsChange;
+  const onTransitionSubmit = actions.handleTransitionSubmit;
+  const onLivePromptSubmit = actions.handleLivePromptSubmit;
+  const onTimelinePromptUpdate = actions.handleTimelinePromptUpdate;
+  const onSpoutReceiverChange = actions.handleSpoutReceiverChange;
+  const onInputModeChange = actions.handleInputModeChange;
+  const onRefImagesChange = actions.handleRefImagesChange;
+  const onSendHints = actions.handleSendHints;
+  const onFirstFrameImageChange = actions.handleFirstFrameImageChange;
+  const onLastFrameImageChange = actions.handleLastFrameImageChange;
+  const onExtensionModeChange = actions.handleExtensionModeChange;
+  const onSendExtensionFrames = actions.handleSendExtensionFrames;
+  const onSchemaFieldOverrideChange = actions.handleSchemaFieldOverrideChange;
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
     if (_timelinePrompts.length === 0) return true;

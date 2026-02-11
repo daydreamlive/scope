@@ -1,5 +1,5 @@
 // Color palette for prompt boxes
-export const PROMPT_COLORS = [
+const PROMPT_COLORS = [
   "#FF6B6B",
   "#4ECDC4",
   "#45B7D1",

@@ -4,23 +4,17 @@ import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useStreamContext } from "../contexts/StreamContext";
+import { useAppStore } from "../stores";
 
 interface HeaderProps {
   className?: string;
-  onPipelinesRefresh?: () => Promise<unknown>;
-  cloudDisabled?: boolean;
-  // External settings tab control
-  openSettingsTab?: string | null;
-  onSettingsTabOpened?: () => void;
 }
 
-export function Header({
-  className = "",
-  onPipelinesRefresh,
-  cloudDisabled,
-  openSettingsTab,
-  onSettingsTabOpened,
-}: HeaderProps) {
+export function Header({ className = "" }: HeaderProps) {
+  const { actions, isStreaming } = useStreamContext();
+  const openSettingsTab = useAppStore(s => s.openSettingsTab);
+  const setOpenSettingsTab = useAppStore(s => s.setOpenSettingsTab);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
     "general" | "account" | "api-keys" | "plugins"
@@ -64,15 +58,17 @@ export function Header({
   useEffect(() => {
     if (prevConnectedRef.current !== isConnected) {
       // Connection status changed - refresh pipelines to get the right list
-      onPipelinesRefresh?.().catch(e =>
-        console.error(
-          "[Header] Failed to refresh pipelines after cloud status change:",
-          e
-        )
-      );
+      actions
+        .handlePipelinesRefresh()
+        .catch(e =>
+          console.error(
+            "[Header] Failed to refresh pipelines after cloud status change:",
+            e
+          )
+        );
     }
     prevConnectedRef.current = isConnected;
-  }, [isConnected, onPipelinesRefresh]);
+  }, [isConnected, actions]);
 
   const handleCloudIconClick = () => {
     setInitialTab("account");
@@ -86,9 +82,9 @@ export function Header({
         openSettingsTab as "general" | "account" | "api-keys" | "plugins"
       );
       setSettingsOpen(true);
-      onSettingsTabOpened?.();
+      setOpenSettingsTab(null);
     }
-  }, [openSettingsTab, onSettingsTabOpened]);
+  }, [openSettingsTab, setOpenSettingsTab]);
 
   useEffect(() => {
     // Handle deep link actions for plugin installation
@@ -158,8 +154,8 @@ export function Header({
         onClose={handleClose}
         initialTab={initialTab}
         initialPluginPath={initialPluginPath}
-        onPipelinesRefresh={onPipelinesRefresh}
-        cloudDisabled={cloudDisabled}
+        onPipelinesRefresh={() => actions.handlePipelinesRefresh()}
+        cloudDisabled={isStreaming}
       />
     </header>
   );

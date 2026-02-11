@@ -1,19 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
-import type {
-  SystemMetrics,
-  StreamStatus,
-  SettingsState,
-  PromptData,
-  PipelineId,
-  InputMode,
-} from "../types";
-import {
-  getHardwareInfo as getHardwareInfoApi,
-  getPipelineSchemas as getPipelineSchemasApi,
-  type HardwareInfoResponse,
-  type PipelineSchemasResponse,
-} from "../lib/api";
-import { useCloudContext } from "../lib/cloudContext";
+import { useCallback, useEffect } from "react";
+import type { PipelineId, InputMode } from "../types";
+import { usePipelineSchemas } from "./queries/usePipelineSchemas";
+import { useHardwareInfo } from "./queries/useHardwareInfo";
+import { useAppStore } from "../stores";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
@@ -25,11 +14,9 @@ const BASE_FALLBACK = {
 
 // Get fallback defaults for a pipeline before schemas are loaded
 function getFallbackDefaults(mode?: InputMode) {
-  // Default to text mode if no mode specified (will be corrected when schemas load)
   const effectiveMode = mode ?? "text";
   const isVideoMode = effectiveMode === "video";
 
-  // Video mode gets noise controls, text mode doesn't
   return {
     height: BASE_FALLBACK.height,
     width: BASE_FALLBACK.width,
@@ -43,52 +30,22 @@ function getFallbackDefaults(mode?: InputMode) {
 }
 
 export function useStreamState() {
-  const { adapter, isCloudMode, isReady } = useCloudContext();
+  const { data: pipelineSchemas, refetch: refetchSchemas } =
+    usePipelineSchemas();
+  const { data: hardwareInfo, refetch: refetchHardware } = useHardwareInfo();
 
-  // Helper functions that use cloud adapter when available
-  const getPipelineSchemas =
-    useCallback(async (): Promise<PipelineSchemasResponse> => {
-      if (isCloudMode && adapter) {
-        return adapter.api.getPipelineSchemas();
-      }
-      return getPipelineSchemasApi();
-    }, [adapter, isCloudMode]);
-
-  const getHardwareInfo =
-    useCallback(async (): Promise<HardwareInfoResponse> => {
-      if (isCloudMode && adapter) {
-        return adapter.api.getHardwareInfo();
-      }
-      return getHardwareInfoApi();
-    }, [adapter, isCloudMode]);
-
-  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
-    cpu: 0,
-    gpu: 0,
-    systemRAM: 0,
-    vram: 0,
-    fps: 0,
-    latency: 0,
-  });
-
-  const [streamStatus, setStreamStatus] = useState<StreamStatus>({
-    status: "Ready",
-  });
-
-  // Store pipeline schemas from backend
-  const [pipelineSchemas, setPipelineSchemas] =
-    useState<PipelineSchemasResponse | null>(null);
+  // Settings live in the Zustand store (single source of truth)
+  const settings = useAppStore(s => s.settings);
+  const storeUpdateSettings = useAppStore(s => s.updateSettings);
 
   // Helper to get defaults from schemas or fallback
   // When mode is provided, applies mode-specific overrides from mode_defaults
-  // Returns undefined instead of null for optional fields to match SettingsState types
   const getDefaults = useCallback(
     (pipelineId: PipelineId, mode?: InputMode) => {
       const schema = pipelineSchemas?.pipelines[pipelineId];
       if (schema?.config_schema?.properties) {
         const props = schema.config_schema.properties;
 
-        // Start with base defaults from config_schema
         let height = (props.height?.default as number) ?? 512;
         let width = (props.width?.default as number) ?? 512;
         let denoisingSteps: number[] | undefined =
@@ -98,7 +55,6 @@ export function useStreamState() {
         let noiseController: boolean | undefined =
           (props.noise_controller?.default as boolean | null) ?? undefined;
 
-        // Apply mode-specific overrides if mode is specified and mode_defaults exist
         const effectiveMode = mode ?? schema.default_mode;
         const modeOverrides = schema.mode_defaults?.[effectiveMode];
         let defaultTemporalInterpolationSteps =
@@ -128,220 +84,111 @@ export function useStreamState() {
           quantization: undefined as "fp8_e4m3fn" | undefined,
         };
       }
-      // Fallback to derived defaults if schemas not loaded
       return getFallbackDefaults(mode);
     },
     [pipelineSchemas]
   );
 
   // Check if a pipeline supports noise controls in video mode
-  // Derived from schema: only show if video mode explicitly defines noise_scale with a value
   const supportsNoiseControls = useCallback(
     (pipelineId: PipelineId): boolean => {
       const schema = pipelineSchemas?.pipelines[pipelineId];
       if (schema?.mode_defaults?.video) {
-        // Check if video mode explicitly defines noise_scale with a non-null value
         const noiseScale = schema.mode_defaults.video.noise_scale;
         return noiseScale !== undefined && noiseScale !== null;
       }
-      // If video mode doesn't define noise_scale, don't show noise controls
       return false;
     },
     [pipelineSchemas]
   );
 
-  // Default pipeline ID to use before schemas load
-  const defaultPipelineId = "longlive";
-
-  // Get initial defaults (use fallback since schemas haven't loaded yet)
-  const initialDefaults = getFallbackDefaults("text");
-
-  const [settings, setSettings] = useState<SettingsState>({
-    pipelineId: "longlive",
-    resolution: {
-      height: initialDefaults.height,
-      width: initialDefaults.width,
-    },
-    denoisingSteps: initialDefaults.denoisingSteps,
-    noiseScale: initialDefaults.noiseScale,
-    noiseController: initialDefaults.noiseController,
-    manageCache: true,
-    quantization: null,
-    kvCacheAttentionBias: 0.3,
-    paused: false,
-    loraMergeStrategy: "permanent_merge",
-    inputMode: initialDefaults.inputMode,
-  });
-
-  const [promptData, setPromptData] = useState<PromptData>({
-    prompt: "",
-    isProcessing: false,
-  });
-
-  // Store hardware info
-  const [hardwareInfo, setHardwareInfo] = useState<HardwareInfoResponse | null>(
-    null
-  );
-
   // Function to refresh pipeline schemas (can be called externally)
   const refreshPipelineSchemas = useCallback(async () => {
-    try {
-      const schemas = await getPipelineSchemas();
-      setPipelineSchemas(schemas);
+    const result = await refetchSchemas();
+    const schemas = result.data;
+    if (!schemas) throw new Error("Failed to refresh pipeline schemas");
 
-      // Check if the current pipeline is still available
-      // If not, switch to the first available pipeline
-      const availablePipelines = Object.keys(schemas.pipelines);
+    const availablePipelines = Object.keys(schemas.pipelines);
+    const currentPipelineId = useAppStore.getState().settings.pipelineId;
 
-      setSettings(prev => {
-        if (
-          !availablePipelines.includes(prev.pipelineId) &&
-          availablePipelines.length > 0
-        ) {
-          const firstPipelineId = availablePipelines[0] as PipelineId;
-          const firstPipelineSchema = schemas.pipelines[firstPipelineId];
+    if (
+      !availablePipelines.includes(currentPipelineId) &&
+      availablePipelines.length > 0
+    ) {
+      const firstPipelineId = availablePipelines[0] as PipelineId;
+      const firstPipelineSchema = schemas.pipelines[firstPipelineId];
 
-          return {
-            ...prev,
-            pipelineId: firstPipelineId,
-            inputMode: firstPipelineSchema.default_mode,
-          };
-        }
-        return prev;
+      storeUpdateSettings({
+        pipelineId: firstPipelineId,
+        inputMode: firstPipelineSchema.default_mode,
       });
-
-      return schemas;
-    } catch (error) {
-      console.error(
-        "useStreamState: Failed to refresh pipeline schemas:",
-        error
-      );
-      throw error;
     }
-  }, [getPipelineSchemas]);
+
+    return schemas;
+  }, [refetchSchemas, storeUpdateSettings]);
 
   // Function to refresh hardware info (can be called externally)
   const refreshHardwareInfo = useCallback(async () => {
-    try {
-      const hardware = await getHardwareInfo();
-      setHardwareInfo(hardware);
-      return hardware;
-    } catch (error) {
-      console.error("useStreamState: Failed to refresh hardware info:", error);
-      throw error;
-    }
-  }, [getHardwareInfo]);
+    const result = await refetchHardware();
+    if (!result.data) throw new Error("Failed to refresh hardware info");
+    return result.data;
+  }, [refetchHardware]);
 
-  // Fetch pipeline schemas and hardware info on mount
+  // When schemas first load, check if default pipeline is available
   useEffect(() => {
-    // In cloud mode, wait until adapter is ready
-    if (isCloudMode && !isReady) {
-      return;
+    if (!pipelineSchemas) return;
+
+    const availablePipelines = Object.keys(pipelineSchemas.pipelines);
+    const currentPipelineId = useAppStore.getState().settings.pipelineId;
+    if (
+      !availablePipelines.includes(currentPipelineId) &&
+      availablePipelines.length > 0
+    ) {
+      const firstPipelineId = availablePipelines[0] as PipelineId;
+      const firstPipelineSchema = pipelineSchemas.pipelines[firstPipelineId];
+
+      storeUpdateSettings({
+        pipelineId: firstPipelineId,
+        inputMode: firstPipelineSchema.default_mode,
+      });
     }
-
-    const fetchInitialData = async () => {
-      try {
-        const [schemasResult, hardwareResult] = await Promise.allSettled([
-          getPipelineSchemas(),
-          getHardwareInfo(),
-        ]);
-
-        if (schemasResult.status === "fulfilled") {
-          const schemas = schemasResult.value;
-          setPipelineSchemas(schemas);
-
-          // Check if the default pipeline is available
-          // If not, switch to the first available pipeline
-          const availablePipelines = Object.keys(schemas.pipelines);
-
-          if (
-            !availablePipelines.includes(defaultPipelineId) &&
-            availablePipelines.length > 0
-          ) {
-            const firstPipelineId = availablePipelines[0] as PipelineId;
-            const firstPipelineSchema = schemas.pipelines[firstPipelineId];
-
-            setSettings(prev => ({
-              ...prev,
-              pipelineId: firstPipelineId,
-              inputMode: firstPipelineSchema.default_mode,
-            }));
-          }
-        } else {
-          console.error(
-            "useStreamState: Failed to fetch pipeline schemas:",
-            schemasResult.reason
-          );
-        }
-
-        if (hardwareResult.status === "fulfilled") {
-          setHardwareInfo(hardwareResult.value);
-        } else {
-          console.error(
-            "useStreamState: Failed to fetch hardware info:",
-            hardwareResult.reason
-          );
-        }
-      } catch (error) {
-        console.error("useStreamState: Failed to fetch initial data:", error);
-      }
-    };
-
-    fetchInitialData();
-  }, [isCloudMode, isReady, getPipelineSchemas, getHardwareInfo]);
+  }, [pipelineSchemas, storeUpdateSettings]);
 
   // Update inputMode when schemas load or pipeline changes
-  // This sets the correct default mode for the pipeline
   useEffect(() => {
     if (pipelineSchemas) {
       const schema = pipelineSchemas.pipelines[settings.pipelineId];
       if (schema?.default_mode) {
-        setSettings(prev => ({
-          ...prev,
-          inputMode: schema.default_mode,
-        }));
+        storeUpdateSettings({ inputMode: schema.default_mode });
       }
     }
-    // Only run when schemas load or pipeline changes, NOT when inputMode changes
-  }, [pipelineSchemas, settings.pipelineId]);
+  }, [pipelineSchemas, settings.pipelineId, storeUpdateSettings]);
 
   // Set recommended quantization based on pipeline schema and available VRAM
   useEffect(() => {
     const schema = pipelineSchemas?.pipelines[settings.pipelineId];
     const vramThreshold = schema?.recommended_quantization_vram_threshold;
 
-    // Only set quantization if pipeline has a recommendation and hardware info is available
     if (
       vramThreshold !== null &&
       vramThreshold !== undefined &&
       hardwareInfo?.vram_gb !== null &&
       hardwareInfo?.vram_gb !== undefined
     ) {
-      // If user's VRAM > threshold, no quantization needed (null)
-      // Otherwise, recommend fp8_e4m3fn quantization
       const recommendedQuantization =
         hardwareInfo.vram_gb > vramThreshold ? null : "fp8_e4m3fn";
-      setSettings(prev => ({
-        ...prev,
-        quantization: recommendedQuantization,
-      }));
+      storeUpdateSettings({ quantization: recommendedQuantization });
     } else {
-      // No recommendation from pipeline: reset quantization to null (default)
-      setSettings(prev => ({
-        ...prev,
-        quantization: null,
-      }));
+      storeUpdateSettings({ quantization: null });
     }
-  }, [settings.pipelineId, hardwareInfo, pipelineSchemas]);
+  }, [settings.pipelineId, hardwareInfo, pipelineSchemas, storeUpdateSettings]);
 
   // Set recommended VACE enabled state based on pipeline schema and available VRAM
-  // VACE is enabled by default, but disabled if VRAM is below recommended_quantization_vram_threshold
   useEffect(() => {
     const schema = pipelineSchemas?.pipelines[settings.pipelineId];
     const quantizationThreshold =
       schema?.recommended_quantization_vram_threshold;
 
-    // Only set vaceEnabled if pipeline supports VACE and has a quantization VRAM threshold
     if (
       schema?.supports_vace &&
       quantizationThreshold !== null &&
@@ -349,48 +196,18 @@ export function useStreamState() {
       hardwareInfo?.vram_gb !== null &&
       hardwareInfo?.vram_gb !== undefined
     ) {
-      // VACE is enabled by default, but disabled if VRAM is below the quantization threshold
-      // (because FP8 quantization will be recommended in that case)
       const recommendedVaceEnabled =
         hardwareInfo.vram_gb > quantizationThreshold;
-      setSettings(prev => ({
-        ...prev,
-        vaceEnabled: recommendedVaceEnabled,
-      }));
+      storeUpdateSettings({ vaceEnabled: recommendedVaceEnabled });
     }
-    // If no threshold is set, VACE remains enabled by default (from schema)
-  }, [settings.pipelineId, hardwareInfo, pipelineSchemas]);
-
-  const updateMetrics = useCallback((newMetrics: Partial<SystemMetrics>) => {
-    setSystemMetrics(prev => ({ ...prev, ...newMetrics }));
-  }, []);
-
-  const updateStreamStatus = useCallback((newStatus: Partial<StreamStatus>) => {
-    setStreamStatus(prev => ({ ...prev, ...newStatus }));
-  }, []);
-
-  const updateSettings = useCallback((newSettings: Partial<SettingsState>) => {
-    setSettings(prev => ({ ...prev, ...newSettings }));
-  }, []);
-
-  const updatePrompt = useCallback((newPrompt: Partial<PromptData>) => {
-    setPromptData(prev => ({ ...prev, ...newPrompt }));
-  }, []);
+  }, [settings.pipelineId, hardwareInfo, pipelineSchemas, storeUpdateSettings]);
 
   // Derive spoutAvailable from hardware info (server-side detection)
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
 
   return {
-    systemMetrics,
-    streamStatus,
     settings,
-    promptData,
-    hardwareInfo,
-    pipelineSchemas,
-    updateMetrics,
-    updateStreamStatus,
-    updateSettings,
-    updatePrompt,
+    updateSettings: storeUpdateSettings,
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
