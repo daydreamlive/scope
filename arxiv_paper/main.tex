@@ -371,7 +371,7 @@ This adaptation trades some per-task quality for versatility: a single set of pr
     \item \textbf{Control signal variance:} Some signals (depth, scribble, layout) work reliably; others require more tuning.
     \item \textbf{Reference-to-Video} is the most problematic capability. Detail preservation and reference fidelity are severely degraded compared to batch VACE due to causal attention and per-chunk processing. Further architectural work is needed.
     \item \textbf{First+last frame extension} has reduced utility compared to batch VACE due to small chunk sizes in streaming contexts.
-    \item \textbf{No perceptual quality metrics} (FVD, FID) comparing to batch VACE are provided. Throughput and overhead are measured but visual quality comparison is left to future work.
+    \item \textbf{No perceptual quality comparison} to batch VACE is provided. The autoregressive base models (e.g., LongLive) are separately trained models that share Wan2.1's architecture but differ in attention pattern, step count, and training data. A comparison against batch Wan2.1 with VACE would conflate these base model differences with the adaptation itself, making it impossible to isolate the quality impact of our architectural change.
 \end{itemize}
 
 \section{Conclusion}
