@@ -1252,6 +1252,83 @@ async def get_input_source_resolution(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/preview")
+async def get_input_source_preview(
+    source_type: str, identifier: str, timeout_ms: int = Query(5000)
+):
+    """Grab a single frame from an input source and return it as a JPEG thumbnail."""
+    from scope.core.inputs.ndi import NDIInputSource
+    from scope.core.inputs.spout import SpoutInputSource
+
+    source_classes = {
+        NDIInputSource.source_id: NDIInputSource,
+        SpoutInputSource.source_id: SpoutInputSource,
+    }
+
+    source_class = source_classes.get(source_type)
+    if source_class is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown input source type '{source_type}'.",
+        )
+
+    if not source_class.is_available():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input source '{source_type}' is not available on this system.",
+        )
+
+    try:
+        from PIL import Image
+
+        instance = source_class()
+        try:
+            if not instance.connect(identifier):
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not connect to '{identifier}'.",
+                )
+
+            # Poll for a frame
+            elapsed = 0
+            poll_interval = 100
+            frame = None
+            while elapsed < timeout_ms:
+                frame = instance.receive_frame(timeout_ms=poll_interval)
+                if frame is not None:
+                    break
+                elapsed += poll_interval
+
+            if frame is None:
+                raise HTTPException(
+                    status_code=408,
+                    detail=f"No frame received from '{identifier}' within {timeout_ms}ms.",
+                )
+
+            # Downscale for thumbnail (max 320px wide)
+            h, w = frame.shape[:2]
+            max_w = 320
+            if w > max_w:
+                scale = max_w / w
+                new_w = max_w
+                new_h = int(h * scale)
+                img = Image.fromarray(frame).resize((new_w, new_h), Image.LANCZOS)
+            else:
+                img = Image.fromarray(frame)
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=80)
+            buf.seek(0)
+            return Response(content=buf.read(), media_type="image/jpeg")
+        finally:
+            instance.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting preview for '{source_type}/{identifier}': {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info(
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),

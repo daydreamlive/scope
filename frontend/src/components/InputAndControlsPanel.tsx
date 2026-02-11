@@ -18,7 +18,7 @@ import type {
   PromptTransition,
   DiscoveredSource,
 } from "../lib/api";
-import { getInputSourceSources } from "../lib/api";
+import { getInputSourceSources, getInputSourcePreviewUrl } from "../lib/api";
 import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
@@ -182,12 +182,37 @@ export function InputAndControlsPanel({
     }
   }, []);
 
+  // NDI preview thumbnail
+  const [ndiPreviewUrl, setNdiPreviewUrl] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  const fetchNdiPreview = useCallback((identifier: string) => {
+    if (!identifier) {
+      setNdiPreviewUrl(null);
+      return;
+    }
+    setIsLoadingPreview(true);
+    // Append a cache-buster so the browser always fetches a fresh frame
+    const url =
+      getInputSourcePreviewUrl("ndi", identifier) + `&_t=${Date.now()}`;
+    setNdiPreviewUrl(url);
+  }, []);
+
   // Auto-discover NDI sources when switching to NDI mode
   useEffect(() => {
     if (mode === "ndi" && ndiAvailable) {
       discoverNdiSources();
     }
   }, [mode, ndiAvailable, discoverNdiSources]);
+
+  // Fetch preview when an NDI source is selected
+  useEffect(() => {
+    if (mode === "ndi" && selectedNdiSource) {
+      fetchNdiPreview(selectedNdiSource);
+    } else {
+      setNdiPreviewUrl(null);
+    }
+  }, [mode, selectedNdiSource, fetchNdiPreview]);
 
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -271,21 +296,36 @@ export function InputAndControlsPanel({
                 }
               }}
               className="justify-start"
-              disabled={isStreaming}
             >
-              <ToggleGroupItem value="video" aria-label="Video file">
+              <ToggleGroupItem
+                value="video"
+                aria-label="Video file"
+                disabled={isStreaming && mode === "ndi"}
+              >
                 File
               </ToggleGroupItem>
-              <ToggleGroupItem value="camera" aria-label="Camera">
+              <ToggleGroupItem
+                value="camera"
+                aria-label="Camera"
+                disabled={isStreaming && mode === "ndi"}
+              >
                 Camera
               </ToggleGroupItem>
               {spoutAvailable && (
-                <ToggleGroupItem value="spout" aria-label="Spout Receiver">
+                <ToggleGroupItem
+                  value="spout"
+                  aria-label="Spout Receiver"
+                  disabled={isStreaming && mode === "ndi"}
+                >
                   Spout
                 </ToggleGroupItem>
               )}
               {ndiAvailable && (
-                <ToggleGroupItem value="ndi" aria-label="NDI">
+                <ToggleGroupItem
+                  value="ndi"
+                  aria-label="NDI"
+                  disabled={isStreaming && mode !== "ndi"}
+                >
                   NDI
                 </ToggleGroupItem>
               )}
@@ -300,13 +340,13 @@ export function InputAndControlsPanel({
             {mode === "ndi" ? (
               /* NDI Source Picker */
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   <Select
                     value={selectedNdiSource}
                     onValueChange={value => onNdiSourceChange?.(value)}
                     disabled={isStreaming || isDiscoveringNdi}
                   >
-                    <SelectTrigger className="flex-1 h-8 text-sm">
+                    <SelectTrigger className="flex-1 min-w-0 h-8 text-sm [&>span]:truncate">
                       <SelectValue
                         placeholder={
                           isDiscoveringNdi
@@ -341,6 +381,37 @@ export function InputAndControlsPanel({
                     />
                   </Button>
                 </div>
+                {/* NDI source preview thumbnail */}
+                {selectedNdiSource && (
+                  <div
+                    className="relative rounded-md overflow-hidden border border-border bg-muted cursor-pointer min-w-0"
+                    onClick={() => fetchNdiPreview(selectedNdiSource)}
+                    title="Click to refresh preview"
+                  >
+                    {ndiPreviewUrl ? (
+                      <img
+                        src={ndiPreviewUrl}
+                        alt="NDI source preview"
+                        className="block w-full h-auto object-contain"
+                        onLoad={() => setIsLoadingPreview(false)}
+                        onError={() => {
+                          setIsLoadingPreview(false);
+                          setNdiPreviewUrl(null);
+                        }}
+                      />
+                    ) : null}
+                    {isLoadingPreview && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-muted/80">
+                        <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    {!ndiPreviewUrl && !isLoadingPreview && (
+                      <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
+                        No preview available
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : mode === "spout" ? (
               /* Spout Receiver Configuration */
