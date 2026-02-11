@@ -233,7 +233,7 @@ def main():
     )
 
     # Small resolution to fit 14B model in VRAM
-    height, width = 256, 256
+    height, width = 320, 576
     num_chunks = 15
     warmup_chunks = 3
     frames_per_chunk = 3  # Krea uses num_frame_per_block=3
