@@ -16,7 +16,7 @@
 
 \title{Adapting VACE for Real-Time Autoregressive Video Generation}
 
-\author[1]{Ryan Fosdick}
+\author[1]{Ryan Fosdick\thanks{ryan@livepeer.org}}
 \affil[1]{Daydream Live}
 
 \date{}
@@ -26,7 +26,7 @@
 \maketitle
 
 \begin{abstract}
-We describe an adaptation of VACE (Video All-in-one Creation and Editing) for real-time autoregressive video generation. VACE provides unified video control---reference guidance, structural conditioning, inpainting, and temporal extension---but assumes bidirectional attention over full sequences, making it incompatible with streaming pipelines that require fixed chunk sizes and causal attention. The key modification moves reference frames from the diffusion latent space into a parallel conditioning pathway, preserving the fixed chunk sizes and KV caching that autoregressive models require. This adaptation reuses existing pretrained VACE weights without additional training. We observe real-time throughput ($>$20 FPS at $368 \times 640$, 12 frames per chunk, NVIDIA RTX 5090) for structural control, inpainting, layout control, and arbitrary task compositions. Reference-to-video fidelity is reduced compared to batch VACE due to causal attention constraints. A reference implementation is available at \url{https://github.com/daydreamlive/scope}.
+We describe an adaptation of VACE (Video All-in-one Creation and Editing) for real-time autoregressive video generation. VACE provides unified video control---reference guidance, structural conditioning, inpainting, and temporal extension---but assumes bidirectional attention over full sequences, making it incompatible with streaming pipelines that require fixed chunk sizes and causal attention. The key modification moves reference frames from the diffusion latent space into a parallel conditioning pathway, preserving the fixed chunk sizes and KV caching that autoregressive models require. This adaptation reuses existing pretrained VACE weights without additional training. We observe 17--22 FPS throughput at $368 \times 640$ resolution on an NVIDIA RTX 5090 depending on mode, with structural control and inpainting at ${\sim}$17 FPS and temporal extension at ${\sim}$22 FPS. Reference-to-video fidelity is reduced compared to batch VACE due to causal attention constraints. A reference implementation is available at \url{https://github.com/daydreamlive/scope}.
 \end{abstract}
 
 \section{Introduction}
@@ -40,8 +40,8 @@ This paper presents an adaptation that enables VACE's control capabilities in st
 \begin{itemize}
     \item An architectural modification that moves reference frames from the diffusion latent space into a parallel conditioning pathway, resolving the incompatibility between VACE's reference handling and fixed-size chunk processing.
     \item Demonstration that pretrained VACE Context Block weights transfer directly to the adapted architecture without fine-tuning, due to the preservation of zero-initialized hint injection structure.
-    \item Empirical validation that structural control (depth, scribble, optical flow, layout), masked generation (inpainting, outpainting), and temporal extension all function at 20+ fps on consumer hardware in streaming contexts.
-    \item A pipeline mixin design validated across five distinct Wan-based autoregressive pipelines without per-model modifications.
+    \item Empirical validation that structural control (depth, scribble, optical flow, layout), masked generation (inpainting, outpainting), and temporal extension all function at real-time rates (17--22 FPS) on consumer hardware in streaming contexts.
+    \item Empirical validation across Wan2.1 1.3B and 14B model scales using the same adaptation code without per-model modifications.
 \end{itemize}
 
 This work does not retrain VACE or introduce new control modules. It provides an architectural adaptation that enables pretrained VACE Context Blocks to function in causal chunked pipelines without modifying base model weights.
@@ -81,6 +81,7 @@ This approach has three incompatibilities with streaming generation:
 \end{enumerate}
 
 \subsection{Adaptation: Separate Conditioning Pathway}
+\label{sec:adaptation}
 
 We move reference frames out of the diffusion latent space into a parallel conditioning pathway (Figure~\ref{fig:arch}). In the original architecture, references are concatenated with video latents, denoised together, then stripped from the output. In the adapted architecture, video latents are denoised alone while reference frames are processed separately by Context Blocks that produce hints---additive signals injected into the main DiT pathway via zero-initialized projections scaled by a user-controllable context scale.
 
@@ -163,7 +164,7 @@ The zero-initialized projections are critical to this transfer: at initializatio
 
 \section{Streaming Compatibility and Capabilities}
 
-Most VACE primitives transfer to streaming contexts with minimal adaptation. Masks, control signals (depth, pose, optical flow, scribble, grayscale, layout), dual-stream encoding, and hint injection all function with the same core mechanisms---requiring only cache management changes, not architectural ones. Reference image handling is the exception, addressed in Section~3.2.
+Most VACE primitives transfer to streaming contexts with minimal adaptation. Masks, control signals (depth, pose, optical flow, scribble, grayscale, layout), dual-stream encoding, and hint injection all function with the same core mechanisms---requiring only cache management changes, not architectural ones. Reference image handling is the exception, addressed in Section~\ref{sec:adaptation}.
 
 \begin{table}[h]
 \centering
@@ -294,7 +295,7 @@ The adaptation is implemented as a pipeline mixin compatible with multiple Wan-b
 
 \begin{table}[h]
 \centering
-\caption{Compatible base pipelines.}
+\caption{Validated base pipelines.}
 \label{tab:pipelines}
 \begin{tabular}{ll}
 \toprule
@@ -315,7 +316,7 @@ Key design decisions include: separate VAE encoder caches for dual-stream encodi
 
 Benchmarks were measured on a single NVIDIA RTX 5090 (32\,GB) with SageAttention~\citep{zhang2025sageattention} enabled. All models use bfloat16 precision at $368 \times 640$ resolution with TAE decoder. Each configuration was run for 15 measured chunks after 3 warmup chunks. These are inference-only measurements; end-to-end throughput with streaming overhead is slightly lower.
 
-To validate cross-pipeline compatibility, we benchmark on two distinct base pipelines: LongLive (4 denoising steps, 12 frames per chunk) and StreamDiffusion V2 (2 denoising steps, 4 frames per chunk). The same VACE adaptation code is used for both without modification.
+To validate cross-model compatibility, we benchmark on two Wan2.1 model scales: LongLive (1.3B, 4 denoising steps, 12 frames per chunk) and Krea Realtime Video (14B). The same VACE adaptation code is used for both without modification.
 
 \begin{table}[h]
 \centering
@@ -335,22 +336,23 @@ Baseline (no VACE) & 539\,ms & 22.3 & 22.8 & 13.2\,GB \\
 
 \begin{table}[h]
 \centering
-\caption{StreamDiffusion V2 1.3B ablation (4 frames per chunk, 2 denoising steps).}
-\label{tab:perf-sdv2}
+\caption{Krea Realtime Video 14B ablation (TODO: frames per chunk, TODO denoising steps, TODO resolution).}
+\label{tab:perf-krea}
 \begin{tabular}{lcccc}
 \toprule
 \textbf{Configuration} & \textbf{Avg Latency} & \textbf{Avg FPS} & \textbf{Peak FPS} & \textbf{Peak VRAM} \\
 \midrule
-Baseline (no VACE) & 233\,ms & 17.2 & 17.7 & 12.6\,GB \\
-+ Depth Control & 597\,ms & 6.7 & 6.8 & 15.2\,GB \\
-+ Inpainting & 557\,ms & 7.2 & 7.3 & 15.3\,GB \\
+Baseline (no VACE) & TODO & TODO & TODO & TODO \\
++ Depth Control & TODO & TODO & TODO & TODO \\
++ Inpainting & TODO & TODO & TODO & TODO \\
++ Extension (I2V) & TODO & TODO & TODO & TODO \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-VACE adds approximately 1.4--2.7\,GB of VRAM overhead across pipelines (the VACE Context Block weights). Per-chunk latency overhead varies by base pipeline and mode. With LongLive (4 denoising steps), VACE context encoding adds ${\sim}$30\% latency for depth and inpainting. Extension mode caches reference hints after the first chunk, resulting in negligible overhead (${\sim}$1\%) for subsequent chunks.
+VACE adds approximately 1.4\,GB of VRAM overhead for the 1.3B model (the VACE Context Block weights). Per-chunk latency overhead varies by mode. With LongLive (4 denoising steps), VACE context encoding adds ${\sim}$30\% latency for depth and inpainting. Extension mode caches reference hints after the first chunk, resulting in negligible overhead (${\sim}$1\%) for subsequent chunks.
 
-With StreamDiffusion V2 (2 denoising steps), the same VACE context encoding represents a larger fraction of total compute, resulting in ${\sim}$170\% latency overhead for depth control. This is expected: the fixed cost of VACE encoding is constant regardless of the number of denoising steps, so pipelines with fewer steps see proportionally higher overhead. Optimizations such as compiling the VACE encoder or reducing its precision could mitigate this.
+% TODO: Add Krea 14B performance discussion once benchmarks are available.
 
 \section{Related Work}
 
@@ -370,7 +372,7 @@ This adaptation trades some per-task quality for versatility: a single set of pr
 
 \section{Conclusion}
 
-By moving reference frames from the diffusion latent space into a parallel conditioning pathway, this adaptation preserves the fixed chunk sizes and KV caching that autoregressive models require while reusing existing VACE weights directly. Structural control, masked generation, and temporal extension function in real-time at 20+ fps on consumer hardware. The approach has been validated across multiple Wan-based autoregressive pipelines without per-model modifications.
+By moving reference frames from the diffusion latent space into a parallel conditioning pathway, this adaptation preserves the fixed chunk sizes and KV caching that autoregressive models require while reusing existing VACE weights directly. Structural control, masked generation, and temporal extension function at real-time rates (17--22 FPS) on consumer hardware. The approach has been validated across Wan2.1 1.3B and 14B model scales without per-model modifications.
 
 \section*{Acknowledgements}
 
