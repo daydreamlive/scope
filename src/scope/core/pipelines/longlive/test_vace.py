@@ -59,7 +59,7 @@ CONFIG = {
     # ===== INPUT PATHS =====
     # R2V: List of reference image paths (condition entire video, don't appear in output)
     "ref_images": [
-        "path/to/reference_image.png",
+        "tests/fixtures/cardboard_man_desk.jpg",
     ],
     # Depth: Path to depth map video (grayscale or RGB, will be converted)
     "depth_video": "tests/fixtures/white_square_moving.mp4",
@@ -67,8 +67,8 @@ CONFIG = {
     "input_video": "frontend/public/assets/test.mp4",
     "mask_video": "tests/fixtures/static_mask_half_white_half_black.mp4",
     # Extension: Frame images (appear in output video as actual frames)
-    "first_frame_image": "path/to/first_frame.png",
-    "last_frame_image": "path/to/last_frame.png",
+    "first_frame_image": "tests/fixtures/cardboard_man_desk.jpg",
+    "last_frame_image": "tests/fixtures/blue_electric_lava.webp",
     "extension_mode": "firstframe",  # "firstframe", "lastframe", or "firstlastframe"
     # ===== GENERATION PARAMETERS =====
     "prompt": None,  # Set to override mode-specific prompts, or None to use defaults
