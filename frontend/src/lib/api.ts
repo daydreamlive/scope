@@ -268,6 +268,36 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   return result;
 };
 
+export interface LoRADownloadRequest {
+  url: string;
+  filename?: string;
+}
+
+export interface LoRADownloadResponse {
+  message: string;
+  file: LoRAFileInfo;
+}
+
+export const downloadLoRAFile = async (
+  data: LoRADownloadRequest
+): Promise<LoRADownloadResponse> => {
+  const response = await fetch("/api/v1/lora/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Download LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
 export interface AssetFileInfo {
   name: string;
   path: string;

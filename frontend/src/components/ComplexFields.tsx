@@ -210,7 +210,7 @@ export function SchemaComplexField({
     );
   }
 
-  if (component === "lora" && !rendered.has("lora") && !ctx.isCloudMode) {
+  if (component === "lora" && !rendered.has("lora")) {
     rendered.add("lora");
     return (
       <div key="lora" className="space-y-4">

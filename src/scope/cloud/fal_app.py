@@ -627,8 +627,12 @@ class ScopeApp(fal.App, keep_alive=300):
                                 timeout=60.0,  # Longer timeout for uploads
                             )
                         else:
+                            # Use longer timeout for LoRA downloads
+                            post_timeout = 300.0 if "/lora/download" in path else 30.0
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}", json=body, timeout=30.0
+                                f"{SCOPE_BASE_URL}{path}",
+                                json=body,
+                                timeout=post_timeout,
                             )
                     elif method == "PATCH":
                         response = await client.patch(

@@ -12,6 +12,8 @@ import type {
   PipelineSchemasResponse,
   HardwareInfoResponse,
   LoRAFilesResponse,
+  LoRADownloadRequest,
+  LoRADownloadResponse,
   AssetsResponse,
   AssetFileInfo,
   WebRTCOfferRequest,
@@ -92,6 +94,16 @@ export function useApi() {
     }
     return api.listLoRAFiles();
   }, [adapter, isCloudMode]);
+
+  const downloadLoRAFile = useCallback(
+    async (data: LoRADownloadRequest): Promise<LoRADownloadResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.downloadLoRAFile(data);
+      }
+      return api.downloadLoRAFile(data);
+    },
+    [adapter, isCloudMode]
+  );
 
   // Asset APIs
   const listAssets = useCallback(
@@ -192,6 +204,7 @@ export function useApi() {
 
     // LoRA
     listLoRAFiles,
+    downloadLoRAFile,
 
     // Assets
     listAssets,

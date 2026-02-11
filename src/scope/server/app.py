@@ -869,8 +869,13 @@ class LoRAFilesResponse(BaseModel):
 
 
 @app.get("/api/v1/lora/list", response_model=LoRAFilesResponse)
-async def list_lora_files():
-    """List available LoRA files in the models/lora directory and its subdirectories."""
+async def list_lora_files(
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """List available LoRA files in the models/lora directory and its subdirectories.
+
+    When cloud mode is active, lists LoRA files from the cloud server instead.
+    """
 
     def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
         """Extract LoRA file metadata."""
@@ -887,6 +892,19 @@ async def list_lora_files():
         )
 
     try:
+        # If cloud mode is active, proxy to cloud
+        if cloud_manager.is_connected:
+            logger.info("[CLOUD] Fetching LoRA list from cloud")
+            response = await cloud_manager.api_request(
+                method="GET",
+                path="/api/v1/lora/list",
+                timeout=30.0,
+            )
+            data = response.get("data", {})
+            return LoRAFilesResponse(
+                lora_files=[LoRAFileInfo(**f) for f in data.get("lora_files", [])]
+            )
+
         lora_dir = get_models_dir() / "lora"
         lora_files: list[LoRAFileInfo] = []
 
@@ -898,6 +916,98 @@ async def list_lora_files():
 
     except Exception as e:  # pragma: no cover - defensive logging
         logger.error(f"list_lora_files: Error listing LoRA files: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class LoRADownloadRequest(BaseModel):
+    url: str
+    filename: str | None = None
+
+
+class LoRADownloadResponse(BaseModel):
+    message: str
+    file: LoRAFileInfo
+
+
+@app.post("/api/v1/lora/download", response_model=LoRADownloadResponse)
+async def download_lora_file(
+    request: LoRADownloadRequest,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Download a LoRA file from a URL (e.g. HuggingFace, CivitAI).
+
+    When cloud mode is active, the download happens on the cloud machine.
+    """
+    from urllib.parse import unquote, urlparse
+
+    from .download_models import http_get
+
+    try:
+        # If cloud mode is active, proxy to cloud
+        if cloud_manager.is_connected:
+            logger.info("[CLOUD] Proxying LoRA download to cloud")
+            response = await cloud_manager.api_request(
+                method="POST",
+                path="/api/v1/lora/download",
+                body=request.model_dump(),
+                timeout=300.0,
+            )
+            data = response.get("data", {})
+            return LoRADownloadResponse(
+                message=data.get("message", "Downloaded via cloud"),
+                file=LoRAFileInfo(**data.get("file", {})),
+            )
+
+        # Determine filename from URL if not provided
+        filename = request.filename
+        if not filename:
+            parsed = urlparse(request.url)
+            filename = unquote(parsed.path.split("/")[-1])
+
+        if not filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not determine filename from URL. Please provide a filename.",
+            )
+
+        # Validate file extension
+        ext = Path(filename).suffix.lower()
+        if ext not in LORA_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file extension '{ext}'. Allowed: {', '.join(sorted(LORA_EXTENSIONS))}",
+            )
+
+        lora_dir = get_models_dir() / "lora"
+        dest_path = lora_dir / filename
+
+        if dest_path.exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f"File '{filename}' already exists.",
+            )
+
+        # Download in a thread to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, http_get, request.url, dest_path)
+
+        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        file_info = LoRAFileInfo(
+            name=dest_path.stem,
+            path=str(dest_path),
+            size_mb=round(size_mb, 2),
+            folder=None,
+        )
+
+        return LoRADownloadResponse(
+            message=f"Successfully downloaded '{filename}'",
+            file=file_info,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"download_lora_file: Error downloading LoRA: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

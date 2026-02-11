@@ -8,11 +8,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Plus, X, RefreshCw } from "lucide-react";
+import { Plus, X, RefreshCw, Download } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { LoRAConfig, LoraMergeStrategy } from "../types";
-import { listLoRAFiles, type LoRAFileInfo } from "../lib/api";
+import type { LoRAFileInfo } from "../lib/api";
+import { useApi } from "../hooks/useApi";
+import { Input } from "./ui/input";
 import { FilePicker } from "./ui/file-picker";
 
 interface LoRAManagerProps {
@@ -30,9 +32,13 @@ export function LoRAManager({
   isStreaming = false,
   loraMergeStrategy = "permanent_merge",
 }: LoRAManagerProps) {
+  const { listLoRAFiles, downloadLoRAFile } = useApi();
   const [availableLoRAs, setAvailableLoRAs] = useState<LoRAFileInfo[]>([]);
   const [isLoadingLoRAs, setIsLoadingLoRAs] = useState(false);
   const [localScales, setLocalScales] = useState<Record<string, number>>({});
+  const [downloadUrl, setDownloadUrl] = useState("");
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const loadAvailableLoRAs = async () => {
     setIsLoadingLoRAs(true);
@@ -99,6 +105,23 @@ export function LoRAManager({
     return { isDisabled, tooltipText };
   };
 
+  const handleDownloadLoRA = async () => {
+    if (!downloadUrl.trim()) return;
+    setIsDownloading(true);
+    setDownloadError(null);
+    try {
+      await downloadLoRAFile({ url: downloadUrl.trim() });
+      setDownloadUrl("");
+      await loadAvailableLoRAs();
+    } catch (error) {
+      setDownloadError(
+        error instanceof Error ? error.message : "Download failed"
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -130,6 +153,37 @@ export function LoRAManager({
           </Button>
         </div>
       </div>
+
+      <div className="flex items-center gap-1">
+        <Input
+          value={downloadUrl}
+          onChange={e => {
+            setDownloadUrl(e.target.value);
+            setDownloadError(null);
+          }}
+          placeholder="Paste LoRA URL (HuggingFace, CivitAI...)"
+          disabled={disabled || isDownloading}
+          className="h-7 text-xs flex-1"
+          onKeyDown={e => {
+            if (e.key === "Enter") handleDownloadLoRA();
+          }}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleDownloadLoRA}
+          disabled={disabled || isDownloading || !downloadUrl.trim()}
+          className="h-7 px-2"
+          title="Download LoRA from URL"
+        >
+          <Download
+            className={`h-3 w-3 ${isDownloading ? "animate-pulse" : ""}`}
+          />
+        </Button>
+      </div>
+      {downloadError && (
+        <p className="text-xs text-destructive">{downloadError}</p>
+      )}
 
       {loras.length === 0 && (
         <p className="text-xs text-muted-foreground">
