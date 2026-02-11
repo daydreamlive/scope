@@ -298,9 +298,7 @@ export function useStreamState() {
         }
 
         if (inputSourcesResult.status === "fulfilled") {
-          setAvailableInputSources(
-            inputSourcesResult.value.input_sources
-          );
+          setAvailableInputSources(inputSourcesResult.value.input_sources);
         } else {
           console.error(
             "useStreamState: Failed to fetch input sources:",
@@ -313,7 +311,13 @@ export function useStreamState() {
     };
 
     fetchInitialData();
-  }, [isCloudMode, isReady, getPipelineSchemas, getHardwareInfo, getInputSources]);
+  }, [
+    isCloudMode,
+    isReady,
+    getPipelineSchemas,
+    getHardwareInfo,
+    getInputSources,
+  ]);
 
   // Update inputMode when schemas load or pipeline changes
   // This sets the correct default mode for the pipeline

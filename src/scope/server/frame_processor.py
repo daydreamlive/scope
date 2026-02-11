@@ -134,7 +134,7 @@ class FrameProcessor:
         self.spout_receiver_name = ""
         self.spout_receiver_thread = None
 
-        self.input_source: "InputSource | None" = None
+        self.input_source: InputSource | None = None
         self.input_source_enabled = False
         self.input_source_type = ""
         self.input_source_thread = None

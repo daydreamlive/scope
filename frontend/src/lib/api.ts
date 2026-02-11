@@ -249,22 +249,21 @@ export interface DiscoveredSourcesResponse {
   sources: DiscoveredSource[];
 }
 
-export const getInputSources =
-  async (): Promise<InputSourceTypesResponse> => {
-    const response = await fetch("/api/v1/input-sources", {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
+export const getInputSources = async (): Promise<InputSourceTypesResponse> => {
+  const response = await fetch("/api/v1/input-sources", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Input sources failed: ${response.status} ${response.statusText}: ${errorText}`
-      );
-    }
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Input sources failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
 
-    return response.json();
-  };
+  return response.json();
+};
 
 export const getInputSourceSources = async (
   sourceType: string,

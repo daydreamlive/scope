@@ -111,8 +111,9 @@ export function StreamPage() {
   } = useStreamState();
 
   // Derive NDI availability from dynamic input sources list
-  const ndiAvailable =
-    availableInputSources.some(s => s.source_id === "ndi" && s.available);
+  const ndiAvailable = availableInputSources.some(
+    s => s.source_id === "ndi" && s.available
+  );
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
@@ -807,7 +808,10 @@ export function StreamPage() {
 
     // Probe the source's native resolution so the pipeline loads at the right aspect ratio
     try {
-      const { width, height } = await getInputSourceResolution("ndi", identifier);
+      const { width, height } = await getInputSourceResolution(
+        "ndi",
+        identifier
+      );
       updateSettings({ resolution: { width, height } });
     } catch (e) {
       console.warn("Could not probe NDI source resolution:", e);
