@@ -86,6 +86,9 @@ export interface SettingsState {
   postprocessorIds?: string[];
   // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
   schemaFieldOverrides?: Record<string, unknown>;
+  // Schema-driven overrides for preprocessor/postprocessor plugin configs
+  preprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  postprocessorSchemaFieldOverrides?: Record<string, unknown>;
 }
 
 export interface PipelineInfo {

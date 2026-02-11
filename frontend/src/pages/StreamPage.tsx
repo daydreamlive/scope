@@ -311,6 +311,14 @@ export function StreamPage() {
         ? customVideoResolution
         : { height: modeDefaults.height, width: modeDefaults.width };
 
+    // Clear pre/postprocessors that don't support the new mode
+    const preprocessorStillValid = settings.preprocessorIds?.every(id =>
+      pipelines?.[id]?.supportedModes?.includes(newMode)
+    );
+    const postprocessorStillValid = settings.postprocessorIds?.every(id =>
+      pipelines?.[id]?.supportedModes?.includes(newMode)
+    );
+
     // Update settings with new mode and ALL mode-specific defaults including resolution
     updateSettings({
       inputMode: newMode,
@@ -318,6 +326,12 @@ export function StreamPage() {
       denoisingSteps: modeDefaults.denoisingSteps,
       noiseScale: modeDefaults.noiseScale,
       noiseController: modeDefaults.noiseController,
+      ...(preprocessorStillValid
+        ? {}
+        : { preprocessorIds: [], preprocessorSchemaFieldOverrides: {} }),
+      ...(postprocessorStillValid
+        ? {}
+        : { postprocessorIds: [], postprocessorSchemaFieldOverrides: {} }),
     });
 
     // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
@@ -393,6 +407,8 @@ export function StreamPage() {
       noiseScale: defaults.noiseScale,
       noiseController: defaults.noiseController,
       loras: [], // Clear LoRA controls when switching pipelines
+      preprocessorSchemaFieldOverrides: {},
+      postprocessorSchemaFieldOverrides: {},
     });
   };
 
@@ -657,13 +673,46 @@ export function StreamPage() {
     }
   };
 
-  const handlePreprocessorIdsChange = (ids: string[]) => {
-    updateSettings({ preprocessorIds: ids });
+  // Shared helpers for pre/postprocessor plugin settings
+  const pluginSettingsKeys = {
+    preprocessor: {
+      ids: "preprocessorIds",
+      overrides: "preprocessorSchemaFieldOverrides",
+    },
+    postprocessor: {
+      ids: "postprocessorIds",
+      overrides: "postprocessorSchemaFieldOverrides",
+    },
+  } as const;
+
+  type PluginKind = keyof typeof pluginSettingsKeys;
+
+  const makePluginIdsHandler = (kind: PluginKind) => (ids: string[]) => {
+    const k = pluginSettingsKeys[kind];
+    updateSettings({ [k.ids]: ids, [k.overrides]: {} });
   };
 
-  const handlePostprocessorIdsChange = (ids: string[]) => {
-    updateSettings({ postprocessorIds: ids });
-  };
+  const makePluginOverrideHandler =
+    (kind: PluginKind) =>
+    (key: string, value: unknown, isRuntimeParam?: boolean) => {
+      const k = pluginSettingsKeys[kind];
+      const currentOverrides =
+        (settings[k.overrides] as Record<string, unknown> | undefined) ?? {};
+      updateSettings({ [k.overrides]: { ...currentOverrides, [key]: value } });
+      const pipelineId = (settings[k.ids] as string[] | undefined)?.[0];
+      if (isRuntimeParam && isStreaming && pipelineId) {
+        sendParameterUpdate({
+          pipeline_params: { [pipelineId]: { [key]: value } },
+        });
+      }
+    };
+
+  const handlePreprocessorIdsChange = makePluginIdsHandler("preprocessor");
+  const handlePostprocessorIdsChange = makePluginIdsHandler("postprocessor");
+  const handlePreprocessorSchemaFieldOverrideChange =
+    makePluginOverrideHandler("preprocessor");
+  const handlePostprocessorSchemaFieldOverrideChange =
+    makePluginOverrideHandler("postprocessor");
 
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
@@ -1059,6 +1108,23 @@ export function StreamPage() {
           Object.keys(settings.schemaFieldOverrides).length > 0
         ) {
           loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
+        }
+
+        // Include pre/postprocessor schema overrides keyed by pipeline ID
+        for (const kind of ["preprocessor", "postprocessor"] as const) {
+          const k = pluginSettingsKeys[kind];
+          const ids = settings[k.ids] as string[] | undefined;
+          const overrides = settings[k.overrides] as
+            | Record<string, unknown>
+            | undefined;
+          if (ids?.length && overrides && Object.keys(overrides).length > 0) {
+            loadParams.pipeline_params = {
+              ...(loadParams.pipeline_params as
+                | Record<string, unknown>
+                | undefined),
+              ...Object.fromEntries(ids.map(id => [id, overrides])),
+            };
+          }
         }
 
         console.log(
@@ -1549,6 +1615,32 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
+            preprocessorConfigSchema={
+              settings.preprocessorIds?.[0]
+                ? (pipelines?.[settings.preprocessorIds[0]]?.configSchema as
+                    | import("../lib/schemaSettings").ConfigSchemaLike
+                    | undefined)
+                : undefined
+            }
+            postprocessorConfigSchema={
+              settings.postprocessorIds?.[0]
+                ? (pipelines?.[settings.postprocessorIds[0]]?.configSchema as
+                    | import("../lib/schemaSettings").ConfigSchemaLike
+                    | undefined)
+                : undefined
+            }
+            preprocessorSchemaFieldOverrides={
+              settings.preprocessorSchemaFieldOverrides ?? {}
+            }
+            postprocessorSchemaFieldOverrides={
+              settings.postprocessorSchemaFieldOverrides ?? {}
+            }
+            onPreprocessorSchemaFieldOverrideChange={
+              handlePreprocessorSchemaFieldOverrideChange
+            }
+            onPostprocessorSchemaFieldOverrideChange={
+              handlePostprocessorSchemaFieldOverrideChange
+            }
             schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
             onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
               updateSettings({

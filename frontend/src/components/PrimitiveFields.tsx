@@ -163,7 +163,7 @@ export function NumberField({
           className={
             isLongLabel
               ? "text-sm font-medium"
-              : "text-sm font-medium w-14 shrink-0"
+              : "text-sm font-medium w-20 shrink-0"
           }
         />
         {stepper}
@@ -202,7 +202,7 @@ export function SliderField({
       max={max}
       step={step}
       incrementAmount={incrementAmount}
-      labelClassName="text-sm font-medium w-14 shrink-0"
+      labelClassName="text-sm font-medium w-20 shrink-0"
       valueFormatter={isFloat ? (v: number) => v : (v: number) => Math.round(v)}
       inputParser={
         isFloat
