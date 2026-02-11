@@ -1309,7 +1309,7 @@ async def list_plugins():
     """List all installed plugins with metadata."""
     from scope.core.plugins import get_plugin_manager
 
-    from .schema import PluginListResponse
+    from .schema import FailedPluginInfoSchema, PluginListResponse
 
     try:
         plugin_manager = get_plugin_manager()
@@ -1317,7 +1317,19 @@ async def list_plugins():
 
         plugins = [_convert_plugin_dict_to_info(p) for p in plugins_data]
 
-        return PluginListResponse(plugins=plugins, total=len(plugins))
+        failed = [
+            FailedPluginInfoSchema(
+                package_name=f.package_name,
+                entry_point_name=f.entry_point_name,
+                error_type=f.error_type,
+                error_message=f.error_message,
+            )
+            for f in plugin_manager.get_failed_plugins()
+        ]
+
+        return PluginListResponse(
+            plugins=plugins, total=len(plugins), failed_plugins=failed
+        )
     except Exception as e:
         logger.error(f"Error listing plugins: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

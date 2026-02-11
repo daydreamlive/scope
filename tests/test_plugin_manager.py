@@ -1235,3 +1235,195 @@ class TestEditableInstallPluginsTxtCleanup:
 
         # _write_plugins_file should NOT have been called
         mock_write.assert_not_called()
+
+
+class TestLoadPluginsErrorHandling:
+    """Tests for resilient plugin loading with malformed entry points."""
+
+    def _make_mock_dist(self, ep_name, ep_group="scope", package_name="test-plugin"):
+        """Create a mock distribution with a single entry point."""
+        mock_ep = MagicMock()
+        mock_ep.group = ep_group
+        mock_ep.name = ep_name
+        mock_ep.load = MagicMock(return_value=MagicMock())
+
+        mock_dist = MagicMock()
+        mock_dist.entry_points = [mock_ep]
+        mock_dist.metadata = {"Name": package_name}
+        return mock_dist, mock_ep
+
+    def test_malformed_entry_point_does_not_crash(self):
+        """One bad entry point should not prevent good plugins from loading."""
+        pm = PluginManager()
+
+        # Good plugin
+        good_dist, good_ep = self._make_mock_dist(
+            "good-plugin", package_name="good-pkg"
+        )
+        good_ep.load.return_value = MagicMock()
+
+        # Bad plugin — load raises ModuleNotFoundError
+        bad_dist, bad_ep = self._make_mock_dist("bad-plugin", package_name="bad-pkg")
+        bad_ep.load.side_effect = ModuleNotFoundError("No module named 'MIT'")
+
+        with patch(
+            "importlib.metadata.distributions", return_value=[good_dist, bad_dist]
+        ):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                pm.load_plugins()
+
+        # Bad plugin recorded in _failed_plugins
+        assert len(pm._failed_plugins) == 1
+        failed = pm._failed_plugins[0]
+        assert failed.package_name == "bad-pkg"
+        assert failed.entry_point_name == "bad-plugin"
+        assert failed.error_type == "ModuleNotFoundError"
+        assert "MIT" in failed.error_message
+
+    def test_all_plugins_fail_gracefully(self):
+        """All entry points failing should not raise an exception."""
+        pm = PluginManager()
+
+        dist1, ep1 = self._make_mock_dist("plugin-a", package_name="pkg-a")
+        ep1.load.side_effect = ImportError("missing dep")
+
+        dist2, ep2 = self._make_mock_dist("plugin-b", package_name="pkg-b")
+        ep2.load.side_effect = ModuleNotFoundError("No module named 'xyz'")
+
+        with patch("importlib.metadata.distributions", return_value=[dist1, dist2]):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                # Should not raise
+                pm.load_plugins()
+
+        assert len(pm._failed_plugins) == 2
+        names = {f.package_name for f in pm._failed_plugins}
+        assert names == {"pkg-a", "pkg-b"}
+
+    def test_failed_entry_point_is_blocked(self):
+        """After a failed load, the entry point should be blocked in pluggy."""
+        pm = PluginManager()
+
+        dist, ep = self._make_mock_dist("broken-ep", package_name="broken-pkg")
+        ep.load.side_effect = ModuleNotFoundError("bad module")
+
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                pm.load_plugins()
+
+        assert pm._pm.is_blocked("broken-ep")
+
+    def test_multiple_entry_points_rejected(self):
+        """A package with != 1 scope entry points should be rejected immediately."""
+        pm = PluginManager()
+
+        # Package with two entry points: one bogus (license metadata), one real
+        bogus_ep = MagicMock()
+        bogus_ep.group = "scope"
+        bogus_ep.name = "license"
+
+        real_ep = MagicMock()
+        real_ep.group = "scope"
+        real_ep.name = "real-plugin"
+
+        mock_dist = MagicMock()
+        mock_dist.entry_points = [bogus_ep, real_ep]
+        mock_dist.metadata = {"Name": "broken-pkg"}
+
+        with patch("importlib.metadata.distributions", return_value=[mock_dist]):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                pm.load_plugins()
+
+        # Both entry points should be blocked
+        assert pm._pm.is_blocked("license")
+        assert pm._pm.is_blocked("real-plugin")
+
+        # Neither ep.load() should have been called
+        bogus_ep.load.assert_not_called()
+        real_ep.load.assert_not_called()
+
+        # Failure recorded with InvalidPluginError
+        assert len(pm._failed_plugins) == 1
+        failed = pm._failed_plugins[0]
+        assert failed.package_name == "broken-pkg"
+        assert failed.error_type == "InvalidPluginError"
+        assert "Expected 1 entry point" in failed.error_message
+
+    def test_load_plugins_clears_previous_failures(self):
+        """Calling load_plugins() again should clear previous failures."""
+        pm = PluginManager()
+
+        dist, ep = self._make_mock_dist("flaky-ep", package_name="flaky-pkg")
+        ep.load.side_effect = ImportError("first failure")
+
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                pm.load_plugins()
+
+        assert len(pm._failed_plugins) == 1
+
+        # Second call with no broken plugins — failures should be cleared
+        with patch("importlib.metadata.distributions", return_value=[]):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                pm.load_plugins()
+
+        assert len(pm._failed_plugins) == 0
+
+    def test_get_failed_plugins_returns_copy(self):
+        """get_failed_plugins() should return a copy, not the internal list."""
+        pm = PluginManager()
+
+        dist, ep = self._make_mock_dist("fail-ep", package_name="fail-pkg")
+        ep.load.side_effect = ImportError("oops")
+
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                pm.load_plugins()
+
+        result = pm.get_failed_plugins()
+        assert len(result) == 1
+        assert result is not pm._failed_plugins
+        # Mutating the returned list should not affect internal state
+        result.clear()
+        assert len(pm._failed_plugins) == 1
+
+    def test_failed_plugin_pipelines_not_registered(self):
+        """Pipelines from failed plugins should not appear in the registry."""
+        pm = PluginManager()
+
+        # Good plugin
+        good_dist, good_ep = self._make_mock_dist(
+            "good-plugin", package_name="good-pkg"
+        )
+        good_module = MagicMock()
+
+        def good_register(register):
+            mock_cls = MagicMock()
+            mock_cls.get_config_class.return_value.pipeline_id = "good-pipeline"
+            register(mock_cls)
+
+        good_module.register_pipelines = good_register
+        good_ep.load.return_value = good_module
+
+        # Bad plugin — entry point load fails during prevalidation
+        bad_dist, bad_ep = self._make_mock_dist("bad-plugin", package_name="bad-pkg")
+        bad_ep.load.side_effect = ImportError("missing dependency")
+
+        with patch(
+            "importlib.metadata.distributions",
+            return_value=[good_dist, bad_dist],
+        ):
+            with patch.object(pm._pm, "load_setuptools_entrypoints"):
+                pm.load_plugins()
+
+            # Set up a mock registry
+            mock_registry = MagicMock()
+            mock_registry.list_pipelines.return_value = ["good-pipeline"]
+
+            pm.register_plugin_pipelines(mock_registry)
+
+        # Bad package should NOT be in _registered_plugins
+        assert "bad-pkg" not in pm._registered_plugins
+        assert "good-pkg" in pm._registered_plugins
+
+        # Bad package's pipeline should NOT be in the mapping
+        assert "bad-pkg" not in pm._pipeline_to_plugin.values()

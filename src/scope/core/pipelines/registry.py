@@ -220,10 +220,15 @@ def _initialize_registry():
     _register_pipelines()
 
     # Load and register plugin pipelines
-    from scope.core.plugins import load_plugins, register_plugin_pipelines
+    try:
+        from scope.core.plugins import load_plugins, register_plugin_pipelines
 
-    load_plugins()
-    register_plugin_pipelines(PipelineRegistry)
+        load_plugins()
+        register_plugin_pipelines(PipelineRegistry)
+    except Exception as e:
+        logger.error(
+            f"Failed to load plugins: {e}. Built-in pipelines are still available."
+        )
 
     pipeline_count = len(PipelineRegistry.list_pipelines())
     logger.info(f"Registry initialized with {pipeline_count} pipeline(s)")

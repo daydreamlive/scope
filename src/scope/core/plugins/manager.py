@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -72,6 +73,16 @@ class PluginInstallError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class FailedPluginInfo:
+    """Information about a plugin entry point that failed to load."""
+
+    package_name: str
+    entry_point_name: str
+    error_type: str
+    error_message: str
+
+
 class PluginManager:
     """Manager for Scope plugin lifecycle.
 
@@ -89,6 +100,9 @@ class PluginManager:
 
         # Cache of registered plugin names (package names)
         self._registered_plugins: set[str] = set()
+
+        # Entry points that failed to load
+        self._failed_plugins: list[FailedPluginInfo] = []
 
     def _read_plugins_file(self) -> list[str]:
         """Read plugin specifiers from plugins.txt."""
@@ -231,12 +245,92 @@ class PluginManager:
         """Get the underlying pluggy PluginManager."""
         return self._pm
 
+    def _prevalidate_entrypoints(self, group: str) -> None:
+        """Pre-validate entry points by attempting to load each one.
+
+        Entry points that fail to load are logged, recorded in _failed_plugins,
+        and all entry points from that package are blocked in pluggy so that
+        load_setuptools_entrypoints skips the entire package.
+
+        Args:
+            group: Entry point group name (e.g. "scope")
+        """
+        from importlib.metadata import distributions
+
+        for dist in distributions():
+            try:
+                eps = dist.entry_points
+                scope_eps = [ep for ep in eps if ep.group == group]
+                if not scope_eps:
+                    continue
+
+                package_name = dist.metadata.get("Name", "unknown")
+
+                if len(scope_eps) != 1:
+                    ep_names = [ep.name for ep in scope_eps]
+                    logger.error(
+                        f"Plugin '{package_name}' has {len(scope_eps)} entry points "
+                        f"in the 'scope' group (expected 1): {ep_names}"
+                    )
+                    self._failed_plugins.append(
+                        FailedPluginInfo(
+                            package_name=package_name,
+                            entry_point_name=", ".join(ep_names),
+                            error_type="InvalidPluginError",
+                            error_message=(
+                                f"Expected 1 entry point in 'scope' group, "
+                                f"found {len(scope_eps)}: {ep_names}"
+                            ),
+                        )
+                    )
+                    for ep in scope_eps:
+                        self._pm.set_blocked(ep.name)
+                    continue
+
+                # Single entry point — validate it loads
+                ep = scope_eps[0]
+                try:
+                    ep.load()
+                except Exception as e:
+                    error_type = type(e).__name__
+                    error_message = str(e)
+                    logger.error(
+                        f"Failed to load plugin entry point "
+                        f"'{ep.name}' from '{package_name}': "
+                        f"{error_type}: {error_message}"
+                    )
+                    self._failed_plugins.append(
+                        FailedPluginInfo(
+                            package_name=package_name,
+                            entry_point_name=ep.name,
+                            error_type=error_type,
+                            error_message=error_message,
+                        )
+                    )
+                    self._pm.set_blocked(ep.name)
+            except Exception as e:
+                logger.debug(f"Error checking distribution {dist}: {e}")
+
     def load_plugins(self) -> None:
         """Discover and load all plugins via entry points."""
         with self._lock:
+            self._failed_plugins.clear()
+            self._prevalidate_entrypoints("scope")
             self._pm.load_setuptools_entrypoints("scope")
             plugin_count = len(self._pm.get_plugins())
-            logger.info(f"Loaded {plugin_count} plugin(s)")
+            if self._failed_plugins:
+                names = [f.package_name for f in self._failed_plugins]
+                logger.warning(
+                    f"Loaded {plugin_count} plugin(s), "
+                    f"{len(self._failed_plugins)} failed: {names}"
+                )
+            else:
+                logger.info(f"Loaded {plugin_count} plugin(s)")
+
+    def get_failed_plugins(self) -> list[FailedPluginInfo]:
+        """Return a copy of the failed plugin info list (thread-safe)."""
+        with self._lock:
+            return list(self._failed_plugins)
 
     def register_plugin_pipelines(self, registry: "PipelineRegistry") -> None:
         """Call register_pipelines hook for all plugins.
@@ -270,6 +364,9 @@ class PluginManager:
         # Get all pipeline IDs currently registered
         all_pipeline_ids = set(registry.list_pipelines())
 
+        # Skip packages whose entry points failed to load
+        failed_packages = {fp.package_name for fp in self._failed_plugins}
+
         # Find which package provides each plugin
         for dist in distributions():
             # Check if this package has scope entry points
@@ -280,6 +377,8 @@ class PluginManager:
                     continue
 
                 package_name = dist.metadata["Name"]
+                if package_name in failed_packages:
+                    continue
                 self._registered_plugins.add(package_name)
 
                 # Try to get pipeline IDs from this plugin
@@ -1170,7 +1269,9 @@ class PluginManager:
         if editable_path:
             self._reload_module_tree(name, editable_path)
 
-        # Re-load plugins via entry points
+        # Re-load plugins via entry points (with prevalidation)
+        self._failed_plugins.clear()
+        self._prevalidate_entrypoints("scope")
         self._pm.load_setuptools_entrypoints("scope")
 
         # Re-register pipelines
