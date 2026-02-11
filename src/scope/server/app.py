@@ -1248,9 +1248,7 @@ async def get_input_source_resolution(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            f"Error probing resolution for '{source_type}/{identifier}': {e}"
-        )
+        logger.error(f"Error probing resolution for '{source_type}/{identifier}': {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

@@ -969,9 +969,7 @@ class FrameProcessor:
                     target=self._input_source_receiver_loop, daemon=True
                 )
                 self.input_source_thread.start()
-                logger.info(
-                    f"Input source enabled: {source_type} -> '{source_name}'"
-                )
+                logger.info(f"Input source enabled: {source_type} -> '{source_name}'")
             else:
                 logger.error(
                     f"Failed to connect to input source: "
@@ -998,9 +996,7 @@ class FrameProcessor:
         frame_count = 0
 
         while (
-            self.running
-            and self.input_source_enabled
-            and self.input_source is not None
+            self.running and self.input_source_enabled and self.input_source is not None
         ):
             try:
                 current_pipeline_fps = self.get_fps()

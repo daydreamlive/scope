@@ -87,6 +87,7 @@ class _NDIlib_metadata_frame_t(ctypes.Structure):
         ("p_data", ctypes.c_char_p),
     ]
 
+
 # Color format constants
 _NDI_COLOR_FORMAT_BGRX_BGRA = 0
 _NDI_COLOR_FORMAT_UYVY_BGRA = 1
@@ -245,6 +246,7 @@ def _setup_ndi_functions(lib: ctypes.CDLL) -> None:
         ctypes.POINTER(_NDIlib_video_frame_v2_t),
     ]
 
+
 class NDIInputSource(InputSource):
     """Input source that receives video frames via NDI.
 
@@ -309,9 +311,7 @@ class NDIInputSource(InputSource):
         for i in range(num_sources.value):
             source = sources_ptr[i]
             name = source.p_ndi_name.decode("utf-8") if source.p_ndi_name else ""
-            url = (
-                source.p_url_address.decode("utf-8") if source.p_url_address else ""
-            )
+            url = source.p_url_address.decode("utf-8") if source.p_url_address else ""
             sources.append(
                 InputSourceInfo(
                     name=name,
@@ -354,9 +354,7 @@ class NDIInputSource(InputSource):
         recv_create.allow_video_fields = False
         recv_create.p_ndi_recv_name = b"Scope"
 
-        self._recv_instance = self._lib.NDIlib_recv_create_v3(
-            ctypes.byref(recv_create)
-        )
+        self._recv_instance = self._lib.NDIlib_recv_create_v3(ctypes.byref(recv_create))
         if not self._recv_instance:
             logger.error(f"Failed to create NDI receiver for '{identifier}'")
             return False
@@ -407,9 +405,7 @@ class NDIInputSource(InputSource):
             if stride == width * bpp:
                 # No padding, direct copy
                 buffer_size = height * stride
-                buffer = (ctypes.c_uint8 * buffer_size).from_address(
-                    video_frame.p_data
-                )
+                buffer = (ctypes.c_uint8 * buffer_size).from_address(video_frame.p_data)
                 frame_data = np.frombuffer(buffer, dtype=np.uint8).reshape(
                     (height, width, bpp if bpp == 4 else -1)
                 )
@@ -475,8 +471,7 @@ class NDIInputSource(InputSource):
                 elapsed += poll_interval
 
             logger.warning(
-                f"Timed out probing resolution for '{identifier}' "
-                f"after {timeout_ms}ms"
+                f"Timed out probing resolution for '{identifier}' after {timeout_ms}ms"
             )
             return None
         finally:
