@@ -6,6 +6,7 @@
 \usepackage{url}
 \usepackage{booktabs}
 \usepackage{amsfonts}
+\usepackage{amsmath}
 \usepackage{microtype}
 \usepackage{graphicx}
 \usepackage{float}
@@ -35,7 +36,7 @@ Real-time video generation models such as LongLive~\citep{yang2026longlive}, Kre
 
 VACE~\citep{jiang2025vace} provides unified video control for batch-oriented diffusion models, supporting reference-to-video generation, video-to-video structural control, masked editing (inpainting/outpainting), temporal extension, and arbitrary compositions of these capabilities. However, VACE assumes bidirectional attention and processes full video sequences at once, making it incompatible with streaming generation.
 
-This paper presents an adaptation that enables VACE's control capabilities in streaming autoregressive pipelines. The technique is general to any chunked autoregressive diffusion model with causal attention and is not tied to a specific application or product. Our contributions are:
+This paper presents an adaptation that enables VACE's control capabilities in streaming autoregressive pipelines. We validate on five Wan2.1-based autoregressive pipelines spanning 1.3B and 14B parameter scales; the technique should generalize to other chunked causal diffusion models sharing the same DiT backbone, though we have not tested beyond the Wan2.1 family. Our contributions are:
 
 \begin{itemize}
     \item An architectural modification that moves reference frames from the diffusion latent space into a parallel conditioning pathway, resolving the incompatibility between VACE's reference handling and fixed-size chunk processing.
@@ -83,9 +84,7 @@ This approach has three incompatibilities with streaming generation:
 \subsection{Adaptation: Separate Conditioning Pathway}
 \label{sec:adaptation}
 
-We move reference frames out of the diffusion latent space into a parallel conditioning pathway (Figure~\ref{fig:arch}). In the original architecture, references are concatenated with video latents, denoised together, then stripped from the output. In the adapted architecture, video latents are denoised alone while reference frames are processed separately by Context Blocks that produce hints---additive signals injected into the main DiT pathway via zero-initialized projections scaled by a user-controllable context scale.
-
-This preserves fixed chunk sizes: video latents maintain consistent dimensions regardless of how many references are provided.
+We move reference frames out of the diffusion latent space into a parallel conditioning pathway (Figure~\ref{fig:arch}). Video latents are denoised alone while reference frames are processed separately by Context Blocks that produce hints---additive signals injected into the main DiT pathway via zero-initialized projections scaled by a user-controllable context scale. This preserves fixed chunk sizes regardless of how many references are provided.
 
 \begin{figure}[h]
 \centering
@@ -160,11 +159,17 @@ Attention pattern & Bidirectional & Causal \\
 
 The Context Blocks themselves are unchanged---they process references and produce hints using the same weights. The adaptation changes \emph{where} references enter the pipeline and \emph{where} hints are injected.
 
-The zero-initialized projections are critical to this transfer: at initialization they contribute nothing, and the trained weights encode learned scaling factors that remain valid in the adapted architecture.
+Concretely, each DiT block $i$ with a corresponding Context Block receives a hint via residual addition:
+%
+\begin{equation}
+    \mathbf{x}_i = \text{DiTBlock}_i(\mathbf{x}_{i-1}) + \alpha \cdot W_{\text{proj}}^{(i)} \, \mathbf{h}_i
+\end{equation}
+%
+where $\mathbf{h}_i$ is the hint from Context Block $i$, $W_{\text{proj}}^{(i)}$ is a zero-initialized linear projection, and $\alpha$ is the user-controllable context scale. Since $W_{\text{proj}}$ is zero at initialization, hints have no effect until trained---and the trained weights remain valid in the adapted architecture because neither the projection nor the residual structure changes.
 
 \section{Streaming Compatibility and Capabilities}
 
-Most VACE primitives transfer to streaming contexts with minimal adaptation. Masks, control signals (depth, pose, optical flow, scribble, grayscale, layout), dual-stream encoding, and hint injection all function with the same core mechanisms---requiring only cache management changes, not architectural ones. Reference image handling is the exception, addressed in Section~\ref{sec:adaptation}.
+Beyond reference handling (Section~\ref{sec:adaptation}), most VACE primitives transfer to streaming contexts with only cache management changes. Masks, control signals (depth, pose, optical flow, scribble, grayscale, layout), dual-stream encoding, and hint injection all function with the same core mechanisms.
 
 \begin{table}[h]
 \centering
@@ -238,21 +243,21 @@ The adaptation supports structural control (V2V), masked generation including in
 \begin{tabular}{cccc}
 & \small Input & \small Conditioning & \small Output \\[2pt]
 \rotatebox{90}{\small ~~Depth} &
-\includegraphics[width=0.17\textwidth]{figures/depth_comparison_left.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/depth_comparison_center.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/depth_comparison_right.jpg} \\[1pt]
+\includegraphics[width=0.15\textwidth]{figures/depth_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/depth_comparison_center.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/depth_comparison_right.jpg} \\[1pt]
 \rotatebox{90}{\small ~~Scribble} &
-\includegraphics[width=0.17\textwidth]{figures/scribble_comparison_low_strength_left.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/scribble_comparison_low_strength_center.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/scribble_comparison_low_strength_right.jpg} \\[1pt]
+\includegraphics[width=0.15\textwidth]{figures/scribble_comparison_low_strength_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/scribble_comparison_low_strength_center.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/scribble_comparison_low_strength_right.jpg} \\[1pt]
 \rotatebox{90}{\small ~~Flow} &
-\includegraphics[width=0.17\textwidth]{figures/optical_fish_comparison_left.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/optical_fish_comparison_center.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/optical_fish_comparison_right.jpg} \\[1pt]
+\includegraphics[width=0.15\textwidth]{figures/optical_fish_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/optical_fish_comparison_center.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/optical_fish_comparison_right.jpg} \\[1pt]
 \rotatebox{90}{\small ~~Color} &
-\includegraphics[width=0.17\textwidth]{figures/gray_comparison_left.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/gray_comparison_center.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/gray_comparison_right.jpg} \\
+\includegraphics[width=0.15\textwidth]{figures/gray_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/gray_comparison_center.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/gray_comparison_right.jpg} \\
 \end{tabular}
 \caption{Structural control modes. Each row: input frame, extracted conditioning signal, and generated output. Depth, scribble/edge, optical flow, and colorization (grayscale) controls shown.}
 \label{fig:structural}
@@ -265,26 +270,26 @@ The adaptation supports structural control (V2V), masked generation including in
 \begin{tabular}{cccc}
 & \small Input & \small Mask/Control & \small Output \\[2pt]
 \rotatebox{90}{\small ~~Inpaint} &
-\includegraphics[width=0.17\textwidth]{figures/inpainting_comparison_left.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/inpainting_comparison_center.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/inpainting_comparison_right.jpg} \\[1pt]
+\includegraphics[width=0.15\textwidth]{figures/inpainting_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/inpainting_comparison_center.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/inpainting_comparison_right.jpg} \\[1pt]
 \rotatebox{90}{\small ~~LoRA} &
-\includegraphics[width=0.17\textwidth]{figures/lora_comparison_left.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/lora_comparison_center.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/lora_comparison_right.jpg} \\[1pt]
+\includegraphics[width=0.15\textwidth]{figures/lora_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/lora_comparison_center.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/lora_comparison_right.jpg} \\[1pt]
 \rotatebox{90}{\small ~~Layout} &
-\includegraphics[width=0.17\textwidth]{figures/layout_comparison_left.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/layout_comparison_center.jpg} &
-\includegraphics[width=0.17\textwidth]{figures/layout_comparison_right.jpg} \\[1pt]
+\includegraphics[width=0.15\textwidth]{figures/layout_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/layout_comparison_center.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/layout_comparison_right.jpg} \\[1pt]
 & \small Input & & \small Output \\[2pt]
 \rotatebox{90}{\small ~~I2V} &
-\includegraphics[width=0.17\textwidth]{figures/i2v_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/i2v_comparison_left.jpg} &
 &
-\includegraphics[width=0.17\textwidth]{figures/i2v_comparison_right.jpg} \\[1pt]
+\includegraphics[width=0.15\textwidth]{figures/i2v_comparison_right.jpg} \\[1pt]
 \rotatebox{90}{\small ~~Outpaint} &
-\includegraphics[width=0.17\textwidth]{figures/outpainting_comparison_left.jpg} &
+\includegraphics[width=0.15\textwidth]{figures/outpainting_comparison_left.jpg} &
 &
-\includegraphics[width=0.17\textwidth]{figures/outpainting_comparison_right.jpg} \\
+\includegraphics[width=0.15\textwidth]{figures/outpainting_comparison_right.jpg} \\
 \end{tabular}
 \caption{Masked generation, layout control, and temporal extension. All outputs generated in real-time.}
 \label{fig:qualitative}
@@ -292,7 +297,7 @@ The adaptation supports structural control (V2V), masked generation including in
 
 \section{Implementation}
 
-The adaptation is implemented as a pipeline mixin compatible with multiple Wan-based autoregressive pipelines:
+The adaptation has been validated with the following Wan-based autoregressive pipelines:
 
 \begin{table}[h]
 \centering
@@ -311,7 +316,7 @@ Reward Forcing & \citep{lu2025rewardforcing} \\
 \end{tabular}
 \end{table}
 
-Key design decisions include: zero-initialized hint projections enabling safe composition with LoRA and quantization; implicit mode detection from provided inputs; crop-to-fill resizing to avoid padding artifacts; and cached hint computation where reference hints are computed once and reused across chunks.
+Key design decisions include: zero-initialized hint projections enabling safe composition with LoRA and quantization; implicit mode detection from provided inputs; and cached hint computation where reference hints are computed once and reused across chunks.
 
 \paragraph{Cache management for dual-stream encoding.}
 VACE encodes conditioning frames into two streams: \emph{inactive} (preserved regions, masked to zero where generation occurs) and \emph{reactive} (generated regions, masked to zero where content is preserved). These are channel-concatenated before entering Context Blocks. In streaming contexts, the temporal autoencoder (TAE/3D VAE) maintains internal state across chunks. We allocate separate encoder caches for the inactive and reactive streams to prevent cross-contamination of temporal statistics. For inpainting and outpainting, the reactive stream cache is additionally skipped: because reactive regions contain newly generated content each chunk, temporal blending from cached state introduces ghosting artifacts. Conditioning mode (depth, pose, etc.) caches both streams normally, as both carry temporally coherent signals.
