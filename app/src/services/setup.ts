@@ -22,6 +22,11 @@ export class ScopeSetupService implements SetupService {
       return true;
     }
 
+    // Check if venv exists (required since uv run uses --no-sync)
+    if (!fs.existsSync(paths.venvPath)) {
+      return true;
+    }
+
     return false;
   }
 
@@ -173,7 +178,7 @@ export class ScopeSetupService implements SetupService {
     logger.info(`Virtual environment path: ${venvPath}`);
 
     return new Promise((resolve, reject) => {
-      const proc = spawn(uvCommand, ['sync'], {
+      const proc = spawn(uvCommand, ['sync', '--inexact'], {
         cwd: projectRoot,
         stdio: 'pipe',
         shell: false,
