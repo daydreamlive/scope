@@ -84,7 +84,6 @@ export class ScopePythonProcessService implements PythonProcessService {
 
     const child = spawn(uvCommand, [
       'run',
-      '--no-sync',
       'daydream-scope',
       '--host',
       SERVER_CONFIG.host,
@@ -98,6 +97,10 @@ export class ScopePythonProcessService implements PythonProcessService {
       env: {
         ...process.env,
         PATH: pathEnv,
+        // Always use the project's own source code, even if the installed
+        // editable package points at a stale location. PYTHONPATH is checked
+        // before site-packages, so third-party deps still resolve from the venv.
+        PYTHONPATH: path.join(projectRoot, 'src'),
         PYTHONUNBUFFERED: '1',
         // Use UV_PROJECT_ENVIRONMENT to use .venv from userData (writable)
         // while running source code from resources (read-only)
