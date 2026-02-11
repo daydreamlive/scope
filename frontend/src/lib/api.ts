@@ -52,22 +52,55 @@ export interface PipelineStatusResponse {
   error?: string;
 }
 
-export const getIceServers = async (): Promise<IceServersResponse> => {
-  const response = await fetch("/api/v1/webrtc/ice-servers", {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
+// ---------------------------------------------------------------------------
+// Shared fetch helpers
+// ---------------------------------------------------------------------------
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Get ICE servers failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+const extractErrorDetail = async (response: Response): Promise<string> => {
+  try {
+    const text = await response.text();
+    try {
+      const errorJson = JSON.parse(text);
+      if (errorJson.detail) {
+        return typeof errorJson.detail === "string"
+          ? errorJson.detail
+          : JSON.stringify(errorJson.detail);
+      }
+      return text;
+    } catch {
+      return text || `${response.status} ${response.statusText}`;
+    }
+  } catch {
+    return `${response.status} ${response.statusText}`;
   }
-
-  const result = await response.json();
-  return result;
 };
+
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+async function apiFetchRaw(
+  url: string,
+  options?: RequestInit
+): Promise<Response> {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response;
+}
+
+const jsonHeaders = { "Content-Type": "application/json" } as const;
+
+// ---------------------------------------------------------------------------
+// WebRTC
+// ---------------------------------------------------------------------------
 
 export interface WebRTCOfferResponse {
   sdp: string;
@@ -75,37 +108,26 @@ export interface WebRTCOfferResponse {
   sessionId: string;
 }
 
-export const sendWebRTCOffer = async (
+export const getIceServers = (): Promise<IceServersResponse> =>
+  apiFetch("/api/v1/webrtc/ice-servers", { headers: jsonHeaders });
+
+export const sendWebRTCOffer = (
   data: WebRTCOfferRequest
-): Promise<WebRTCOfferResponse> => {
-  const response = await fetch("/api/v1/webrtc/offer", {
+): Promise<WebRTCOfferResponse> =>
+  apiFetch("/api/v1/webrtc/offer", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders,
     body: JSON.stringify(data),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `WebRTC offer failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
 
 export const sendIceCandidates = async (
   sessionId: string,
   candidates: RTCIceCandidate | RTCIceCandidate[]
 ): Promise<void> => {
   const candidateArray = Array.isArray(candidates) ? candidates : [candidates];
-
-  const response = await fetch(`/api/v1/webrtc/offer/${sessionId}`, {
+  await apiFetchRaw(`/api/v1/webrtc/offer/${sessionId}`, {
     method: "PATCH",
-    // TODO: Use Content-Type 'application/trickle-ice-sdpfrag'
-    // once backend supports it
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders,
     body: JSON.stringify({
       candidates: candidateArray.map(c => ({
         candidate: c.candidate,
@@ -114,239 +136,26 @@ export const sendIceCandidates = async (
       })),
     }),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Send ICE candidate failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
 };
 
-export const loadPipeline = async (
+// ---------------------------------------------------------------------------
+// Pipelines
+// ---------------------------------------------------------------------------
+
+export const loadPipeline = (
   data: PipelineLoadRequest
-): Promise<{ message: string }> => {
-  const response = await fetch("/api/v1/pipeline/load", {
+): Promise<{ message: string }> =>
+  apiFetch("/api/v1/pipeline/load", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders,
     body: JSON.stringify(data),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Pipeline load failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
-  const response = await fetch("/api/v1/pipeline/status", {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(30000), // 30 second timeout per request
+export const getPipelineStatus = (): Promise<PipelineStatusResponse> =>
+  apiFetch("/api/v1/pipeline/status", {
+    headers: jsonHeaders,
+    signal: AbortSignal.timeout(30000),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Pipeline status failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export const checkModelStatus = async (
-  pipelineId: string
-): Promise<ModelStatusResponse> => {
-  const response = await fetch(
-    `/api/v1/models/status?pipeline_id=${pipelineId}`,
-    {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Model status check failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export const downloadPipelineModels = async (
-  pipelineId: string
-): Promise<{ message: string }> => {
-  const response = await fetch("/api/v1/models/download", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pipeline_id: pipelineId }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Model download failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export interface HardwareInfoResponse {
-  vram_gb: number | null;
-  spout_available: boolean;
-}
-
-export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
-  const response = await fetch("/api/v1/hardware/info", {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Hardware info failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export const fetchCurrentLogs = async (): Promise<string> => {
-  const response = await fetch("/api/v1/logs/current", {
-    method: "GET",
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Fetch logs failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const logsText = await response.text();
-  return logsText;
-};
-
-export interface LoRAFileInfo {
-  name: string;
-  path: string;
-  size_mb: number;
-  folder?: string | null;
-}
-
-export interface LoRAFilesResponse {
-  lora_files: LoRAFileInfo[];
-}
-
-export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
-  const response = await fetch("/api/v1/lora/list", {
-    method: "GET",
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `List LoRA files failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export interface AssetFileInfo {
-  name: string;
-  path: string;
-  size_mb: number;
-  folder?: string | null;
-  type: string; // "image" or "video"
-  created_at: number; // Unix timestamp
-}
-
-export interface AssetsResponse {
-  assets: AssetFileInfo[];
-}
-
-export const listAssets = async (
-  type?: "image" | "video"
-): Promise<AssetsResponse> => {
-  const url = type ? `/api/v1/assets?type=${type}` : "/api/v1/assets";
-  const response = await fetch(url, {
-    method: "GET",
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `List assets failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
-  const fileContent = await file.arrayBuffer();
-  const filename = encodeURIComponent(file.name);
-
-  const response = await fetch(`/api/v1/assets?filename=${filename}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-    },
-    body: fileContent,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Upload asset failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  const result = await response.json();
-  return result;
-};
-
-export const getAssetUrl = (assetPath: string): string => {
-  // The backend returns full absolute paths, but we need to extract the relative path
-  // from the assets directory for the serving endpoint
-  // Example: C:\Users\...\assets\myimage.png -> myimage.png
-  // or: C:\Users\...\assets\subfolder\myimage.png -> subfolder/myimage.png
-
-  const pathParts = assetPath.split(/[/\\]/);
-  const assetsIndex = pathParts.findIndex(
-    part => part === "assets" || part === ".daydream-scope"
-  );
-
-  if (assetsIndex >= 0 && assetsIndex < pathParts.length - 1) {
-    // Find the assets directory and take everything after it
-    const assetsPos = pathParts.findIndex(part => part === "assets");
-    if (assetsPos >= 0) {
-      const relativePath = pathParts.slice(assetsPos + 1).join("/");
-      return `/api/v1/assets/${relativePath}`;
-    }
-  }
-
-  // Fallback: just use the filename
-  const filename = pathParts[pathParts.length - 1];
-  return `/api/v1/assets/${encodeURIComponent(filename)}`;
-};
 
 // UI metadata from pipeline schema (json_schema_extra on fields)
 export interface SchemaFieldUI {
@@ -429,25 +238,122 @@ export interface PipelineSchemasResponse {
   pipelines: Record<string, PipelineSchemaInfo>;
 }
 
-export const getPipelineSchemas =
-  async (): Promise<PipelineSchemasResponse> => {
-    const response = await fetch("/api/v1/pipelines/schemas", {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
+export const getPipelineSchemas = (): Promise<PipelineSchemasResponse> =>
+  apiFetch("/api/v1/pipelines/schemas", { headers: jsonHeaders });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Get pipeline schemas failed: ${response.status} ${response.statusText}: ${errorText}`
-      );
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+export const checkModelStatus = (
+  pipelineId: string
+): Promise<ModelStatusResponse> =>
+  apiFetch(`/api/v1/models/status?pipeline_id=${pipelineId}`, {
+    headers: jsonHeaders,
+  });
+
+export const downloadPipelineModels = (
+  pipelineId: string
+): Promise<{ message: string }> =>
+  apiFetch("/api/v1/models/download", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ pipeline_id: pipelineId }),
+  });
+
+// ---------------------------------------------------------------------------
+// Hardware
+// ---------------------------------------------------------------------------
+
+export interface HardwareInfoResponse {
+  vram_gb: number | null;
+  spout_available: boolean;
+}
+
+export const getHardwareInfo = (): Promise<HardwareInfoResponse> =>
+  apiFetch("/api/v1/hardware/info", { headers: jsonHeaders });
+
+// ---------------------------------------------------------------------------
+// Logs
+// ---------------------------------------------------------------------------
+
+export const fetchCurrentLogs = async (): Promise<string> => {
+  const response = await apiFetchRaw("/api/v1/logs/current");
+  return response.text();
+};
+
+// ---------------------------------------------------------------------------
+// LoRA
+// ---------------------------------------------------------------------------
+
+export interface LoRAFileInfo {
+  name: string;
+  path: string;
+  size_mb: number;
+  folder?: string | null;
+}
+
+export interface LoRAFilesResponse {
+  lora_files: LoRAFileInfo[];
+}
+
+export const listLoRAFiles = (): Promise<LoRAFilesResponse> =>
+  apiFetch("/api/v1/lora/list");
+
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+
+export interface AssetFileInfo {
+  name: string;
+  path: string;
+  size_mb: number;
+  folder?: string | null;
+  type: string; // "image" or "video"
+  created_at: number; // Unix timestamp
+}
+
+export interface AssetsResponse {
+  assets: AssetFileInfo[];
+}
+
+export const listAssets = (type?: "image" | "video"): Promise<AssetsResponse> =>
+  apiFetch(type ? `/api/v1/assets?type=${type}` : "/api/v1/assets");
+
+export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
+  const fileContent = await file.arrayBuffer();
+  const filename = encodeURIComponent(file.name);
+  return apiFetch(`/api/v1/assets?filename=${filename}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: fileContent,
+  });
+};
+
+export const getAssetUrl = (assetPath: string): string => {
+  // The backend returns full absolute paths, but we need to extract the relative path
+  // from the assets directory for the serving endpoint
+  const pathParts = assetPath.split(/[/\\]/);
+  const assetsIndex = pathParts.findIndex(
+    part => part === "assets" || part === ".daydream-scope"
+  );
+
+  if (assetsIndex >= 0 && assetsIndex < pathParts.length - 1) {
+    const assetsPos = pathParts.findIndex(part => part === "assets");
+    if (assetsPos >= 0) {
+      const relativePath = pathParts.slice(assetsPos + 1).join("/");
+      return `/api/v1/assets/${relativePath}`;
     }
+  }
 
-    const result = await response.json();
-    return result;
-  };
+  const filename = pathParts[pathParts.length - 1];
+  return `/api/v1/assets/${encodeURIComponent(filename)}`;
+};
 
-// Plugin types
+// ---------------------------------------------------------------------------
+// Plugins
+// ---------------------------------------------------------------------------
+
 export interface PluginPipelineInfo {
   pipeline_id: string;
   pipeline_name: string;
@@ -492,62 +398,30 @@ export interface PluginUninstallResponse {
   unloaded_pipelines: string[];
 }
 
-// Helper to extract user-friendly error message from API response
-const extractErrorDetail = async (response: Response): Promise<string> => {
-  try {
-    const errorJson = await response.json();
-    // FastAPI HTTPException returns { detail: "message" }
-    if (errorJson.detail) {
-      return typeof errorJson.detail === "string"
-        ? errorJson.detail
-        : JSON.stringify(errorJson.detail);
-    }
-    return JSON.stringify(errorJson);
-  } catch {
-    // If JSON parsing fails, fall back to text
-    return response.statusText || "Unknown error";
-  }
-};
+export const listPlugins = (): Promise<PluginListResponse> =>
+  apiFetch("/api/v1/plugins");
 
-export const listPlugins = async (): Promise<PluginListResponse> => {
-  const response = await fetch("/api/v1/plugins");
-  if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(detail);
-  }
-  return response.json();
-};
-
-export const installPlugin = async (
+export const installPlugin = (
   request: PluginInstallRequest
-): Promise<PluginInstallResponse> => {
-  const response = await fetch("/api/v1/plugins", {
+): Promise<PluginInstallResponse> =>
+  apiFetch("/api/v1/plugins", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders,
     body: JSON.stringify(request),
   });
-  if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(detail);
-  }
-  return response.json();
-};
 
-export const uninstallPlugin = async (
+export const uninstallPlugin = (
   name: string
-): Promise<PluginUninstallResponse> => {
-  const response = await fetch(`/api/v1/plugins/${encodeURIComponent(name)}`, {
+): Promise<PluginUninstallResponse> =>
+  apiFetch(`/api/v1/plugins/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
-  if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(detail);
-  }
-  return response.json();
-};
+
+// ---------------------------------------------------------------------------
+// Server lifecycle
+// ---------------------------------------------------------------------------
 
 export const restartServer = async (): Promise<number | null> => {
-  // Get current server start time before triggering restart
   let oldStartTime: number | null = null;
   try {
     const response = await fetch(`/health?_t=${Date.now()}`);
@@ -578,12 +452,9 @@ export const waitForServer = async (
       const response = await fetch(`/health?_t=${Date.now()}`);
       if (response.ok) {
         const data = await response.json();
-        // If we have an old start time, wait for it to change
         if (oldStartTime === null || data.server_start_time !== oldStartTime) {
-          // New server is up
           return;
         }
-        // Same server still running, keep waiting
       }
     } catch {
       // Server not ready yet
@@ -606,16 +477,14 @@ export interface ServerInfo {
   gitCommit: string;
 }
 
-export async function getServerInfo(): Promise<ServerInfo> {
-  const response = await fetch("/health");
-  if (!response.ok) {
-    throw new Error("Failed to fetch server info");
-  }
-  const data: HealthResponse = await response.json();
+export const getServerInfo = async (): Promise<ServerInfo> => {
+  const data = await apiFetch<HealthResponse>("/health");
   return { version: data.version, gitCommit: data.git_commit };
-}
+};
 
-// API Key management types and functions
+// ---------------------------------------------------------------------------
+// API Keys
+// ---------------------------------------------------------------------------
 
 export interface ApiKeyInfo {
   id: string;
@@ -637,78 +506,37 @@ export interface ApiKeyDeleteResponse {
   message: string;
 }
 
-export const getApiKeys = async (): Promise<{ keys: ApiKeyInfo[] }> => {
-  const response = await fetch("/api/v1/keys", {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
+export const getApiKeys = (): Promise<{ keys: ApiKeyInfo[] }> =>
+  apiFetch("/api/v1/keys", { headers: jsonHeaders });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Get API keys failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  return response.json();
-};
-
-export const setApiKey = async (
+export const setApiKey = (
   serviceId: string,
   value: string
-): Promise<ApiKeySetResponse> => {
-  const response = await fetch(
-    `/api/v1/keys/${encodeURIComponent(serviceId)}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value }),
-    }
-  );
+): Promise<ApiKeySetResponse> =>
+  apiFetch(`/api/v1/keys/${encodeURIComponent(serviceId)}`, {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ value }),
+  });
 
-  if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(detail);
-  }
-
-  return response.json();
-};
-
-export const deleteApiKey = async (
+export const deleteApiKey = (
   serviceId: string
-): Promise<ApiKeyDeleteResponse> => {
-  const response = await fetch(
-    `/api/v1/keys/${encodeURIComponent(serviceId)}`,
-    {
-      method: "DELETE",
-    }
-  );
+): Promise<ApiKeyDeleteResponse> =>
+  apiFetch(`/api/v1/keys/${encodeURIComponent(serviceId)}`, {
+    method: "DELETE",
+  });
 
-  if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(detail);
-  }
-
-  return response.json();
-};
+// ---------------------------------------------------------------------------
+// Recordings
+// ---------------------------------------------------------------------------
 
 export const downloadRecording = async (sessionId: string): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");
   }
 
-  const response = await fetch(`/api/v1/recordings/${sessionId}`, {
-    method: "GET",
-  });
+  const response = await apiFetchRaw(`/api/v1/recordings/${sessionId}`);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Download recording failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
-  }
-
-  // Get the blob and trigger download
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
