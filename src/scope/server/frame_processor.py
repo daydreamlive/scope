@@ -81,7 +81,6 @@ class FrameProcessor:
         self.last_input_fps_update = time.time()
         self.input_fps_lock = threading.Lock()
 
-
         self.paused = False
 
         self._pinned_buffer_cache = {}
@@ -637,7 +636,7 @@ class FrameProcessor:
 
             # Only the last processor in the chain gets the audio callback
             # (intermediate processors pass video to the next processor)
-            is_last_processor = (i == len(self.pipeline_ids) - 1)
+            is_last_processor = i == len(self.pipeline_ids) - 1
             audio_callback = self._handle_audio_output if is_last_processor else None
 
             # Create processor with its own queues

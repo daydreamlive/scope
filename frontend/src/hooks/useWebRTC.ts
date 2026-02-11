@@ -141,9 +141,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
             if (track.kind === "video") {
               console.log("Adding video track for sending");
               const sender = pc.addTrack(track, stream);
-              videoTransceiver = pc.getTransceivers().find(
-                t => t.sender === sender
-              );
+              videoTransceiver = pc
+                .getTransceivers()
+                .find(t => t.sender === sender);
             }
           });
         } else {
