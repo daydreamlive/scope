@@ -115,7 +115,7 @@ class FrameProcessor:
         # This determines whether we wait for video frames or generate immediately.
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Pipeline chaining support (local mode only)
+        # Pipeline chaining support
         self.pipeline_processors: list[PipelineProcessor] = []
         self.pipeline_ids: list[str] = []
 
