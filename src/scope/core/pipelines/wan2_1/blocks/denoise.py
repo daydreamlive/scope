@@ -85,10 +85,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                 description="Starting frame index that overrides current_start_frame",
             ),
             InputParam(
-                "kv_cache",
+                "kv_cache_manager",
                 required=True,
-                type_hint=list[dict],
-                description="Initialized KV cache",
+                description="KVCacheManager (ring buffer)",
             ),
             InputParam(
                 "kv_bank",
@@ -155,17 +154,28 @@ class DenoiseBlock(ModularPipelineBlocks):
         end_frame = start_frame + num_frames
 
         if block_state.noise_scale is not None:
-            # Higher noise scale -> more denoising steps, more intense changes to input
-            # Lower noise scale -> less denoising steps, less intense changes to input
             denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
+
+        # Compute cache metadata via KVCacheManager
+        cache_mgr = block_state.kv_cache_manager
+        num_new_tokens = num_frames * frame_seq_length
+        # Compute grid dimensions (h, w after patching)
+        h = block_state.height // scale_size
+        w = block_state.width // scale_size
+        freqs = components.generator.model.freqs.to(
+            next(components.generator.model.parameters()).device
+        )
+        write_indices, attn_mask, rope_freqs = cache_mgr.prepare_step(
+            num_new_tokens=num_new_tokens,
+            start_frame=start_frame,
+            freqs=freqs,
+            f=num_frames,
+            h=h,
+            w=w,
+        )
 
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
-            if index == 0:
-                q_bank = True
-            else:
-                q_bank = False
-
             timestep = (
                 torch.ones(
                     [batch_size, num_frames],
@@ -175,24 +185,17 @@ class DenoiseBlock(ModularPipelineBlocks):
                 * current_timestep
             )
 
-            if index < len(denoising_step_list) - 1:
-                _, denoised_pred = components.generator(
-                    noisy_image_or_video=noise,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=block_state.kv_cache,
-                    kv_bank=block_state.kv_bank,
-                    update_bank=False,
-                    q_bank=q_bank,
-                    current_start=start_frame * frame_seq_length,
-                    current_end=end_frame * frame_seq_length,
-                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
-                    vace_context=block_state.vace_context,
-                    vace_context_scale=block_state.vace_context_scale,
-                )
+            _, denoised_pred = components.generator(
+                noisy_image_or_video=noise,
+                conditional_dict=conditional_dict,
+                timestep=timestep,
+                write_indices=write_indices,
+                attn_mask=attn_mask,
+                rope_freqs=rope_freqs,
+            )
 
+            if index < len(denoising_step_list) - 1:
                 next_timestep = denoising_step_list[index + 1]
-                # Create noise with same shape and properties as denoised_pred
                 flattened_pred = denoised_pred.flatten(0, 1)
                 random_noise = torch.randn(
                     flattened_pred.shape,
@@ -210,21 +213,9 @@ class DenoiseBlock(ModularPipelineBlocks):
                         dtype=torch.long,
                     ),
                 ).unflatten(0, denoised_pred.shape[:2])
-            else:
-                _, denoised_pred = components.generator(
-                    noisy_image_or_video=noise,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=block_state.kv_cache,
-                    kv_bank=block_state.kv_bank,
-                    update_bank=False,
-                    q_bank=q_bank,
-                    current_start=start_frame * frame_seq_length,
-                    current_end=end_frame * frame_seq_length,
-                    kv_cache_attention_bias=block_state.kv_cache_attention_bias,
-                    vace_context=block_state.vace_context,
-                    vace_context_scale=block_state.vace_context_scale,
-                )
+
+        # Advance ring pointer after all denoising steps
+        cache_mgr.advance(num_new_tokens)
 
         block_state.latents = denoised_pred
 

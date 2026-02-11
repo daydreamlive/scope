@@ -49,15 +49,9 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
                 description="Current starting frame index of current block",
             ),
             InputParam(
-                "kv_cache",
+                "kv_cache_manager",
                 required=True,
-                type_hint=list[dict],
-                description="Initialized KV cache",
-            ),
-            InputParam(
-                "kv_bank",
-                type_hint=list[dict],
-                description="Initialized KV memory bank",
+                description="KVCacheManager (ring buffer)",
             ),
             InputParam(
                 "height", required=True, type_hint=int, description="Height of video"
@@ -89,49 +83,46 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             block_state.width // scale_size
         )
 
-        record_interval = getattr(components.config, "record_interval", None)
-        if (
-            record_interval is not None
-            and block_state.current_start_frame % (3 * record_interval) == 0
-        ):
-            update_bank = True
-        else:
-            update_bank = False
-
         generator_param = next(components.generator.parameters())
 
         _, num_frames, _, _, _ = block_state.latents.shape
-        current_end_frame = block_state.current_start_frame + num_frames
 
-        # This is defined to give us timestep = 0 while matching shape expected by the generator.
-        # After denoising the KV cache will contain keys/values computed from the noisy input at the final timestep.
-        # We want to update the generator with the key/values computed from the final "clean" latent (no noise) which
-        # corresponds with timestep = 0.
-        # The multiplication by 0 gives us timestep = 0 and is included to illustrate that we could also multiply by
-        # a different value (typically a context_noise param).
+        # Compute cache metadata for the clean pass (timestep=0)
+        cache_mgr = block_state.kv_cache_manager
+        num_new_tokens = num_frames * frame_seq_length
+        h = block_state.height // scale_size
+        w = block_state.width // scale_size
+        freqs = components.generator.model.freqs.to(generator_param.device)
+        write_indices, attn_mask, rope_freqs = cache_mgr.prepare_step(
+            num_new_tokens=num_new_tokens,
+            start_frame=block_state.current_start_frame,
+            freqs=freqs,
+            f=num_frames,
+            h=h,
+            w=w,
+        )
+
         context_timestep = (
             torch.ones(
                 [1, num_frames],
                 device=generator_param.device,
-                dtype=generator_param.dtype,
+                dtype=torch.int64,
             )
             * 0
         )
 
-        # Run the generator with the clean latent at timestep = 0 to update the KV cache
+        # Run generator at timestep=0 to write clean K/V into cache
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
         components.generator(
             noisy_image_or_video=block_state.latents,
             conditional_dict=conditional_dict,
             timestep=context_timestep,
-            kv_cache=block_state.kv_cache,
-            kv_bank=block_state.kv_bank,
-            update_bank=update_bank,
-            q_bank=False,
-            update_cache=True,
-            current_start=block_state.current_start_frame * frame_seq_length,
-            current_end=current_end_frame * frame_seq_length,
+            write_indices=write_indices,
+            attn_mask=attn_mask,
+            rope_freqs=rope_freqs,
         )
+        # Note: we do NOT advance the ring pointer here because we're
+        # overwriting the same positions that were just written during denoise.
 
         self.set_block_state(state, block_state)
         return components, state

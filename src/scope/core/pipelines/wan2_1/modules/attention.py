@@ -56,10 +56,12 @@ if not is_hopper_gpu() and not is_b200_gpu():
     from .sage import SAGEATTN_AVAILABLE, sageattn_func
 
 import warnings
+import torch.nn.functional as F
 
 __all__ = [
     "flash_attention",
     "attention",
+    "compiled_attention",
     "sageattn_func",
     "SAGEATTN_AVAILABLE",
 ]
@@ -67,6 +69,41 @@ __all__ = [
 print("flash attn 2 available", FLASH_ATTN_2_AVAILABLE)
 print("flash attn 3 available", FLASH_ATTN_3_AVAILABLE)
 print("sage attn available", SAGEATTN_AVAILABLE)
+
+
+def compiled_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    attn_mask=None,
+    dtype=torch.bfloat16,
+):
+    """
+    torch.compile / CUDA-graph friendly attention using scaled_dot_product_attention.
+
+    This function is suitable for use inside compiled graphs. It uses PyTorch's
+    native SDPA which auto-dispatches to Flash Attention / Memory Efficient
+    kernels and supports explicit attention masks.
+
+    Args:
+        q: [B, Lq, N, D] query tensor.
+        k: [B, Lk, N, D] key tensor.
+        v: [B, Lk, N, D] value tensor.
+        attn_mask: Optional bool mask [1, 1, 1, Lk] or [B, N, Lq, Lk].
+                   True = attend, False = mask out.
+        dtype: Compute dtype (bfloat16 or float16).
+    """
+    og_dtype = q.dtype
+
+    # SDPA expects [B, N, L, D] layout
+    q = q.transpose(1, 2).to(dtype)
+    k = k.transpose(1, 2).to(dtype)
+    v = v.transpose(1, 2).to(dtype)
+
+    out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+
+    out = out.transpose(1, 2).contiguous().to(og_dtype)
+    return out
 
 
 def flash_attention(

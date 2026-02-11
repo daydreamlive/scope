@@ -13,7 +13,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from ..utils import initialize_kv_cache
+from ..utils import initialize_kv_cache, initialize_kv_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +45,15 @@ class SetupCachesBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
+                "kv_cache_manager",
+                default=None,
+                description="Existing KVCacheManager (ring buffer)",
+            ),
+            InputParam(
                 "kv_cache",
                 type_hint=list[dict] | None,
                 default=None,
-                description="Existing KV cache",
+                description="Existing KV cache (legacy)",
             ),
             InputParam(
                 "crossattn_cache",
@@ -110,9 +115,13 @@ class SetupCachesBlock(ModularPipelineBlocks):
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
+                "kv_cache_manager",
+                description="KVCacheManager (ring buffer)",
+            ),
+            OutputParam(
                 "kv_cache",
                 type_hint=list[dict],
-                description="Initialized KV cache",
+                description="Initialized KV cache (legacy)",
             ),
             OutputParam(
                 "crossattn_cache",
@@ -172,32 +181,31 @@ class SetupCachesBlock(ModularPipelineBlocks):
         generator_dtype = generator_param.dtype
         generator_device = generator_param.device
 
-        if init_cache or block_state.kv_cache is None:
-            for block in components.generator.model.blocks:
-                block.self_attn.local_attn_size = -1
-                block.self_attn.num_frame_per_block = (
-                    components.config.num_frame_per_block
-                )
-
-            components.generator.model.local_attn_size = (
-                components.config.local_attn_size
-            )
-
-            set_all_modules_frame_seq_length(components.generator, frame_seq_length)
-            set_all_modules_max_attention_size(
-                components.generator,
-                components.config.local_attn_size * frame_seq_length,
-            )
-
-            block_state.kv_cache = initialize_kv_cache(
+        if init_cache or getattr(block_state, "kv_cache_manager", None) is None:
+            sink_size = getattr(components.generator.model, "sink_size", 0)
+            block_state.kv_cache_manager = initialize_kv_cache_manager(
                 generator=components.generator,
                 batch_size=1,
                 dtype=generator_dtype,
                 device=generator_device,
                 local_attn_size=components.config.local_attn_size,
                 frame_seq_length=frame_seq_length,
-                kv_cache_existing=block_state.kv_cache,
+                sink_size=sink_size,
+                existing_manager=getattr(block_state, "kv_cache_manager", None),
             )
+
+            # Apply torch.compile to the base model if not already compiled
+            base_model = (
+                components.generator.model.get_base_model()
+                if hasattr(components.generator.model, "get_base_model")
+                else components.generator.model
+            )
+            if not getattr(base_model, "_compiled", False):
+                logger.info("Applying torch.compile to CausalWanModel")
+                base_model.forward = torch.compile(
+                    base_model.forward, mode="default"
+                )
+                base_model._compiled = True
 
 
         if init_cache:

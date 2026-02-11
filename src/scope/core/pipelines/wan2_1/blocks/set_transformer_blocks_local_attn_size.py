@@ -42,10 +42,8 @@ class SetTransformerBlocksLocalAttnSizeBlock(ModularPipelineBlocks):
 
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
+        # local_attn_size is now managed by KVCacheManager, not stored on blocks.
+        # This block is kept as a no-op for pipeline compatibility.
         block_state = self.get_block_state(state)
-
-        for block in components.generator.model.blocks:
-            block.self_attn.local_attn_size = components.config.local_attn_size
-
         self.set_block_state(state, block_state)
         return components, state

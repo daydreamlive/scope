@@ -7,10 +7,6 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from scope.core.pipelines.wan2_1.utils import (
-    initialize_kv_cache,
-)
-
 
 class RecacheFramesBlock(ModularPipelineBlocks):
     @property
@@ -46,15 +42,9 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 description="Sliding window of recache frames",
             ),
             InputParam(
-                "kv_cache",
+                "kv_cache_manager",
                 required=True,
-                type_hint=list[dict],
-                description="Initialized KV cache",
-            ),
-            InputParam(
-                "kv_bank",
-                type_hint=list[dict],
-                description="Initialized KV memory bank",
+                description="KVCacheManager (ring buffer)",
             ),
             InputParam(
                 "height", required=True, type_hint=int, description="Height of video"
@@ -72,7 +62,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 "conditioning_embeds_updated",
                 required=True,
                 type_hint=bool,
-                description="Whether conditioning_embeds were updated (requires frame recaching)",
+                description="Whether conditioning_embeds were updated",
             ),
         ]
 
@@ -80,9 +70,8 @@ class RecacheFramesBlock(ModularPipelineBlocks):
     def intermediate_outputs(self) -> list[OutputParam]:
         return [
             OutputParam(
-                "kv_cache",
-                type_hint=list[dict],
-                description="Initialized KV cache",
+                "kv_cache_manager",
+                description="KVCacheManager (ring buffer)",
             ),
             OutputParam(
                 "recache_buffer",
@@ -94,11 +83,9 @@ class RecacheFramesBlock(ModularPipelineBlocks):
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> PipelineState:
         block_state = self.get_block_state(state)
-
         generator_param = next(components.generator.model.parameters())
 
         if block_state.current_start_frame == 0:
-            # Initialize recache buffer
             latent_height = (
                 block_state.height // components.config.vae_spatial_downsample_factor
             )
@@ -106,21 +93,13 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 block_state.width // components.config.vae_spatial_downsample_factor
             )
             block_state.recache_buffer = torch.zeros(
-                [
-                    1,
-                    components.config.local_attn_size,
-                    16,
-                    latent_height,
-                    latent_width,
-                ],
+                [1, components.config.local_attn_size, 16, latent_height, latent_width],
                 dtype=generator_param.dtype,
                 device=generator_param.device,
             )
-
             self.set_block_state(state, block_state)
             return components, state
 
-        # Only recache frames if conditioning_embeds were updated
         if not block_state.conditioning_embeds_updated:
             self.set_block_state(state, block_state)
             return components, state
@@ -134,22 +113,9 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         )
 
         global_sink = components.config.global_sink
+        cache_mgr = block_state.kv_cache_manager
+        cache_mgr.reset_for_recache(keep_sink=global_sink)
 
-        # When global_sink is True (default): Preserve sink tokens in KV cache
-        # When global_sink is False: Reset KV cache before recaching
-        if not global_sink:
-            block_state.kv_cache = initialize_kv_cache(
-                generator=components.generator,
-                batch_size=1,
-                dtype=generator_param.dtype,
-                device=generator_param.device,
-                local_attn_size=components.config.local_attn_size,
-                frame_seq_length=frame_seq_length,
-                kv_cache_existing=block_state.kv_cache,
-                reset_indices=False,
-            )
-
-        # Get the number of frames to recache (min of what we've generated and buffer size)
         num_recache_frames = min(
             block_state.current_start_frame, components.config.local_attn_size
         )
@@ -158,6 +124,20 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             block_state.recache_buffer[:, -num_recache_frames:]
             .contiguous()
             .to(generator_param.device)
+        )
+
+        num_recache_tokens = num_recache_frames * frame_seq_length
+        h = block_state.height // scale_size
+        w = block_state.width // scale_size
+        freqs = components.generator.model.freqs.to(generator_param.device)
+
+        write_indices, attn_mask, rope_freqs = cache_mgr.prepare_step(
+            num_new_tokens=num_recache_tokens,
+            start_frame=recache_start,
+            freqs=freqs,
+            f=num_recache_frames,
+            h=h,
+            w=w,
         )
 
         context_timestep = (
@@ -170,21 +150,16 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         )
 
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
-        # When global_sink is True: sink_recache_after_switch=False (preserve sink tokens)
-        # When global_sink is False: sink_recache_after_switch=True (recache writes to sink positions)
         components.generator(
             noisy_image_or_video=recache_frames,
             conditional_dict=conditional_dict,
             timestep=context_timestep,
-            kv_cache=block_state.kv_cache,
-            kv_bank=block_state.kv_bank,
-            update_bank=False,
-            q_bank=True,
-            update_cache=True,
-            is_recache=True,
-            current_start=recache_start * frame_seq_length,
-            sink_recache_after_switch=not global_sink,
+            write_indices=write_indices,
+            attn_mask=attn_mask,
+            rope_freqs=rope_freqs,
         )
+
+        cache_mgr.advance(num_recache_tokens)
 
         self.set_block_state(state, block_state)
         return components, state

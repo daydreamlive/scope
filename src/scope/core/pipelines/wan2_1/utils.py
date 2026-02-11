@@ -3,6 +3,74 @@ import os
 import torch
 from safetensors.torch import load_file as load_safetensors
 
+from scope.core.pipelines.longlive.modules.kv_cache_manager import KVCacheManager
+
+
+def initialize_kv_cache_manager(
+    generator,
+    batch_size,
+    dtype,
+    device,
+    local_attn_size,
+    frame_seq_length,
+    sink_size=0,
+    existing_manager=None,
+):
+    """
+    Create or reset a KVCacheManager with ring buffer cache.
+
+    Args:
+        generator: The WanDiffusionWrapper containing the model.
+        batch_size: Batch size (typically 1).
+        dtype: Data type for cache tensors.
+        device: Device for cache tensors.
+        local_attn_size: Number of frames in the local attention window.
+        frame_seq_length: Number of tokens per frame.
+        sink_size: Number of frames to use as sink tokens.
+        existing_manager: Existing KVCacheManager to reset (avoids reallocation).
+
+    Returns:
+        KVCacheManager instance with cache buffers bound to the model.
+    """
+    num_layers = len(generator.model.blocks)
+    num_heads = generator.model.num_heads
+    head_dim = generator.model.dim // num_heads
+
+    if local_attn_size != -1:
+        cache_size = local_attn_size * frame_seq_length
+    else:
+        cache_size = 32760
+
+    sink_tokens = sink_size * frame_seq_length
+
+    # Reuse existing manager if shapes match
+    if (
+        existing_manager is not None
+        and existing_manager.cache_size == cache_size
+        and existing_manager.num_layers == num_layers
+    ):
+        existing_manager.full_reset()
+        generator.model.set_cache(existing_manager.cache_k, existing_manager.cache_v)
+        return existing_manager
+
+    # Create new manager
+    manager = KVCacheManager(
+        num_layers=num_layers,
+        batch_size=batch_size,
+        cache_size=cache_size,
+        num_heads=num_heads,
+        head_dim=head_dim,
+        sink_tokens=sink_tokens,
+        frame_seqlen=frame_seq_length,
+        device=device,
+        dtype=dtype,
+    )
+
+    # Bind cache buffers to the model
+    generator.model.set_cache(manager.cache_k, manager.cache_v)
+
+    return manager
+
 
 def initialize_kv_cache(
     generator,

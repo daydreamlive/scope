@@ -188,13 +188,8 @@ class WanDiffusionWrapper(torch.nn.Module):
         return flow_pred.to(original_dtype)
 
     def _call_model(self, *args, **kwargs):
-        # HACK!
-        # __call__() and forward() accept *args, **kwargs so inspection doesn't tell us anything
-        # As a workaround we inspect the internal _forward_inference() function to determine what the accepted params are
-        # This allows us to filter out params that might not work with the underlying CausalWanModel impl
-        sig = inspect.signature(self.model._forward_inference)
-
-        # Check if the signature accepts **kwargs (VAR_KEYWORD), if so pass all parameters through
+        # Filter kwargs to only include parameters accepted by the model's forward
+        sig = inspect.signature(self.model.forward)
         has_var_keyword = any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
@@ -211,6 +206,10 @@ class WanDiffusionWrapper(torch.nn.Module):
         noisy_image_or_video: torch.Tensor,
         conditional_dict: dict,
         timestep: torch.Tensor,
+        write_indices: torch.Tensor | None = None,
+        attn_mask: torch.Tensor | None = None,
+        rope_freqs: torch.Tensor | None = None,
+        # Legacy params kept for backward compat with other pipelines
         kv_cache: list[dict] | None = None,
         crossattn_cache: list[dict] | None = None,
         kv_bank: list[dict] | None = None,
@@ -238,9 +237,18 @@ class WanDiffusionWrapper(torch.nn.Module):
         else:
             input_timestep = timestep
 
-        logits = None
-        # X0 prediction
-        if kv_cache is not None:
+        # New ring-buffer cache path: write_indices provided by KVCacheManager
+        if write_indices is not None:
+            flow_pred = self._call_model(
+                noisy_image_or_video.permute(0, 2, 1, 3, 4),
+                t=input_timestep,
+                context=prompt_embeds,
+                write_indices=write_indices,
+                attn_mask=attn_mask,
+                rope_freqs=rope_freqs,
+            ).permute(0, 2, 1, 3, 4)
+        # Legacy path: old-style kv_cache dict list
+        elif kv_cache is not None:
             flow_pred = self._call_model(
                 noisy_image_or_video.permute(0, 2, 1, 3, 4),
                 t=input_timestep,
@@ -262,52 +270,20 @@ class WanDiffusionWrapper(torch.nn.Module):
                 sink_recache_after_switch=sink_recache_after_switch,
             ).permute(0, 2, 1, 3, 4)
         else:
-            if clean_x is not None:
-                # teacher forcing
-                flow_pred = self._call_model(
-                    noisy_image_or_video.permute(0, 2, 1, 3, 4),
-                    t=input_timestep,
-                    context=prompt_embeds,
-                    seq_len=self.seq_len,
-                    clean_x=clean_x.permute(0, 2, 1, 3, 4),
-                    aug_t=aug_t,
-                    vace_context=vace_context,
-                    vace_context_scale=vace_context_scale,
-                ).permute(0, 2, 1, 3, 4)
-            else:
-                if classify_mode:
-                    flow_pred, logits = self._call_model(
-                        noisy_image_or_video.permute(0, 2, 1, 3, 4),
-                        t=input_timestep,
-                        context=prompt_embeds,
-                        seq_len=self.seq_len,
-                        classify_mode=True,
-                        register_tokens=self._register_tokens,
-                        cls_pred_branch=self._cls_pred_branch,
-                        gan_ca_blocks=self._gan_ca_blocks,
-                        concat_time_embeddings=concat_time_embeddings,
-                        vace_context=vace_context,
-                        vace_context_scale=vace_context_scale,
-                    )
-                    flow_pred = flow_pred.permute(0, 2, 1, 3, 4)
-                else:
-                    flow_pred = self._call_model(
-                        noisy_image_or_video.permute(0, 2, 1, 3, 4),
-                        t=input_timestep,
-                        context=prompt_embeds,
-                        seq_len=self.seq_len,
-                        vace_context=vace_context,
-                        vace_context_scale=vace_context_scale,
-                    ).permute(0, 2, 1, 3, 4)
+            flow_pred = self._call_model(
+                noisy_image_or_video.permute(0, 2, 1, 3, 4),
+                t=input_timestep,
+                context=prompt_embeds,
+                seq_len=self.seq_len,
+                vace_context=vace_context,
+                vace_context_scale=vace_context_scale,
+            ).permute(0, 2, 1, 3, 4)
 
         pred_x0 = self._convert_flow_pred_to_x0(
             flow_pred=flow_pred.flatten(0, 1),
             xt=noisy_image_or_video.flatten(0, 1),
             timestep=timestep.flatten(0, 1),
         ).unflatten(0, flow_pred.shape[:2])
-
-        if logits is not None:
-            return flow_pred, pred_x0, logits
 
         return flow_pred, pred_x0
 
