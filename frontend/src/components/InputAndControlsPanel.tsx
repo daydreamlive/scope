@@ -27,6 +27,7 @@ import {
   parseInputFields,
 } from "../lib/schemaSettings";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
+import { useCloudStatus } from "../hooks/useCloudStatus";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -173,6 +174,33 @@ export function InputAndControlsPanel({
       videoRef.current.srcObject = localStream;
     }
   }, [localStream]);
+
+  // Track cloud connection state and clear images when it changes
+  // (switching between local/cloud means different asset lists)
+  const { isConnected: isCloudConnected } = useCloudStatus();
+  const prevCloudConnectedRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    // On first render, just store the initial state
+    if (prevCloudConnectedRef.current === null) {
+      prevCloudConnectedRef.current = isCloudConnected;
+      return;
+    }
+
+    // Clear images when cloud connection state changes (connected or disconnected)
+    if (prevCloudConnectedRef.current !== isCloudConnected) {
+      onRefImagesChange?.([]);
+      onFirstFrameImageChange?.(undefined);
+      onLastFrameImageChange?.(undefined);
+    }
+
+    prevCloudConnectedRef.current = isCloudConnected;
+  }, [
+    isCloudConnected,
+    onRefImagesChange,
+    onFirstFrameImageChange,
+    onLastFrameImageChange,
+  ]);
 
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>

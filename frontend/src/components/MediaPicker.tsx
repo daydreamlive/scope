@@ -7,6 +7,7 @@ import {
   getAssetUrl,
   type AssetFileInfo,
 } from "../lib/api";
+import { useCloudStatus } from "../hooks/useCloudStatus";
 
 interface MediaPickerProps {
   isOpen: boolean;
@@ -44,6 +45,25 @@ export function MediaPicker({
       loadImages();
     }
   }, [isOpen]);
+
+  // Refresh image list when cloud connection state changes while picker is open
+  const { isConnected: isCloudConnected } = useCloudStatus();
+  const prevCloudConnectedRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    // Skip first render
+    if (prevCloudConnectedRef.current === null) {
+      prevCloudConnectedRef.current = isCloudConnected;
+      return;
+    }
+
+    // If connection state changed and picker is open, reload images
+    if (prevCloudConnectedRef.current !== isCloudConnected && isOpen) {
+      loadImages();
+    }
+
+    prevCloudConnectedRef.current = isCloudConnected;
+  }, [isCloudConnected, isOpen, loadImages]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

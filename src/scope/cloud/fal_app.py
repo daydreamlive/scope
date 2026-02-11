@@ -443,7 +443,6 @@ class ScopeApp(fal.App, keep_alive=300):
         async def check_max_duration_exceeded() -> bool:
             """Check if connection has exceeded max duration. Returns True if should close."""
             elapsed_seconds = time.time() - connection_start_time
-            print(f"[{log_prefix()}] Checking max duration: {elapsed_seconds:.0f}s")
             if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
                 print(
                     f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)"
