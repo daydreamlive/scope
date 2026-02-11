@@ -11,7 +11,9 @@ from .enums import Quantization as Quantization  # noqa: PLC0414
 from .enums import VaeType as VaeType  # noqa: PLC0414
 
 # Re-export quantization utilities
-from .quantization_utils import apply_quantization as apply_quantization  # noqa: PLC0414
+from .quantization_utils import (
+    apply_quantization as apply_quantization,  # noqa: PLC0414
+)
 
 
 def load_state_dict(weights_path: str) -> dict:
