@@ -1131,16 +1131,37 @@ def is_spout_available() -> bool:
     return sys.platform == "win32"
 
 
+_source_discovery_cache: dict[str, tuple[float, list]] = {}
+_SOURCE_DISCOVERY_TTL = 10  # seconds
+
+
+def _resolve_input_source_class(source_type: str):
+    """Resolve a source_type string to its InputSource class, or raise HTTPException."""
+    from scope.core.inputs import get_input_source_classes
+
+    source_classes = get_input_source_classes()
+    source_class = source_classes.get(source_type)
+    if source_class is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown input source type '{source_type}'. "
+            f"Available types: {list(source_classes.keys())}",
+        )
+    if not source_class.is_available():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input source '{source_type}' is not available on this system.",
+        )
+    return source_class
+
+
 @app.get("/api/v1/input-sources")
 async def list_input_source_types():
     """List available input source types with their availability status."""
-    from scope.core.inputs.ndi import NDIInputSource
-    from scope.core.inputs.spout import SpoutInputSource
+    from scope.core.inputs import get_input_source_classes
 
-    source_classes = [SpoutInputSource, NDIInputSource]
     sources = []
-
-    for cls in source_classes:
+    for cls in get_input_source_classes().values():
         sources.append(
             {
                 "source_id": cls.source_id,
@@ -1156,44 +1177,29 @@ async def list_input_source_types():
 @app.get("/api/v1/input-sources/{source_type}/sources")
 async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
     """List discovered sources for a given input source type."""
-    from scope.core.inputs.ndi import NDIInputSource
-    from scope.core.inputs.spout import SpoutInputSource
+    source_class = _resolve_input_source_class(source_type)
 
-    source_classes = {
-        NDIInputSource.source_id: NDIInputSource,
-        SpoutInputSource.source_id: SpoutInputSource,
-    }
-
-    source_class = source_classes.get(source_type)
-    if source_class is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown input source type '{source_type}'. "
-            f"Available types: {list(source_classes.keys())}",
-        )
-
-    if not source_class.is_available():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Input source '{source_type}' is not available on this system. "
-            f"Required dependencies may not be installed.",
-        )
+    # Return cached results if still fresh
+    cached = _source_discovery_cache.get(source_type)
+    if cached is not None:
+        ts, sources = cached
+        if time.monotonic() - ts < _SOURCE_DISCOVERY_TTL:
+            return {"source_type": source_type, "sources": sources}
 
     try:
         instance = source_class()
         try:
             discovered = instance.list_sources(timeout_ms=timeout_ms)
-            return {
-                "source_type": source_type,
-                "sources": [
-                    {
-                        "name": s.name,
-                        "identifier": s.identifier,
-                        "metadata": s.metadata,
-                    }
-                    for s in discovered
-                ],
-            }
+            sources = [
+                {
+                    "name": s.name,
+                    "identifier": s.identifier,
+                    "metadata": s.metadata,
+                }
+                for s in discovered
+            ]
+            _source_discovery_cache[source_type] = (time.monotonic(), sources)
+            return {"source_type": source_type, "sources": sources}
         finally:
             instance.close()
     except HTTPException:
@@ -1208,26 +1214,7 @@ async def get_input_source_resolution(
     source_type: str, identifier: str, timeout_ms: int = Query(5000)
 ):
     """Probe the native resolution of a specific input source."""
-    from scope.core.inputs.ndi import NDIInputSource
-    from scope.core.inputs.spout import SpoutInputSource
-
-    source_classes = {
-        NDIInputSource.source_id: NDIInputSource,
-        SpoutInputSource.source_id: SpoutInputSource,
-    }
-
-    source_class = source_classes.get(source_type)
-    if source_class is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown input source type '{source_type}'.",
-        )
-
-    if not source_class.is_available():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Input source '{source_type}' is not available on this system.",
-        )
+    source_class = _resolve_input_source_class(source_type)
 
     try:
         instance = source_class()
@@ -1257,26 +1244,7 @@ async def get_input_source_preview(
     source_type: str, identifier: str, timeout_ms: int = Query(5000)
 ):
     """Grab a single frame from an input source and return it as a JPEG thumbnail."""
-    from scope.core.inputs.ndi import NDIInputSource
-    from scope.core.inputs.spout import SpoutInputSource
-
-    source_classes = {
-        NDIInputSource.source_id: NDIInputSource,
-        SpoutInputSource.source_id: SpoutInputSource,
-    }
-
-    source_class = source_classes.get(source_type)
-    if source_class is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown input source type '{source_type}'.",
-        )
-
-    if not source_class.is_available():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Input source '{source_type}' is not available on this system.",
-        )
+    source_class = _resolve_input_source_class(source_type)
 
     try:
         from PIL import Image
