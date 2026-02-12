@@ -104,6 +104,7 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    hardwareInfo,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   } = useStreamState();
@@ -604,7 +605,9 @@ export function StreamPage() {
     });
   };
 
-  const handleQuantizationChange = (quantization: "fp8_e4m3fn" | null) => {
+  const handleQuantizationChange = (
+    quantization: "fp8_e4m3fn" | "nvfp4" | null
+  ) => {
     updateSettings({ quantization });
     // Note: This setting requires pipeline reload, so we don't send parameter update here
   };
@@ -1590,6 +1593,7 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
+            supportsNvfp4={hardwareInfo?.supports_nvfp4 ?? false}
             spoutSender={settings.spoutSender}
             onSpoutSenderChange={handleSpoutSenderChange}
             spoutAvailable={spoutAvailable}

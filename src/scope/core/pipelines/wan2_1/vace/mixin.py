@@ -144,42 +144,33 @@ class VACEEnabledPipeline:
 
         # Quantize VACE components if quantization is enabled
         if quantization is not None:
-            # Import here to avoid circular dependency
             try:
-                from ...utils import Quantization
+                from ...quantization_utils import apply_quantization_to_module
 
-                if quantization == Quantization.FP8_E4M3FN:
-                    logger.info(
-                        "_init_vace: Quantizing VACE components to FP8 (matching base model)..."
-                    )
-                    start = time.time()
+                logger.info(
+                    f"_init_vace: Quantizing VACE components with {quantization}..."
+                )
+                start = time.time()
 
-                    from torchao.quantization.quant_api import (
-                        Float8DynamicActivationFloat8WeightConfig,
-                        PerTensor,
-                        quantize_,
-                    )
+                apply_quantization_to_module(
+                    vace_wrapped_model.vace_patch_embedding,
+                    quantization,
+                    device,
+                    dtype,
+                )
+                apply_quantization_to_module(
+                    vace_wrapped_model.vace_blocks,
+                    quantization,
+                    device,
+                    dtype,
+                )
 
-                    quantize_(
-                        vace_wrapped_model.vace_patch_embedding,
-                        Float8DynamicActivationFloat8WeightConfig(
-                            granularity=PerTensor()
-                        ),
-                        device=device,
-                    )
-                    quantize_(
-                        vace_wrapped_model.vace_blocks,
-                        Float8DynamicActivationFloat8WeightConfig(
-                            granularity=PerTensor()
-                        ),
-                        device=device,
-                    )
-                    logger.info(
-                        f"_init_vace: Quantized VACE to FP8 in {time.time() - start:.3f}s"
-                    )
+                logger.info(
+                    f"_init_vace: Quantized VACE components in {time.time() - start:.3f}s"
+                )
             except ImportError:
                 logger.warning(
-                    "_init_vace: Could not import Quantization, skipping quantization check"
+                    "_init_vace: Could not import quantization_utils, skipping quantization"
                 )
 
         self.vace_enabled = True

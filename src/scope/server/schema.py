@@ -251,6 +251,10 @@ class HardwareInfoResponse(BaseModel):
         default=False,
         description="Whether Spout is available (Windows only, not WSL)",
     )
+    supports_nvfp4: bool = Field(
+        default=False,
+        description="Whether GPU supports NVFP4 quantization (Blackwell SM >= 10.0)",
+    )
 
 
 class PipelineStatusEnum(str, Enum):

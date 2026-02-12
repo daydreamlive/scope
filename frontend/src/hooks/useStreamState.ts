@@ -38,7 +38,7 @@ function getFallbackDefaults(mode?: InputMode) {
     noiseController: isVideoMode ? true : undefined,
     defaultTemporalInterpolationSteps: undefined as number | undefined,
     inputMode: effectiveMode,
-    quantization: undefined as "fp8_e4m3fn" | undefined,
+    quantization: undefined as "fp8_e4m3fn" | "nvfp4" | undefined,
   };
 }
 
@@ -125,7 +125,7 @@ export function useStreamState() {
           noiseController,
           defaultTemporalInterpolationSteps,
           inputMode: effectiveMode,
-          quantization: undefined as "fp8_e4m3fn" | undefined,
+          quantization: undefined as "fp8_e4m3fn" | "nvfp4" | undefined,
         };
       }
       // Fallback to derived defaults if schemas not loaded
@@ -333,6 +333,20 @@ export function useStreamState() {
       }));
     }
   }, [settings.pipelineId, hardwareInfo, pipelineSchemas]);
+
+  // Reset nvfp4 selection if GPU doesn't support it (e.g. from persisted state)
+  useEffect(() => {
+    if (
+      hardwareInfo &&
+      !hardwareInfo.supports_nvfp4 &&
+      settings.quantization === "nvfp4"
+    ) {
+      setSettings(prev => ({
+        ...prev,
+        quantization: "fp8_e4m3fn",
+      }));
+    }
+  }, [hardwareInfo, settings.quantization]);
 
   // Set recommended VACE enabled state based on pipeline schema and available VRAM
   // VACE is enabled by default, but disabled if VRAM is below recommended_quantization_vram_threshold

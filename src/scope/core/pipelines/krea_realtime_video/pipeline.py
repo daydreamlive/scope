@@ -15,6 +15,7 @@ from ..defaults import (
 )
 from ..interface import Pipeline, Requirements
 from ..process import postprocess_chunk
+from ..quantization_utils import apply_quantization
 from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
@@ -111,29 +112,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         # Initialize optional LoRA adapters on the underlying model AFTER VACE.
         generator.model = self._init_loras(config, generator.model)
 
-        if quantization == Quantization.FP8_E4M3FN:
-            # Cast before optional quantization
-            generator = generator.to(dtype=dtype)
-
-            start = time.time()
-
-            from torchao.quantization.quant_api import (
-                Float8DynamicActivationFloat8WeightConfig,
-                PerTensor,
-                quantize_,
-            )
-
-            # Move to target device during quantization
-            # Defaults to using fp8_e4m3fn for both weights and activations
-            quantize_(
-                generator,
-                Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
-                device=device,
-            )
-
-            print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
-        else:
-            generator = generator.to(device=device, dtype=dtype)
+        generator = apply_quantization(generator, quantization, device, dtype)
 
         if compile:
             # Only compile the attention blocks

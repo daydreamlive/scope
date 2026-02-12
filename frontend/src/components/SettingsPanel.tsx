@@ -140,8 +140,8 @@ interface SettingsPanelProps {
   onNoiseControllerChange?: (enabled: boolean) => void;
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
-  quantization?: "fp8_e4m3fn" | null;
-  onQuantizationChange?: (quantization: "fp8_e4m3fn" | null) => void;
+  quantization?: "fp8_e4m3fn" | "nvfp4" | null;
+  onQuantizationChange?: (quantization: "fp8_e4m3fn" | "nvfp4" | null) => void;
   kvCacheAttentionBias?: number;
   onKvCacheAttentionBiasChange?: (bias: number) => void;
   onResetCache?: () => void;
@@ -155,6 +155,8 @@ interface SettingsPanelProps {
   // Spout settings
   spoutSender?: SettingsState["spoutSender"];
   onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
+  // Whether GPU supports NVFP4 quantization (Blackwell SM >= 10.0)
+  supportsNvfp4?: boolean;
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
   // VACE settings
@@ -221,6 +223,7 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
+  supportsNvfp4 = false,
   spoutSender,
   onSpoutSenderChange,
   spoutAvailable = false,
@@ -629,6 +632,7 @@ export function SettingsPanel({
               supportsNoiseControls,
               supportsQuantization:
                 pipelines?.[pipelineId]?.supportsQuantization,
+              supportsNvfp4,
               supportsCacheManagement:
                 pipelines?.[pipelineId]?.supportsCacheManagement,
               supportsKvCacheBias: pipelines?.[pipelineId]?.supportsKvCacheBias,
@@ -721,8 +725,8 @@ export function SettingsPanel({
                     <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
                       <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
                       <p className="text-xs text-amber-600 dark:text-amber-500">
-                        VACE is incompatible with FP8 quantization. Please
-                        disable quantization to use VACE.
+                        VACE is incompatible with quantization. Please disable
+                        quantization to use VACE.
                       </p>
                     </div>
                   )}
@@ -1055,12 +1059,14 @@ export function SettingsPanel({
                           value={quantization || "none"}
                           onValueChange={value => {
                             onQuantizationChange?.(
-                              value === "none" ? null : (value as "fp8_e4m3fn")
+                              value === "none"
+                                ? null
+                                : (value as "fp8_e4m3fn" | "nvfp4")
                             );
                           }}
                           disabled={isStreaming || vaceEnabled}
                         >
-                          <SelectTrigger className="w-[140px] h-7">
+                          <SelectTrigger className="w-[180px] h-7">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1068,6 +1074,11 @@ export function SettingsPanel({
                             <SelectItem value="fp8_e4m3fn">
                               fp8_e4m3fn (Dynamic)
                             </SelectItem>
+                            {supportsNvfp4 && (
+                              <SelectItem value="nvfp4">
+                                nvfp4 (Blackwell)
+                              </SelectItem>
+                            )}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1075,7 +1086,7 @@ export function SettingsPanel({
                       {vaceEnabled && (
                         <p className="text-xs text-muted-foreground">
                           Disabled because VACE is enabled. Disable VACE to use
-                          FP8 quantization.
+                          quantization.
                         </p>
                       )}
                     </div>

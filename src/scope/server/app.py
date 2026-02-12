@@ -1152,15 +1152,21 @@ async def get_hardware_info(
         import torch  # Lazy import to avoid loading at CLI startup
 
         vram_gb = None
+        supports_nvfp4 = False
 
         if torch.cuda.is_available():
             # Get total VRAM from the first GPU (in bytes), convert to GB
             _, total_mem = torch.cuda.mem_get_info(0)
             vram_gb = total_mem / (1024**3)
 
+            # Blackwell GPUs (SM >= 10.0) support NVFP4 quantization
+            cap = torch.cuda.get_device_capability()
+            supports_nvfp4 = cap >= (10, 0)
+
         return HardwareInfoResponse(
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
+            supports_nvfp4=supports_nvfp4,
         )
     except HTTPException:
         raise
