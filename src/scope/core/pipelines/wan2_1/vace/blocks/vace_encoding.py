@@ -297,6 +297,10 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         replicates it across a temporal group, fills remaining frames with zeros (dummy frames),
         and encodes with masks indicating which frames to inpaint (1=dummy, 0=reference).
 
+        Supports combining with conditioning inputs (inpainting/depth):
+        - If vace_input_frames provided: use those for dummy positions instead of zeros
+        - If vace_input_masks provided: use those for spatial control on dummy positions
+
         Spatial masking: Auto-generates spatial mask based on padding detection
         (0=image region, 1=padding region). This allows the first/last frame influence
         to be regional rather than full-frame, letting the model freely generate in
@@ -337,6 +341,27 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         ref_at_start = extension_mode in ("firstframe", "firstlastframe")
         ref_at_end = extension_mode in ("lastframe", "firstlastframe")
 
+        # Check for conditioning inputs (inpainting/depth) to combine with extension
+        conditioning_frames = None
+        conditioning_masks = None
+        if block_state.vace_input_frames is not None:
+            # Extract conditioning frames for dummy positions
+            input_frames = block_state.vace_input_frames
+            if input_frames.dim() == 5:
+                # [B, C, F, H, W] -> [C, F, H, W] (take first batch)
+                input_frames = input_frames[0]
+            conditioning_frames = input_frames.to(
+                device=components.config.device, dtype=vae_dtype
+            )
+
+            # Also get conditioning masks if provided
+            if block_state.vace_input_masks is not None:
+                input_masks = block_state.vace_input_masks
+                if input_masks.dim() == 5:
+                    # [B, 1, F, H, W] -> [1, F, H, W] (take first batch)
+                    input_masks = input_masks[0]
+                conditioning_masks = input_masks.to(device=components.config.device)
+
         frames, masks = self._build_extension_frames_and_masks(
             prepared_refs=prepared_refs,
             num_frames=num_frames,
@@ -348,18 +373,45 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             height=block_state.height,
             width=block_state.width,
             spatial_masks=spatial_masks,
+            conditioning_frames=conditioning_frames,
+            conditioning_masks=conditioning_masks,
         )
 
         frames_to_encode = [frames]
         masks_to_encode = [masks]
 
+        # Check for R2V reference images to combine with extension
+        ref_image_paths = block_state.vace_ref_images
+        has_ref_images = ref_image_paths is not None and len(ref_image_paths) > 0
+        r2v_refs = None
+        if has_ref_images:
+            r2v_prepared_refs, _ = load_and_prepare_reference_images(
+                ref_image_paths,
+                block_state.height,
+                block_state.width,
+                components.config.device,
+            )
+            r2v_refs = [r2v_prepared_refs]
+
+        # Lazily initialize encoder caches for combined mode with conditioning
+        if conditioning_frames is not None and not self._caches_initialized:
+            self._inactive_cache = vae.create_encoder_cache()
+            self._reactive_cache = vae.create_encoder_cache()
+            self._caches_initialized = True
+
         z0 = vace_encode_frames(
             vae=vae,
             frames=frames_to_encode,
-            ref_images=[None],
+            ref_images=r2v_refs if r2v_refs else [None],
             masks=masks_to_encode,
             pad_to_96=False,
-            use_cache=False,
+            use_cache=False if conditioning_frames is None else True,
+            inactive_cache=self._inactive_cache
+            if conditioning_frames is not None
+            else None,
+            reactive_cache=self._reactive_cache
+            if conditioning_frames is not None
+            else None,
         )
 
         vae_stride = (
@@ -369,16 +421,22 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         )
         m0 = vace_encode_masks(
             masks=masks_to_encode,
-            ref_images=[None],
+            ref_images=r2v_refs if r2v_refs else [None],
             vae_stride=vae_stride,
         )
 
         vace_context = vace_latent(z0, m0)
 
-        # Log spatial mask status
+        # Log mode info
         has_padding = any((mask > 0).any() for mask in spatial_masks)
+        combined_info = []
+        if conditioning_frames is not None:
+            combined_info.append("conditioning")
+        if has_ref_images:
+            combined_info.append("r2v")
+        combined_str = f" + {' + '.join(combined_info)}" if combined_info else ""
         logger.info(
-            f"_encode_extension_mode: mode={extension_mode}, current_start={current_start}, "
+            f"_encode_extension_mode: mode={extension_mode}{combined_str}, current_start={current_start}, "
             f"num_frames={num_frames}, vace_context_shape={vace_context[0].shape}, "
             f"spatial_masking={'active (padding detected)' if has_padding else 'inactive (no padding)'}"
         )
@@ -397,127 +455,222 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         height: int,
         width: int,
         spatial_masks: list[torch.Tensor] | None = None,
+        conditioning_frames: torch.Tensor | None = None,
+        conditioning_masks: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Build frames and masks for extension mode with reference frame replication.
+        Build frames and masks for extension mode using a two-stage approach:
+
+        Stage 1: Build base sequence from conditioning (or zeros/ones default)
+        Stage 2: Overlay reference frames at anchor positions
+
+        This cleanly separates "what fills the sequence" from "where anchors go".
 
         Args:
-            prepared_refs: List of prepared reference images [C, 1, H, W].
-                For firstframe/lastframe: single image.
-                For firstlastframe: [first_image, last_image].
-            num_frames: Total number of frames to generate
-            temporal_group_size: Number of frames in a temporal VAE group
-            ref_at_start: True to place reference at start (firstframe, firstlastframe)
-            ref_at_end: True to place reference at end (lastframe, firstlastframe)
-            device: Target device
-            dtype: Target dtype for frames
-            height: Frame height
-            width: Frame width
-            spatial_masks: Optional list of spatial masks [1, 1, H, W] where 0=image region,
-                1=padding region. When provided, reference frame masks use these spatial masks
-                instead of all-zeros, allowing the model to freely generate in padding regions
-                while preserving the reference image's influence in its actual region.
+            prepared_refs: Reference images [C, 1, H, W]. Single for first/last, two for firstlast.
+            num_frames: Total frames to generate
+            temporal_group_size: Frames per VAE temporal group (typically 4)
+            ref_at_start/ref_at_end: Where to place reference anchors
+            spatial_masks: Optional padding masks for reference positions [1, 1, H, W]
+            conditioning_frames: Optional base frames [C, F, H, W] (inpainting/depth)
+            conditioning_masks: Optional base masks [1, F, H, W] (inpainting spatial control)
 
         Returns:
-            Tuple of (frames, masks) where:
-            - frames: [C, F, H, W] tensor with reference frames and dummy frames
-            - masks: [1, F, H, W] tensor with spatial masks for reference frames (0=preserve,
-                     1=generate in padding), 1s for dummy frames (fully generate)
+            (frames, masks): [C, F, H, W] and [1, F, H, W] tensors ready for VACE encoding
         """
+        # Stage 1: Build base frames and masks for entire sequence
+        frames, masks = self._build_base_sequence(
+            num_frames=num_frames,
+            conditioning_frames=conditioning_frames,
+            conditioning_masks=conditioning_masks,
+            device=device,
+            dtype=dtype,
+            height=height,
+            width=width,
+        )
 
-        # Helper to create ref and mask tensors
-        def make_ref_block(
-            ref_tensor: torch.Tensor,
-            spatial_mask: torch.Tensor | None = None,
-        ) -> tuple[torch.Tensor, torch.Tensor]:
-            """Replicate ref across temporal group, return (frames, masks)."""
-            ref_replicated = ref_tensor.repeat(1, temporal_group_size, 1, 1)
+        # Stage 2: Overlay references at anchor positions
+        # Clone once here so _overlay_reference_at can mutate in-place
+        frames = frames.clone()
+        masks = masks.clone()
+
+        first_spatial = spatial_masks[0] if spatial_masks else None
+        last_spatial = (
+            spatial_masks[1]
+            if spatial_masks and len(spatial_masks) > 1
+            else first_spatial
+        )
+
+        if ref_at_start and ref_at_end:
+            # firstlastframe mode
+            if num_frames < 2 * temporal_group_size:
+                raise ValueError(
+                    f"Not enough frames for firstlastframe: need {2 * temporal_group_size}, got {num_frames}"
+                )
+            frames, masks = self._overlay_reference_at(
+                frames,
+                masks,
+                prepared_refs[0],
+                first_spatial,
+                start_idx=0,
+                temporal_group_size=temporal_group_size,
+                conditioning_masks=conditioning_masks,
+                device=device,
+                height=height,
+                width=width,
+            )
+            frames, masks = self._overlay_reference_at(
+                frames,
+                masks,
+                prepared_refs[1],
+                last_spatial,
+                start_idx=num_frames - temporal_group_size,
+                temporal_group_size=temporal_group_size,
+                conditioning_masks=conditioning_masks,
+                device=device,
+                height=height,
+                width=width,
+            )
+        elif ref_at_start:
+            frames, masks = self._overlay_reference_at(
+                frames,
+                masks,
+                prepared_refs[0],
+                first_spatial,
+                start_idx=0,
+                temporal_group_size=temporal_group_size,
+                conditioning_masks=conditioning_masks,
+                device=device,
+                height=height,
+                width=width,
+            )
+        elif ref_at_end:
+            frames, masks = self._overlay_reference_at(
+                frames,
+                masks,
+                prepared_refs[0],
+                first_spatial,
+                start_idx=num_frames - temporal_group_size,
+                temporal_group_size=temporal_group_size,
+                conditioning_masks=conditioning_masks,
+                device=device,
+                height=height,
+                width=width,
+            )
+        else:
+            raise ValueError("At least one of ref_at_start or ref_at_end must be True")
+
+        return frames, masks
+
+    def _build_base_sequence(
+        self,
+        num_frames: int,
+        conditioning_frames: torch.Tensor | None,
+        conditioning_masks: torch.Tensor | None,
+        device: torch.device,
+        dtype: torch.dtype,
+        height: int,
+        width: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Build the base frame/mask sequence from conditioning or defaults.
+
+        If conditioning provided: use those frames/masks (padded if needed)
+        If no conditioning: zeros for frames, ones for masks (generate everything)
+        """
+        if conditioning_frames is not None:
+            frames = self._extract_and_pad(conditioning_frames, num_frames, dtype)
+            if conditioning_masks is not None:
+                masks = self._extract_and_pad(
+                    conditioning_masks, num_frames, torch.float32
+                )
+            else:
+                masks = torch.ones(
+                    (1, num_frames, height, width), device=device, dtype=torch.float32
+                )
+        else:
+            frames = torch.zeros(
+                (3, num_frames, height, width), device=device, dtype=dtype
+            )
+            masks = torch.ones(
+                (1, num_frames, height, width), device=device, dtype=torch.float32
+            )
+
+        return frames, masks
+
+    def _extract_and_pad(
+        self,
+        tensor: torch.Tensor,
+        target_frames: int,
+        target_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Extract frames from tensor, padding with last frame if needed."""
+        available = tensor.shape[1]
+        if available >= target_frames:
+            return tensor[:, :target_frames, :, :].to(dtype=target_dtype)
+        else:
+            padding = target_frames - available
+            pad_tensor = tensor[:, -1:, :, :].repeat(1, padding, 1, 1)
+            return torch.cat([tensor, pad_tensor], dim=1).to(dtype=target_dtype)
+
+    def _overlay_reference_at(
+        self,
+        frames: torch.Tensor,
+        masks: torch.Tensor,
+        ref_tensor: torch.Tensor,
+        spatial_mask: torch.Tensor | None,
+        start_idx: int,
+        temporal_group_size: int,
+        conditioning_masks: torch.Tensor | None,
+        device: torch.device,
+        height: int,
+        width: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Overlay a reference frame at a specific position in the sequence.
+
+        Two behaviors based on whether we're combining with inpainting:
+
+        With inpainting (conditioning_masks provided):
+            - Composite: reference where mask=1 (inpaint region), keep base where mask=0 (preserve)
+            - Output mask: all zeros (preserve the composite entirely)
+
+        Without inpainting:
+            - Replace frames with replicated reference
+            - Output mask: spatial_mask (for padding regions) or zeros (preserve all)
+        """
+        end_idx = start_idx + temporal_group_size
+        ref_replicated = ref_tensor.repeat(1, temporal_group_size, 1, 1)
+
+        if conditioning_masks is not None:
+            # Inpainting mode: composite reference into masked regions only
+            cond_slice = conditioning_masks[:, start_idx:end_idx, :, :]
+            if cond_slice.shape[1] < temporal_group_size:
+                pad = temporal_group_size - cond_slice.shape[1]
+                cond_slice = torch.cat(
+                    [cond_slice, cond_slice[:, -1:, :, :].repeat(1, pad, 1, 1)], dim=1
+                )
+
+            # Composite: reference where mask=1, existing base where mask=0
+            mask_expanded = cond_slice.expand_as(ref_replicated)
+            base_frames = frames[:, start_idx:end_idx, :, :]
+            composited = torch.where(mask_expanded > 0.5, ref_replicated, base_frames)
+
+            frames[:, start_idx:end_idx, :, :] = composited
+            masks[:, start_idx:end_idx, :, :] = 0.0  # Preserve composite entirely
+        else:
+            # Standard mode: replace with reference
+            frames[:, start_idx:end_idx, :, :] = ref_replicated
 
             if spatial_mask is not None:
-                # Use spatial mask: 0=preserve image region, 1=generate in padding
-                # Replicate [1, 1, H, W] -> [1, temporal_group_size, H, W]
                 ref_mask = spatial_mask.repeat(1, temporal_group_size, 1, 1)
             else:
-                # No spatial mask: all zeros (preserve entire reference frame)
                 ref_mask = torch.zeros(
                     (1, temporal_group_size, height, width),
                     device=device,
                     dtype=torch.float32,
                 )
-            return ref_replicated, ref_mask
-
-        # Get spatial masks if provided
-        first_spatial_mask = spatial_masks[0] if spatial_masks else None
-        last_spatial_mask = (
-            spatial_masks[1]
-            if spatial_masks and len(spatial_masks) > 1
-            else first_spatial_mask
-        )
-
-        if ref_at_start and ref_at_end:
-            # firstlastframe: [ref_first, ref_first, ..., dummy, dummy, ..., ref_last, ref_last, ...]
-            # Two temporal groups for refs, rest for dummy
-            num_dummy_frames = num_frames - 2 * temporal_group_size
-            if num_dummy_frames < 0:
-                raise ValueError(
-                    f"Not enough frames for firstlastframe mode: need at least {2 * temporal_group_size} frames, got {num_frames}"
-                )
-
-            first_ref_frames, first_ref_mask = make_ref_block(
-                prepared_refs[0], first_spatial_mask
-            )
-            last_ref_frames, last_ref_mask = make_ref_block(
-                prepared_refs[1], last_spatial_mask
-            )
-
-            dummy_frames = torch.zeros(
-                (3, num_dummy_frames, height, width), device=device, dtype=dtype
-            )
-            dummy_mask = torch.ones(
-                (1, num_dummy_frames, height, width),
-                device=device,
-                dtype=torch.float32,
-            )
-
-            frames = torch.cat([first_ref_frames, dummy_frames, last_ref_frames], dim=1)
-            masks = torch.cat([first_ref_mask, dummy_mask, last_ref_mask], dim=1)
-
-        elif ref_at_start:
-            # firstframe: [ref, ref, ref, zeros, zeros, ...]
-            num_dummy_frames = num_frames - temporal_group_size
-            ref_frames, ref_mask = make_ref_block(prepared_refs[0], first_spatial_mask)
-
-            dummy_frames = torch.zeros(
-                (3, num_dummy_frames, height, width), device=device, dtype=dtype
-            )
-            dummy_mask = torch.ones(
-                (1, num_dummy_frames, height, width),
-                device=device,
-                dtype=torch.float32,
-            )
-
-            frames = torch.cat([ref_frames, dummy_frames], dim=1)
-            masks = torch.cat([ref_mask, dummy_mask], dim=1)
-
-        elif ref_at_end:
-            # lastframe: [zeros, zeros, ..., ref, ref, ref]
-            num_dummy_frames = num_frames - temporal_group_size
-            ref_frames, ref_mask = make_ref_block(prepared_refs[0], first_spatial_mask)
-
-            dummy_frames = torch.zeros(
-                (3, num_dummy_frames, height, width), device=device, dtype=dtype
-            )
-            dummy_mask = torch.ones(
-                (1, num_dummy_frames, height, width),
-                device=device,
-                dtype=torch.float32,
-            )
-
-            frames = torch.cat([dummy_frames, ref_frames], dim=1)
-            masks = torch.cat([dummy_mask, ref_mask], dim=1)
-
-        else:
-            raise ValueError("At least one of ref_at_start or ref_at_end must be True")
+            masks[:, start_idx:end_idx, :, :] = ref_mask
 
         return frames, masks
 
