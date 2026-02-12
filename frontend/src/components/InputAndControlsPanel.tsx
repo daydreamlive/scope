@@ -214,15 +214,6 @@ export function InputAndControlsPanel({
     }
   }, [mode, selectedNdiSource, fetchNdiPreview]);
 
-  // Periodically refresh NDI preview while streaming
-  useEffect(() => {
-    if (!isStreaming || mode !== "ndi" || !selectedNdiSource) return;
-    const interval = setInterval(() => {
-      fetchNdiPreview(selectedNdiSource);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [isStreaming, mode, selectedNdiSource, fetchNdiPreview]);
-
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
     if (_timelinePrompts.length === 0) return true;
