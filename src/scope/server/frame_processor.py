@@ -877,13 +877,11 @@ class FrameProcessor:
             # Get pipeline instance from manager
             pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
 
-            proc_params = self.parameters.copy()
-
             # Create processor with its own queues
             processor = PipelineProcessor(
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
-                initial_parameters=proc_params,
+                initial_parameters=self.parameters.copy(),
                 session_id=self.session_id,
                 user_id=self.user_id,
                 connection_id=self.connection_id,
