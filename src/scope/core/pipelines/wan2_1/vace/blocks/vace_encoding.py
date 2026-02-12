@@ -144,6 +144,13 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 type_hint=int,
                 description="Current starting frame index",
             ),
+            InputParam(
+                "auto_resize",
+                default=True,
+                type_hint=bool,
+                description="If True (default), scale images to fill target dimensions for seamless UX. "
+                "If False, center images at original size and pad for outpainting.",
+            ),
         ]
 
     @property
@@ -321,12 +328,16 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             # Load BOTH images for firstlastframe mode
             images_to_load = [first_frame_image, last_frame_image]
 
-        # Load and crop-to-fill reference images (spatial masks always zeros with crop strategy)
+        # Get auto_resize setting (True for seamless UX, False for outpainting)
+        auto_resize = getattr(block_state, "auto_resize", True)
+
+        # Load and prepare reference images
         prepared_refs, spatial_masks = load_and_prepare_reference_images(
             images_to_load,
             block_state.height,
             block_state.width,
             components.config.device,
+            auto_resize=auto_resize,
         )
 
         vae = components.vae
