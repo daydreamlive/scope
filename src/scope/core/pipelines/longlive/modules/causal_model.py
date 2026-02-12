@@ -13,6 +13,14 @@ from torch.nn.attention.flex_attention import (
 )
 
 from scope.core.pipelines.wan2_1.modules.attention import attention
+
+# Fused AdaLN Triton kernels are available in ..kernels.fused_adaln but disabled
+# by default — they yield ~5.5x speedup on norm+modulate in isolation but <1%
+# end-to-end since the pipeline is matmul-dominated. To enable:
+#   from ..kernels.fused_adaln import HAS_TRITON, fused_adaln_norm_modulate, fused_gate_residual
+#   _USE_FUSED_ADALN = HAS_TRITON
+_USE_FUSED_ADALN = False
+
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
