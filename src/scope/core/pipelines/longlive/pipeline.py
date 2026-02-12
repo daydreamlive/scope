@@ -110,29 +110,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         # This is additive and does not replace the original LongLive performance LoRA.
         generator.model = self._init_loras(config, generator.model)
 
-        if quantization == Quantization.FP8_E4M3FN:
-            # Cast before optional quantization
-            generator = generator.to(dtype=dtype)
-
-            start = time.time()
-
-            from torchao.quantization.quant_api import (
-                Float8DynamicActivationFloat8WeightConfig,
-                PerTensor,
-                quantize_,
-            )
-
-            # Move to target device during quantization
-            # Defaults to using fp8_e4m3fn for both weights and activations
-            quantize_(
-                generator,
-                Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
-                device=device,
-            )
-
-            print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
-        else:
-            generator = generator.to(device=device, dtype=dtype)
+        generator = generator.to(device=device, dtype=dtype)
 
         start = time.time()
         text_encoder = WanTextEncoderWrapper(

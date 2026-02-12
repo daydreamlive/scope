@@ -46,7 +46,22 @@ Compute hints once at step 1, reuse for steps 2-4. However, hints take `x` (the 
 
 The pipeline already supports `Float8DynamicActivationFloat8WeightConfig` via torchao for the main model. Could apply same to the 15 VACE blocks. `aten::addmm` is 58.2% of VACE CUDA time — FP8 could roughly halve this.
 
-**Verdict: Viable, but FP8 not yet working on LongLive. Revisit when FP8 support is ready.**
+**Verdict: Not viable. See FP8 testing below.**
+
+#### FP8 Testing (Feb 2026)
+
+Got FP8 working on the full LongLive generator using torchao's `Float8DynamicActivationFloat8WeightConfig` with `PerTensor` granularity. Required two fixes:
+1. `filter_fn` to only quantize `nn.Linear` layers (skip `nn.Conv3d` patch embedding)
+2. Skip already-quantized `Float8Tensor` weights — needed because VACE wrapper aliases `self.blocks = self.causal_wan_model.blocks`, causing torchao to double-traverse shared modules
+
+**Result: 3.7x slower than baseline. Confirms [issue #195](https://github.com/daydreamlive/scope/issues/195).**
+
+| Mode | Per-chunk (512x512, depth, 12 frames) | FPS |
+|------|---------------------------------------|-----|
+| Baseline (bf16) | 756ms | 15.87 |
+| FP8 (Float8DynamicActivation) | 2814ms | 4.27 |
+
+Tested on RTX 5090 (SM 12.0 / Blackwell). The dynamic activation quantization overhead far exceeds any matmul savings. The FP8 code path was removed from LongLive's pipeline.py. VACE-only FP8 is not worth pursuing given the full-model results.
 
 ### 5. Fuse VACE Patch Embedding + First Block
 
@@ -117,7 +132,7 @@ CUDA graphs are not viable for VACE optimization in LongLive. The theoretical sa
 | torch.compile | ~0ms | <2% | Done | Not viable |
 | Hint caching | ~117ms | ~16% | Easy | Quality risk |
 | Fewer blocks | Variable | Variable | Easy | Quality risk |
-| FP8 VACE blocks | ~30-35ms | ~4-5% | Medium | Blocked (FP8 not ready) |
+| FP8 VACE blocks | -2058ms | -280% | Done | **3.7x slower** — not viable |
 | Fuse ops | Negligible | <1% | Easy | Not worth it |
 | CUDA graphs (VACE-only) | 25-50ms | 3-7% | Hard | Significant prerequisites |
 | CUDA graphs (global via max-autotune) | -39ms | -5.3% | Done | **Slower** — overhead > savings |
@@ -129,7 +144,7 @@ The VACE overhead (~170ms/chunk, ~23%) resists easy optimization because:
 - The overhead is proportional to the work — 15 transformer blocks × 4 steps is real compute, not waste
 - The only high-leverage option (hint caching) risks quality degradation
 - CUDA graphs hurt rather than help due to graph replay overhead exceeding launch overhead savings
-- FP8 quantization remains the most promising path but is blocked on LongLive FP8 support
+- FP8 quantization (torchao Float8DynamicActivation) is 3.7x slower — confirmed issue #195, code removed
 
 ## Benchmark Scripts
 
