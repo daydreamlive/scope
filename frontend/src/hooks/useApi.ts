@@ -4,7 +4,7 @@
  */
 
 import { useCallback } from "react";
-import { useCloudContext } from "../lib/cloudContext";
+import { useCloudContext } from "../lib/directCloudContext";
 import * as api from "../lib/api";
 import type {
   PipelineStatusResponse,

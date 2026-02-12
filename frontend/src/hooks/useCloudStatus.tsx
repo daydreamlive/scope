@@ -26,7 +26,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { useCloudContext } from "../lib/cloudContext";
+import { useCloudContext } from "../lib/directCloudContext";
 
 export interface CloudStatus {
   connected: boolean;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { getPipelineSchemas } from "../lib/api";
-import { useCloudContext } from "../lib/cloudContext";
+import { useCloudContext } from "../lib/directCloudContext";
 import type { InputMode, PipelineInfo } from "../types";
 
 export function usePipelines() {

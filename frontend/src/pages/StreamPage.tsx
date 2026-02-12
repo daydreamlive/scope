@@ -15,7 +15,7 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useApi } from "../hooks/useApi";
-import { useCloudContext } from "../lib/cloudContext";
+import { useCloudContext } from "../lib/directCloudContext";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";

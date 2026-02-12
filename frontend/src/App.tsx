@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
-import { CloudProvider } from "./lib/cloudContext";
+import { CloudProvider } from "./lib/directCloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
 import {
   handleOAuthCallback,

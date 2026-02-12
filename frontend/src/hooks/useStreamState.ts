@@ -13,7 +13,7 @@ import {
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
 } from "../lib/api";
-import { useCloudContext } from "../lib/cloudContext";
+import { useCloudContext } from "../lib/directCloudContext";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
