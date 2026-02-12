@@ -2,8 +2,128 @@
 # Adapted for causal/autoregressive generation
 # Pipeline-agnostic using duck typing with factory pattern
 
+import logging
+
 import torch
 import torch.nn as nn
+
+logger = logging.getLogger(__name__)
+
+
+class VaceSelfAttention(nn.Module):
+    """Drop-in replacement for CausalWanSelfAttention optimized for VACE blocks.
+
+    VACE blocks don't use KV cache, causal masking, or block_mask features.
+    This replaces flex_attention + padding-to-128 with a simple SDPA call,
+    eliminating:
+    - Padding to multiple of 128 (3 tensor allocations + 3 cat ops per call)
+    - flex_attention compiled graph overhead
+    - block_mask processing
+    - .item() GPU-CPU sync for is_tf check
+
+    Uses the same Q/K/V/O linear layers and RoPE as the original.
+    """
+
+    def __init__(self, original_self_attn, rope_apply_fn, flash_attention_fn):
+        super().__init__()
+        self.num_heads = original_self_attn.num_heads
+        self.head_dim = original_self_attn.head_dim
+        # Share the same linear layers (no extra parameters)
+        self.q = original_self_attn.q
+        self.k = original_self_attn.k
+        self.v = original_self_attn.v
+        self.o = original_self_attn.o
+        self.norm_q = original_self_attn.norm_q
+        self.norm_k = original_self_attn.norm_k
+        self._rope_apply = rope_apply_fn
+        self._flash_attention = flash_attention_fn
+
+    def forward(
+        self,
+        x,
+        seq_lens,
+        grid_sizes,
+        freqs,
+        block_mask=None,
+        kv_cache=None,
+        current_start=0,
+        cache_start=None,
+        sink_recache_after_switch=False,
+    ):
+        b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+        q = self.norm_q(self.q(x)).view(b, s, n, d)
+        k = self.norm_k(self.k(x)).view(b, s, n, d)
+        v = self.v(x).view(b, s, n, d)
+
+        # Apply RoPE
+        q = self._rope_apply(q, grid_sizes, freqs).type_as(v)
+        k = self._rope_apply(k, grid_sizes, freqs).type_as(v)
+
+        # flash_attention expects (B, S, num_heads, head_dim) — already in that layout
+        # No causal mask needed for VACE — bidirectional attention
+        x = self._flash_attention(q, k, v)
+
+        # Output projection
+        x = self.o(x.flatten(2))
+
+        return x
+
+
+def swap_vace_self_attention(vace_blocks, rope_apply_fn=None, flash_attention_fn=None):
+    """Replace CausalWanSelfAttention with VaceSelfAttention on VACE blocks.
+
+    Args:
+        vace_blocks: nn.ModuleList of VACE attention blocks
+        rope_apply_fn: The rope_apply function from the pipeline's model module.
+            If None, auto-discovers from the self_attn module's globals.
+        flash_attention_fn: The flash_attention function. If None, auto-discovers
+            from the module that imports it (typically the cross-attention module).
+    """
+    if rope_apply_fn is None or flash_attention_fn is None:
+        # Auto-discover from the module where self_attn's parent block class is defined
+        first_block = vace_blocks[0]
+        if hasattr(first_block, "self_attn"):
+            import sys
+
+            # rope_apply lives in the same module as the block's base class
+            # Walk MRO to find a module with rope_apply
+            for cls in type(first_block).__mro__:
+                mod = sys.modules.get(cls.__module__)
+                if mod is None:
+                    continue
+                if rope_apply_fn is None and hasattr(mod, "rope_apply"):
+                    rope_apply_fn = mod.rope_apply
+                if flash_attention_fn is None and hasattr(mod, "flash_attention"):
+                    flash_attention_fn = mod.flash_attention
+
+    if rope_apply_fn is None:
+        logger.warning(
+            "swap_vace_self_attention: Could not auto-discover rope_apply, skipping swap"
+        )
+        return
+
+    if flash_attention_fn is None:
+        # Fallback: import from the shared attention module
+        try:
+            from scope.core.pipelines.wan2_1.modules.attention import flash_attention
+
+            flash_attention_fn = flash_attention
+        except ImportError:
+            logger.warning(
+                "swap_vace_self_attention: Could not find flash_attention, skipping swap"
+            )
+            return
+
+    for block in vace_blocks:
+        if hasattr(block, "self_attn"):
+            block.self_attn = VaceSelfAttention(
+                block.self_attn, rope_apply_fn, flash_attention_fn
+            )
+    logger.info(
+        f"Swapped self-attention on {len(vace_blocks)} VACE blocks "
+        f"to VaceSelfAttention (flash_attn)"
+    )
 
 
 def create_vace_attention_block_class(base_attention_block_class):

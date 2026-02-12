@@ -182,6 +182,13 @@ class VACEEnabledPipeline:
                     "_init_vace: Could not import Quantization, skipping quantization check"
                 )
 
+        # Swap flex_attention for SDPA on VACE blocks
+        # VACE blocks don't use KV cache or causal masking, so SDPA is sufficient
+        # and eliminates flex_attention overhead (padding to 128, compiled graph, block_mask)
+        from ..vace.models.attention_blocks import swap_vace_self_attention
+
+        swap_vace_self_attention(vace_wrapped_model.vace_blocks)
+
         self.vace_enabled = True
         logger.info("_init_vace: VACE enabled successfully")
 

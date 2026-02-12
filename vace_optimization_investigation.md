@@ -91,9 +91,24 @@ The pipeline already supports `Float8DynamicActivationFloat8WeightConfig` via to
 3. **Dynamic control flow** — The `is_tf` branch based on runtime tensor values is incompatible with CUDA graphs.
 4. **Growing hint accumulation** — Each VACE block appends hints via `torch.unbind`/`torch.stack`, creating tensors of increasing size across blocks. Requires pre-allocated fixed-size buffer.
 
+#### Experiment: Switching flex_attention to `max-autotune` (with CUDA graphs)
+
+The `no-cudagraphs` flag was originally added in PR #259 (Dec 2025) for StreamDiffusionv2 with the comment: "max-autotune did not play well with VACE code." We tested removing it on LongLive.
+
+**Result: `max-autotune` runs without errors but is ~5% slower.**
+
+| Mode | Per-chunk | FPS |
+|------|-----------|-----|
+| `max-autotune-no-cudagraphs` (current) | 739ms | 16.25 |
+| `max-autotune` (CUDA graphs enabled) | 778ms | 15.42 |
+
+The original incompatibility with VACE was in the StreamDiffusionv2 codebase, not LongLive — it runs fine here. However, CUDA graphs add overhead to the **main model's** flex_attention (30 blocks × 4 steps = 120 calls) that exceeds the kernel launch savings. The large, well-utilized kernels in the main transformer don't benefit from graph replay — the fixed graph replay overhead actually hurts.
+
+This also means VACE-only CUDA graphs (which would require the prerequisite refactoring above) are unlikely to help either: the same overhead/savings tradeoff applies to the VACE blocks, which use the same flex_attention path.
+
 #### Verdict
 
-Meaningful but not transformative. 25-50ms/chunk savings requires non-trivial refactoring of the attention path that also affects the non-VACE code. The prerequisites (removing `.item()`, pre-allocating buffers, addressing flex_attention constraint) are significant engineering work for a modest return.
+CUDA graphs are not viable for VACE optimization in LongLive. The theoretical savings from eliminating kernel launch overhead (25-50ms) are negated by CUDA graph replay overhead when applied globally, and the prerequisite refactoring for VACE-only graphs is not justified given the marginal expected benefit.
 
 ## Summary
 
@@ -104,7 +119,17 @@ Meaningful but not transformative. 25-50ms/chunk savings requires non-trivial re
 | Fewer blocks | Variable | Variable | Easy | Quality risk |
 | FP8 VACE blocks | ~30-35ms | ~4-5% | Medium | Blocked (FP8 not ready) |
 | Fuse ops | Negligible | <1% | Easy | Not worth it |
-| CUDA graphs | 25-50ms | 3-7% | Hard | Significant prerequisites |
+| CUDA graphs (VACE-only) | 25-50ms | 3-7% | Hard | Significant prerequisites |
+| CUDA graphs (global via max-autotune) | -39ms | -5.3% | Done | **Slower** — overhead > savings |
+
+## Conclusions
+
+The VACE overhead (~170ms/chunk, ~23%) resists easy optimization because:
+- The compute is already efficient (cuBLAS linears, compiled flex_attention, flash_attn cross-attn)
+- The overhead is proportional to the work — 15 transformer blocks × 4 steps is real compute, not waste
+- The only high-leverage option (hint caching) risks quality degradation
+- CUDA graphs hurt rather than help due to graph replay overhead exceeding launch overhead savings
+- FP8 quantization remains the most promising path but is blocked on LongLive FP8 support
 
 ## Benchmark Scripts
 
