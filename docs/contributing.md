@@ -104,5 +104,6 @@ This test outputs a video file.
 
 ## Release Process
 
-1. Update the `version` field in `package.json` for the frontend.
-2. Update the `version` field in `pyproject.toml` for the server.
+1. Run the **Version Bump PR** workflow from GitHub Actions (`version-bump.yml`), providing the desired version. This creates a PR that bumps versions across `pyproject.toml`, `frontend/package.json`, `app/package.json`, and their lock files.
+2. Review and merge the auto-created `release/v*` PR.
+3. On merge to `main`, the **Tag on Merge** workflow (`tag-on-merge.yml`) automatically creates and pushes the git tag, which triggers the Electron app build (`build-electron.yml`) and Docker image build (`docker-build.yml`) workflows.
