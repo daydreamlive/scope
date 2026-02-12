@@ -75,7 +75,7 @@ jobs:
         working-directory: frontend
 
       - name: Update app lock file
-        run: npm install --package-lock-only
+        run: npm install --package-lock-only --ignore-scripts
         working-directory: app
 
       - name: Verify versions updated
