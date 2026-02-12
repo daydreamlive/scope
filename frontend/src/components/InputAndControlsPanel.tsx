@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -10,10 +10,15 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Upload, ArrowUp } from "lucide-react";
+import { Upload, ArrowUp, RefreshCw } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
-import type { PromptItem, PromptTransition } from "../lib/api";
+import type {
+  PromptItem,
+  PromptTransition,
+  DiscoveredSource,
+} from "../lib/api";
+import { getInputSourceSources, getInputSourcePreviewUrl } from "../lib/api";
 import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
@@ -71,6 +76,11 @@ interface InputAndControlsPanelProps {
   onInputModeChange: (mode: InputMode) => void;
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
+  // Whether NDI is available (NDI SDK installed on server)
+  ndiAvailable?: boolean;
+  // Currently selected NDI source identifier
+  selectedNdiSource?: string;
+  onNdiSourceChange?: (identifier: string) => void;
   // VACE reference images (only shown when VACE is enabled)
   vaceEnabled?: boolean;
   refImages?: string[];
@@ -136,6 +146,9 @@ export function InputAndControlsPanel({
   inputMode,
   onInputModeChange,
   spoutAvailable = false,
+  ndiAvailable = false,
+  selectedNdiSource = "",
+  onNdiSourceChange,
   vaceEnabled = true,
   refImages = [],
   onRefImagesChange,
@@ -153,6 +166,55 @@ export function InputAndControlsPanel({
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
 }: InputAndControlsPanelProps) {
+  // NDI source discovery
+  const [ndiSources, setNdiSources] = useState<DiscoveredSource[]>([]);
+  const [isDiscoveringNdi, setIsDiscoveringNdi] = useState(false);
+
+  const discoverNdiSources = useCallback(async () => {
+    setIsDiscoveringNdi(true);
+    try {
+      const result = await getInputSourceSources("ndi");
+      setNdiSources(result.sources);
+    } catch (e) {
+      console.error("Failed to discover NDI sources:", e);
+      setNdiSources([]);
+    } finally {
+      setIsDiscoveringNdi(false);
+    }
+  }, []);
+
+  // NDI preview thumbnail
+  const [ndiPreviewUrl, setNdiPreviewUrl] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  const fetchNdiPreview = useCallback((identifier: string) => {
+    if (!identifier) {
+      setNdiPreviewUrl(null);
+      return;
+    }
+    setIsLoadingPreview(true);
+    // Append a cache-buster so the browser always fetches a fresh frame
+    const url =
+      getInputSourcePreviewUrl("ndi", identifier) + `&_t=${Date.now()}`;
+    setNdiPreviewUrl(url);
+  }, []);
+
+  // Auto-discover NDI sources when switching to NDI mode
+  useEffect(() => {
+    if (mode === "ndi" && ndiAvailable) {
+      discoverNdiSources();
+    }
+  }, [mode, ndiAvailable, discoverNdiSources]);
+
+  // Fetch preview when an NDI source is selected
+  useEffect(() => {
+    if (mode === "ndi" && selectedNdiSource) {
+      fetchNdiPreview(selectedNdiSource);
+    } else {
+      setNdiPreviewUrl(null);
+    }
+  }, [mode, selectedNdiSource, fetchNdiPreview]);
+
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
     if (_timelinePrompts.length === 0) return true;
@@ -263,15 +325,36 @@ export function InputAndControlsPanel({
               }}
               className="justify-start"
             >
-              <ToggleGroupItem value="video" aria-label="Video file">
+              <ToggleGroupItem
+                value="video"
+                aria-label="Video file"
+                disabled={isStreaming && mode === "ndi"}
+              >
                 File
               </ToggleGroupItem>
-              <ToggleGroupItem value="camera" aria-label="Camera">
+              <ToggleGroupItem
+                value="camera"
+                aria-label="Camera"
+                disabled={isStreaming && mode === "ndi"}
+              >
                 Camera
               </ToggleGroupItem>
               {spoutAvailable && (
-                <ToggleGroupItem value="spout" aria-label="Spout Receiver">
-                  Spout Receiver
+                <ToggleGroupItem
+                  value="spout"
+                  aria-label="Spout Receiver"
+                  disabled={isStreaming && mode === "ndi"}
+                >
+                  Spout
+                </ToggleGroupItem>
+              )}
+              {ndiAvailable && (
+                <ToggleGroupItem
+                  value="ndi"
+                  aria-label="NDI"
+                  disabled={isStreaming && mode !== "ndi"}
+                >
+                  NDI
                 </ToggleGroupItem>
               )}
             </ToggleGroup>
@@ -282,7 +365,83 @@ export function InputAndControlsPanel({
         {inputMode === "video" && (
           <div>
             <h3 className="text-sm font-medium mb-2">Input</h3>
-            {mode === "spout" ? (
+            {mode === "ndi" ? (
+              /* NDI Source Picker */
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Select
+                    value={selectedNdiSource}
+                    onValueChange={value => onNdiSourceChange?.(value)}
+                    disabled={isStreaming || isDiscoveringNdi}
+                  >
+                    <SelectTrigger className="flex-1 min-w-0 h-8 text-sm [&>span]:truncate">
+                      <SelectValue
+                        placeholder={
+                          isDiscoveringNdi
+                            ? "Discovering..."
+                            : ndiSources.length === 0
+                              ? "No sources found"
+                              : "Select NDI source"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ndiSources.map(source => (
+                        <SelectItem
+                          key={source.identifier}
+                          value={source.identifier}
+                        >
+                          {source.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={discoverNdiSources}
+                    disabled={isStreaming || isDiscoveringNdi}
+                    title="Refresh NDI sources"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${isDiscoveringNdi ? "animate-spin" : ""}`}
+                    />
+                  </Button>
+                </div>
+                {/* NDI source preview thumbnail */}
+                {selectedNdiSource && (
+                  <div
+                    className="relative rounded-md overflow-hidden border border-border bg-muted cursor-pointer min-w-0"
+                    onClick={() => fetchNdiPreview(selectedNdiSource)}
+                    title="Click to refresh preview"
+                  >
+                    {ndiPreviewUrl ? (
+                      <img
+                        src={ndiPreviewUrl}
+                        alt="NDI source preview"
+                        className="block w-full h-auto object-contain"
+                        onLoad={() => setIsLoadingPreview(false)}
+                        onError={() => {
+                          setIsLoadingPreview(false);
+                          setNdiPreviewUrl(null);
+                        }}
+                      />
+                    ) : null}
+                    {isLoadingPreview && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-muted/80">
+                        <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    {!ndiPreviewUrl && !isLoadingPreview && (
+                      <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
+                        No preview available
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : mode === "spout" ? (
               /* Spout Receiver Configuration */
               <div className="flex items-center gap-3">
                 <LabelWithTooltip

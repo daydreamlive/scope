@@ -225,6 +225,103 @@ export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
   return result;
 };
 
+// Input sources API
+
+export interface InputSourceType {
+  source_id: string;
+  source_name: string;
+  source_description: string;
+  available: boolean;
+}
+
+export interface InputSourceTypesResponse {
+  input_sources: InputSourceType[];
+}
+
+export interface DiscoveredSource {
+  name: string;
+  identifier: string;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface DiscoveredSourcesResponse {
+  source_type: string;
+  sources: DiscoveredSource[];
+}
+
+export const getInputSources = async (): Promise<InputSourceTypesResponse> => {
+  const response = await fetch("/api/v1/input-sources", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Input sources failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const getInputSourceSources = async (
+  sourceType: string,
+  timeoutMs = 5000
+): Promise<DiscoveredSourcesResponse> => {
+  const response = await fetch(
+    `/api/v1/input-sources/${sourceType}/sources?timeout_ms=${timeoutMs}`,
+    {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Discover sources failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export interface InputSourceResolution {
+  width: number;
+  height: number;
+}
+
+export const getInputSourceResolution = async (
+  sourceType: string,
+  identifier: string,
+  timeoutMs = 5000
+): Promise<InputSourceResolution> => {
+  const response = await fetch(
+    `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/resolution?timeout_ms=${timeoutMs}`,
+    {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Probe resolution failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const getInputSourcePreviewUrl = (
+  sourceType: string,
+  identifier: string,
+  timeoutMs = 5000
+): string =>
+  `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/preview?timeout_ms=${timeoutMs}`;
+
 export const fetchCurrentLogs = async (): Promise<string> => {
   const response = await fetch("/api/v1/logs/current", {
     method: "GET",

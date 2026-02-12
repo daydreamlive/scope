@@ -10,8 +10,10 @@ import type {
 import {
   getHardwareInfo as getHardwareInfoApi,
   getPipelineSchemas as getPipelineSchemasApi,
+  getInputSources as getInputSourcesApi,
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
+  type InputSourceType,
 } from "../lib/api";
 import { useCloudContext } from "../lib/cloudContext";
 
@@ -61,6 +63,11 @@ export function useStreamState() {
       }
       return getHardwareInfoApi();
     }, [adapter, isCloudMode]);
+
+  const getInputSources = useCallback(async () => {
+    // Input sources are always fetched from the local backend
+    return getInputSourcesApi();
+  }, []);
 
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
@@ -183,6 +190,11 @@ export function useStreamState() {
     null
   );
 
+  // Store available input sources from backend
+  const [availableInputSources, setAvailableInputSources] = useState<
+    InputSourceType[]
+  >([]);
+
   // Function to refresh pipeline schemas (can be called externally)
   const refreshPipelineSchemas = useCallback(async () => {
     try {
@@ -241,10 +253,12 @@ export function useStreamState() {
 
     const fetchInitialData = async () => {
       try {
-        const [schemasResult, hardwareResult] = await Promise.allSettled([
-          getPipelineSchemas(),
-          getHardwareInfo(),
-        ]);
+        const [schemasResult, hardwareResult, inputSourcesResult] =
+          await Promise.allSettled([
+            getPipelineSchemas(),
+            getHardwareInfo(),
+            getInputSources(),
+          ]);
 
         if (schemasResult.status === "fulfilled") {
           const schemas = schemasResult.value;
@@ -282,13 +296,28 @@ export function useStreamState() {
             hardwareResult.reason
           );
         }
+
+        if (inputSourcesResult.status === "fulfilled") {
+          setAvailableInputSources(inputSourcesResult.value.input_sources);
+        } else {
+          console.error(
+            "useStreamState: Failed to fetch input sources:",
+            inputSourcesResult.reason
+          );
+        }
       } catch (error) {
         console.error("useStreamState: Failed to fetch initial data:", error);
       }
     };
 
     fetchInitialData();
-  }, [isCloudMode, isReady, getPipelineSchemas, getHardwareInfo]);
+  }, [
+    isCloudMode,
+    isReady,
+    getPipelineSchemas,
+    getHardwareInfo,
+    getInputSources,
+  ]);
 
   // Update inputMode when schemas load or pipeline changes
   // This sets the correct default mode for the pipeline
@@ -377,7 +406,7 @@ export function useStreamState() {
     setPromptData(prev => ({ ...prev, ...newPrompt }));
   }, []);
 
-  // Derive spoutAvailable from hardware info (server-side detection)
+  // Derive spoutAvailable from hardware info (server-side detection) for backward compat
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
 
   return {
@@ -394,6 +423,7 @@ export function useStreamState() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   };

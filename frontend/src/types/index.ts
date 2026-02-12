@@ -63,10 +63,6 @@ export interface SettingsState {
   // Track current input mode (text vs video)
   inputMode?: InputMode;
   // Spout settings
-  spoutReceiver?: {
-    enabled: boolean;
-    name: string;
-  };
   spoutSender?: {
     enabled: boolean;
     name: string;
@@ -84,6 +80,12 @@ export interface SettingsState {
   preprocessorIds?: string[];
   // Postprocessors
   postprocessorIds?: string[];
+  // Generic input source (NDI, Spout via new input source system, etc.)
+  inputSource?: {
+    enabled: boolean;
+    source_type: string;
+    source_name: string;
+  };
   // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
   schemaFieldOverrides?: Record<string, unknown>;
   // Schema-driven overrides for preprocessor/postprocessor plugin configs

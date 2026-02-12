@@ -1131,6 +1131,172 @@ def is_spout_available() -> bool:
     return sys.platform == "win32"
 
 
+_source_discovery_cache: dict[str, tuple[float, list]] = {}
+_SOURCE_DISCOVERY_TTL = 10  # seconds
+
+
+def _resolve_input_source_class(source_type: str):
+    """Resolve a source_type string to its InputSource class, or raise HTTPException."""
+    from scope.core.inputs import get_input_source_classes
+
+    source_classes = get_input_source_classes()
+    source_class = source_classes.get(source_type)
+    if source_class is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown input source type '{source_type}'. "
+            f"Available types: {list(source_classes.keys())}",
+        )
+    if not source_class.is_available():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input source '{source_type}' is not available on this system.",
+        )
+    return source_class
+
+
+@app.get("/api/v1/input-sources")
+async def list_input_source_types():
+    """List available input source types with their availability status."""
+    from scope.core.inputs import get_input_source_classes
+
+    sources = []
+    for cls in get_input_source_classes().values():
+        sources.append(
+            {
+                "source_id": cls.source_id,
+                "source_name": cls.source_name,
+                "source_description": cls.source_description,
+                "available": cls.is_available(),
+            }
+        )
+
+    return {"input_sources": sources}
+
+
+@app.get("/api/v1/input-sources/{source_type}/sources")
+async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
+    """List discovered sources for a given input source type."""
+    source_class = _resolve_input_source_class(source_type)
+
+    # Return cached results if still fresh
+    cached = _source_discovery_cache.get(source_type)
+    if cached is not None:
+        ts, sources = cached
+        if time.monotonic() - ts < _SOURCE_DISCOVERY_TTL:
+            return {"source_type": source_type, "sources": sources}
+
+    try:
+        instance = source_class()
+        try:
+            discovered = instance.list_sources(timeout_ms=timeout_ms)
+            sources = [
+                {
+                    "name": s.name,
+                    "identifier": s.identifier,
+                    "metadata": s.metadata,
+                }
+                for s in discovered
+            ]
+            _source_discovery_cache[source_type] = (time.monotonic(), sources)
+            return {"source_type": source_type, "sources": sources}
+        finally:
+            instance.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing sources for '{source_type}': {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/resolution")
+async def get_input_source_resolution(
+    source_type: str, identifier: str, timeout_ms: int = Query(5000)
+):
+    """Probe the native resolution of a specific input source."""
+    source_class = _resolve_input_source_class(source_type)
+
+    try:
+        instance = source_class()
+        try:
+            resolution = instance.get_source_resolution(
+                identifier, timeout_ms=timeout_ms
+            )
+            if resolution is None:
+                raise HTTPException(
+                    status_code=408,
+                    detail=f"Could not determine resolution for '{identifier}' "
+                    f"within {timeout_ms}ms.",
+                )
+            width, height = resolution
+            return {"width": width, "height": height}
+        finally:
+            instance.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error probing resolution for '{source_type}/{identifier}': {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/preview")
+async def get_input_source_preview(
+    source_type: str, identifier: str, timeout_ms: int = Query(5000)
+):
+    """Grab a single frame from an input source and return it as a JPEG thumbnail."""
+    source_class = _resolve_input_source_class(source_type)
+
+    try:
+        from PIL import Image
+
+        instance = source_class()
+        try:
+            if not instance.connect(identifier):
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not connect to '{identifier}'.",
+                )
+
+            # Poll for a frame
+            elapsed = 0
+            poll_interval = 100
+            frame = None
+            while elapsed < timeout_ms:
+                frame = instance.receive_frame(timeout_ms=poll_interval)
+                if frame is not None:
+                    break
+                elapsed += poll_interval
+
+            if frame is None:
+                raise HTTPException(
+                    status_code=408,
+                    detail=f"No frame received from '{identifier}' within {timeout_ms}ms.",
+                )
+
+            # Downscale for thumbnail (max 320px wide)
+            h, w = frame.shape[:2]
+            max_w = 320
+            if w > max_w:
+                scale = max_w / w
+                new_w = max_w
+                new_h = int(h * scale)
+                img = Image.fromarray(frame).resize((new_w, new_h), Image.LANCZOS)
+            else:
+                img = Image.fromarray(frame)
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=80)
+            buf.seek(0)
+            return Response(content=buf.read(), media_type="image/jpeg")
+        finally:
+            instance.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting preview for '{source_type}/{identifier}': {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info(
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
