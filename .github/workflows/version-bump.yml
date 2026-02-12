@@ -1,0 +1,123 @@
+name: Version Bump PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.2.0, 0.2.0-beta.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate and normalize version
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          # Strip leading 'v' if present
+          VERSION="${VERSION#v}"
+          # Validate format: major.minor.patch with optional prerelease
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag doesn't already exist
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${{ steps.version.outputs.version }}" | grep -q .; then
+            echo "::error::Tag v${{ steps.version.outputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read current version
+        id: current
+        run: |
+          CURRENT=$(grep -m1 '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "Current version: $CURRENT"
+
+      - name: Update versions in source files
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+          OLD_VERSION: ${{ steps.current.outputs.version }}
+        run: |
+          # pyproject.toml
+          sed -i "s/^version = \"$OLD_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
+
+          # frontend/package.json
+          sed -i "s/\"version\": \"$OLD_VERSION\"/\"version\": \"$NEW_VERSION\"/" frontend/package.json
+
+          # app/package.json
+          sed -i "s/\"version\": \"$OLD_VERSION\"/\"version\": \"$NEW_VERSION\"/" app/package.json
+
+      - name: Update uv.lock
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "0.9.11"
+      - run: uv lock
+
+      - name: Update frontend lock file
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - run: npm install --package-lock-only
+        working-directory: frontend
+
+      - name: Update app lock file
+        run: npm install --package-lock-only
+        working-directory: app
+
+      - name: Verify versions updated
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ERRORS=0
+          for file in pyproject.toml frontend/package.json app/package.json; do
+            if ! grep -q "$NEW_VERSION" "$file"; then
+              echo "::error::Version not updated in $file"
+              ERRORS=1
+            fi
+          done
+          if [ "$ERRORS" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All versions updated to $NEW_VERSION"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: release/v${{ steps.version.outputs.version }}
+          commit-message: |
+            chore: bump version to ${{ steps.version.outputs.version }}
+
+            Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          title: "Release v${{ steps.version.outputs.version }}"
+          body: |
+            ## Release v${{ steps.version.outputs.version }}
+
+            This PR bumps the version from `${{ steps.current.outputs.version }}` to `${{ steps.version.outputs.version }}` across all packages.
+
+            ### Changed files
+            - `pyproject.toml`
+            - `frontend/package.json`
+            - `app/package.json`
+            - `uv.lock`
+            - `frontend/package-lock.json`
+            - `app/package-lock.json`
+
+            ### What happens on merge
+            1. The `tag-on-merge` workflow will automatically create and push tag `v${{ steps.version.outputs.version }}`
+            2. The tag will trigger the Electron build and Docker build workflows
+          labels: release
+          delete-branch: true
