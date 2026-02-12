@@ -52,6 +52,71 @@ import { SchemaPrimitiveField } from "./PrimitiveFields";
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
 
+/** Renders primitive config fields from a plugin pipeline's configSchema. */
+function PluginConfigFields({
+  configSchema,
+  inputMode,
+  overrides,
+  onChange,
+  isStreaming = false,
+  isLoading = false,
+}: {
+  configSchema: import("../lib/schemaSettings").ConfigSchemaLike;
+  inputMode?: InputMode;
+  overrides?: Record<string, unknown>;
+  onChange?: (key: string, value: unknown, isRuntimeParam?: boolean) => void;
+  isStreaming?: boolean;
+  isLoading?: boolean;
+}) {
+  const fields = parseConfigurationFields(configSchema, inputMode);
+  const primitiveFields = fields.filter(
+    ({ fieldType }) =>
+      !(COMPLEX_COMPONENTS as readonly string[]).includes(fieldType) &&
+      fieldType !== "resolution"
+  );
+  if (primitiveFields.length === 0) return null;
+
+  const enumValuesByRef: Record<string, string[]> = {};
+  if (configSchema.$defs) {
+    for (const [defName, def] of Object.entries(configSchema.$defs)) {
+      if (def?.enum && Array.isArray(def.enum)) {
+        enumValuesByRef[defName] = def.enum as string[];
+      }
+    }
+  }
+
+  return (
+    <div className="rounded-lg border bg-card p-3 space-y-3">
+      {primitiveFields.map(({ key, prop, ui, fieldType }) => {
+        const value = overrides?.[key] ?? prop.default;
+        const isRuntimeParam = ui.is_load_param === false;
+        const enumValues =
+          fieldType === "enum" && typeof prop.$ref === "string"
+            ? enumValuesByRef[prop.$ref.split("/").pop() ?? ""]
+            : undefined;
+        return (
+          <SchemaPrimitiveField
+            key={key}
+            fieldKey={key}
+            prop={prop}
+            value={value}
+            onChange={v => onChange?.(key, v, isRuntimeParam)}
+            disabled={(isStreaming && !isRuntimeParam) || isLoading}
+            label={ui.label}
+            fieldType={
+              typeof fieldType === "string" &&
+              !(COMPLEX_COMPONENTS as readonly string[]).includes(fieldType)
+                ? (fieldType as import("../lib/schemaSettings").PrimitiveFieldType)
+                : undefined
+            }
+            enumValues={enumValues}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 interface SettingsPanelProps {
   className?: string;
   pipelines: Record<string, PipelineInfo> | null;
@@ -112,6 +177,19 @@ interface SettingsPanelProps {
     value: unknown,
     isRuntimeParam?: boolean
   ) => void;
+  // Preprocessor/postprocessor config schemas and overrides
+  preprocessorConfigSchema?: import("../lib/schemaSettings").ConfigSchemaLike;
+  postprocessorConfigSchema?: import("../lib/schemaSettings").ConfigSchemaLike;
+  preprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  postprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  onPreprocessorSchemaFieldOverrideChange?: (
+    key: string,
+    value: unknown
+  ) => void;
+  onPostprocessorSchemaFieldOverrideChange?: (
+    key: string,
+    value: unknown
+  ) => void;
   isCloudMode?: boolean;
 }
 
@@ -158,6 +236,12 @@ export function SettingsPanel({
   onPostprocessorIdsChange,
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
+  preprocessorConfigSchema,
+  postprocessorConfigSchema,
+  preprocessorSchemaFieldOverrides,
+  postprocessorSchemaFieldOverrides,
+  onPreprocessorSchemaFieldOverrideChange,
+  onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
@@ -425,6 +509,16 @@ export function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
+          {preprocessorConfigSchema && (
+            <PluginConfigFields
+              configSchema={preprocessorConfigSchema}
+              inputMode={inputMode}
+              overrides={preprocessorSchemaFieldOverrides}
+              onChange={onPreprocessorSchemaFieldOverrideChange}
+              isStreaming={isStreaming}
+              isLoading={isLoading}
+            />
+          )}
         </div>
 
         {/* Postprocessor Selector - fixed, always shown */}
@@ -466,6 +560,16 @@ export function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
+          {postprocessorConfigSchema && (
+            <PluginConfigFields
+              configSchema={postprocessorConfigSchema}
+              inputMode={inputMode}
+              overrides={postprocessorSchemaFieldOverrides}
+              onChange={onPostprocessorSchemaFieldOverrideChange}
+              isStreaming={isStreaming}
+              isLoading={isLoading}
+            />
+          )}
         </div>
 
         {/* Schema-driven configuration (when configSchema has ui.category===configuration) or legacy */}
