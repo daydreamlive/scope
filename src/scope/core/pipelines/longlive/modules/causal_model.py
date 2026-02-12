@@ -18,17 +18,17 @@ from .model import (
 
 
 def precompute_freqs_i(freqs, f, h, w, start_frame=0):
-    """Precompute RoPE frequency tensor outside the compiled region.
+    """Precompute RoPE cos/sin tensors outside the compiled region.
 
     Args:
-        freqs: Base frequency table, shape [max_seq_len, head_dim // 2]
+        freqs: Base frequency table (complex), shape [max_seq_len, head_dim // 2]
         f: Number of temporal frames
         h: Spatial height (after patching)
         w: Spatial width (after patching)
         start_frame: Starting frame index for temporal position encoding
 
     Returns:
-        freqs_i: Precomputed frequency tensor, shape [f*h*w, 1, head_dim // 2]
+        Tuple of (freqs_cos, freqs_sin), each shape [1, f*h*w, 1, head_dim // 2]
     """
     c = freqs.shape[1]
     freqs_split = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
@@ -44,28 +44,35 @@ def precompute_freqs_i(freqs, f, h, w, start_frame=0):
         dim=-1,
     ).reshape(f * h * w, 1, -1)
 
-    return freqs_i
+    # Convert complex frequencies to real cos/sin for compile-friendly RoPE.
+    # Shape: [1, seq_len, 1, head_dim // 2] for broadcasting with [B, seq_len, heads, head_dim // 2]
+    freqs_cos = freqs_i.real.float().unsqueeze(0)
+    freqs_sin = freqs_i.imag.float().unsqueeze(0)
+
+    return freqs_cos, freqs_sin
 
 
-def causal_rope_apply_precomputed(x, freqs_i):
-    """Apply precomputed RoPE frequencies. No grid_sizes, no start_frame, no .item() calls.
+def causal_rope_apply_precomputed(x, freqs_cos, freqs_sin):
+    """Apply precomputed RoPE using real-valued sin/cos. Fully torch.compile friendly.
 
     Args:
         x: Input tensor, shape [B, seq_len, num_heads, head_dim]
-        freqs_i: Precomputed frequency tensor, shape [seq_len, 1, head_dim // 2]
+        freqs_cos: Cosine frequencies, shape [1, seq_len, 1, head_dim // 2]
+        freqs_sin: Sine frequencies, shape [1, seq_len, 1, head_dim // 2]
 
     Returns:
         Tensor with rotary embeddings applied, same shape as x.
     """
-    n, c = x.size(2), x.size(3) // 2
-    seq_len = x.shape[1]
+    # Split into even/odd pairs and apply rotation in float32
+    x_even = x[..., 0::2].float()
+    x_odd = x[..., 1::2].float()
 
-    x_rope = torch.view_as_complex(
-        x.to(torch.float64).reshape(-1, seq_len, n, c, 2)
-    )
-    x_rope = torch.view_as_real(x_rope * freqs_i).flatten(3)
+    # Complex rotation: (a + bi)(cos + i*sin) = (a*cos - b*sin) + (a*sin + b*cos)i
+    rotated_even = x_even * freqs_cos - x_odd * freqs_sin
+    rotated_odd = x_even * freqs_sin + x_odd * freqs_cos
 
-    return x_rope.type_as(x)
+    # Interleave back: [even0, odd0, even1, odd1, ...]
+    return torch.stack([rotated_even, rotated_odd], dim=-1).flatten(-2).type_as(x)
 
 
 class CausalWanSelfAttention(nn.Module):
@@ -91,12 +98,14 @@ class CausalWanSelfAttention(nn.Module):
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-    def forward(self, x, freqs_i, kv_cache):
+    def forward(self, x, freqs_cos, freqs_sin, cache_k, cache_v):
         r"""
         Args:
             x(Tensor): Shape [B, L, C] (pre-norm'd and modulated input)
-            freqs_i(Tensor): Precomputed RoPE frequencies, shape [L, 1, head_dim // 2]
-            kv_cache(dict): Cache dict with 'k' and 'v' tensors
+            freqs_cos(Tensor): RoPE cosines, shape [1, L, 1, head_dim // 2]
+            freqs_sin(Tensor): RoPE sines, shape [1, L, 1, head_dim // 2]
+            cache_k(Tensor): Valid cache keys, shape [B, valid_tokens, num_heads, head_dim]
+            cache_v(Tensor): Valid cache values, shape [B, valid_tokens, num_heads, head_dim]
         Returns:
             Tuple of (output, (new_roped_k, new_v))
         """
@@ -106,12 +115,11 @@ class CausalWanSelfAttention(nn.Module):
         k = self.norm_k(self.k(x)).view(b, s, n, d)
         v = self.v(x).view(b, s, n, d)
 
-        roped_q = causal_rope_apply_precomputed(q, freqs_i).type_as(v)
-        roped_k = causal_rope_apply_precomputed(k, freqs_i).type_as(v)
+        roped_q = causal_rope_apply_precomputed(q, freqs_cos, freqs_sin)
+        roped_k = causal_rope_apply_precomputed(k, freqs_cos, freqs_sin)
 
-        # Concatenate cache context with new KVs: 9 + 3 = 12 frames
-        attn_k = torch.cat([kv_cache["k"], roped_k], dim=1)
-        attn_v = torch.cat([kv_cache["v"], v], dim=1)
+        attn_k = torch.cat([cache_k, roped_k], dim=1)
+        attn_v = torch.cat([cache_v, v], dim=1)
 
         x = attention(roped_q, attn_k, attn_v)
 
@@ -167,14 +175,16 @@ class CausalWanAttentionBlock(nn.Module):
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
-    def forward(self, x, e, freqs_i, context, kv_cache):
+    def forward(self, x, e, freqs_cos, freqs_sin, context, cache_k, cache_v):
         r"""
         Args:
             x(Tensor): Shape [B, L, C]
             e(Tensor): Shape [B, F, 6, C]
-            freqs_i(Tensor): Precomputed RoPE frequencies
+            freqs_cos(Tensor): RoPE cosines
+            freqs_sin(Tensor): RoPE sines
             context(Tensor): Text embeddings
-            kv_cache(dict): Cache dict with 'k' and 'v' tensors
+            cache_k(Tensor): Valid cache keys
+            cache_v(Tensor): Valid cache values
         Returns:
             Tuple of (output, (new_roped_k, new_v))
         """
@@ -188,8 +198,10 @@ class CausalWanAttentionBlock(nn.Module):
                 * (1 + e[1])
                 + e[0]
             ).flatten(1, 2),
-            freqs_i,
-            kv_cache,
+            freqs_cos,
+            freqs_sin,
+            cache_k,
+            cache_v,
         )
 
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(
@@ -293,6 +305,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # Set by SetupCachesBlock at runtime
         self.frame_seq_length = 0
+        # Tracks how many valid tokens are in the cache (0 = empty, cache_size = full)
+        self.fill_level = 0
+        self._blocks_compiled = False
 
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size
@@ -337,7 +352,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             dim=1,
         )
 
-    def _roll_update_cache(self, kv_cache, new_kvs, current_start):
+    def _roll_update_cache(self, kv_cache, new_kvs):
         """Roll the KV cache and insert new KVs.
 
         During the filling phase (sink not yet active), the entire cache is rolled.
@@ -346,7 +361,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         """
         cache_tokens = kv_cache[0]["k"].shape[1]
         sink_tokens = self.sink_size * self.frame_seq_length
-        sink_active = current_start >= cache_tokens
+        sink_active = self.fill_level >= cache_tokens
         num_new = new_kvs[0][0].shape[1]
 
         for i, (new_k, new_v) in enumerate(new_kvs):
@@ -365,6 +380,31 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             # Overwrite the wrapped-around junk at the end with new values
             kv_cache[i]["k"][:, -num_new:] = new_k
             kv_cache[i]["v"][:, -num_new:] = new_v
+
+        # Advance fill_level, capped at cache size
+        self.fill_level = min(self.fill_level + num_new, cache_tokens)
+
+    def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs):
+        """Pure-tensor inner forward through all blocks. Compiled when cache is full.
+
+        All inputs are tensors (or lists of tensors). No dicts, no Python ints,
+        no dynamic slicing, no complex ops -- fully torch.compile friendly.
+        """
+        new_ks = []
+        new_vs = []
+        for block_index, block in enumerate(self.blocks):
+            x, (new_k, new_v) = block(
+                x,
+                e=e0,
+                freqs_cos=freqs_cos,
+                freqs_sin=freqs_sin,
+                context=context,
+                cache_k=cache_ks[block_index],
+                cache_v=cache_vs[block_index],
+            )
+            new_ks.append(new_k)
+            new_vs.append(new_v)
+        return x, list(zip(new_ks, new_vs))
 
     def _forward_inference(
         self,
@@ -396,9 +436,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         f, h, w = x.shape[2], x.shape[3], x.shape[4]
         x = x.flatten(2).transpose(1, 2)
 
-        # Precompute RoPE frequencies (outside compiled region)
+        # Precompute RoPE cos/sin (outside compiled region, avoids complex ops)
         start_frame = current_start // (h * w)
-        freqs_i = precompute_freqs_i(self.freqs, f, h, w, start_frame)
+        freqs_cos, freqs_sin = precompute_freqs_i(self.freqs, f, h, w, start_frame)
 
         # Time and text embeddings
         e = self.time_embedding(
@@ -419,21 +459,35 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context = padded_context
         context = self.text_embedding(context)
 
-        # Block loop -- uniform path for all modes
-        new_kvs = []
-        for block_index, block in enumerate(self.blocks):
-            x, new_kv = block(
-                x,
-                e=e0,
-                freqs_i=freqs_i,
-                context=context,
-                kv_cache=kv_cache[block_index],
-            )
-            new_kvs.append(new_kv)
+        fill_level = self.fill_level
+
+        # Extract valid cache slices (outside compiled region)
+        if kv_cache is not None and fill_level > 0:
+            cache_ks = [kv_cache[i]["k"][:, -fill_level:] for i in range(len(self.blocks))]
+            cache_vs = [kv_cache[i]["v"][:, -fill_level:] for i in range(len(self.blocks))]
+        else:
+            # No valid cache: use empty tensors so the inner function always gets tensors
+            empty_k = torch.empty(1, 0, self.num_heads, self.dim // self.num_heads,
+                                  dtype=x.dtype, device=x.device)
+            cache_ks = [empty_k] * len(self.blocks)
+            cache_vs = [empty_k] * len(self.blocks)
+
+        # Compile the inner loop once the cache is full (all shapes are fixed).
+        if not self._blocks_compiled and kv_cache is not None:
+            cache_tokens = kv_cache[0]["k"].shape[1]
+            if fill_level >= cache_tokens:
+                self._compiled_inner = torch.compile(self._inner_forward)
+                self._blocks_compiled = True
+
+        # Run the block loop (compiled when ready, eager otherwise)
+        if self._blocks_compiled:
+            x, new_kvs = self._compiled_inner(x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs)
+        else:
+            x, new_kvs = self._inner_forward(x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs)
 
         # Cache update (outside compiled region)
         if update_cache and kv_cache is not None:
-            self._roll_update_cache(kv_cache, new_kvs, current_start)
+            self._roll_update_cache(kv_cache, new_kvs)
 
         # Head and unpatchify
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))

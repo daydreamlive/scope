@@ -199,6 +199,8 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 num_frame_per_block=components.config.num_frame_per_block,
                 kv_cache_existing=block_state.kv_cache,
             )
+            # Reset fill_level when cache is (re)initialized
+            components.generator.model.fill_level = 0
 
 
         if init_cache:

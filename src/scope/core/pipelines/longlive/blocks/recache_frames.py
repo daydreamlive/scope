@@ -7,10 +7,6 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
-from scope.core.pipelines.wan2_1.utils import (
-    initialize_kv_cache,
-)
-
 
 class RecacheFramesBlock(ModularPipelineBlocks):
     @property
@@ -134,11 +130,17 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             block_state.width // scale_size
         )
         num_frame_per_block = components.config.num_frame_per_block
+        sink_tokens = components.generator.model.sink_size * frame_seq_length
 
-        # Zero out the cache before recaching
+        # Preserve the sink frames (old scene continuity) but zero non-sink portion.
+        # This way chunked recache has the sink as context for smooth transitions.
         for cache in block_state.kv_cache:
-            cache["k"].zero_()
-            cache["v"].zero_()
+            cache["k"][:, sink_tokens:].zero_()
+            cache["v"][:, sink_tokens:].zero_()
+
+        # Set fill_level to sink_tokens so only the sink is valid context initially.
+        # Each chunk will grow fill_level as it processes.
+        components.generator.model.fill_level = sink_tokens
 
         # Get the number of frames to recache (min of what we've generated and buffer size)
         num_recache_frames = min(
@@ -154,8 +156,8 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
 
         # Process recache frames in chunks of num_frame_per_block.
-        # This reuses the exact same forward path as normal operation (Q=3, KV=12),
-        # keeping a single compiled graph. Each chunk updates the cache via rolling.
+        # Each chunk sees the sink (old scene continuity) + previously recached chunks
+        # as context, maintaining smooth transitions between prompts.
         for chunk_idx in range(0, num_recache_frames, num_frame_per_block):
             chunk_end = min(chunk_idx + num_frame_per_block, num_recache_frames)
             chunk_frames = recache_frames[:, chunk_idx:chunk_end]
