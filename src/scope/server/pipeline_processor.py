@@ -189,24 +189,33 @@ class PipelineProcessor:
             if threading.current_thread() != self.worker_thread:
                 self.worker_thread.join(timeout=5.0)
 
-        # Clear queues
         with self.input_queue_lock:
             input_queue_ref = self.input_queue
         if input_queue_ref:
             while not input_queue_ref.empty():
                 try:
-                    input_queue_ref.get_nowait()
+                    frame = input_queue_ref.get_nowait()
+                    del frame
                 except queue.Empty:
                     break
 
         if self.output_queue:
             while not self.output_queue.empty():
                 try:
-                    self.output_queue.get_nowait()
+                    frame = self.output_queue.get_nowait()
+                    del frame
                 except queue.Empty:
                     break
 
+        # Release pipeline reference to allow GC of GPU resources
+        self.pipeline = None
+
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
+
+    def release_pipeline(self):
+        """Release pipeline reference to allow GC of GPU resources."""
+        logger.info(f"Releasing pipeline reference for {self.pipeline_id}")
+        self.pipeline = None
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
@@ -367,9 +376,14 @@ class PipelineProcessor:
             if self.output_queue:
                 while not self.output_queue.empty():
                     try:
-                        self.output_queue.get_nowait()
+                        frame = self.output_queue.get_nowait()
+                        del frame
                     except queue.Empty:
                         break
+
+        # Pipeline may have been released during a switch
+        if self.pipeline is None:
+            return
 
         requirements = None
         if hasattr(self.pipeline, "prepare"):
