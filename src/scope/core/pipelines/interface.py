@@ -88,6 +88,7 @@ class Pipeline(ABC):
                 if components_dict is not None:
                     for name in list(components_dict.keys()):
                         del components_dict[name]
+                del self.components
             except Exception:
                 pass
 
@@ -95,6 +96,7 @@ class Pipeline(ABC):
             try:
                 if hasattr(self.state, "values"):
                     self.state.values.clear()
+                del self.state
             except Exception:
                 pass
 
@@ -105,5 +107,11 @@ class Pipeline(ABC):
                 pass
 
         gc.collect()
+        gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            try:
+                torch._dynamo.reset()
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            except Exception:
+                pass

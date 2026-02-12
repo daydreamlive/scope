@@ -184,5 +184,6 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         if self.frame_processor is not None:
             self.frame_processor.stop()
+            self.frame_processor = None
 
         await super().stop()

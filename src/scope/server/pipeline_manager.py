@@ -670,12 +670,14 @@ class PipelineManager:
             self._load_params = None
             self._error_message = None
 
-        # Cleanup resources
+        gc.collect()
         gc.collect()
         if torch.cuda.is_available():
             try:
+                torch._dynamo.reset()
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
+                torch.cuda.ipc_collect()
                 logger.info("CUDA cache cleared")
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")

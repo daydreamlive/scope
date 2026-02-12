@@ -229,8 +229,10 @@ class FrameProcessor:
         # Clear pipeline processors
         self.pipeline_processors.clear()
 
-        # Clear pinned memory buffers
-        self._pinned_buffer_cache.clear()
+        with self._pinned_buffer_lock:
+            for key in list(self._pinned_buffer_cache.keys()):
+                tensor = self._pinned_buffer_cache.pop(key)
+                del tensor
 
         # Clean up Spout sender
         self.spout_sender_enabled = False

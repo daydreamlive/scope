@@ -179,20 +179,21 @@ class PipelineProcessor:
             if threading.current_thread() != self.worker_thread:
                 self.worker_thread.join(timeout=5.0)
 
-        # Clear queues
         with self.input_queue_lock:
             input_queue_ref = self.input_queue
         if input_queue_ref:
             while not input_queue_ref.empty():
                 try:
-                    input_queue_ref.get_nowait()
+                    frame = input_queue_ref.get_nowait()
+                    del frame
                 except queue.Empty:
                     break
 
         if self.output_queue:
             while not self.output_queue.empty():
                 try:
-                    self.output_queue.get_nowait()
+                    frame = self.output_queue.get_nowait()
+                    del frame
                 except queue.Empty:
                     break
 
@@ -365,7 +366,8 @@ class PipelineProcessor:
             if self.output_queue:
                 while not self.output_queue.empty():
                     try:
-                        self.output_queue.get_nowait()
+                        frame = self.output_queue.get_nowait()
+                        del frame
                     except queue.Empty:
                         break
 
