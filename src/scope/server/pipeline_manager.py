@@ -110,6 +110,7 @@ class PipelineManager:
         load_params: dict | None = None,
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> bool:
         """
         Load a pipeline by ID asynchronously (private method).
@@ -118,6 +119,7 @@ class PipelineManager:
             pipeline_id: ID of pipeline to load
             load_params: Pipeline-specific load parameters
             connection_info: Optional connection info (gpu_type, fal_host) for event correlation
+            user_id: Optional user ID for event correlation
 
         Returns:
             bool: True if loaded successfully, False otherwise.
@@ -130,6 +132,7 @@ class PipelineManager:
             load_params,
             connection_id,
             connection_info,
+            user_id,
         )
 
     def _load_pipeline_by_id_sync(
@@ -138,6 +141,7 @@ class PipelineManager:
         load_params: dict | None = None,
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> bool:
         """Synchronous wrapper for loading a pipeline by ID."""
         with self._lock:
@@ -192,6 +196,7 @@ class PipelineManager:
             connection_id=connection_id,
             connection_info=connection_info,
             pipeline_ids=[pipeline_id],
+            user_id=user_id,
             metadata={"load_params": load_params} if load_params else None,
         )
 
@@ -220,6 +225,7 @@ class PipelineManager:
                 connection_id=connection_id,
                 connection_info=connection_info,
                 pipeline_ids=[pipeline_id],
+                user_id=user_id,
                 metadata=metadata,
             )
             return True
@@ -362,6 +368,7 @@ class PipelineManager:
         load_params: dict | None = None,
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> bool:
         """
         Load multiple pipelines asynchronously.
@@ -371,6 +378,7 @@ class PipelineManager:
             load_params: Pipeline-specific load parameters (applies to all pipelines)
             connection_id: Optional connection ID from fal.ai WebSocket for event correlation
             connection_info: Optional connection info (gpu_type, fal_host) for event correlation
+            user_id: Optional user ID for event correlation
 
         Returns:
             bool: True if all pipelines loaded successfully, False otherwise.
@@ -383,6 +391,7 @@ class PipelineManager:
             load_params,
             connection_id,
             connection_info,
+            user_id,
         )
 
     def _load_pipelines_sync(
@@ -391,6 +400,7 @@ class PipelineManager:
         load_params: dict | None = None,
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> bool:
         """Synchronous wrapper for loading multiple pipelines."""
         if not pipeline_ids:
@@ -426,6 +436,7 @@ class PipelineManager:
                     pipeline_id_to_unload,
                     connection_id=connection_id,
                     connection_info=connection_info,
+                    user_id=user_id,
                 )
 
         # Load all pipelines
@@ -437,6 +448,7 @@ class PipelineManager:
                     load_params,
                     connection_id=connection_id,
                     connection_info=connection_info,
+                    user_id=user_id,
                 )
                 if not result:
                     logger.error(f"Failed to load pipeline: {pipeline_id}")
@@ -539,6 +551,7 @@ class PipelineManager:
         pipeline_id: str,
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ):
         """Unload a specific pipeline by ID (thread-safe)."""
         with self._lock:
@@ -546,6 +559,7 @@ class PipelineManager:
                 pipeline_id,
                 connection_id=connection_id,
                 connection_info=connection_info,
+                user_id=user_id,
             )
 
     def unload_all_pipelines(self):
@@ -565,6 +579,7 @@ class PipelineManager:
         pipeline_id: str,
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ):
         """Unload a specific pipeline by ID. Must be called with lock held."""
         # Check if pipeline exists (either in _pipelines or as main pipeline)
@@ -608,6 +623,7 @@ class PipelineManager:
             connection_id=connection_id,
             connection_info=connection_info,
             pipeline_ids=[pipeline_id],
+            user_id=user_id,
         )
 
     def _load_pipeline_implementation(

@@ -604,6 +604,7 @@ class ScopeApp(fal.App, keep_alive=300):
             ):
                 body["connection_id"] = connection_id
                 body["connection_info"] = connection_info
+                body["user_id"] = user_id
 
             async with httpx.AsyncClient() as client:
                 try:

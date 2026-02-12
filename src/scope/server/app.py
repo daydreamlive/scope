@@ -514,6 +514,7 @@ async def load_pipeline(
                 load_params_dict,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
+                user_id=request.user_id,
             )
         )
         return {"message": "Pipeline loading initiated successfully"}

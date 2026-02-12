@@ -467,6 +467,10 @@ class PipelineLoadRequest(BaseModel):
         default=None,
         description="Connection info (gpu_type, fal_host) for event correlation",
     )
+    user_id: str | None = Field(
+        default=None,
+        description="User ID for event correlation and tracking",
+    )
 
 
 class PipelineStatusResponse(BaseModel):
