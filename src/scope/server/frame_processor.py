@@ -180,8 +180,24 @@ class FrameProcessor:
 
         # Local mode: setup pipeline chain
         if not self.pipeline_ids:
-            logger.error("No pipeline IDs provided, cannot start")
+            error_msg = "No pipeline IDs provided, cannot start"
+            logger.error(error_msg)
             self.running = False
+            # Publish error for startup failure
+            publish_event(
+                event_type="error",
+                session_id=self.session_id,
+                connection_id=self.connection_id,
+                user_id=self.user_id,
+                error={
+                    "error_type": "stream_startup_failed",
+                    "message": error_msg,
+                    "exception_type": "ConfigurationError",
+                    "recoverable": False,
+                },
+                metadata={"mode": "local"},
+                connection_info=self.connection_info,
+            )
             return
 
         try:
@@ -189,6 +205,22 @@ class FrameProcessor:
         except Exception as e:
             logger.error(f"Pipeline chain setup failed: {e}")
             self.running = False
+            # Publish error for pipeline setup failure
+            publish_event(
+                event_type="error",
+                session_id=self.session_id,
+                connection_id=self.connection_id,
+                pipeline_ids=self.pipeline_ids,
+                user_id=self.user_id,
+                error={
+                    "error_type": "stream_startup_failed",
+                    "message": str(e),
+                    "exception_type": type(e).__name__,
+                    "recoverable": False,
+                },
+                metadata={"mode": "local"},
+                connection_info=self.connection_info,
+            )
             return
 
         logger.info(
@@ -271,16 +303,17 @@ class FrameProcessor:
                 logger.error(f"Error in frame processor stop callback: {e}")
         # Publish Kafka events for stream stop
         if error_message:
-            # Publish stream_error event
+            # Publish error event for stream failure
             publish_event(
-                event_type="stream_error",
+                event_type="error",
                 session_id=self.session_id,
                 connection_id=self.connection_id,
                 pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
                 user_id=self.user_id,
                 error={
+                    "error_type": "stream_failed",
                     "message": error_message,
-                    "type": "StreamError",
+                    "exception_type": "StreamError",
                     "recoverable": False,
                 },
                 metadata={

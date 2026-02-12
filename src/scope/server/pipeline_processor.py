@@ -244,16 +244,17 @@ class PipelineProcessor:
                     logger.error(
                         f"Non-recoverable error in worker loop for {self.pipeline_id}: {e}, stopping"
                     )
-                    # Publish stream_error event for non-recoverable errors
+                    # Publish error event for pipeline processing failure
                     publish_event(
-                        event_type="stream_error",
+                        event_type="error",
                         session_id=self.session_id,
                         connection_id=self.connection_id,
                         pipeline_ids=[self.pipeline_id],
                         user_id=self.user_id,
                         error={
+                            "error_type": "pipeline_processing_failed",
                             "message": str(e),
-                            "type": type(e).__name__,
+                            "exception_type": type(e).__name__,
                             "recoverable": False,
                         },
                         connection_info=self.connection_info,

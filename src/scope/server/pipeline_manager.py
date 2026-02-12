@@ -248,15 +248,17 @@ class PipelineManager:
                 if pipeline_id in self._pipeline_load_params:
                     del self._pipeline_load_params[pipeline_id]
 
-            # Publish pipeline_error event
+            # Publish error event for pipeline load failure
             publish_event(
-                event_type="pipeline_error",
+                event_type="error",
                 connection_id=connection_id,
                 connection_info=connection_info,
                 pipeline_ids=[pipeline_id],
+                user_id=user_id,
                 error={
+                    "error_type": "pipeline_load_failed",
                     "message": str(e),
-                    "type": type(e).__name__,
+                    "exception_type": type(e).__name__,
                     "recoverable": True,
                 },
             )
