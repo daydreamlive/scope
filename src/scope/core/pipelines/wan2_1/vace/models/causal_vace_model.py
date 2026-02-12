@@ -62,7 +62,6 @@ class CausalVaceWanModel(nn.Module):
         self.qk_norm = causal_wan_model.qk_norm
         self.cross_attn_norm = causal_wan_model.cross_attn_norm
         self.eps = causal_wan_model.eps
-        self.model_type = causal_wan_model.model_type
         self.patch_size = causal_wan_model.patch_size
         self.in_dim = causal_wan_model.in_dim
 
@@ -122,9 +121,7 @@ class CausalVaceWanModel(nn.Module):
 
         Uses duck typing to determine which parameters the block class expects.
         """
-        cross_attn_type = (
-            "t2v_cross_attn" if self.model_type == "t2v" else "i2v_cross_attn"
-        )
+        cross_attn_type = "t2v_cross_attn"
 
         # Base kwargs that all blocks should have
         kwargs = {
@@ -319,7 +316,6 @@ class CausalVaceWanModel(nn.Module):
         context,
         context_lens,
         block_mask,
-        crossattn_cache,
     ):
         """Process VACE context to generate hints."""
         # Get target dtype from vace_patch_embedding parameters
@@ -354,7 +350,6 @@ class CausalVaceWanModel(nn.Module):
                 context,
                 context_lens,
                 block_mask,
-                crossattn_cache,
             )
 
         # Extract hints
@@ -367,25 +362,17 @@ class CausalVaceWanModel(nn.Module):
         t,
         context,
         seq_len,
-        clip_fea=None,
-        y=None,
         vace_context=None,
         vace_context_scale=1.0,
         kv_cache=None,
-        crossattn_cache=None,
         current_start=0,
         **block_kwargs,
     ):
         """Forward pass with optional VACE conditioning."""
-        if self.model_type == "i2v":
-            assert clip_fea is not None and y is not None
 
         device = self.causal_wan_model.patch_embedding.weight.device
         if self.causal_wan_model.freqs.device != device:
             self.causal_wan_model.freqs = self.causal_wan_model.freqs.to(device)
-
-        if y is not None:
-            x = [torch.cat([u, v], dim=0) for u, v in zip(x, y, strict=False)]
 
         # Embeddings
         x = [self.causal_wan_model.patch_embedding(u.unsqueeze(0)) for u in x]
@@ -427,10 +414,6 @@ class CausalVaceWanModel(nn.Module):
             )
         )
 
-        if clip_fea is not None:
-            context_clip = self.causal_wan_model.img_emb(clip_fea)
-            context = torch.concat([context_clip, context], dim=1)
-
         # Generate VACE hints
         hints = None
         if vace_context is not None:
@@ -445,7 +428,6 @@ class CausalVaceWanModel(nn.Module):
                 context,
                 context_lens,
                 self.causal_wan_model.block_mask,
-                crossattn_cache,
             )
 
         # Base arguments for transformer blocks (shared across all blocks)
@@ -471,7 +453,7 @@ class CausalVaceWanModel(nn.Module):
         cache_update_infos = []
         for block_index, block in enumerate(self.blocks):
             # Build per-block kwargs:
-            # - kv_cache/crossattn_cache are always per-block indexed
+            # - kv_cache are always per-block indexed
             # - Additional block_kwargs are dynamically filtered based on block's signature
             #   and automatically indexed if they're per-block lists
             filtered_block_kwargs = self._filter_block_kwargs(block_kwargs, block_index)
@@ -495,7 +477,6 @@ class CausalVaceWanModel(nn.Module):
                 else:
                     x = result
             else:
-                per_block_kwargs["crossattn_cache"] = crossattn_cache[block_index]
                 kwargs = {**base_kwargs, **per_block_kwargs}
                 result = block(x, **kwargs)
                 if kv_cache is not None and isinstance(result, tuple):

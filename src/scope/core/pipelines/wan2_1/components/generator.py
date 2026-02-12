@@ -217,18 +217,15 @@ class WanDiffusionWrapper(torch.nn.Module):
         update_bank: bool | None = False,
         q_bank: bool | None = False,
         update_cache: bool | None = False,
-        is_recache: bool | None = False,
         current_start: int | None = None,
         current_end: int | None = None,
         classify_mode: bool | None = False,
         concat_time_embeddings: bool | None = False,
         clean_x: torch.Tensor | None = None,
         aug_t: torch.Tensor | None = None,
-        cache_start: int | None = None,
         kv_cache_attention_bias: float = 1.0,
         vace_context: torch.Tensor | None = None,
         vace_context_scale: float = 1.0,
-        sink_recache_after_switch: bool = False,
     ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
 
@@ -252,14 +249,11 @@ class WanDiffusionWrapper(torch.nn.Module):
                 update_bank=update_bank,
                 q_bank=q_bank,
                 update_cache=update_cache,
-                is_recache=is_recache,
                 current_start=current_start,
                 current_end=current_end,
-                cache_start=cache_start,
                 kv_cache_attention_bias=kv_cache_attention_bias,
                 vace_context=vace_context,
                 vace_context_scale=vace_context_scale,
-                sink_recache_after_switch=sink_recache_after_switch,
             ).permute(0, 2, 1, 3, 4)
         else:
             if clean_x is not None:

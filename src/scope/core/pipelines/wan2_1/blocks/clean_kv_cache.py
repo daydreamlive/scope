@@ -130,7 +130,6 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
             q_bank=False,
             update_cache=True,
             current_start=block_state.current_start_frame * frame_seq_length,
-            current_end=current_end_frame * frame_seq_length,
         )
 
         self.set_block_state(state, block_state)

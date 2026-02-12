@@ -196,6 +196,7 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 device=generator_device,
                 local_attn_size=components.config.local_attn_size,
                 frame_seq_length=frame_seq_length,
+                num_frame_per_block=components.config.num_frame_per_block,
                 kv_cache_existing=block_state.kv_cache,
             )
 
