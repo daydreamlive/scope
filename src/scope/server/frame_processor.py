@@ -584,14 +584,7 @@ class FrameProcessor:
             spout_config = parameters.pop("spout_receiver")
             self._update_spout_receiver(spout_config)
 
-        # Route per-pipeline params to the correct processor
-        per_pipeline = parameters.pop("pipeline_params", None) or {}
-        for processor in self.pipeline_processors:
-            extra = per_pipeline.get(processor.pipeline_id)
-            if extra:
-                processor.update_parameters(extra)
-
-        # Update parameters for all pipeline processors (shared/global params)
+        # Update parameters for all pipeline processors
         for processor in self.pipeline_processors:
             processor.update_parameters(parameters)
 
@@ -879,21 +872,12 @@ class FrameProcessor:
             logger.error("No pipeline IDs provided")
             return
 
-        # Extract per-pipeline params keyed by pipeline ID (e.g. from pre/postprocessor config)
-        pipeline_params: dict[str, dict] = (
-            self.parameters.pop("pipeline_params", None) or {}
-        )
-
         # Create pipeline processors (each creates its own queues)
         for pipeline_id in self.pipeline_ids:
             # Get pipeline instance from manager
             pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
 
-            # Merge any pipeline-specific overrides
             proc_params = self.parameters.copy()
-            extra = pipeline_params.get(pipeline_id)
-            if extra:
-                proc_params.update(extra)
 
             # Create processor with its own queues
             processor = PipelineProcessor(

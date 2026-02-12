@@ -673,8 +673,8 @@ export function StreamPage() {
     }
   };
 
-  // Shared helpers for pre/postprocessor plugin settings
-  const pluginSettingsKeys = {
+  // Shared helpers for pre/postprocessor pipeline settings
+  const pipelineSettingsKeys = {
     preprocessor: {
       ids: "preprocessorIds",
       overrides: "preprocessorSchemaFieldOverrides",
@@ -685,34 +685,31 @@ export function StreamPage() {
     },
   } as const;
 
-  type PluginKind = keyof typeof pluginSettingsKeys;
+  type PipelineKind = keyof typeof pipelineSettingsKeys;
 
-  const makePluginIdsHandler = (kind: PluginKind) => (ids: string[]) => {
-    const k = pluginSettingsKeys[kind];
+  const makePipelineIdsHandler = (kind: PipelineKind) => (ids: string[]) => {
+    const k = pipelineSettingsKeys[kind];
     updateSettings({ [k.ids]: ids, [k.overrides]: {} });
   };
 
-  const makePluginOverrideHandler =
-    (kind: PluginKind) =>
+  const makePipelineOverrideHandler =
+    (kind: PipelineKind) =>
     (key: string, value: unknown, isRuntimeParam?: boolean) => {
-      const k = pluginSettingsKeys[kind];
+      const k = pipelineSettingsKeys[kind];
       const currentOverrides =
         (settings[k.overrides] as Record<string, unknown> | undefined) ?? {};
       updateSettings({ [k.overrides]: { ...currentOverrides, [key]: value } });
-      const pipelineId = (settings[k.ids] as string[] | undefined)?.[0];
-      if (isRuntimeParam && isStreaming && pipelineId) {
-        sendParameterUpdate({
-          pipeline_params: { [pipelineId]: { [key]: value } },
-        });
+      if (isRuntimeParam && isStreaming) {
+        sendParameterUpdate({ [key]: value });
       }
     };
 
-  const handlePreprocessorIdsChange = makePluginIdsHandler("preprocessor");
-  const handlePostprocessorIdsChange = makePluginIdsHandler("postprocessor");
+  const handlePreprocessorIdsChange = makePipelineIdsHandler("preprocessor");
+  const handlePostprocessorIdsChange = makePipelineIdsHandler("postprocessor");
   const handlePreprocessorSchemaFieldOverrideChange =
-    makePluginOverrideHandler("preprocessor");
+    makePipelineOverrideHandler("preprocessor");
   const handlePostprocessorSchemaFieldOverrideChange =
-    makePluginOverrideHandler("postprocessor");
+    makePipelineOverrideHandler("postprocessor");
 
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
@@ -1110,20 +1107,15 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
         }
 
-        // Include pre/postprocessor schema overrides keyed by pipeline ID
+        // Include pre/postprocessor schema overrides as flat params
         for (const kind of ["preprocessor", "postprocessor"] as const) {
-          const k = pluginSettingsKeys[kind];
+          const k = pipelineSettingsKeys[kind];
           const ids = settings[k.ids] as string[] | undefined;
           const overrides = settings[k.overrides] as
             | Record<string, unknown>
             | undefined;
           if (ids?.length && overrides && Object.keys(overrides).length > 0) {
-            loadParams.pipeline_params = {
-              ...(loadParams.pipeline_params as
-                | Record<string, unknown>
-                | undefined),
-              ...Object.fromEntries(ids.map(id => [id, overrides])),
-            };
+            Object.assign(loadParams, overrides);
           }
         }
 
