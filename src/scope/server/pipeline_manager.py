@@ -5,8 +5,8 @@ import gc
 import logging
 import threading
 import time
-from enum import Enum
 from collections.abc import Callable
+from enum import Enum
 from typing import Any
 
 import torch

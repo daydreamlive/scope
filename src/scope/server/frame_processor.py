@@ -193,9 +193,7 @@ class FrameProcessor:
 
         # Register for pipeline unload notifications to release references
         if self.pipeline_manager:
-            self.pipeline_manager.register_unload_callback(
-                self._on_pipeline_unloading
-            )
+            self.pipeline_manager.register_unload_callback(self._on_pipeline_unloading)
 
         logger.info(
             f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
