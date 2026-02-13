@@ -7,6 +7,7 @@ import { GeneralTab } from "./settings/GeneralTab";
 import { PluginsTab } from "./settings/PluginsTab";
 import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
+import { useCloudContext } from "@/lib/directCloudContext";
 import type { InstalledPlugin } from "@/types/settings";
 import {
   listPlugins,
@@ -63,6 +64,7 @@ export function SettingsDialog({
   cloudDisabled,
 }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
+  const { isCloudMode: isDirectCloudMode } = useCloudContext();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
   );
@@ -339,18 +341,23 @@ export function SettingsDialog({
             >
               Account
             </TabsTrigger>
-            <TabsTrigger
-              value="api-keys"
-              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
-            >
-              API Keys
-            </TabsTrigger>
-            <TabsTrigger
-              value="plugins"
-              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
-            >
-              Plugins
-            </TabsTrigger>
+            {/* Hide API Keys and Plugins tabs in direct cloud mode - no local backend */}
+            {!isDirectCloudMode && (
+              <>
+                <TabsTrigger
+                  value="api-keys"
+                  className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+                >
+                  API Keys
+                </TabsTrigger>
+                <TabsTrigger
+                  value="plugins"
+                  className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+                >
+                  Plugins
+                </TabsTrigger>
+              </>
+            )}
           </TabsList>
           <div className="w-px bg-border self-stretch" />
           <div className="flex-1 min-w-0 p-4 pt-10 h-[40vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
@@ -371,23 +378,28 @@ export function SettingsDialog({
                 cloudDisabled={cloudDisabled}
               />
             </TabsContent>
-            <TabsContent value="api-keys" className="mt-0">
-              <ApiKeysTab isActive={open && activeTab === "api-keys"} />
-            </TabsContent>
-            <TabsContent value="plugins" className="mt-0">
-              <PluginsTab
-                plugins={plugins}
-                installPath={pluginInstallPath}
-                onInstallPathChange={setPluginInstallPath}
-                onBrowse={handleBrowseLocalPlugin}
-                onInstall={handleInstallPlugin}
-                onUpdate={handleUpdatePlugin}
-                onDelete={handleDeletePlugin}
-                onReload={handleReloadPlugin}
-                isLoading={isLoadingPlugins}
-                isInstalling={isInstalling}
-              />
-            </TabsContent>
+            {/* Hide API Keys and Plugins content in direct cloud mode */}
+            {!isDirectCloudMode && (
+              <>
+                <TabsContent value="api-keys" className="mt-0">
+                  <ApiKeysTab isActive={open && activeTab === "api-keys"} />
+                </TabsContent>
+                <TabsContent value="plugins" className="mt-0">
+                  <PluginsTab
+                    plugins={plugins}
+                    installPath={pluginInstallPath}
+                    onInstallPathChange={setPluginInstallPath}
+                    onBrowse={handleBrowseLocalPlugin}
+                    onInstall={handleInstallPlugin}
+                    onUpdate={handleUpdatePlugin}
+                    onDelete={handleDeletePlugin}
+                    onReload={handleReloadPlugin}
+                    isLoading={isLoadingPlugins}
+                    isInstalling={isInstalling}
+                  />
+                </TabsContent>
+              </>
+            )}
           </div>
         </Tabs>
       </DialogContent>

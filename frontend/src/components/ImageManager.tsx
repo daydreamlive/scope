@@ -1,8 +1,44 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, X } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
+import { useApi } from "../hooks/useApi";
 import { getAssetUrl } from "../lib/api";
 import { MediaPicker } from "./MediaPicker";
+
+/** Helper component that loads an asset image, using data URL in cloud mode */
+function AssetImage({
+  assetPath,
+  alt,
+  isCloudMode,
+  getAssetDataUrl,
+}: {
+  assetPath: string;
+  alt: string;
+  isCloudMode: boolean;
+  getAssetDataUrl: (path: string) => Promise<string>;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isCloudMode) {
+      getAssetDataUrl(assetPath)
+        .then(setSrc)
+        .catch(() => setSrc(null));
+    } else {
+      setSrc(getAssetUrl(assetPath));
+    }
+  }, [assetPath, isCloudMode, getAssetDataUrl]);
+
+  if (!src) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-muted">
+        <div className="animate-pulse w-8 h-8 bg-muted-foreground/20 rounded" />
+      </div>
+    );
+  }
+
+  return <img src={src} alt={alt} className="w-full h-full object-cover" />;
+}
 
 interface ImageManagerProps {
   images: string[];
@@ -30,6 +66,7 @@ export function ImageManager({
   hideLabel = false,
   singleColumn,
 }: ImageManagerProps) {
+  const { isCloudMode, getAssetDataUrl } = useApi();
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
 
   const handleAddImage = (imagePath: string) => {
@@ -80,10 +117,11 @@ export function ImageManager({
             key={index}
             className="aspect-square border rounded-lg overflow-hidden relative group"
           >
-            <img
-              src={getAssetUrl(imagePath)}
+            <AssetImage
+              assetPath={imagePath}
               alt={`${label} ${index + 1}`}
-              className="w-full h-full object-cover"
+              isCloudMode={isCloudMode}
+              getAssetDataUrl={getAssetDataUrl}
             />
             <button
               onClick={() => handleRemoveImage(index)}

@@ -13,7 +13,7 @@ import React, {
   useState,
   useRef,
 } from "react";
-import { CloudAdapter } from "./cloudAdapter";
+import { CloudAdapter } from "./directCloudAdapter";
 
 interface CloudContextValue {
   /** Whether we're in direct cloud mode (VITE_CLOUD_WS_URL is set) */
@@ -32,6 +32,10 @@ interface CloudContextValue {
   lastCloseCode: number | null;
   /** Last close reason if connection was closed unexpectedly */
   lastCloseReason: string | null;
+  /** Disconnect the cloud adapter (for logout) */
+  disconnect: () => void;
+  /** Reconnect the cloud adapter (for login) */
+  reconnect: () => void;
 }
 
 const CloudContext = createContext<CloudContextValue>({
@@ -43,6 +47,8 @@ const CloudContext = createContext<CloudContextValue>({
   connectionId: null,
   lastCloseCode: null,
   lastCloseReason: null,
+  disconnect: () => {},
+  reconnect: () => {},
 });
 
 interface CloudProviderProps {
@@ -68,15 +74,24 @@ export function CloudProvider({
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [lastCloseCode, setLastCloseCode] = useState<number | null>(null);
   const [lastCloseReason, setLastCloseReason] = useState<string | null>(null);
+  // Track if manually disconnected (e.g., user logged out)
+  const [manuallyDisconnected, setManuallyDisconnected] = useState(false);
   // Track if the effect is still active to prevent state updates after cleanup
   // This is important for React StrictMode which double-mounts components
   const isActiveRef = useRef(true);
+  // Store adapter ref for disconnect/reconnect
+  const adapterRef = useRef<CloudAdapter | null>(null);
 
   useEffect(() => {
     // Reset active flag on each effect run
     isActiveRef.current = true;
 
-    if (!wsUrl) {
+    if (!wsUrl || manuallyDisconnected) {
+      // Don't connect if no URL or manually disconnected
+      if (adapterRef.current) {
+        adapterRef.current.disconnect();
+        adapterRef.current = null;
+      }
       setAdapter(null);
       setIsConnecting(false);
       setIsReady(false);
@@ -89,6 +104,7 @@ export function CloudProvider({
 
     console.log("[CloudProvider] Connecting to cloud:", wsUrl);
     const cloudAdapter = new CloudAdapter(wsUrl, apiKey, userId);
+    adapterRef.current = cloudAdapter;
     setAdapter(cloudAdapter);
     // Set connecting state while waiting for ready message
     setIsConnecting(true);
@@ -135,18 +151,33 @@ export function CloudProvider({
       // Mark effect as inactive before disconnecting
       isActiveRef.current = false;
       cloudAdapter.disconnect();
+      adapterRef.current = null;
     };
-  }, [wsUrl, apiKey, userId]);
+  }, [wsUrl, apiKey, userId, manuallyDisconnected]);
+
+  // Disconnect function for logout
+  const disconnect = React.useCallback(() => {
+    console.log("[CloudProvider] Manual disconnect requested");
+    setManuallyDisconnected(true);
+  }, []);
+
+  // Reconnect function for login
+  const reconnect = React.useCallback(() => {
+    console.log("[CloudProvider] Reconnect requested");
+    setManuallyDisconnected(false);
+  }, []);
 
   const value: CloudContextValue = {
     isCloudMode: !!wsUrl,
     adapter,
-    isConnecting: !!wsUrl && isConnecting,
-    isReady: !!wsUrl && isReady,
+    isConnecting: !!wsUrl && !manuallyDisconnected && isConnecting,
+    isReady: !!wsUrl && !manuallyDisconnected && isReady,
     error,
     connectionId,
     lastCloseCode,
     lastCloseReason,
+    disconnect,
+    reconnect,
   };
 
   return (
@@ -174,6 +205,8 @@ export function useCloudAdapter() {
     connectionId,
     lastCloseCode,
     lastCloseReason,
+    disconnect,
+    reconnect,
   } = useCloudContext();
   return {
     adapter,
@@ -184,5 +217,7 @@ export function useCloudAdapter() {
     connectionId,
     lastCloseCode,
     lastCloseReason,
+    disconnect,
+    reconnect,
   };
 }

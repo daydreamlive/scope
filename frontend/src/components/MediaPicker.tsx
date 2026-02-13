@@ -1,12 +1,56 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Upload } from "lucide-react";
 import { Button } from "./ui/button";
-import {
-  listAssets,
-  uploadAsset,
-  getAssetUrl,
-  type AssetFileInfo,
-} from "../lib/api";
+import { useApi } from "../hooks/useApi";
+import { getAssetUrl, type AssetFileInfo } from "../lib/api";
+
+/** Helper component that loads an asset image, using data URL in cloud mode */
+function AssetImage({
+  assetPath,
+  alt,
+  isCloudMode,
+  getAssetDataUrl,
+}: {
+  assetPath: string;
+  alt: string;
+  isCloudMode: boolean;
+  getAssetDataUrl: (path: string) => Promise<string>;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (isCloudMode) {
+      // In cloud mode, fetch the image as a data URL
+      getAssetDataUrl(assetPath)
+        .then(setSrc)
+        .catch(() => setError(true));
+    } else {
+      // In local mode, use the regular URL
+      setSrc(getAssetUrl(assetPath));
+    }
+  }, [assetPath, isCloudMode, getAssetDataUrl]);
+
+  if (error) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-muted text-muted-foreground text-xs">
+        Failed to load
+      </div>
+    );
+  }
+
+  if (!src) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-muted">
+        <div className="animate-pulse w-8 h-8 bg-muted-foreground/20 rounded" />
+      </div>
+    );
+  }
+
+  return (
+    <img src={src} alt={alt} className="w-full h-full object-cover" loading="lazy" />
+  );
+}
 
 interface MediaPickerProps {
   isOpen: boolean;
@@ -21,6 +65,7 @@ export function MediaPicker({
   onSelectImage,
   disabled,
 }: MediaPickerProps) {
+  const { listAssets, uploadAsset, isCloudMode, getAssetDataUrl } = useApi();
   const [images, setImages] = useState<AssetFileInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -168,11 +213,11 @@ export function MediaPicker({
                   className="aspect-square border rounded-lg overflow-hidden hover:ring-2 hover:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all relative"
                   title={image.name}
                 >
-                  <img
-                    src={getAssetUrl(image.path)}
+                  <AssetImage
+                    assetPath={image.path}
                     alt={image.name}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
+                    isCloudMode={isCloudMode}
+                    getAssetDataUrl={getAssetDataUrl}
                   />
                 </button>
               ))}

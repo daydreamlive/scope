@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
+import { Button } from "./components/ui/button";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { CloudProvider } from "./lib/directCloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
@@ -8,6 +9,8 @@ import {
   handleOAuthCallback,
   initElectronAuthListener,
   getDaydreamUserId,
+  isAuthenticated,
+  redirectToSignIn,
 } from "./lib/auth";
 import { toast } from "sonner";
 import "./index.css";
@@ -24,9 +27,57 @@ type AuthResult =
   | { type: "error"; message: string }
   | null;
 
+/**
+ * Component that gates the main content behind authentication in direct cloud mode
+ */
+function AuthGatedContent({ isSignedIn }: { isSignedIn: boolean }) {
+  // Check if we're in direct cloud mode using the env var directly
+  // (can't use context.isCloudMode because it depends on effectiveWsUrl which is undefined when not signed in)
+  const isDirectCloudMode = !!CLOUD_WS_URL;
+
+  // In direct cloud mode, require authentication
+  if (isDirectCloudMode && !isSignedIn) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="text-center space-y-4 p-8">
+          <h1 className="text-2xl font-semibold">Daydream Scope</h1>
+          <p className="text-muted-foreground">
+            Please log in to your Daydream account to continue.
+          </p>
+          <Button onClick={() => redirectToSignIn()} size="lg">
+            Log in
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <PipelinesProvider>
+      <StreamPage />
+    </PipelinesProvider>
+  );
+}
+
 function App() {
   const [isHandlingAuth, setIsHandlingAuth] = useState(true);
   const [authResult, setAuthResult] = useState<AuthResult>(null);
+  // Track auth state for direct cloud mode - only connect when authenticated
+  const [isSignedIn, setIsSignedIn] = useState(isAuthenticated());
+
+  // Listen for auth changes to update cloud connection
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setIsSignedIn(isAuthenticated());
+    };
+
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+    window.addEventListener("daydream-auth-success", handleAuthChange);
+    return () => {
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+      window.removeEventListener("daydream-auth-success", handleAuthChange);
+    };
+  }, []);
 
   useEffect(() => {
     // Initialize Electron auth callback listener (if running in Electron)
@@ -99,12 +150,15 @@ function App() {
   // Get user ID for direct cloud mode (sent to cloud for log correlation)
   const userId = getDaydreamUserId() ?? undefined;
 
+  // Only connect to cloud if authenticated (in direct cloud mode)
+  // This prevents connecting before login and ensures we see the "connecting" state
+  const shouldConnect = !CLOUD_WS_URL || isSignedIn;
+  const effectiveWsUrl = shouldConnect ? CLOUD_WS_URL : undefined;
+
   return (
-    <CloudStatusProvider>
-      <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY} userId={userId}>
-        <PipelinesProvider>
-          <StreamPage />
-        </PipelinesProvider>
+    <CloudStatusProvider skipPolling={!!CLOUD_WS_URL}>
+      <CloudProvider wsUrl={effectiveWsUrl} apiKey={CLOUD_KEY} userId={userId}>
+        <AuthGatedContent isSignedIn={isSignedIn} />
         <Toaster />
       </CloudProvider>
     </CloudStatusProvider>

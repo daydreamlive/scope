@@ -67,18 +67,27 @@ const CloudStatusContext = createContext<CloudStatusContextValue | null>(null);
 
 interface CloudStatusProviderProps {
   children: ReactNode;
+  /** Skip backend polling - used in direct cloud mode where there's no local backend */
+  skipPolling?: boolean;
 }
 
 /**
  * Provider component that manages cloud status and shares state across all consumers.
  * Polling is automatic and adapts based on connection state.
  */
-export function CloudStatusProvider({ children }: CloudStatusProviderProps) {
+export function CloudStatusProvider({
+  children,
+  skipPolling = false,
+}: CloudStatusProviderProps) {
   const [status, setStatus] = useState<CloudStatus>(DEFAULT_STATUS);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!skipPolling);
   const intervalRef = useRef<number | null>(null);
 
   const fetchStatus = useCallback(async () => {
+    // Skip fetching in direct cloud mode - no local backend to poll
+    if (skipPolling) {
+      return;
+    }
     try {
       const response = await fetch("/api/v1/cloud/status");
       if (response.ok) {
@@ -90,19 +99,26 @@ export function CloudStatusProvider({ children }: CloudStatusProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [skipPolling]);
 
-  // Initial fetch on mount
+  // Initial fetch on mount (skip in direct cloud mode)
   useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
+    if (!skipPolling) {
+      fetchStatus();
+    }
+  }, [fetchStatus, skipPolling]);
 
-  // Smart polling based on connection state
+  // Smart polling based on connection state (skip in direct cloud mode)
   useEffect(() => {
     // Clear any existing interval
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+
+    // Skip polling entirely in direct cloud mode
+    if (skipPolling) {
+      return;
     }
 
     // Determine polling interval based on status
@@ -127,7 +143,7 @@ export function CloudStatusProvider({ children }: CloudStatusProviderProps) {
         intervalRef.current = null;
       }
     };
-  }, [status.connecting, status.connected, fetchStatus]);
+  }, [status.connecting, status.connected, fetchStatus, skipPolling]);
 
   // Manual refresh function - updates shared state immediately
   const refresh = useCallback(async () => {

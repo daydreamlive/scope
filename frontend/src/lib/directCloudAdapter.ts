@@ -487,10 +487,75 @@ export class CloudAdapter {
     fetchCurrentLogs: (): Promise<string> =>
       this.apiRequest("GET", "/api/v1/logs/current"),
 
-    // Note: downloadRecording needs special handling for binary data
-    // For now, it will return the URL to download from
-    getRecordingUrl: (sessionId: string): string =>
-      `/api/v1/recordings/${sessionId}`,
+    /**
+     * Download a recording. Returns the recording as a base64-encoded string.
+     * The caller is responsible for triggering the browser download.
+     */
+    downloadRecording: async (sessionId: string): Promise<void> => {
+      const response = await this.sendAndWait<ApiResponse & { data?: { _base64_content?: string; _content_type?: string }; _base64_content?: string; _content_type?: string }>({
+        type: "api",
+        method: "GET",
+        path: `/api/v1/recordings/${sessionId}`,
+        _binary: true, // Signal to cloud that we want base64 response
+      });
+
+      // Check both top-level and nested data for the base64 content
+      const base64Content = response._base64_content || response.data?._base64_content;
+      if (!base64Content) {
+        console.error("[CloudAdapter] Recording response:", response);
+        throw new Error("No recording data received");
+      }
+
+      // Convert base64 to blob and trigger download
+      const binaryString = atob(base64Content);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const contentType = response._content_type || response.data?._content_type || "video/mp4";
+      const blob = new Blob([bytes], { type: contentType });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `recording-${new Date().toISOString().split("T")[0]}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    },
+
+    /**
+     * Get asset content as base64 data URL (for displaying images in cloud mode)
+     */
+    getAssetDataUrl: async (assetPath: string): Promise<string> => {
+      // Extract filename from path for the API call
+      const pathParts = assetPath.split(/[/\\]/);
+      const assetsIndex = pathParts.findIndex(part => part === "assets");
+      let relativePath: string;
+      if (assetsIndex >= 0 && assetsIndex < pathParts.length - 1) {
+        relativePath = pathParts.slice(assetsIndex + 1).join("/");
+      } else {
+        relativePath = pathParts[pathParts.length - 1];
+      }
+
+      const response = await this.sendAndWait<ApiResponse & { data?: { _base64_content?: string; _content_type?: string }; _base64_content?: string; _content_type?: string }>({
+        type: "api",
+        method: "GET",
+        path: `/api/v1/assets/${encodeURIComponent(relativePath)}`,
+        _binary: true,
+      });
+
+      // Check both top-level and nested data for the base64 content
+      const base64Content = response._base64_content || response.data?._base64_content;
+      if (!base64Content) {
+        console.error("[CloudAdapter] Asset response:", response);
+        throw new Error("No asset data received");
+      }
+
+      const contentType = response._content_type || response.data?._content_type || "image/png";
+      return `data:${contentType};base64,${base64Content}`;
+    },
   };
 }
 

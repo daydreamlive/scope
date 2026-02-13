@@ -21,6 +21,7 @@ import {
   shouldShowCloudMode,
 } from "../../lib/auth";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
+import { useCloudContext } from "../../lib/directCloudContext";
 
 interface DaydreamAccountSectionProps {
   /** Callback to refresh pipeline list after cloud mode toggle */
@@ -40,6 +41,9 @@ export function DaydreamAccountSection({
 
   // Use shared cloud status hook - avoids redundant polling with Header
   const { status, refresh: refreshStatus } = useCloudStatus();
+
+  // Check if we're in direct cloud mode (no local backend, always cloud)
+  const { isCloudMode: isDirectCloudMode, disconnect: disconnectCloud } = useCloudContext();
 
   // Local action state
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -174,7 +178,11 @@ export function DaydreamAccountSection({
 
   const handleSignOut = async () => {
     // Disconnect from cloud if connected before signing out
-    if (status.connected) {
+    if (isDirectCloudMode) {
+      // In direct cloud mode, use the context's disconnect function
+      disconnectCloud();
+    } else if (status.connected) {
+      // In backend cloud mode, call the backend API to disconnect
       await handleDisconnect();
     }
     clearDaydreamAuth();
@@ -207,7 +215,8 @@ export function DaydreamAccountSection({
       </div>
 
       {/* Cloud Mode section - only visible for cohort participants or admins */}
-      {showCloudMode && (
+      {/* Hidden in direct cloud mode since there's no local backend option */}
+      {showCloudMode && !isDirectCloudMode && (
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
