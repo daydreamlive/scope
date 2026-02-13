@@ -187,6 +187,22 @@ def build_chunk_kwargs(
         request.vace_context_scale, chunk_idx, 1.0
     )
 
+    # Noise controller
+    if request.noise_controller is not None:
+        kwargs["noise_controller"] = request.noise_controller
+
+    # KV cache attention bias
+    kv_bias = get_chunk_value(request.kv_cache_attention_bias, chunk_idx)
+    if kv_bias is not None:
+        kwargs["kv_cache_attention_bias"] = kv_bias
+
+    # Prompt interpolation method
+    kwargs["prompt_interpolation_method"] = request.prompt_interpolation_method
+
+    # VACE use input video
+    if request.vace_use_input_video is not None:
+        kwargs["vace_use_input_video"] = request.vace_use_input_video
+
     # LoRA scales
     if request.lora_scales:
         lora_scale_updates = []
