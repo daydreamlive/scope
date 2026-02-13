@@ -900,6 +900,12 @@ async def list_lora_files(
                 path="/api/v1/lora/list",
                 timeout=30.0,
             )
+            status = response.get("status", 200)
+            if status >= 400:
+                detail = response.get("error") or response.get("data", {}).get(
+                    "detail", "Cloud LoRA list request failed"
+                )
+                raise HTTPException(status_code=status, detail=detail)
             data = response.get("data", {})
             return LoRAFilesResponse(
                 lora_files=[LoRAFileInfo(**f) for f in data.get("lora_files", [])]
@@ -952,10 +958,16 @@ async def download_lora_file(
                 body=request.model_dump(),
                 timeout=300.0,
             )
+            status = response.get("status", 200)
+            if status >= 400:
+                detail = response.get("error") or response.get("data", {}).get(
+                    "detail", "Cloud LoRA download failed"
+                )
+                raise HTTPException(status_code=status, detail=detail)
             data = response.get("data", {})
             return LoRADownloadResponse(
                 message=data.get("message", "Downloaded via cloud"),
-                file=LoRAFileInfo(**data.get("file", {})),
+                file=LoRAFileInfo(**data["file"]),
             )
 
         # Determine filename from URL if not provided

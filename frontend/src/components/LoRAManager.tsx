@@ -14,6 +14,8 @@ import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { LoRAConfig, LoraMergeStrategy } from "../types";
 import type { LoRAFileInfo } from "../lib/api";
 import { useApi } from "../hooks/useApi";
+import { useCloudStatus } from "../hooks/useCloudStatus";
+import { toast } from "sonner";
 import { Input } from "./ui/input";
 import { FilePicker } from "./ui/file-picker";
 
@@ -33,6 +35,9 @@ export function LoRAManager({
   loraMergeStrategy = "permanent_merge",
 }: LoRAManagerProps) {
   const { listLoRAFiles, downloadLoRAFile } = useApi();
+  const { isConnected: isCloudConnected, isConnecting: isCloudConnecting } =
+    useCloudStatus();
+  const isCloudPending = isCloudConnecting && !isCloudConnected;
   const [availableLoRAs, setAvailableLoRAs] = useState<LoRAFileInfo[]>([]);
   const [isLoadingLoRAs, setIsLoadingLoRAs] = useState(false);
   const [localScales, setLocalScales] = useState<Record<string, number>>({});
@@ -109,8 +114,14 @@ export function LoRAManager({
     if (!downloadUrl.trim()) return;
     setIsDownloading(true);
     setDownloadError(null);
+    const url = downloadUrl.trim();
+    const filename = url.split("/").pop()?.split("?")[0] || "LoRA file";
     try {
-      await downloadLoRAFile({ url: downloadUrl.trim() });
+      await toast.promise(downloadLoRAFile({ url }), {
+        loading: `Downloading ${filename}...`,
+        success: response => response.message,
+        error: err => err.message || "Download failed",
+      });
       setDownloadUrl("");
       await loadAvailableLoRAs();
     } catch (error) {
@@ -162,7 +173,7 @@ export function LoRAManager({
             setDownloadError(null);
           }}
           placeholder="Paste LoRA URL (HuggingFace, CivitAI...)"
-          disabled={disabled || isDownloading}
+          disabled={disabled || isDownloading || isCloudPending}
           className="h-7 text-xs flex-1"
           onKeyDown={e => {
             if (e.key === "Enter") handleDownloadLoRA();
@@ -172,15 +183,26 @@ export function LoRAManager({
           size="sm"
           variant="outline"
           onClick={handleDownloadLoRA}
-          disabled={disabled || isDownloading || !downloadUrl.trim()}
+          disabled={
+            disabled || isDownloading || !downloadUrl.trim() || isCloudPending
+          }
           className="h-7 px-2"
-          title="Download LoRA from URL"
+          title={
+            isCloudPending
+              ? "Waiting for cloud connection..."
+              : "Download LoRA from URL"
+          }
         >
           <Download
             className={`h-3 w-3 ${isDownloading ? "animate-pulse" : ""}`}
           />
         </Button>
       </div>
+      {isCloudPending && (
+        <p className="text-xs text-muted-foreground animate-pulse">
+          Waiting for cloud connection...
+        </p>
+      )}
       {downloadError && (
         <p className="text-xs text-destructive">{downloadError}</p>
       )}
