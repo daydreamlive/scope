@@ -1176,7 +1176,7 @@ async def list_input_source_types():
 
 
 @app.get("/api/v1/input-sources/{source_type}/sources")
-async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
+def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
     """List discovered sources for a given input source type."""
     source_class = _resolve_input_source_class(source_type)
 
@@ -1211,7 +1211,7 @@ async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
 
 
 @app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/resolution")
-async def get_input_source_resolution(
+def get_input_source_resolution(
     source_type: str, identifier: str, timeout_ms: int = Query(5000)
 ):
     """Probe the native resolution of a specific input source."""
@@ -1241,7 +1241,7 @@ async def get_input_source_resolution(
 
 
 @app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/preview")
-async def get_input_source_preview(
+def get_input_source_preview(
     source_type: str, identifier: str, timeout_ms: int = Query(5000)
 ):
     """Grab a single frame from an input source and return it as a JPEG thumbnail."""
