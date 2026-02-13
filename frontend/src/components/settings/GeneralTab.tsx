@@ -9,6 +9,8 @@ interface GeneralTabProps {
   onModelsDirectoryChange: (value: string) => void;
   onLogsDirectoryChange: (value: string) => void;
   onReportBug: () => void;
+  /** Whether we're in direct cloud mode (hides local-only settings) */
+  isDirectCloudMode?: boolean;
 }
 
 export function GeneralTab({
@@ -19,6 +21,7 @@ export function GeneralTab({
   onModelsDirectoryChange,
   onLogsDirectoryChange,
   onReportBug,
+  isDirectCloudMode = false,
 }: GeneralTabProps) {
   const handleDocsClick = () => {
     console.log("Docs clicked");
@@ -49,7 +52,8 @@ export function GeneralTab({
           <div className="flex-1 flex items-center justify-end">
             <span className="text-sm text-muted-foreground">
               {version}
-              {gitCommit && ` (${gitCommit})`}
+              {/* Hide git SHA in direct cloud mode */}
+              {!isDirectCloudMode && gitCommit && ` (${gitCommit})`}
             </span>
           </div>
         </div>
@@ -111,41 +115,45 @@ export function GeneralTab({
           />
         </div>
 
-        {/* Models Directory */}
-        <div className="flex items-center gap-4">
-          <label
-            htmlFor="models-directory"
-            className="text-sm font-medium text-foreground whitespace-nowrap w-32"
-          >
-            Models Directory
-          </label>
-          <Input
-            id="models-directory"
-            value={modelsDirectory}
-            onChange={e => onModelsDirectoryChange(e.target.value)}
-            placeholder="~/.daydream-scope/models"
-            className="flex-1"
-            disabled
-          />
-        </div>
+        {/* Models Directory - hidden in direct cloud mode */}
+        {!isDirectCloudMode && (
+          <div className="flex items-center gap-4">
+            <label
+              htmlFor="models-directory"
+              className="text-sm font-medium text-foreground whitespace-nowrap w-32"
+            >
+              Models Directory
+            </label>
+            <Input
+              id="models-directory"
+              value={modelsDirectory}
+              onChange={e => onModelsDirectoryChange(e.target.value)}
+              placeholder="~/.daydream-scope/models"
+              className="flex-1"
+              disabled
+            />
+          </div>
+        )}
 
-        {/* Logs Directory */}
-        <div className="flex items-center gap-4">
-          <label
-            htmlFor="logs-directory"
-            className="text-sm font-medium text-foreground whitespace-nowrap w-32"
-          >
-            Logs Directory
-          </label>
-          <Input
-            id="logs-directory"
-            value={logsDirectory}
-            onChange={e => onLogsDirectoryChange(e.target.value)}
-            placeholder="~/.daydream-scope/logs"
-            className="flex-1"
-            disabled
-          />
-        </div>
+        {/* Logs Directory - hidden in direct cloud mode */}
+        {!isDirectCloudMode && (
+          <div className="flex items-center gap-4">
+            <label
+              htmlFor="logs-directory"
+              className="text-sm font-medium text-foreground whitespace-nowrap w-32"
+            >
+              Logs Directory
+            </label>
+            <Input
+              id="logs-directory"
+              value={logsDirectory}
+              onChange={e => onLogsDirectoryChange(e.target.value)}
+              placeholder="~/.daydream-scope/logs"
+              className="flex-1"
+              disabled
+            />
+          </div>
+        )}
       </div>
     </div>
   );

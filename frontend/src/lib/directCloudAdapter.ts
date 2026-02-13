@@ -33,6 +33,8 @@ import type {
   LoRAFilesResponse,
   AssetsResponse,
   AssetFileInfo,
+  HealthResponse,
+  ServerInfo,
 } from "./api";
 
 type MessageHandler = (response: ApiResponse) => void;
@@ -555,6 +557,27 @@ export class CloudAdapter {
 
       const contentType = response._content_type || response.data?._content_type || "image/png";
       return `data:${contentType};base64,${base64Content}`;
+    },
+
+    /**
+     * Get server health/info
+     */
+    getServerInfo: async (): Promise<ServerInfo> => {
+      const response = await this.sendAndWait<ApiResponse & { data?: HealthResponse }>({
+        type: "api",
+        method: "GET",
+        path: "/health",
+      });
+
+      const data = response.data;
+      if (!data) {
+        throw new Error("No health data received");
+      }
+
+      return {
+        version: data.version,
+        gitCommit: data.git_commit,
+      };
     },
   };
 }

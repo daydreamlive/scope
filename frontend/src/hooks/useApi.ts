@@ -16,6 +16,7 @@ import type {
   AssetFileInfo,
   WebRTCOfferRequest,
   WebRTCOfferResponse,
+  ServerInfo,
 } from "../lib/api";
 import type { IceServersResponse, ModelStatusResponse } from "../types";
 
@@ -187,6 +188,17 @@ export function useApi() {
     [adapter, isCloudMode]
   );
 
+  // Server info
+  const getServerInfo = useCallback(async (): Promise<ServerInfo> => {
+    if (isCloudMode) {
+      if (adapter) {
+        return adapter.api.getServerInfo();
+      }
+      throw new Error("Cloud connection not ready");
+    }
+    return api.getServerInfo();
+  }, [adapter, isCloudMode]);
+
   // WebRTC signaling
   const getIceServers = useCallback(async (): Promise<IceServersResponse> => {
     if (isCloudMode) {
@@ -268,6 +280,9 @@ export function useApi() {
 
     // Recording
     downloadRecording,
+
+    // Server info
+    getServerInfo,
 
     // WebRTC signaling
     getIceServers,

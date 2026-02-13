@@ -15,8 +15,8 @@ import {
   uninstallPlugin,
   restartServer,
   waitForServer,
-  getServerInfo,
 } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
 import { toast } from "sonner";
 
 interface SettingsDialogProps {
@@ -65,6 +65,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
   const { isCloudMode: isDirectCloudMode } = useCloudContext();
+  const { getServerInfo } = useApi();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
   );
@@ -370,6 +371,7 @@ export function SettingsDialog({
                 onModelsDirectoryChange={handleModelsDirectoryChange}
                 onLogsDirectoryChange={handleLogsDirectoryChange}
                 onReportBug={() => setReportBugOpen(true)}
+                isDirectCloudMode={isDirectCloudMode}
               />
             </TabsContent>
             <TabsContent value="account" className="mt-0">
