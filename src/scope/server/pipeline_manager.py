@@ -403,6 +403,14 @@ class PipelineManager:
         with self._lock:
             self._load_params = load_params
 
+            # Clear stale statuses for pipelines not in the new load list
+            # This prevents ERROR statuses from a previous failed load from
+            # poisoning the overall status when loading new pipelines
+            new_pipeline_set = set(pipeline_ids)
+            for pid in list(self._pipeline_statuses.keys()):
+                if pid not in new_pipeline_set:
+                    del self._pipeline_statuses[pid]
+
             # Identify pipelines that need to be unloaded:
             # 1. Currently loaded but not in new list
             # 2. In new list but with different load_params (e.g., different resolution)
