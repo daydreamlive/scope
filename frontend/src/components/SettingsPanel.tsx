@@ -1095,8 +1095,8 @@ export function SettingsPanel({
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
-                label={PARAMETER_METADATA.spoutSender.label}
-                tooltip={PARAMETER_METADATA.spoutSender.tooltip}
+                label="Spout Output"
+                tooltip="Send video to Spout-compatible apps (Windows) like TouchDesigner, Resolume, OBS."
                 className="text-sm font-medium"
               />
               <Toggle
