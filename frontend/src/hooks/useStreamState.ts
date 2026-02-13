@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type {
   SystemMetrics,
   StreamStatus,
@@ -319,19 +319,24 @@ export function useStreamState() {
     getInputSources,
   ]);
 
-  // Update inputMode when schemas load or pipeline changes
-  // This sets the correct default mode for the pipeline
+  // Track previous pipelineId so we only reset inputMode when the pipeline actually changes
+  const prevPipelineIdRef = useRef<string | null>(null);
+
+  // Update inputMode when schemas first load or pipeline changes
   useEffect(() => {
     if (pipelineSchemas) {
       const schema = pipelineSchemas.pipelines[settings.pipelineId];
-      if (schema?.default_mode) {
+      if (
+        schema?.default_mode &&
+        prevPipelineIdRef.current !== settings.pipelineId
+      ) {
         setSettings(prev => ({
           ...prev,
           inputMode: schema.default_mode,
         }));
       }
+      prevPipelineIdRef.current = settings.pipelineId;
     }
-    // Only run when schemas load or pipeline changes, NOT when inputMode changes
   }, [pipelineSchemas, settings.pipelineId]);
 
   // Set recommended quantization based on pipeline schema and available VRAM
