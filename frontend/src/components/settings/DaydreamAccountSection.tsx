@@ -214,8 +214,7 @@ export function DaydreamAccountSection({
         )}
       </div>
 
-      {/* Cloud Mode section - only visible for cohort participants or admins */}
-      {/* Hidden in direct cloud mode since there's no local backend option */}
+      {/* Cloud Mode toggle section - only visible for cohort participants or admins, hidden in direct cloud mode */}
       {showCloudMode && !isDirectCloudMode && (
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between">
@@ -258,6 +257,49 @@ export function DaydreamAccountSection({
                 )}
               </Button>
             </div>
+          )}
+
+          {(error || status.error) && (
+            <p className="text-xs text-destructive">{error || status.error}</p>
+          )}
+        </div>
+      )}
+
+      {/* Direct cloud mode - show connection info without toggle */}
+      {isDirectCloudMode && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center gap-2">
+            <Cloud className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Cloud Connection</span>
+          </div>
+
+          {/* Connection ID when connected */}
+          {status.connected && status.connection_id && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                Connection ID:{" "}
+                <code className="bg-background px-1 rounded">
+                  {status.connection_id}
+                </code>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0"
+                onClick={handleCopyConnectionId}
+                title="Copy connection ID"
+              >
+                {copied ? (
+                  <Check className="h-3 w-3 text-green-500" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </Button>
+            </div>
+          )}
+
+          {status.connecting && (
+            <p className="text-xs text-muted-foreground">Connecting...</p>
           )}
 
           {(error || status.error) && (

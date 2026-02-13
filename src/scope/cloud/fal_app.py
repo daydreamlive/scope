@@ -207,6 +207,9 @@ def cleanup_session_data():
         print(f"Warning: Session cleanup failed: {e}")
 
 
+# TODO different client_source for kafka in direct cloud
+# TODO missing user id and conn id for direct mode?
+
 # To deploy:
 # 1. Ensure the docker image for your current git SHA has been built
 #    (check https://github.com/daydreamlive/scope/actions for the docker-build workflow)
