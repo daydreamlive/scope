@@ -170,8 +170,23 @@ class CloudConnectionManager:
                     raise RuntimeError(f"Expected 'ready' message, got: {data}")
                 # Extract connection_id for log correlation
                 self._connection_id = data.get("connection_id")
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                # Get the underlying exception for better diagnostics
+                ws_exception = self.ws.exception() if self.ws else None
+                raise RuntimeError(
+                    f"WebSocket error while waiting for ready message: {ws_exception}. "
+                )
+            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                close_code = self.ws.close_code if self.ws else None
+                raise RuntimeError(
+                    f"WebSocket closed before ready message (code={close_code}). "
+                )
+            elif msg.type == aiohttp.WSMsgType.CLOSE:
+                raise RuntimeError(
+                    f"WebSocket received close frame before ready message (data={msg.data})."
+                )
             else:
-                raise RuntimeError(f"Unexpected message type: {msg.type}")
+                raise RuntimeError(f"Unexpected WebSocket message type: {msg.type}")
         except TimeoutError:
             await self._cleanup()
             raise RuntimeError(
