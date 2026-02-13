@@ -424,3 +424,12 @@ def generate_video_stream(
     except Exception as e:
         logger.exception("Error generating video")
         yield sse_event("error", {"error": str(e)})
+
+    finally:
+        # Clean up uploaded input file
+        if request.input_path:
+            try:
+                Path(request.input_path).unlink(missing_ok=True)
+                logger.info(f"Cleaned up input file: {request.input_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up input file: {e}")
