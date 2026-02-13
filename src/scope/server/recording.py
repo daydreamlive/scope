@@ -439,6 +439,8 @@ def cleanup_recording_files():
     patterns = [
         f"{TEMP_FILE_PREFIXES['recording']}*.mp4",
         f"{TEMP_FILE_PREFIXES['download']}*.mp4",
+        f"{TEMP_FILE_PREFIXES['generate_input']}*.bin",
+        f"{TEMP_FILE_PREFIXES['generate_output']}*.bin",
     ]
 
     deleted_count = 0
