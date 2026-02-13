@@ -21,7 +21,7 @@ from aiortc.sdp import candidate_from_sdp
 
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
-from .kafka_publisher import publish_event_async
+from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
@@ -148,6 +148,38 @@ class NotificationSender:
         self.pending_notifications.clear()
 
 
+def _publish_connection_error(
+    session_id: str | None,
+    connection_id: str | None,
+    user_id: str | None,
+    connection_info: dict | None,
+    error_message: str,
+    exception_type: str,
+    error_type: str,
+    mode: str,
+    phase: str | None = None,
+) -> None:
+    """Publish a connection error event to Kafka (fire-and-forget)."""
+    metadata = {"mode": mode}
+    if phase:
+        metadata["phase"] = phase
+
+    publish_event(
+        event_type="error",
+        session_id=session_id,
+        connection_id=connection_id,
+        user_id=user_id,
+        error={
+            "error_type": error_type,
+            "message": error_message,
+            "exception_type": exception_type,
+            "recoverable": False,
+        },
+        metadata=metadata,
+        connection_info=connection_info,
+    )
+
+
 class WebRTCManager:
     """
     Manages multiple WebRTC peer connections using sessions.
@@ -263,6 +295,17 @@ class WebRTCManager:
                 logger.info(
                     f"Connection state changed to: {pc.connectionState} for session {session.id}"
                 )
+                if pc.connectionState == "failed":
+                    _publish_connection_error(
+                        session.id,
+                        session.connection_id,
+                        session.user_id,
+                        session.connection_info,
+                        "WebRTC connection failed",
+                        "WebRTCConnectionError",
+                        error_type="webrtc_connection_failed",
+                        mode="local",
+                    )
                 if pc.connectionState in ["closed", "failed"]:
                     await self.remove_session(session.id)
 
@@ -332,7 +375,7 @@ class WebRTCManager:
 
             # Publish session_created event
             pipeline_ids = initial_parameters.get("pipeline_ids")
-            await publish_event_async(
+            publish_event(
                 event_type="session_created",
                 session_id=session.id,
                 connection_id=request.connection_id,
@@ -350,6 +393,17 @@ class WebRTCManager:
 
         except Exception as e:
             logger.error(f"Error handling WebRTC offer: {e}")
+            _publish_connection_error(
+                session.id if "session" in locals() else None,
+                request.connection_id,
+                request.user_id,
+                request.connection_info,
+                str(e),
+                type(e).__name__,
+                error_type="webrtc_offer_failed",
+                mode="local",
+                phase="offer_handling",
+            )
             if "session" in locals():
                 await self.remove_session(session.id)
             raise
@@ -428,8 +482,18 @@ class WebRTCManager:
                 logger.info(
                     f"[CLOUD] Connection state: {pc.connectionState} for session {session.id}"
                 )
+                if pc.connectionState == "failed":
+                    _publish_connection_error(
+                        session.id,
+                        session.connection_id,
+                        session.user_id,
+                        session.connection_info,
+                        "WebRTC connection failed",
+                        "WebRTCConnectionError",
+                        error_type="webrtc_connection_failed",
+                        mode="relay",
+                    )
                 if pc.connectionState in ["closed", "failed"]:
-                    # Stop the relay track
                     if hasattr(cloud_track, "stop"):
                         await cloud_track.stop()
                     await self.remove_session(session.id)
@@ -470,7 +534,7 @@ class WebRTCManager:
 
             # Publish session_created event for relay mode
             pipeline_ids = initial_parameters.get("pipeline_ids")
-            await publish_event_async(
+            publish_event(
                 event_type="session_created",
                 session_id=session.id,
                 connection_id=request.connection_id,
@@ -488,6 +552,17 @@ class WebRTCManager:
 
         except Exception as e:
             logger.error(f"[CLOUD] Error handling offer: {e}")
+            _publish_connection_error(
+                session.id if "session" in locals() else None,
+                request.connection_id,
+                request.user_id,
+                request.connection_info,
+                str(e),
+                type(e).__name__,
+                error_type="webrtc_offer_failed",
+                mode="relay",
+                phase="offer_handling",
+            )
             if "session" in locals():
                 await self.remove_session(session.id)
             raise
@@ -505,7 +580,7 @@ class WebRTCManager:
             await session.close()
 
             # Publish session_closed event
-            await publish_event_async(
+            publish_event(
                 event_type="session_closed",
                 session_id=session_id,
                 connection_id=session.connection_id,

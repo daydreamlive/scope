@@ -471,10 +471,21 @@ class ScopeApp(fal.App, keep_alive=300):
                     "status": response.status_code,
                 }
 
+        # Parse fal_log_labels as JSON if possible, otherwise use raw string
+        fal_log_labels_raw = os.getenv("FAL_LOG_LABELS", "unknown")
+        try:
+            fal_log_labels = json.loads(fal_log_labels_raw)
+        except (json.JSONDecodeError, TypeError):
+            fal_log_labels = fal_log_labels_raw
+
         # Build connection_info with GPU type and any available infrastructure info
         connection_info = {
             "gpu_type": ScopeApp.machine_type,
             "fal_region": os.getenv("NOMAD_DC", "unknown"),
+            "fal_runner_id": os.getenv(
+                "FAL_JOB_ID", os.getenv("FAL_RUNNER_ID", "unknown")
+            ),
+            "fal_log_labels": fal_log_labels,
         }
 
         async def handle_offer(payload: dict):
@@ -604,6 +615,7 @@ class ScopeApp(fal.App, keep_alive=300):
             ):
                 body["connection_id"] = connection_id
                 body["connection_info"] = connection_info
+                body["user_id"] = user_id
 
             async with httpx.AsyncClient() as client:
                 try:
