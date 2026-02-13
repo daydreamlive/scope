@@ -62,11 +62,8 @@ export interface SettingsState {
   loraMergeStrategy?: LoraMergeStrategy;
   // Track current input mode (text vs video)
   inputMode?: InputMode;
-  // Spout settings
-  spoutSender?: {
-    enabled: boolean;
-    name: string;
-  };
+  // Output sinks
+  outputSinks?: Record<string, { enabled: boolean; name: string }>;
   // VACE-specific settings
   vaceEnabled?: boolean;
   vaceUseInputVideo?: boolean;

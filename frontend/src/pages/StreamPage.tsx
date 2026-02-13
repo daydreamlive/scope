@@ -105,12 +105,13 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    ndiOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   } = useStreamState();
 
-  // Derive NDI availability from dynamic input sources list
+  // Derive NDI input availability from dynamic input sources list
   const ndiAvailable = availableInputSources.some(
     s => s.source_id === "ndi" && s.available
   );
@@ -786,14 +787,15 @@ export function StreamPage() {
     });
   };
 
-  const handleSpoutSenderChange = (
-    spoutSender: { enabled: boolean; name: string } | undefined
+  const handleOutputSinkChange = (
+    sinkType: string,
+    config: { enabled: boolean; name: string }
   ) => {
-    updateSettings({ spoutSender });
-    // Send Spout output settings to backend
+    const updated = { ...settings.outputSinks, [sinkType]: config };
+    updateSettings({ outputSinks: updated });
     if (isStreaming) {
       sendParameterUpdate({
-        spout_sender: spoutSender,
+        output_sinks: updated,
       });
     }
   };
@@ -1197,7 +1199,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
-        spout_sender?: { enabled: boolean; name: string };
+        output_sinks?: Record<string, { enabled: boolean; name: string }>;
         vace_ref_images?: string[];
         vace_use_input_video?: boolean;
         vace_context_scale?: number;
@@ -1279,9 +1281,14 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
-      // Spout output settings - send if enabled
-      if (settings.spoutSender?.enabled) {
-        initialParameters.spout_sender = settings.spoutSender;
+      // Output sinks - send if any are enabled
+      if (settings.outputSinks) {
+        const enabledSinks = Object.fromEntries(
+          Object.entries(settings.outputSinks).filter(([, v]) => v.enabled)
+        );
+        if (Object.keys(enabledSinks).length > 0) {
+          initialParameters.output_sinks = enabledSinks;
+        }
       }
 
       // Generic input source (NDI, Spout, etc.) - send if enabled
@@ -1643,9 +1650,10 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            spoutSender={settings.spoutSender}
-            onSpoutSenderChange={handleSpoutSenderChange}
+            outputSinks={settings.outputSinks}
+            onOutputSinkChange={handleOutputSinkChange}
             spoutAvailable={spoutAvailable}
+            ndiAvailable={ndiOutputAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&

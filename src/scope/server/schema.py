@@ -114,9 +114,13 @@ class Parameters(BaseModel):
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
     )
+    output_sinks: "dict[str, OutputSinkConfig] | None" = Field(
+        default=None,
+        description="Output sinks config keyed by type, e.g. {'spout': {'enabled': true, 'name': 'ScopeOut'}, 'ndi': {'enabled': true, 'name': 'Scope'}}",
+    )
     spout_sender: "SpoutConfig | None" = Field(
         default=None,
-        description="Spout output configuration for sending frames to external apps",
+        description="(Deprecated, use output_sinks) Spout output configuration",
     )
     vace_enabled: bool | None = Field(
         default=None,
@@ -158,8 +162,15 @@ class Parameters(BaseModel):
     )
 
 
+class OutputSinkConfig(BaseModel):
+    """Configuration for a single output sink (Spout, NDI, etc.)."""
+
+    enabled: bool = Field(default=False, description="Enable this output sink")
+    name: str = Field(default="", description="Sender name visible to receivers")
+
+
 class SpoutConfig(BaseModel):
-    """Configuration for Spout sender/receiver."""
+    """Configuration for Spout sender/receiver (deprecated, use OutputSinkConfig)."""
 
     enabled: bool = Field(default=False, description="Enable Spout")
     name: str = Field(default="", description="Spout sender name")
@@ -246,6 +257,10 @@ class HardwareInfoResponse(BaseModel):
     spout_available: bool = Field(
         default=False,
         description="Whether Spout is available (Windows only, not WSL)",
+    )
+    ndi_available: bool = Field(
+        default=False,
+        description="Whether NDI SDK is available for output",
     )
 
 

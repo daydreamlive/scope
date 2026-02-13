@@ -1128,8 +1128,14 @@ async def download_pipeline_models(
 
 def is_spout_available() -> bool:
     """Check if Spout is available (native Windows only, not WSL)."""
-    # Spout requires native Windows - it won't work in WSL/Linux
     return sys.platform == "win32"
+
+
+def is_ndi_output_available() -> bool:
+    """Check if NDI SDK is available for output."""
+    from scope.core.ndi import is_available
+
+    return is_available()
 
 
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
@@ -1313,6 +1319,7 @@ async def get_hardware_info(
             return await get_hardware_info_from_cloud(
                 cloud_manager,
                 is_spout_available(),
+                is_ndi_output_available(),
             )
 
         # Local mode: get local hardware info
@@ -1328,6 +1335,7 @@ async def get_hardware_info(
         return HardwareInfoResponse(
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
+            ndi_available=is_ndi_output_available(),
         )
     except HTTPException:
         raise
