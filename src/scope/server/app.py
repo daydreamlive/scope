@@ -1246,85 +1246,11 @@ def get_input_source_resolution(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/preview")
-def get_input_source_preview(
-    source_type: str, identifier: str, timeout_ms: int = Query(5000)
-):
-    """Grab a single frame from an input source and return it as a JPEG thumbnail."""
-    source_class = _resolve_input_source_class(source_type)
-
-    try:
-        from PIL import Image
-
-        instance = source_class()
-        try:
-            if not instance.connect(identifier):
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Could not connect to '{identifier}'.",
-                )
-
-            # Poll for a frame
-            elapsed = 0
-            poll_interval = 100
-            frame = None
-            while elapsed < timeout_ms:
-                frame = instance.receive_frame(timeout_ms=poll_interval)
-                if frame is not None:
-                    break
-                elapsed += poll_interval
-
-            if frame is None:
-                raise HTTPException(
-                    status_code=408,
-                    detail=f"No frame received from '{identifier}' within {timeout_ms}ms.",
-                )
-
-            # Downscale for thumbnail (max 320px wide)
-            h, w = frame.shape[:2]
-            max_w = 320
-            if w > max_w:
-                scale = max_w / w
-                new_w = max_w
-                new_h = int(h * scale)
-                img = Image.fromarray(frame).resize((new_w, new_h), Image.LANCZOS)
-            else:
-                img = Image.fromarray(frame)
-
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=80)
-            buf.seek(0)
-            return Response(content=buf.read(), media_type="image/jpeg")
-        finally:
-            instance.close()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting preview for '{source_type}/{identifier}': {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-def _find_active_frame_processor(source_type: str):
-    """Return the FrameProcessor of an active session whose input source matches."""
-    if webrtc_manager is None:
-        return None
-    for session in webrtc_manager.sessions.values():
-        vt = getattr(session, "video_track", None)
-        fp = getattr(vt, "frame_processor", None) if vt else None
-        if fp and fp.running and fp.input_source_type == source_type:
-            return fp
-    return None
-
-
 @app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/stream")
 async def stream_input_source_preview(
     source_type: str, identifier: str, fps: int = Query(10, ge=1, le=30)
 ):
-    """MJPEG stream of an input source for live preview.
-
-    During an active stream, reads from the FrameProcessor's raw-frame buffer
-    (zero extra receiver overhead).  Otherwise spins up a temporary receiver.
-    """
+    """MJPEG stream of an input source for live preview."""
     source_class = _resolve_input_source_class(source_type)
 
     async def _generate():
@@ -1332,29 +1258,17 @@ async def stream_input_source_preview(
 
         max_w = 320
         interval = 1.0 / fps
-        temp_receiver = None
+        receiver = None
 
         try:
+            # Create persistent receiver
+            receiver = source_class()
+            if not receiver.connect(identifier):
+                logger.warning(f"Preview stream: could not connect to '{identifier}'")
+                return
+
             while True:
-                frame = None
-
-                fp = _find_active_frame_processor(source_type)
-                if fp is not None:
-                    frame = fp.get_raw_input_frame()
-                    if temp_receiver is not None:
-                        temp_receiver.close()
-                        temp_receiver = None
-
-                if frame is None and temp_receiver is None:
-                    temp_receiver = source_class()
-                    if not temp_receiver.connect(identifier):
-                        logger.warning(
-                            f"Preview stream: could not connect to '{identifier}'"
-                        )
-                        return
-
-                if frame is None and temp_receiver is not None:
-                    frame = temp_receiver.receive_frame(timeout_ms=200)
+                frame = receiver.receive_frame(timeout_ms=200)
 
                 if frame is not None:
                     h, w = frame.shape[:2]
@@ -1383,8 +1297,8 @@ async def stream_input_source_preview(
         except asyncio.CancelledError:
             pass
         finally:
-            if temp_receiver is not None:
-                temp_receiver.close()
+            if receiver is not None:
+                receiver.close()
 
     return StreamingResponse(
         _generate(),

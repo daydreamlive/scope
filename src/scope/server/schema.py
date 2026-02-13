@@ -116,11 +116,7 @@ class Parameters(BaseModel):
     )
     output_sinks: "dict[str, OutputSinkConfig] | None" = Field(
         default=None,
-        description="Output sinks config keyed by type, e.g. {'spout': {'enabled': true, 'name': 'ScopeOut'}, 'ndi': {'enabled': true, 'name': 'Scope'}}",
-    )
-    spout_sender: "SpoutConfig | None" = Field(
-        default=None,
-        description="(Deprecated, use output_sinks) Spout output configuration",
+        description="Output sinks config keyed by type (e.g., 'spout', 'ndi')",
     )
     vace_enabled: bool | None = Field(
         default=None,
@@ -167,13 +163,6 @@ class OutputSinkConfig(BaseModel):
 
     enabled: bool = Field(default=False, description="Enable this output sink")
     name: str = Field(default="", description="Sender name visible to receivers")
-
-
-class SpoutConfig(BaseModel):
-    """Configuration for Spout sender/receiver (deprecated, use OutputSinkConfig)."""
-
-    enabled: bool = Field(default=False, description="Enable Spout")
-    name: str = Field(default="", description="Spout sender name")
 
 
 class WebRTCOfferRequest(BaseModel):

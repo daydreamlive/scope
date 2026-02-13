@@ -13,8 +13,6 @@ from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
 if TYPE_CHECKING:
-    import numpy as np
-
     from scope.core.inputs import InputSource
     from scope.core.outputs import OutputSink
 
@@ -40,7 +38,7 @@ class FrameProcessor:
     1. Local mode: Frames processed through local GPU pipelines
     2. Cloud mode: Frames sent to cloud for processing
 
-    Output sink integration (Spout, NDI, etc.) works in both modes.
+    Output sink integration (NDI, Spout, etc.) works in both modes.
     """
 
     def __init__(
@@ -96,10 +94,6 @@ class FrameProcessor:
         self.input_source_type = ""
         self.input_source_thread = None
 
-        # Latest raw input frame for live preview
-        self._last_raw_input_frame: np.ndarray | None = None
-        self._raw_frame_lock = threading.Lock()
-
         # Input mode: video waits for frames, text generates immediately
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
@@ -130,9 +124,6 @@ class FrameProcessor:
         if "output_sinks" in self.parameters:
             sinks_config = self.parameters.pop("output_sinks")
             self._update_output_sinks_from_config(sinks_config)
-        if "spout_sender" in self.parameters:
-            spout_config = self.parameters.pop("spout_sender")
-            self._update_output_sink_from_spout_config(spout_config)
 
         # Process generic input source settings
         if "input_source" in self.parameters:
@@ -561,11 +552,6 @@ class FrameProcessor:
                 connection_info=self.connection_info,
             )
 
-    def get_raw_input_frame(self):
-        """Return the latest raw input frame (numpy RGB), or None."""
-        with self._raw_frame_lock:
-            return self._last_raw_input_frame
-
     def get_frame_stats(self) -> dict:
         """Get current frame processing statistics."""
         now = time.time()
@@ -611,11 +597,6 @@ class FrameProcessor:
             sinks_config = parameters.pop("output_sinks")
             self._update_output_sinks_from_config(sinks_config)
 
-        # Handle legacy Spout output settings (backward compat)
-        if "spout_sender" in parameters:
-            spout_config = parameters.pop("spout_sender")
-            self._update_output_sink_from_spout_config(spout_config)
-
         # Handle generic input source settings
         if "input_source" in parameters:
             input_source_config = parameters.pop("input_source")
@@ -652,17 +633,6 @@ class FrameProcessor:
                 sink_name=name,
                 sink_class=sink_cls,
             )
-
-    def _update_output_sink_from_spout_config(self, config: dict):
-        """Translate legacy spout_sender config into the generic output sink system."""
-        self._update_output_sinks_from_config(
-            {
-                "spout": {
-                    "enabled": config.get("enabled", False),
-                    "name": config.get("name", "ScopeSyphonSpoutOut"),
-                }
-            }
-        )
 
     def _update_output_sink(
         self,
@@ -884,10 +854,6 @@ class FrameProcessor:
                 rgb_frame = self.input_source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
                     last_frame_time = time.time()
-
-                    # Store for live preview (cheap reference swap)
-                    with self._raw_frame_lock:
-                        self._last_raw_input_frame = rgb_frame
 
                     if self._cloud_mode:
                         if self._video_mode and self.cloud_manager:

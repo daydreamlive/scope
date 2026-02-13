@@ -77,7 +77,7 @@ export interface SettingsState {
   preprocessorIds?: string[];
   // Postprocessors
   postprocessorIds?: string[];
-  // Generic input source (NDI, Spout via new input source system, etc.)
+  // Generic input source (e.g., NDI, Spout)
   inputSource?: {
     enabled: boolean;
     source_type: string;

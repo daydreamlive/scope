@@ -316,13 +316,6 @@ export const getInputSourceResolution = async (
   return response.json();
 };
 
-export const getInputSourcePreviewUrl = (
-  sourceType: string,
-  identifier: string,
-  timeoutMs = 5000
-): string =>
-  `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/preview?timeout_ms=${timeoutMs}`;
-
 export const getInputSourceStreamUrl = (
   sourceType: string,
   identifier: string,
