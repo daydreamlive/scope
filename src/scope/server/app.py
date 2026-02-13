@@ -45,12 +45,12 @@ from .file_utils import (
     VIDEO_EXTENSIONS,
     iter_files,
 )
+from .generate import generate_video_stream
 from .kafka_publisher import (
     KafkaPublisher,
     is_kafka_enabled,
     set_kafka_publisher,
 )
-from .generate import generate_video_stream
 from .logs_config import (
     cleanup_old_logs,
     ensure_logs_dir,
@@ -1150,6 +1150,15 @@ async def generate_video(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/api/v1/generate/cancel")
+async def cancel_generate():
+    """Cancel the current video generation after the current chunk completes."""
+    from .generate import cancel_generation
+
+    cancel_generation()
+    return {"status": "cancelling"}
 
 
 @app.post("/api/v1/generate/upload")

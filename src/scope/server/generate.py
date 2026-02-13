@@ -3,6 +3,7 @@
 import base64
 import gc
 import json
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -11,6 +12,20 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+
+# Cancellation support (single-client, so one event suffices)
+_cancel_event = threading.Event()
+
+
+def cancel_generation():
+    """Signal the current generation to stop after the current chunk."""
+    _cancel_event.set()
+
+
+def is_generation_cancelled() -> bool:
+    """Check if cancellation has been requested."""
+    return _cancel_event.is_set()
+
 
 # Defaults
 DEFAULT_HEIGHT = 320
@@ -255,6 +270,8 @@ def generate_video_stream(
 
     Writes output to temp file incrementally, returns output_path for download.
     """
+    _cancel_event.clear()
+
     try:
         pipeline = pipeline_manager.get_pipeline_by_id(request.pipeline_id)
 
@@ -294,6 +311,18 @@ def generate_video_stream(
 
         try:
             for chunk_idx in range(num_chunks):
+                if _cancel_event.is_set():
+                    logger.info("Generation cancelled by user")
+                    yield sse_event(
+                        "cancelled",
+                        {
+                            "chunk": chunk_idx,
+                            "total_chunks": num_chunks,
+                            "frames_completed": total_frames,
+                        },
+                    )
+                    return
+
                 start_frame = chunk_idx * chunk_size
                 end_frame = min(start_frame + chunk_size, request.num_frames)
 
