@@ -13,6 +13,8 @@ from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from scope.core.inputs import InputSource
     from scope.core.outputs import OutputSink
 
@@ -93,6 +95,10 @@ class FrameProcessor:
         self.input_source_enabled = False
         self.input_source_type = ""
         self.input_source_thread = None
+
+        # Latest raw input frame for live preview
+        self._last_raw_input_frame: np.ndarray | None = None
+        self._raw_frame_lock = threading.Lock()
 
         # Input mode: video waits for frames, text generates immediately
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
@@ -555,6 +561,11 @@ class FrameProcessor:
                 connection_info=self.connection_info,
             )
 
+    def get_raw_input_frame(self):
+        """Return the latest raw input frame (numpy RGB), or None."""
+        with self._raw_frame_lock:
+            return self._last_raw_input_frame
+
     def get_frame_stats(self) -> dict:
         """Get current frame processing statistics."""
         now = time.time()
@@ -873,6 +884,10 @@ class FrameProcessor:
                 rgb_frame = self.input_source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
                     last_frame_time = time.time()
+
+                    # Store for live preview (cheap reference swap)
+                    with self._raw_frame_lock:
+                        self._last_raw_input_frame = rgb_frame
 
                     if self._cloud_mode:
                         if self._video_mode and self.cloud_manager:

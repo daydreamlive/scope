@@ -21,7 +21,7 @@ import click
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1302,6 +1302,94 @@ def get_input_source_preview(
     except Exception as e:
         logger.error(f"Error getting preview for '{source_type}/{identifier}': {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+def _find_active_frame_processor(source_type: str):
+    """Return the FrameProcessor of an active session whose input source matches."""
+    if webrtc_manager is None:
+        return None
+    for session in webrtc_manager.sessions.values():
+        vt = getattr(session, "video_track", None)
+        fp = getattr(vt, "frame_processor", None) if vt else None
+        if fp and fp.running and fp.input_source_type == source_type:
+            return fp
+    return None
+
+
+@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/stream")
+async def stream_input_source_preview(
+    source_type: str, identifier: str, fps: int = Query(10, ge=1, le=30)
+):
+    """MJPEG stream of an input source for live preview.
+
+    During an active stream, reads from the FrameProcessor's raw-frame buffer
+    (zero extra receiver overhead).  Otherwise spins up a temporary receiver.
+    """
+    source_class = _resolve_input_source_class(source_type)
+
+    async def _generate():
+        from PIL import Image
+
+        max_w = 320
+        interval = 1.0 / fps
+        temp_receiver = None
+
+        try:
+            while True:
+                frame = None
+
+                fp = _find_active_frame_processor(source_type)
+                if fp is not None:
+                    frame = fp.get_raw_input_frame()
+                    if temp_receiver is not None:
+                        temp_receiver.close()
+                        temp_receiver = None
+
+                if frame is None and temp_receiver is None:
+                    temp_receiver = source_class()
+                    if not temp_receiver.connect(identifier):
+                        logger.warning(
+                            f"Preview stream: could not connect to '{identifier}'"
+                        )
+                        return
+
+                if frame is None and temp_receiver is not None:
+                    frame = temp_receiver.receive_frame(timeout_ms=200)
+
+                if frame is not None:
+                    h, w = frame.shape[:2]
+                    if w > max_w:
+                        scale = max_w / w
+                        new_w = max_w
+                        new_h = int(h * scale)
+                        img = Image.fromarray(frame).resize(
+                            (new_w, new_h), Image.NEAREST
+                        )
+                    else:
+                        img = Image.fromarray(frame)
+
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=70)
+                    jpeg = buf.getvalue()
+
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n"
+                        b"\r\n" + jpeg + b"\r\n"
+                    )
+
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if temp_receiver is not None:
+                temp_receiver.close()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
