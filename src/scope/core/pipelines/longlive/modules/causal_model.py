@@ -7,7 +7,8 @@ import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
-from scope.core.pipelines.wan2_1.modules.attention import attention
+from scope.core.pipelines.wan2_1.modules.attention import attention, flash_attention
+
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     WanLayerNorm,
@@ -208,8 +209,14 @@ class CausalWanAttentionBlock(nn.Module):
             1, 2
         )
 
-        # cross-attention
-        x = x + self.cross_attn(self.norm3(x), context, None)
+        # cross-attention (inlined with graph-safe attention to avoid graph breaks)
+        cx = self.norm3(x)
+        b_ca, n_ca, d_ca = cx.size(0), self.self_attn.num_heads, self.self_attn.head_dim
+        cq = self.cross_attn.norm_q(self.cross_attn.q(cx)).view(b_ca, -1, n_ca, d_ca)
+        ck = self.cross_attn.norm_k(self.cross_attn.k(context)).view(b_ca, -1, n_ca, d_ca)
+        cv = self.cross_attn.v(context).view(b_ca, -1, n_ca, d_ca)
+        ca_out = flash_attention(cq, ck, cv).flatten(2)
+        x = x + self.cross_attn.o(ca_out)
 
         # ffn
         y = self.ffn(
@@ -385,10 +392,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         self.fill_level = min(self.fill_level + num_new, cache_tokens)
 
     def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs):
-        """Pure-tensor inner forward through all blocks. Compiled when cache is full.
-
-        All inputs are tensors (or lists of tensors). No dicts, no Python ints,
-        no dynamic slicing, no complex ops -- fully torch.compile friendly.
+        """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
+        when cache is full. With SDPA (no graph breaks), the entire 30-block loop
+        is captured as a single CUDA graph for maximum performance.
         """
         new_ks = []
         new_vs = []
@@ -472,7 +478,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             cache_ks = [empty_k] * len(self.blocks)
             cache_vs = [empty_k] * len(self.blocks)
 
-        # Compile the inner loop once the cache is full (all shapes are fixed).
+        # Compile the inner forward once the cache is full (all shapes are fixed).
+        # With SDPA (no graph breaks), reduce-overhead mode can use CUDA graphs
+        # across the entire 30-block loop for maximum performance.
         if not self._blocks_compiled and kv_cache is not None:
             cache_tokens = kv_cache[0]["k"].shape[1]
             if fill_level >= cache_tokens:
@@ -481,9 +489,14 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # Run the block loop (compiled when ready, eager otherwise)
         if self._blocks_compiled:
-            x, new_kvs = self._compiled_inner(x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs)
+            torch.compiler.cudagraph_mark_step_begin()
+            x, new_kvs = self._compiled_inner(
+                x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
+            )
         else:
-            x, new_kvs = self._inner_forward(x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs)
+            x, new_kvs = self._inner_forward(
+                x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
+            )
 
         # Cache update (outside compiled region)
         if update_cache and kv_cache is not None:
