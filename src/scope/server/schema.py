@@ -816,6 +816,8 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
+
+
 class ChunkFrameSpec(BaseModel):
     """Specification for a frame image at a specific chunk."""
 
@@ -905,6 +907,22 @@ class GenerateRequest(BaseModel):
     manage_cache: bool = Field(
         default=True,
         description="Enable automatic cache management. Set to False to prevent cache resets when parameters change (e.g., LoRA scales).",
+    )
+    noise_controller: bool | None = Field(
+        default=None,
+        description="Enable automatic noise scale adjustment based on motion detection.",
+    )
+    kv_cache_attention_bias: float | list[float] | None = Field(
+        default=None,
+        description="Controls reliance on past frames in cache. Lower values mitigate error accumulation. Single float applies to all chunks; list applies per-chunk. Typical values: 0.3-0.7 moderate, 0.1-0.2 strong.",
+    )
+    prompt_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="linear",
+        description="Spatial interpolation method for blending multiple prompts: linear (weighted average) or slerp (spherical).",
+    )
+    vace_use_input_video: bool | None = Field(
+        default=None,
+        description="When enabled in video-to-video mode, input video is used for VACE conditioning instead of latent initialization.",
     )
     # Per-chunk parameters
     lora_scales: dict[str, float | list[float]] | None = Field(
