@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 TEMP_FILE_PREFIXES = {
     "recording": "scope_recording_",
     "download": "scope_download_",
+    "generate_input": "scope_gen_input_",
+    "generate_output": "scope_gen_output_",
 }
 
 # Environment variables
@@ -437,6 +439,8 @@ def cleanup_recording_files():
     patterns = [
         f"{TEMP_FILE_PREFIXES['recording']}*.mp4",
         f"{TEMP_FILE_PREFIXES['download']}*.mp4",
+        f"{TEMP_FILE_PREFIXES['generate_input']}*.bin",
+        f"{TEMP_FILE_PREFIXES['generate_output']}*.bin",
     ]
 
     deleted_count = 0
