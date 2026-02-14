@@ -99,11 +99,12 @@ CLOUD_REQUEST_FAILED = "Cloud request failed"
 async def get_hardware_info_from_cloud(
     cloud_manager: CloudConnectionManager,
     spout_available: bool,
+    ndi_available: bool = False,
 ) -> HardwareInfoResponse:
-    """Fetch hardware info from cloud and return with local Spout availability.
+    """Fetch hardware info from cloud and return with local output availability.
 
-    Spout is taken from the caller (local) because Spout frames flow through
-    the local backend to cloud, so local Spout support matters.
+    Spout/NDI availability is taken from the caller (local) because output
+    sink frames flow through the local backend.
     """
     logger.info("Proxying hardware info request to cloud")
     try:
@@ -130,6 +131,7 @@ async def get_hardware_info_from_cloud(
     return HardwareInfoResponse(
         vram_gb=data.get("vram_gb"),
         spout_available=spout_available,
+        ndi_available=ndi_available,
     )
 
 

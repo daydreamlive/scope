@@ -19,6 +19,13 @@ def get_output_sink_classes() -> dict[str, type[OutputSink]]:
     except Exception:
         pass
 
+    try:
+        from .ndi import NDIOutputSink
+
+        sinks[NDIOutputSink.source_id] = NDIOutputSink
+    except Exception:
+        pass
+
     return sinks
 
 

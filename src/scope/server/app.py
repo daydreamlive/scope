@@ -21,7 +21,7 @@ import click
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1128,8 +1128,14 @@ async def download_pipeline_models(
 
 def is_spout_available() -> bool:
     """Check if Spout is available (native Windows only, not WSL)."""
-    # Spout requires native Windows - it won't work in WSL/Linux
     return sys.platform == "win32"
+
+
+def is_ndi_output_available() -> bool:
+    """Check if NDI SDK is available for output."""
+    from scope.core.ndi import is_available
+
+    return is_available()
 
 
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
@@ -1240,62 +1246,64 @@ def get_input_source_resolution(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/preview")
-def get_input_source_preview(
-    source_type: str, identifier: str, timeout_ms: int = Query(5000)
+@app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/stream")
+async def stream_input_source_preview(
+    source_type: str, identifier: str, fps: int = Query(10, ge=1, le=30)
 ):
-    """Grab a single frame from an input source and return it as a JPEG thumbnail."""
+    """MJPEG stream of an input source for live preview."""
     source_class = _resolve_input_source_class(source_type)
 
-    try:
+    async def _generate():
         from PIL import Image
 
-        instance = source_class()
+        max_w = 320
+        interval = 1.0 / fps
+        receiver = None
+
         try:
-            if not instance.connect(identifier):
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Could not connect to '{identifier}'.",
-                )
+            # Create persistent receiver
+            receiver = source_class()
+            if not receiver.connect(identifier):
+                logger.warning(f"Preview stream: could not connect to '{identifier}'")
+                return
 
-            # Poll for a frame
-            elapsed = 0
-            poll_interval = 100
-            frame = None
-            while elapsed < timeout_ms:
-                frame = instance.receive_frame(timeout_ms=poll_interval)
+            while True:
+                frame = receiver.receive_frame(timeout_ms=200)
+
                 if frame is not None:
-                    break
-                elapsed += poll_interval
+                    h, w = frame.shape[:2]
+                    if w > max_w:
+                        scale = max_w / w
+                        new_w = max_w
+                        new_h = int(h * scale)
+                        img = Image.fromarray(frame).resize(
+                            (new_w, new_h), Image.NEAREST
+                        )
+                    else:
+                        img = Image.fromarray(frame)
 
-            if frame is None:
-                raise HTTPException(
-                    status_code=408,
-                    detail=f"No frame received from '{identifier}' within {timeout_ms}ms.",
-                )
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=70)
+                    jpeg = buf.getvalue()
 
-            # Downscale for thumbnail (max 320px wide)
-            h, w = frame.shape[:2]
-            max_w = 320
-            if w > max_w:
-                scale = max_w / w
-                new_w = max_w
-                new_h = int(h * scale)
-                img = Image.fromarray(frame).resize((new_w, new_h), Image.LANCZOS)
-            else:
-                img = Image.fromarray(frame)
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n"
+                        b"\r\n" + jpeg + b"\r\n"
+                    )
 
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=80)
-            buf.seek(0)
-            return Response(content=buf.read(), media_type="image/jpeg")
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            pass
         finally:
-            instance.close()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting preview for '{source_type}/{identifier}': {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+            if receiver is not None:
+                receiver.close()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
@@ -1313,6 +1321,7 @@ async def get_hardware_info(
             return await get_hardware_info_from_cloud(
                 cloud_manager,
                 is_spout_available(),
+                is_ndi_output_available(),
             )
 
         # Local mode: get local hardware info
@@ -1328,6 +1337,7 @@ async def get_hardware_info(
         return HardwareInfoResponse(
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
+            ndi_available=is_ndi_output_available(),
         )
     except HTTPException:
         raise

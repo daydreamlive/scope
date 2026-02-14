@@ -411,8 +411,9 @@ export function useStreamState() {
     setPromptData(prev => ({ ...prev, ...newPrompt }));
   }, []);
 
-  // Derive spoutAvailable from hardware info (server-side detection) for backward compat
+  // Derive output sink availability from hardware info
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
+  const ndiOutputAvailable = hardwareInfo?.ndi_available ?? false;
 
   return {
     systemMetrics,
@@ -428,6 +429,7 @@ export function useStreamState() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    ndiOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
