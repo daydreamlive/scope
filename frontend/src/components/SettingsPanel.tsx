@@ -778,7 +778,7 @@ export function SettingsPanel({
                 </div>
               )}
 
-              {currentPipeline?.supportsLoRA && !isCloudMode && (
+              {currentPipeline?.supportsLoRA && (
                 <div className="space-y-4">
                   <LoRAManager
                     loras={loras}
