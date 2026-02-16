@@ -13,6 +13,17 @@ class Requirements(BaseModel):
     """Requirements for pipeline configuration."""
 
     input_size: int
+    inputs: dict[str, int] | None = None  # e.g. {"video": 5, "vace_input_frames": 12}
+
+    def get_input_sizes(self) -> dict[str, int]:
+        """Resolve per-port input sizes.
+
+        If `inputs` is set, use it directly. Otherwise fall back to
+        {"video": input_size} for backward compatibility.
+        """
+        if self.inputs is not None:
+            return self.inputs
+        return {"video": self.input_size}
 
 
 class Pipeline(ABC):

@@ -109,6 +109,11 @@ class PipelineProcessor:
         # the next pipeline in the chain can consume them
         self.throttler = PipelineThrottler()
 
+        # DAG mode: named queues keyed by port name
+        self.input_queues: dict[str, queue.Queue] = {}
+        self.output_queues: dict[str, queue.Queue] = {}
+        self._dag_mode: bool = False
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -206,6 +211,21 @@ class PipelineProcessor:
                 except queue.Empty:
                     break
 
+        # Clear DAG queues
+        for q in self.input_queues.values():
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+        for q in self.output_queues.values():
+            if isinstance(q, queue.Queue):
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
     def update_parameters(self, parameters: dict[str, Any]):
@@ -224,7 +244,10 @@ class PipelineProcessor:
 
         while self.running and not self.shutdown_event.is_set():
             try:
-                self.process_chunk()
+                if self._dag_mode:
+                    self._process_chunk_dag()
+                else:
+                    self.process_chunk()
 
             except PipelineNotAvailableException as e:
                 logger.debug(
@@ -523,6 +546,179 @@ class PipelineProcessor:
                 raise e
 
         self.is_prepared = True
+
+    def _process_chunk_dag(self):
+        """Process a single chunk in DAG mode using named input/output queues."""
+        # --- Parameter updates (same as linear mode) ---
+        try:
+            new_parameters = self.parameters_queue.get_nowait()
+            if new_parameters != self.parameters:
+                if (
+                    "prompts" in new_parameters
+                    and "transition" not in new_parameters
+                    and "transition" in self.parameters
+                ):
+                    self.parameters.pop("transition", None)
+                if "input_mode" in new_parameters:
+                    self._video_mode = new_parameters.get("input_mode") == "video"
+                if "ctrl_input" in new_parameters:
+                    if "ctrl_input" in self.parameters:
+                        existing = self.parameters["ctrl_input"]
+                        new_ctrl = new_parameters["ctrl_input"]
+                        new_parameters["ctrl_input"] = {
+                            "button": new_ctrl.get("button", []),
+                            "mouse": [
+                                existing.get("mouse", [0, 0])[0]
+                                + new_ctrl.get("mouse", [0, 0])[0],
+                                existing.get("mouse", [0, 0])[1]
+                                + new_ctrl.get("mouse", [0, 0])[1],
+                            ],
+                        }
+                self.parameters = {**self.parameters, **new_parameters}
+        except queue.Empty:
+            pass
+
+        # Pause handling
+        paused = self.parameters.pop("paused", None)
+        if paused is not None and paused != self.paused:
+            self._last_frame_time = None
+            self.paused = paused
+        if self.paused:
+            self.shutdown_event.wait(SLEEP_TIME)
+            return
+
+        # Prepare pipeline
+        reset_cache = self.parameters.pop("reset_cache", None)
+        lora_scales = self.parameters.pop("lora_scales", None)
+
+        if reset_cache:
+            logger.info(f"[DAG] Clearing cache for pipeline: {self.pipeline_id}")
+
+        requirements = None
+        if hasattr(self.pipeline, "prepare"):
+            prepare_params = dict(self.parameters.items())
+            if self._video_mode:
+                prepare_params["video"] = True
+            requirements = self.pipeline.prepare(**prepare_params)
+
+        if requirements is None:
+            self.shutdown_event.wait(SLEEP_TIME)
+            return
+
+        # Resolve per-port input sizes
+        input_sizes = requirements.get_input_sizes()
+
+        # Check ALL input queues have enough frames
+        for port_name, needed in input_sizes.items():
+            q = self.input_queues.get(port_name)
+            if q is None or q.qsize() < needed:
+                self.shutdown_event.wait(SLEEP_TIME)
+                return
+
+        # Collect frames from each input queue
+        port_frames: dict[str, list[torch.Tensor]] = {}
+        for port_name, needed in input_sizes.items():
+            q = self.input_queues[port_name]
+            port_frames[port_name] = self.prepare_chunk(q, needed)
+
+        try:
+            # Build call params
+            call_params = dict(self.parameters.items())
+            call_params["init_cache"] = not self.is_prepared
+            if reset_cache is not None:
+                call_params["init_cache"] = reset_cache
+            if lora_scales is not None:
+                call_params["lora_scales"] = lora_scales
+
+            if "ctrl_input" in self.parameters:
+                ctrl_data = self.parameters["ctrl_input"]
+                call_params["ctrl_input"] = parse_ctrl_input(ctrl_data)
+                self.parameters["ctrl_input"]["mouse"] = [0.0, 0.0]
+
+            # Pass all port frames as kwargs
+            for port_name, frames in port_frames.items():
+                call_params[port_name] = frames
+
+            processing_start = time.time()
+            output_dict = self.pipeline(**call_params)
+            processing_time = time.time() - processing_start
+
+            # Distribute outputs to named output queues
+            self._push_frames_to_output_queues(output_dict, processing_time)
+
+            # Clear one-shot parameters
+            one_shot_params = [
+                "vace_ref_images",
+                "images",
+                "first_frame_image",
+                "last_frame_image",
+            ]
+            for param in one_shot_params:
+                if param in call_params and param in self.parameters:
+                    self.parameters.pop(param, None)
+
+            # Clear transition when complete
+            if "transition" in call_params and "transition" in self.parameters:
+                transition_active = False
+                if hasattr(self.pipeline, "state"):
+                    transition_active = self.pipeline.state.get(
+                        "_transition_active", False
+                    )
+                transition = call_params.get("transition")
+                if not transition_active or transition is None:
+                    self.parameters.pop("transition", None)
+
+        except Exception as e:
+            if self._is_recoverable(e):
+                logger.error(
+                    f"[DAG] Error processing chunk for {self.pipeline_id}: {e}",
+                    exc_info=True,
+                )
+            else:
+                raise e
+
+        self.is_prepared = True
+
+    def _push_frames_to_output_queues(
+        self, output_dict: dict, processing_time: float
+    ):
+        """Distribute pipeline output dict to named output queues.
+
+        For each key in output_dict that has a matching output queue,
+        normalize the tensor to uint8 and push frames one-by-one.
+        """
+        for key, value in output_dict.items():
+            out_q = self.output_queues.get(key)
+            if out_q is None:
+                continue
+
+            if not isinstance(value, torch.Tensor):
+                continue
+
+            # Normalize to [0, 255] uint8 (same as linear mode video handling)
+            output = (
+                (value * 255.0)
+                .clamp(0, 255)
+                .to(dtype=torch.uint8)
+                .contiguous()
+                .detach()
+            )
+
+            num_frames = output.shape[0]
+            if num_frames > 0:
+                self.throttler.record_output_batch(num_frames, processing_time)
+
+            # Push frames one-by-one as (1, H, W, C)
+            for frame in output:
+                frame = frame.unsqueeze(0)
+                self._track_output_frame()
+                try:
+                    out_q.put_nowait(frame)
+                except queue.Full:
+                    logger.info(
+                        f"[DAG] Output queue full for {self.pipeline_id}:{key}, "
+                        f"dropping frame"
+                    )
 
     def _track_output_frame(self):
         """Track when a frame is added to the output queue (production rate).

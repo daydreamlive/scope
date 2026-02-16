@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any
 import torch
 from aiortc.mediastreams import VideoFrame
 
+from scope.core.pipelines.dag import DagEdge, DagGraph, DagNode
+
+from .dag_executor import BroadcastQueue, DagExecutor
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
@@ -29,6 +32,53 @@ DEFAULT_FPS = 30.0  # Default FPS
 
 # Heartbeat interval for stream stats logging and Kafka events
 HEARTBEAT_INTERVAL_SECONDS = 10.0
+
+# Known DAG patterns: maps frozenset of pipeline_ids to a DagGraph
+YOLO_LONGLIVE_GRAPH = DagGraph(
+    nodes=[
+        DagNode(id="yolo", pipeline_id="yolo_mask"),
+        DagNode(id="longlive", pipeline_id="longlive"),
+    ],
+    edges=[
+        # Input video fans out to both pipelines
+        DagEdge(
+            source_node="__input__",
+            source_port="video",
+            target_node="yolo",
+            target_port="video",
+        ),
+        DagEdge(
+            source_node="__input__",
+            source_port="video",
+            target_node="longlive",
+            target_port="video",
+        ),
+        # YOLO outputs feed LongLive's VACE inputs
+        DagEdge(
+            source_node="yolo",
+            source_port="vace_input_frames",
+            target_node="longlive",
+            target_port="vace_input_frames",
+        ),
+        DagEdge(
+            source_node="yolo",
+            source_port="vace_input_masks",
+            target_node="longlive",
+            target_port="vace_input_masks",
+        ),
+    ],
+    output_node="longlive",
+    output_port="video",
+)
+
+KNOWN_DAG_PATTERNS: dict[frozenset[str], DagGraph] = {
+    frozenset({"yolo_mask", "longlive"}): YOLO_LONGLIVE_GRAPH,
+}
+
+
+def _detect_dag_graph(pipeline_ids: list[str]) -> DagGraph | None:
+    """Check if pipeline_ids match a known DAG pattern."""
+    return KNOWN_DAG_PATTERNS.get(frozenset(pipeline_ids))
 
 
 class FrameProcessor:
@@ -104,6 +154,11 @@ class FrameProcessor:
         # Pipeline chaining support
         self.pipeline_processors: list[PipelineProcessor] = []
         self.pipeline_ids: list[str] = []
+
+        # DAG mode state
+        self._dag_graph: DagGraph | None = None
+        self._dag_input_queue = None  # queue.Queue or BroadcastQueue
+        self._dag_output_queue: queue.Queue | None = None
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -187,10 +242,19 @@ class FrameProcessor:
             )
             return
 
+        # Check for known DAG patterns before falling back to linear chain
+        self._dag_graph = _detect_dag_graph(self.pipeline_ids)
+
         try:
-            self._setup_pipeline_chain_sync()
+            if self._dag_graph is not None:
+                logger.info(
+                    f"[FRAME-PROCESSOR] Detected DAG pattern for pipeline_ids={self.pipeline_ids}"
+                )
+                self._setup_pipeline_dag(self._dag_graph)
+            else:
+                self._setup_pipeline_chain_sync()
         except Exception as e:
-            logger.error(f"Pipeline chain setup failed: {e}")
+            logger.error(f"Pipeline setup failed: {e}")
             self.running = False
             # Publish error for pipeline setup failure
             publish_event(
@@ -235,8 +299,11 @@ class FrameProcessor:
         for processor in self.pipeline_processors:
             processor.stop()
 
-        # Clear pipeline processors
+        # Clear pipeline processors and DAG state
         self.pipeline_processors.clear()
+        self._dag_graph = None
+        self._dag_input_queue = None
+        self._dag_output_queue = None
 
         # Clean up output sink
         self.output_sink_enabled = False
@@ -365,30 +432,33 @@ class FrameProcessor:
                     return False
             return False
 
-        # Local mode: put into first processor's input queue
-        if self.pipeline_processors:
-            first_processor = self.pipeline_processors[0]
+        # Local mode: convert frame to tensor
+        frame_array = frame.to_ndarray(format="rgb24")
 
-            frame_array = frame.to_ndarray(format="rgb24")
+        if torch.cuda.is_available():
+            shape = frame_array.shape
+            pinned_buffer = self._get_or_create_pinned_buffer(shape)
+            # Note: We reuse pinned buffers for performance. This assumes the copy_()
+            # operation completes before the next frame arrives.
+            # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
+            pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
+            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+        else:
+            frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
 
-            if torch.cuda.is_available():
-                shape = frame_array.shape
-                pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                # Note: We reuse pinned buffers for performance. This assumes the copy_()
-                # operation completes before the next frame arrives.
-                # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
-                pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
-                frame_tensor = pinned_buffer.cuda(non_blocking=True)
-            else:
-                frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
+        frame_tensor = frame_tensor.unsqueeze(0)
 
-            frame_tensor = frame_tensor.unsqueeze(0)
-
-            # Put frame into first processor's input queue
+        # Route to DAG input or first processor's input queue
+        if self._dag_input_queue is not None:
             try:
-                first_processor.input_queue.put_nowait(frame_tensor)
+                self._dag_input_queue.put_nowait(frame_tensor)
             except queue.Full:
-                # Queue full, drop frame (non-blocking)
+                logger.debug("DAG input queue full, dropping frame")
+                return False
+        elif self.pipeline_processors:
+            try:
+                self.pipeline_processors[0].input_queue.put_nowait(frame_tensor)
+            except queue.Full:
                 logger.debug("First processor input queue full, dropping frame")
                 return False
 
@@ -408,8 +478,17 @@ class FrameProcessor:
                 frame = torch.from_numpy(frame_np)
             except queue.Empty:
                 return None
+        elif self._dag_output_queue is not None:
+            # DAG mode: get from DAG output queue
+            try:
+                frame = self._dag_output_queue.get_nowait()
+                frame = frame.squeeze(0)
+                if frame.is_cuda:
+                    frame = frame.cpu()
+            except queue.Empty:
+                return None
         else:
-            # Local mode: get from pipeline processor
+            # Linear chain mode: get from last pipeline processor
             if not self.pipeline_processors:
                 return None
 
@@ -863,9 +942,7 @@ class FrameProcessor:
                         if self._video_mode and self.cloud_manager:
                             if self.cloud_manager.send_frame(rgb_frame):
                                 self._frames_to_cloud += 1
-                    elif self.pipeline_processors:
-                        first_processor = self.pipeline_processors[0]
-
+                    else:
                         if torch.cuda.is_available():
                             shape = rgb_frame.shape
                             pinned_buffer = self._get_or_create_pinned_buffer(shape)
@@ -878,13 +955,25 @@ class FrameProcessor:
 
                         frame_tensor = frame_tensor.unsqueeze(0)
 
-                        try:
-                            first_processor.input_queue.put_nowait(frame_tensor)
-                        except queue.Full:
-                            logger.debug(
-                                f"First processor input queue full, "
-                                f"dropping {self.input_source_type} frame"
-                            )
+                        # Route to DAG input or first processor
+                        if self._dag_input_queue is not None:
+                            try:
+                                self._dag_input_queue.put_nowait(frame_tensor)
+                            except queue.Full:
+                                logger.debug(
+                                    f"DAG input queue full, "
+                                    f"dropping {self.input_source_type} frame"
+                                )
+                        elif self.pipeline_processors:
+                            try:
+                                self.pipeline_processors[0].input_queue.put_nowait(
+                                    frame_tensor
+                                )
+                            except queue.Full:
+                                logger.debug(
+                                    f"First processor input queue full, "
+                                    f"dropping {self.input_source_type} frame"
+                                )
 
                     frame_count += 1
                     if frame_count % 100 == 0:
@@ -902,6 +991,27 @@ class FrameProcessor:
         logger.info(
             f"Input source thread stopped ({self.input_source_type}) "
             f"after {frame_count} frames"
+        )
+
+    def _setup_pipeline_dag(self, graph: DagGraph):
+        """Set up pipeline processors wired as a DAG."""
+        executor = DagExecutor()
+        self.pipeline_processors, self._dag_input_queue, self._dag_output_queue = (
+            executor.setup(
+                graph=graph,
+                pipeline_manager=self.pipeline_manager,
+                parameters=self.parameters,
+                session_id=self.session_id,
+                user_id=self.user_id,
+                connection_id=self.connection_id,
+                connection_info=self.connection_info,
+            )
+        )
+        for processor in self.pipeline_processors:
+            processor.start()
+
+        logger.info(
+            f"Created DAG pipeline with {len(self.pipeline_processors)} processors"
         )
 
     def _setup_pipeline_chain_sync(self):
