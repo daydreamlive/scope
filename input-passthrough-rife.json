@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {"id": "input", "type": "source"},
+    {"id": "passthrough", "type": "pipeline", "pipeline_id": "passthrough"},
+    {"id": "rife", "type": "pipeline", "pipeline_id": "rife"},
+    {"id": "output", "type": "sink"}
+  ],
+  "edges": [
+    {"from": "input", "from_port": "video", "to_node": "passthrough", "to_port": "video", "kind": "stream"},
+    {"from": "passthrough", "from_port": "video", "to_node": "rife", "to_port": "video", "kind": "stream"},
+    {"from": "rife", "from_port": "video", "to_node": "output", "to_port": "video", "kind": "stream"}
+  ]
+}

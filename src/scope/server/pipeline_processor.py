@@ -443,6 +443,11 @@ class PipelineProcessor:
                         call_params["vace_input_frames"] = chunks["video"]
                     else:
                         call_params["video"] = chunks["video"]
+                # Pass any other stream ports (e.g. video2 for combine_streams)
+                for port, frame_list in chunks.items():
+                    if port in ("video", "vace_input_frames", "vace_input_masks"):
+                        continue
+                    call_params[port] = frame_list
 
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
