@@ -306,6 +306,8 @@ def generate_video_stream(
     Writes output to temp file incrementally, returns output_path for download.
     """
     _cancel_event.clear()
+    output_file_path = None
+    completed = False
 
     try:
         pipeline = pipeline_manager.get_pipeline_by_id(request.pipeline_id)
@@ -377,6 +379,101 @@ def generate_video_stream(
                     dtype,
                     logger,
                 )
+
+                # Log chunk operations
+                logger.info(
+                    f"generate_video_stream: Starting chunk {chunk_idx + 1}/{num_chunks}"
+                )
+
+                # Cache management
+                if kwargs.get("init_cache"):
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Resetting cache (init_cache=True)"
+                    )
+
+                # Prompt updates
+                if "prompts" in kwargs:
+                    prompt_texts = [p["text"] for p in kwargs["prompts"]]
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Updating prompt to {prompt_texts}"
+                    )
+
+                # Temporal transitions
+                if "transition" in kwargs:
+                    target_texts = [
+                        p["text"] for p in kwargs["transition"]["target_prompts"]
+                    ]
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Temporal transition to {target_texts} "
+                        f"over {kwargs['transition']['num_steps']} steps "
+                        f"(method: {kwargs['transition']['temporal_interpolation_method']})"
+                    )
+
+                # Keyframes
+                if "first_frame_image" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Using first frame keyframe"
+                    )
+                if "last_frame_image" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Using last frame keyframe"
+                    )
+                if "extension_mode" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Extension mode: {kwargs['extension_mode']}"
+                    )
+
+                # VACE
+                if "vace_ref_images" in kwargs:
+                    num_refs = len(kwargs["vace_ref_images"])
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Using {num_refs} VACE reference images"
+                    )
+                if "vace_input_frames" in kwargs:
+                    vace_shape = kwargs["vace_input_frames"].shape
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: VACE input frames shape: {vace_shape}"
+                    )
+                if "vace_input_masks" in kwargs:
+                    mask_shape = kwargs["vace_input_masks"].shape
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: VACE input masks shape: {mask_shape}"
+                    )
+                if (
+                    "vace_context_scale" in kwargs
+                    and kwargs["vace_context_scale"] != 1.0
+                ):
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: VACE context scale: {kwargs['vace_context_scale']}"
+                    )
+                if "vace_use_input_video" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: VACE use input video: {kwargs['vace_use_input_video']}"
+                    )
+
+                # Video-to-video
+                if "video" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Video-to-video mode with {len(kwargs['video'])} frames, noise_scale={kwargs.get('noise_scale', DEFAULT_NOISE_SCALE)}"
+                    )
+                elif "num_frames" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Text-to-video mode generating {kwargs['num_frames']} frames"
+                    )
+
+                # Other parameters
+                if "denoising_step_list" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Denoising steps: {kwargs['denoising_step_list']}"
+                    )
+                if "noise_controller" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: Using noise controller: {kwargs['noise_controller']}"
+                    )
+                if "kv_cache_attention_bias" in kwargs:
+                    logger.info(
+                        f"generate_video_stream: Chunk {chunk_idx}: KV cache attention bias: {kwargs['kv_cache_attention_bias']}"
+                    )
 
                 # Run pipeline
                 chunk_start = time.time()
@@ -455,6 +552,7 @@ def generate_video_stream(
                 "chunk_size": chunk_size,
             },
         )
+        completed = True
 
     except Exception as e:
         logger.exception("Error generating video")
@@ -468,3 +566,11 @@ def generate_video_stream(
                 logger.info(f"Cleaned up input file: {request.input_path}")
             except Exception as e:
                 logger.warning(f"Failed to clean up input file: {e}")
+
+        # Clean up output file if generation didn't complete successfully
+        if not completed and output_file_path:
+            try:
+                Path(output_file_path).unlink(missing_ok=True)
+                logger.info(f"Cleaned up orphaned output file: {output_file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up output file: {e}")
