@@ -220,7 +220,7 @@ export function redirectToSignIn(): void {
   const state = generateAuthState();
   storeAuthState(state);
 
-  const authUrl = `${DAYDREAM_AUTH_URL}?redirect_url=${encodeURIComponent(getRedirectUrl())}&state=${encodeURIComponent(state)}`;
+  const authUrl = `${DAYDREAM_AUTH_URL}?redirect_url=${encodeURIComponent(getRedirectUrl())}&state=${encodeURIComponent(state)}&utm_source=scope`;
 
   if (isElectron()) {
     // Open in system browser via Electron IPC
