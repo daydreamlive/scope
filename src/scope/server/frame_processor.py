@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 import torch
 from aiortc.mediastreams import VideoFrame
 
+from .dag_executor import DagRun, build_dag, linear_dag_from_pipeline_ids
+from .dag_schema import DagConfig
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
@@ -101,9 +103,11 @@ class FrameProcessor:
         # Input mode: video waits for frames, text generates immediately
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Pipeline chaining support
+        # Pipeline chaining / DAG support
         self.pipeline_processors: list[PipelineProcessor] = []
         self.pipeline_ids: list[str] = []
+        # DAG run (set when using DAG executor; enables shared input and multi-port)
+        self._dag_run: DagRun | None = None
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -235,8 +239,9 @@ class FrameProcessor:
         for processor in self.pipeline_processors:
             processor.stop()
 
-        # Clear pipeline processors
+        # Clear pipeline processors and DAG run
         self.pipeline_processors.clear()
+        self._dag_run = None
 
         # Clean up output sink
         self.output_sink_enabled = False
@@ -365,18 +370,13 @@ class FrameProcessor:
                     return False
             return False
 
-        # Local mode: put into first processor's input queue
+        # Local mode: put into source queue(s) (DAG) or first processor's input queue (chain)
         if self.pipeline_processors:
-            first_processor = self.pipeline_processors[0]
-
             frame_array = frame.to_ndarray(format="rgb24")
 
             if torch.cuda.is_available():
                 shape = frame_array.shape
                 pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                # Note: We reuse pinned buffers for performance. This assumes the copy_()
-                # operation completes before the next frame arrives.
-                # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
                 pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
                 frame_tensor = pinned_buffer.cuda(non_blocking=True)
             else:
@@ -384,13 +384,23 @@ class FrameProcessor:
 
             frame_tensor = frame_tensor.unsqueeze(0)
 
-            # Put frame into first processor's input queue
-            try:
-                first_processor.input_queue.put_nowait(frame_tensor)
-            except queue.Full:
-                # Queue full, drop frame (non-blocking)
-                logger.debug("First processor input queue full, dropping frame")
-                return False
+            if self._dag_run and self._dag_run.source_queues:
+                # DAG: fan-out to all source queues (e.g. shared input -> yolo + longlive)
+                for i, q in enumerate(self._dag_run.source_queues):
+                    try:
+                        # Clone for 2nd+ queues so each consumer has its own tensor
+                        tensor = frame_tensor if i == 0 else frame_tensor.clone()
+                        q.put_nowait(tensor)
+                    except queue.Full:
+                        logger.debug("Source queue full, dropping frame")
+                        return False
+            else:
+                first_processor = self.pipeline_processors[0]
+                try:
+                    first_processor.input_queue.put_nowait(frame_tensor)
+                except queue.Full:
+                    logger.debug("First processor input queue full, dropping frame")
+                    return False
 
         return True
 
@@ -409,16 +419,20 @@ class FrameProcessor:
             except queue.Empty:
                 return None
         else:
-            # Local mode: get from pipeline processor
+            # Local mode: get from sink processor (DAG) or last in chain
             if not self.pipeline_processors:
                 return None
 
-            last_processor = self.pipeline_processors[-1]
-            if not last_processor.output_queue:
+            out_proc = (
+                self._dag_run.sink_processor
+                if self._dag_run and self._dag_run.sink_processor
+                else self.pipeline_processors[-1]
+            )
+            if not out_proc.output_queue:
                 return None
 
             try:
-                frame = last_processor.output_queue.get_nowait()
+                frame = out_proc.output_queue.get_nowait()
                 # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
                 # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
                 frame = frame.squeeze(0)
@@ -496,9 +510,12 @@ class FrameProcessor:
         if not self.pipeline_processors:
             return DEFAULT_FPS
 
-        # Get FPS from the last processor in the chain
-        last_processor = self.pipeline_processors[-1]
-        return last_processor.get_fps()
+        out_proc = (
+            self._dag_run.sink_processor
+            if self._dag_run and self._dag_run.sink_processor
+            else self.pipeline_processors[-1]
+        )
+        return out_proc.get_fps()
 
     def _log_frame_stats(self):
         """Log frame processing statistics and emit heartbeat event."""
@@ -905,43 +922,45 @@ class FrameProcessor:
         )
 
     def _setup_pipeline_chain_sync(self):
-        """Create pipeline processor chain (synchronous).
+        """Create pipeline DAG or linear chain (synchronous).
 
+        Uses DAG executor: if parameters contain "dag", build from that config;
+        otherwise build a linear DAG from pipeline_ids (backward compatible).
         Assumes all pipelines are already loaded by the pipeline manager.
         """
-        if not self.pipeline_ids:
-            logger.error("No pipeline IDs provided")
+        if not self.pipeline_ids and not self.parameters.get("dag"):
+            logger.error("No pipeline IDs or DAG config provided")
             return
 
-        # Create pipeline processors (each creates its own queues)
-        for pipeline_id in self.pipeline_ids:
-            # Get pipeline instance from manager
-            pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+        dag_config: DagConfig
+        dag_raw = self.parameters.get("dag")
+        if isinstance(dag_raw, dict):
+            dag_config = DagConfig.model_validate(dag_raw)
+        elif isinstance(dag_raw, str):
+            dag_config = DagConfig.model_validate_json(dag_raw)
+        else:
+            dag_config = linear_dag_from_pipeline_ids(self.pipeline_ids)
 
-            # Create processor with its own queues
-            processor = PipelineProcessor(
-                pipeline=pipeline,
-                pipeline_id=pipeline_id,
-                initial_parameters=self.parameters.copy(),
-                session_id=self.session_id,
-                user_id=self.user_id,
-                connection_id=self.connection_id,
-                connection_info=self.connection_info,
-            )
+        self._dag_run = build_dag(
+            dag=dag_config,
+            pipeline_manager=self.pipeline_manager,
+            initial_parameters=self.parameters.copy(),
+            session_id=self.session_id,
+            user_id=self.user_id,
+            connection_id=self.connection_id,
+            connection_info=self.connection_info,
+        )
 
-            self.pipeline_processors.append(processor)
+        self.pipeline_processors = self._dag_run.processors
+        if self._dag_run.pipeline_ids:
+            self.pipeline_ids = self._dag_run.pipeline_ids
 
-        for i in range(1, len(self.pipeline_processors)):
-            prev_processor = self.pipeline_processors[i - 1]
-            curr_processor = self.pipeline_processors[i]
-            prev_processor.set_next_processor(curr_processor)
-
-        # Start all processors
         for processor in self.pipeline_processors:
             processor.start()
 
         logger.info(
-            f"Created pipeline chain with {len(self.pipeline_processors)} processors"
+            f"Created pipeline DAG with {len(self.pipeline_processors)} processor(s): "
+            f"{self.pipeline_ids}"
         )
 
     def __enter__(self):

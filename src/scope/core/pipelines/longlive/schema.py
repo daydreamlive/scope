@@ -17,6 +17,9 @@ from ..utils import VaeType
 class LongLiveConfig(BasePipelineConfig):
     pipeline_id = "longlive"
     pipeline_name = "LongLive"
+    # DAG: accepts main video and optional VACE inputs from upstream (e.g. YOLO plugin)
+    stream_inputs = ["video", "vace_input_frames", "vace_input_masks"]
+    stream_outputs = ["video"]
     pipeline_description = (
         "A streaming pipeline and autoregressive video diffusion model from Nvidia, MIT, HKUST, HKU and THU. "
         "The model is trained using Self-Forcing on Wan2.1 1.3b with modifications to support smoother prompt "

@@ -245,6 +245,13 @@ class BasePipelineConfig(BaseModel):
     # to appear in the preprocessor dropdown.
     usage: ClassVar[list[UsageType]] = []
 
+    # DAG port declaration: named inputs/outputs for graph wiring.
+    # stream_inputs = port names this pipeline reads from (e.g. "video", "vace_input_frames").
+    # stream_outputs = port names this pipeline writes to (e.g. "video", "vace_input_masks").
+    # Used by the DAG executor to connect queues and parameter forwarding.
+    stream_inputs: ClassVar[list[str]] = ["video"]
+    stream_outputs: ClassVar[list[str]] = ["video"]
+
     # Mode configuration - keys are mode names, values are ModeDefaults with field overrides
     # Use default=True to mark the default mode. Only include fields that differ from base.
     modes: ClassVar[dict[str, ModeDefaults]] = {"text": ModeDefaults(default=True)}

@@ -61,9 +61,15 @@ class PipelineProcessor:
         self.connection_id = connection_id
         self.connection_info = connection_info
 
-        # Each processor creates its own queues
-        self.input_queue = queue.Queue(maxsize=30)
-        self.output_queue = queue.Queue(maxsize=8)
+        # Unified port-based queues: all frame streams (video, vace_input_frames, etc.) use queues
+        self.input_queues: dict[str, queue.Queue] = {
+            "video": queue.Queue(maxsize=30),
+        }
+        self.output_queues: dict[str, list[queue.Queue]] = {
+            "video": [queue.Queue(maxsize=8)],
+        }
+        # Primary queue refs for backward compat (chain mode, get_fps, resize)
+        self.input_queue = self.input_queues["video"]
         # Lock to protect input_queue assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
@@ -110,34 +116,27 @@ class PipelineProcessor:
         self.throttler = PipelineThrottler()
 
     def _resize_output_queue(self, target_size: int):
-        """Resize the output queue to the target size, transferring existing frames.
-
-        Args:
-            target_size: The desired maximum size for the output queue
-        """
-        if self.output_queue is None:
+        """Resize the primary video output queue, transferring existing frames."""
+        video_queues = self.output_queues.get("video")
+        if not video_queues:
             return
-
-        if self.output_queue.maxsize < target_size:
+        primary = video_queues[0]
+        if primary.maxsize < target_size:
             logger.info(
-                f"Increasing output queue size to {target_size}, current size {self.output_queue.maxsize}"
+                f"Increasing output queue size to {target_size}, current size {primary.maxsize}"
             )
-
-            # Transfer frames from old queue to new queue
-            old_queue = self.output_queue
-            self.output_queue = queue.Queue(maxsize=target_size)
-            while not old_queue.empty():
+            new_queue = queue.Queue(maxsize=target_size)
+            while not primary.empty():
                 try:
-                    frame = old_queue.get_nowait()
-                    self.output_queue.put_nowait(frame)
+                    frame = primary.get_nowait()
+                    new_queue.put_nowait(frame)
                 except queue.Empty:
                     break
-
-            # Update next processor's input_queue to point to the new output_queue
-            # Use lock to ensure thread-safe reference swapping
+            self.output_queues["video"] = [new_queue] + video_queues[1:]
             if self.next_processor is not None:
                 with self.next_processor.input_queue_lock:
-                    self.next_processor.input_queue = self.output_queue
+                    self.next_processor.input_queues["video"] = new_queue
+                    self.next_processor.input_queue = new_queue
 
     def set_next_processor(self, next_processor: "PipelineProcessor"):
         """Set the next processor in the chain and update output queue size accordingly.
@@ -161,7 +160,14 @@ class PipelineProcessor:
         # Update next processor's input_queue to point to this output_queue
         # Use lock to ensure thread-safe reference swapping
         with next_processor.input_queue_lock:
-            next_processor.input_queue = self.output_queue
+            next_processor.input_queues["video"] = self.output_queues["video"][0]
+            next_processor.input_queue = next_processor.input_queues["video"]
+
+    @property
+    def output_queue(self) -> queue.Queue | None:
+        """Primary video output queue (for chain mode and sink get())."""
+        queues = self.output_queues.get("video")
+        return queues[0] if queues else None
 
     def start(self):
         """Start the pipeline processor thread."""
@@ -199,12 +205,13 @@ class PipelineProcessor:
                 except queue.Empty:
                     break
 
-        if self.output_queue:
-            while not self.output_queue.empty():
-                try:
-                    self.output_queue.get_nowait()
-                except queue.Empty:
-                    break
+        for queues in self.output_queues.values():
+            for q in queues:
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
 
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
@@ -267,47 +274,47 @@ class PipelineProcessor:
         self, input_queue_ref: queue.Queue, chunk_size: int
     ) -> list[torch.Tensor]:
         """
-        Sample frames uniformly from the queue, convert them to tensors, and remove processed frames.
-
-        This function implements uniform sampling across the entire queue to ensure
-        temporal coverage of input frames. It samples frames at evenly distributed
-        indices and removes all frames up to the last sampled frame to prevent
-        queue buildup.
-
-        Note:
-            This function must be called with a queue reference obtained while holding
-            input_queue_lock. The caller is responsible for thread safety.
-
-        Example:
-            With queue_size=8 and chunk_size=4:
-            - step = 8/4 = 2.0
-            - indices = [0, 2, 4, 6] (uniformly distributed)
-            - Returns frames at positions 0, 2, 4, 6
-            - Removes frames 0-6 from queue (7 frames total)
-            - Keeps frame 7 in queue
-
-        Args:
-            input_queue_ref: Reference to the input queue (obtained while holding lock)
-            chunk_size: Number of frames to sample
-
-        Returns:
-            List of tensor frames, each (1, H, W, C) for downstream preprocess_chunk
+        Sample frames uniformly from one queue (used when only video port is present).
         """
-
-        # Calculate uniform sampling step
         step = input_queue_ref.qsize() / chunk_size
-        # Generate indices for uniform sampling
         indices = [round(i * step) for i in range(chunk_size)]
-        # Extract VideoFrames at sampled indices
         video_frames = []
-
-        # Drop all frames up to and including the last sampled frame
         last_idx = indices[-1]
         for i in range(last_idx + 1):
             frame = input_queue_ref.get_nowait()
             if i in indices:
                 video_frames.append(frame)
         return video_frames
+
+    def prepare_multi_chunk(
+        self,
+        input_queues_ref: dict[str, queue.Queue],
+        primary_port: str,
+        chunk_size: int,
+    ) -> dict[str, list[torch.Tensor]]:
+        """
+        Sample frames uniformly from the primary queue, then the same indices from other ports.
+
+        Returns dict mapping port name to list of tensors (each 1,H,W,C). All ports
+        must have at least as many frames as we consume from the primary.
+        """
+        primary = input_queues_ref.get(primary_port)
+        if primary is None or primary.qsize() < chunk_size:
+            return {}
+        step = primary.qsize() / chunk_size
+        indices = [round(i * step) for i in range(chunk_size)]
+        last_idx = indices[-1]
+        out: dict[str, list[torch.Tensor]] = {port: [] for port in input_queues_ref}
+        for port, q in input_queues_ref.items():
+            if q.qsize() <= last_idx:
+                return {}
+        for port in input_queues_ref:
+            q = input_queues_ref[port]
+            for i in range(last_idx + 1):
+                frame = q.get_nowait()
+                if i in indices:
+                    out[port].append(frame)
+        return out
 
     def process_chunk(self):
         """Process a single chunk of frames."""
@@ -361,16 +368,16 @@ class PipelineProcessor:
         reset_cache = self.parameters.pop("reset_cache", None)
         lora_scales = self.parameters.pop("lora_scales", None)
 
-        # Handle reset_cache: clear this processor's cache
+        # Handle reset_cache: clear this processor's output queues
         if reset_cache:
             logger.info(f"Clearing cache for pipeline processor: {self.pipeline_id}")
-            # Clear output queue
-            if self.output_queue:
-                while not self.output_queue.empty():
-                    try:
-                        self.output_queue.get_nowait()
-                    except queue.Empty:
-                        break
+            for queues in self.output_queues.values():
+                for q in queues:
+                    while not q.empty():
+                        try:
+                            q.get_nowait()
+                        except queue.Empty:
+                            break
 
         requirements = None
         if hasattr(self.pipeline, "prepare"):
@@ -380,25 +387,26 @@ class PipelineProcessor:
                 prepare_params["video"] = True
             requirements = self.pipeline.prepare(**prepare_params)
 
-        video_input = None
+        chunks: dict[str, list[torch.Tensor]] = {}
         input_frame_count = 0
         if requirements is not None:
             current_chunk_size = requirements.input_size
-
-            # Capture a local reference to input_queue while holding the lock
-            # This ensures thread-safe access even if input_queue is reassigned
             with self.input_queue_lock:
-                input_queue_ref = self.input_queue
-
-            # Check if queue has enough frames before consuming them
-            if input_queue_ref.qsize() < current_chunk_size:
-                # Not enough frames in queue, sleep briefly and try again next iteration
+                input_queues_ref = dict(self.input_queues)
+            primary = input_queues_ref.get("video")
+            if primary is None or primary.qsize() < current_chunk_size:
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
-
-            # Use prepare_chunk to uniformly sample frames from the queue
-            video_input = self.prepare_chunk(input_queue_ref, current_chunk_size)
-            input_frame_count = len(video_input) if video_input else 0
+            if len(input_queues_ref) == 1:
+                chunks["video"] = self.prepare_chunk(primary, current_chunk_size)
+            else:
+                chunks = self.prepare_multi_chunk(
+                    input_queues_ref, "video", current_chunk_size
+                )
+                if not chunks:
+                    self.shutdown_event.wait(SLEEP_TIME)
+                    return
+            input_frame_count = len(chunks.get("video") or [])
 
         try:
             # Pass parameters (excluding prepare-only parameters)
@@ -420,32 +428,29 @@ class PipelineProcessor:
                 # Reset mouse accumulator, keep key state
                 self.parameters["ctrl_input"]["mouse"] = [0.0, 0.0]
 
-            # Route video input based on VACE status
-            # Don't overwrite if preprocessor already provided vace_input_frames
-            if video_input is not None and "vace_input_frames" not in call_params:
-                if (
-                    self._pipeline_supports_vace
-                    and self.vace_enabled
-                    and self.vace_use_input_video
-                ):
-                    call_params["vace_input_frames"] = video_input
-                else:
-                    call_params["video"] = video_input
+            # Fill call_params from stream chunks
+            if chunks:
+                if "vace_input_frames" in chunks and "vace_input_masks" in chunks:
+                    call_params["vace_input_frames"] = chunks["vace_input_frames"]
+                    call_params["vace_input_masks"] = chunks["vace_input_masks"]
+                if "video" in chunks:
+                    if (
+                        self._pipeline_supports_vace
+                        and self.vace_enabled
+                        and self.vace_use_input_video
+                        and "vace_input_frames" not in call_params
+                    ):
+                        call_params["vace_input_frames"] = chunks["video"]
+                    else:
+                        call_params["video"] = chunks["video"]
 
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
 
-            # Extract video from the returned dictionary
             output = output_dict.get("video")
             if output is None:
                 return
-
-            # Forward extra params to downstream pipeline (dual-output pattern)
-            # Preprocessors return {"video": frames, "vace_input_frames": ..., "vace_input_masks": ...}
-            extra_params = {k: v for k, v in output_dict.items() if k != "video"}
-            if extra_params and self.next_processor is not None:
-                self.next_processor.update_parameters(extra_params)
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates
@@ -489,29 +494,40 @@ class PipelineProcessor:
                 .detach()
             )
 
-            # Resize output queue to meet target max size
+            # Resize primary video output queue to meet target max size
             target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
             self._resize_output_queue(target_output_queue_max_size)
 
-            # Put frames in output queue
-            # For intermediate pipelines, output goes to next pipeline's input
-            # For last pipeline, output goes to frame_processor's output_queue
-            # Output frames are [H, W, C], convert to [1, H, W, C] for consistency
-            for frame in output:
-                frame = frame.unsqueeze(0)
-                # Track when a frame is ready (production rate)
-                self._track_output_frame()
-                try:
-                    self.output_queue.put_nowait(frame)
-                except queue.Full:
-                    logger.info(
-                        f"Output queue full for {self.pipeline_id}, dropping processed frame"
-                    )
+            # Put each output port's frames to its queues (all frame ports are streamed)
+            for port, value in output_dict.items():
+                if value is None or not isinstance(value, torch.Tensor):
                     continue
+                queues = self.output_queues.get(port)
+                if not queues:
+                    continue
+                if value.dtype != torch.uint8:
+                    value = (
+                        (value * 255.0)
+                        .clamp(0, 255)
+                        .to(dtype=torch.uint8)
+                        .contiguous()
+                        .detach()
+                    )
+                frames = [value[i].unsqueeze(0) for i in range(value.shape[0])]
+                for frame in frames:
+                    if port == "video":
+                        self._track_output_frame()
+                    for q in queues:
+                        try:
+                            q.put_nowait(frame if q is queues[0] else frame.clone())
+                        except queue.Full:
+                            if port == "video":
+                                logger.info(
+                                    f"Output queue full for {self.pipeline_id}, dropping frame"
+                                )
+                            break
 
-            # Apply throttling if this pipeline is producing faster than next can consume
-            # Only throttle if: (1) has video input, (2) has next processor
-            if video_input is not None and self.next_processor is not None:
+            if chunks and self.next_processor is not None:
                 self.throttler.throttle()
 
         except Exception as e:
