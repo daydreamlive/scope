@@ -60,7 +60,7 @@ from .logs_config import (
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
-    get_models_dir,
+    get_lora_dir,
     models_are_downloaded,
 )
 from .pipeline_manager import PipelineManager
@@ -835,7 +835,7 @@ async def list_lora_files(
                 lora_files=[LoRAFileInfo(**f) for f in data.get("lora_files", [])]
             )
 
-        lora_dir = get_models_dir() / "lora"
+        lora_dir = get_lora_dir()
         lora_files: list[LoRAFileInfo] = []
 
         for file_path in iter_files(lora_dir, LORA_EXTENSIONS):
@@ -914,7 +914,7 @@ async def download_lora_file(
                 detail=f"Invalid file extension '{ext}'. Allowed: {', '.join(sorted(LORA_EXTENSIONS))}",
             )
 
-        lora_dir = get_models_dir() / "lora"
+        lora_dir = get_lora_dir()
         dest_path = lora_dir / filename
 
         if dest_path.exists():

@@ -8,6 +8,10 @@ Provides centralized configuration for model storage location with support for:
 And assets storage location with support for:
 - Default location: ~/.daydream-scope/assets (or sibling to models dir)
 - Environment variable override: DAYDREAM_SCOPE_ASSETS_DIR
+
+And LoRA storage location with support for:
+- Default location: ~/.daydream-scope/models/lora (or subdirectory of models dir)
+- Environment variable override: DAYDREAM_SCOPE_LORA_DIR
 """
 
 import logging
@@ -24,6 +28,9 @@ MODELS_DIR_ENV_VAR = "DAYDREAM_SCOPE_MODELS_DIR"
 
 # Environment variable for overriding assets directory
 ASSETS_DIR_ENV_VAR = "DAYDREAM_SCOPE_ASSETS_DIR"
+
+# Environment variable for overriding lora directory
+LORA_DIR_ENV_VAR = "DAYDREAM_SCOPE_LORA_DIR"
 
 
 def get_models_dir() -> Path:
@@ -51,7 +58,7 @@ def get_models_dir() -> Path:
 def ensure_models_dir() -> Path:
     """
     Get the models directory path and ensure it exists.
-    Also ensures the models/lora subdirectory exists.
+    Also ensures the LoRA directory exists.
 
     Returns:
         Path: Absolute path to the models directory
@@ -59,9 +66,8 @@ def ensure_models_dir() -> Path:
     models_dir = get_models_dir()
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    # Ensure the lora subdirectory exists
-    lora_dir = models_dir / "lora"
-    lora_dir.mkdir(parents=True, exist_ok=True)
+    # Ensure the lora directory exists (uses DAYDREAM_SCOPE_LORA_DIR if set)
+    ensure_lora_dir()
 
     return models_dir
 
@@ -102,6 +108,41 @@ def get_assets_dir() -> Path:
     # Get the parent directory (e.g., ~/.daydream-scope) and create assets directory there
     assets_dir = models_dir.parent / "assets"
     return assets_dir
+
+
+def get_lora_dir() -> Path:
+    """
+    Get the LoRA directory path.
+
+    Priority order:
+    1. DAYDREAM_SCOPE_LORA_DIR environment variable
+    2. Subdirectory of models directory (e.g., ~/.daydream-scope/models/lora)
+
+    Returns:
+        Path: Absolute path to the LoRA directory
+    """
+    # Check environment variable first
+    env_dir = os.environ.get(LORA_DIR_ENV_VAR)
+    if env_dir:
+        lora_dir = Path(env_dir).expanduser().resolve()
+        return lora_dir
+
+    # Default: subdirectory of models directory
+    models_dir = get_models_dir()
+    lora_dir = models_dir / "lora"
+    return lora_dir
+
+
+def ensure_lora_dir() -> Path:
+    """
+    Get the LoRA directory path and ensure it exists.
+
+    Returns:
+        Path: Absolute path to the LoRA directory
+    """
+    lora_dir = get_lora_dir()
+    lora_dir.mkdir(parents=True, exist_ok=True)
+    return lora_dir
 
 
 def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:

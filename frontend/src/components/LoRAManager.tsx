@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import { SliderWithInput } from "./ui/slider-with-input";
 import {
@@ -69,6 +69,26 @@ export function LoRAManager({
     });
     setLocalScales(newLocalScales);
   }, [loras]);
+
+  // Track cloud connection state and clear LoRAs when it changes
+  // (switching between local/cloud means different LoRA file lists)
+  const prevCloudConnectedRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    // On first render, just store the initial state
+    if (prevCloudConnectedRef.current === null) {
+      prevCloudConnectedRef.current = isCloudConnected;
+      return;
+    }
+
+    // Clear LoRAs when cloud connection state changes (connected or disconnected)
+    if (prevCloudConnectedRef.current !== isCloudConnected) {
+      onLorasChange([]);
+      loadAvailableLoRAs();
+    }
+
+    prevCloudConnectedRef.current = isCloudConnected;
+  }, [isCloudConnected, onLorasChange]);
 
   const handleAddLora = () => {
     const newLora: LoRAConfig = {
