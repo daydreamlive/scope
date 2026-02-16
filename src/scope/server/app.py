@@ -1259,16 +1259,22 @@ async def stream_input_source_preview(
         max_w = 320
         interval = 1.0 / fps
         receiver = None
+        loop = asyncio.get_event_loop()
 
         try:
             # Create persistent receiver
             receiver = source_class()
-            if not receiver.connect(identifier):
+            connected = await loop.run_in_executor(
+                None, receiver.connect, identifier
+            )
+            if not connected:
                 logger.warning(f"Preview stream: could not connect to '{identifier}'")
                 return
 
             while True:
-                frame = receiver.receive_frame(timeout_ms=200)
+                frame = await loop.run_in_executor(
+                    None, receiver.receive_frame, 200
+                )
 
                 if frame is not None:
                     h, w = frame.shape[:2]

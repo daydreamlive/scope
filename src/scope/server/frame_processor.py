@@ -236,13 +236,21 @@ class FrameProcessor:
 
         # Clean up all output sinks
         for sink_type, entry in list(self.output_sinks.items()):
-            try:
-                entry["queue"].put_nowait(None)
-            except queue.Full:
-                pass
+            q = entry["queue"]
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+            q.put_nowait(None)
+
             thread = entry.get("thread")
             if thread and thread.is_alive():
                 thread.join(timeout=2.0)
+                if thread.is_alive():
+                    logger.warning(
+                        f"Output sink thread '{sink_type}' did not stop within 2s"
+                    )
             try:
                 entry["sink"].close()
             except Exception as e:
@@ -708,13 +716,22 @@ class FrameProcessor:
         entry = self.output_sinks.pop(sink_type, None)
         if entry is None:
             return
-        try:
-            entry["queue"].put_nowait(None)
-        except queue.Full:
-            pass
+
+        q = entry["queue"]
+        while not q.empty():
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+        q.put_nowait(None)
+
         thread = entry.get("thread")
         if thread and thread.is_alive():
             thread.join(timeout=2.0)
+            if thread.is_alive():
+                logger.warning(
+                    f"Output sink thread '{sink_type}' did not stop within 2s"
+                )
         try:
             entry["sink"].close()
         except Exception as e:
