@@ -1264,17 +1264,13 @@ async def stream_input_source_preview(
         try:
             # Create persistent receiver
             receiver = source_class()
-            connected = await loop.run_in_executor(
-                None, receiver.connect, identifier
-            )
+            connected = await loop.run_in_executor(None, receiver.connect, identifier)
             if not connected:
                 logger.warning(f"Preview stream: could not connect to '{identifier}'")
                 return
 
             while True:
-                frame = await loop.run_in_executor(
-                    None, receiver.receive_frame, 200
-                )
+                frame = await loop.run_in_executor(None, receiver.receive_frame, 200)
 
                 if frame is not None:
                     h, w = frame.shape[:2]
