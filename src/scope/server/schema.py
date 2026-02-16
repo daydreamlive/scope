@@ -826,10 +826,38 @@ class ChunkFrameSpec(BaseModel):
 
 
 class ChunkPromptSpec(BaseModel):
-    """Specification for a prompt at a specific chunk."""
+    """Specification for a prompt at a specific chunk.
+
+    Supports both simple text and weighted prompt lists for spatial blending.
+    """
 
     chunk: int = Field(..., ge=0, description="Chunk index")
-    text: str = Field(..., description="Prompt text for this chunk")
+    text: str | None = Field(
+        default=None,
+        description="Simple prompt text for this chunk (mutually exclusive with prompts)",
+    )
+    prompts: list[PromptItem] | None = Field(
+        default=None,
+        description="Weighted prompt list for spatial blending at this chunk (mutually exclusive with text)",
+    )
+
+
+class ChunkTransitionSpec(BaseModel):
+    """Specification for a temporal transition starting at a specific chunk."""
+
+    chunk: int = Field(..., ge=0, description="Chunk index where transition starts")
+    target_prompts: list[PromptItem] = Field(
+        ..., description="Target prompt blend to interpolate to"
+    )
+    num_steps: int = Field(
+        default=4,
+        ge=0,
+        description="Number of generation calls to transition over (0 = instant)",
+    )
+    temporal_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="linear",
+        description="Method for temporal interpolation between blends across frames",
+    )
 
 
 class ChunkRefImagesSpec(BaseModel):
@@ -860,10 +888,17 @@ class GenerateRequest(BaseModel):
     """Request for batch video generation."""
 
     pipeline_id: str = Field(..., description="Pipeline ID to use for generation")
-    prompt: str = Field(..., description="Text prompt for generation (sent on chunk 0)")
+    prompt: str | list[PromptItem] = Field(
+        ...,
+        description="Text prompt for generation (sent on chunk 0). Can be a simple string or a list of weighted prompts for spatial blending.",
+    )
     chunk_prompts: list[ChunkPromptSpec] | None = Field(
         default=None,
-        description="Prompt changes at later chunks (sticky behavior). The prompt persists until the next specified chunk.",
+        description="Prompt changes at later chunks (sticky behavior). Each entry supports simple text or weighted prompt lists.",
+    )
+    transitions: list[ChunkTransitionSpec] | None = Field(
+        default=None,
+        description="Temporal transitions at specific chunks. Each specifies a target prompt blend and number of interpolation steps.",
     )
     num_frames: int = Field(
         default=64,
@@ -907,6 +942,10 @@ class GenerateRequest(BaseModel):
     manage_cache: bool = Field(
         default=True,
         description="Enable automatic cache management. Set to False to prevent cache resets when parameters change (e.g., LoRA scales).",
+    )
+    cache_reset_chunks: list[int] | None = Field(
+        default=None,
+        description="List of chunk indices where the KV cache should be forcibly reset (init_cache=True). Chunk 0 always resets.",
     )
     noise_controller: bool | None = Field(
         default=None,

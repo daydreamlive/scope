@@ -103,7 +103,8 @@ class DecodedInputs:
     first_frames: dict[int, str] = field(default_factory=dict)
     last_frames: dict[int, str] = field(default_factory=dict)
     ref_images: dict[int, list[str]] = field(default_factory=dict)
-    prompts: dict[int, str] = field(default_factory=dict)
+    prompts: dict[int, list[dict]] = field(default_factory=dict)
+    transitions: dict[int, dict] = field(default_factory=dict)
 
 
 def load_video_from_file(file_path: str) -> np.ndarray:
@@ -148,8 +149,36 @@ def decode_inputs(
     inputs.first_frames = build_lookup(request.first_frames, "image")
     inputs.last_frames = build_lookup(request.last_frames, "image")
     inputs.ref_images = build_lookup(request.vace_ref_images, "images")
-    inputs.prompts = {0: request.prompt}
-    inputs.prompts.update(build_lookup(request.chunk_prompts, "text"))
+    # Normalize prompt to weighted list format
+    if isinstance(request.prompt, str):
+        inputs.prompts = {0: [{"text": request.prompt, "weight": PROMPT_WEIGHT}]}
+    else:
+        inputs.prompts = {
+            0: [{"text": p.text, "weight": p.weight} for p in request.prompt]
+        }
+
+    # Chunk prompts: support both text and weighted prompt lists
+    if request.chunk_prompts:
+        for spec in request.chunk_prompts:
+            if spec.prompts:
+                inputs.prompts[spec.chunk] = [
+                    {"text": p.text, "weight": p.weight} for p in spec.prompts
+                ]
+            elif spec.text:
+                inputs.prompts[spec.chunk] = [
+                    {"text": spec.text, "weight": PROMPT_WEIGHT}
+                ]
+
+    # Build transitions lookup
+    if request.transitions:
+        for t in request.transitions:
+            inputs.transitions[t.chunk] = {
+                "target_prompts": [
+                    {"text": p.text, "weight": p.weight} for p in t.target_prompts
+                ],
+                "num_steps": t.num_steps,
+                "temporal_interpolation_method": t.temporal_interpolation_method,
+            }
 
     return inputs
 
@@ -173,15 +202,21 @@ def build_chunk_kwargs(
         "width": request.width
         or status_info.get("load_params", {}).get("width", DEFAULT_WIDTH),
         "base_seed": get_chunk_value(request.seed, chunk_idx, DEFAULT_SEED),
-        "init_cache": chunk_idx == 0,
+        "init_cache": chunk_idx == 0
+        or (
+            request.cache_reset_chunks is not None
+            and chunk_idx in request.cache_reset_chunks
+        ),
         "manage_cache": request.manage_cache,
     }
 
     # Prompt (sticky behavior - only send when it changes)
     if chunk_idx in inputs.prompts:
-        kwargs["prompts"] = [
-            {"text": inputs.prompts[chunk_idx], "weight": PROMPT_WEIGHT}
-        ]
+        kwargs["prompts"] = inputs.prompts[chunk_idx]
+
+    # Temporal transition
+    if chunk_idx in inputs.transitions:
+        kwargs["transition"] = inputs.transitions[chunk_idx]
 
     if request.denoising_steps:
         kwargs["denoising_step_list"] = request.denoising_steps
