@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { Switch } from "./ui/switch";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Upload, ArrowUp, RefreshCw } from "lucide-react";
@@ -18,7 +19,7 @@ import type {
   PromptTransition,
   DiscoveredSource,
 } from "../lib/api";
-import { getInputSourceSources, getInputSourcePreviewUrl } from "../lib/api";
+import { getInputSourceSources, getInputSourceStreamUrl } from "../lib/api";
 import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
@@ -183,21 +184,18 @@ export function InputAndControlsPanel({
     }
   }, []);
 
-  // NDI preview thumbnail
-  const [ndiPreviewUrl, setNdiPreviewUrl] = useState<string | null>(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  // Live MJPEG preview URL
+  const [showNdiPreview, setShowNdiPreview] = useState(false);
+  const ndiStreamUrl =
+    mode === "ndi" && selectedNdiSource && showNdiPreview
+      ? getInputSourceStreamUrl("ndi", selectedNdiSource)
+      : null;
+  const [isStreamLoaded, setIsStreamLoaded] = useState(false);
 
-  const fetchNdiPreview = useCallback((identifier: string) => {
-    if (!identifier) {
-      setNdiPreviewUrl(null);
-      return;
-    }
-    setIsLoadingPreview(true);
-    // Append a cache-buster so the browser always fetches a fresh frame
-    const url =
-      getInputSourcePreviewUrl("ndi", identifier) + `&_t=${Date.now()}`;
-    setNdiPreviewUrl(url);
-  }, []);
+  // Reset loaded state when the stream URL changes
+  useEffect(() => {
+    setIsStreamLoaded(false);
+  }, [ndiStreamUrl]);
 
   // Auto-discover NDI sources when switching to NDI mode
   useEffect(() => {
@@ -205,15 +203,6 @@ export function InputAndControlsPanel({
       discoverNdiSources();
     }
   }, [mode, ndiAvailable, discoverNdiSources]);
-
-  // Fetch preview when an NDI source is selected
-  useEffect(() => {
-    if (mode === "ndi" && selectedNdiSource) {
-      fetchNdiPreview(selectedNdiSource);
-    } else {
-      setNdiPreviewUrl(null);
-    }
-  }, [mode, selectedNdiSource, fetchNdiPreview]);
 
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
@@ -409,33 +398,39 @@ export function InputAndControlsPanel({
                     />
                   </Button>
                 </div>
-                {/* NDI source preview thumbnail */}
+                {/* Preview toggle */}
                 {selectedNdiSource && (
-                  <div
-                    className="relative rounded-md overflow-hidden border border-border bg-muted cursor-pointer min-w-0"
-                    onClick={() => fetchNdiPreview(selectedNdiSource)}
-                    title="Click to refresh preview"
-                  >
-                    {ndiPreviewUrl ? (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Switch
+                      id="ndi-preview-toggle"
+                      checked={showNdiPreview}
+                      onCheckedChange={setShowNdiPreview}
+                      disabled={isStreaming}
+                    />
+                    <label
+                      htmlFor="ndi-preview-toggle"
+                      className="text-muted-foreground cursor-pointer select-none"
+                    >
+                      Show live preview
+                    </label>
+                  </div>
+                )}
+                {/* Live NDI preview (MJPEG stream) */}
+                {selectedNdiSource && showNdiPreview && (
+                  <div className="relative rounded-md overflow-hidden border border-border bg-muted min-w-0">
+                    {ndiStreamUrl ? (
                       <img
-                        src={ndiPreviewUrl}
+                        src={ndiStreamUrl}
                         alt="NDI source preview"
                         className="block w-full h-auto object-contain"
-                        onLoad={() => setIsLoadingPreview(false)}
-                        onError={() => {
-                          setIsLoadingPreview(false);
-                          setNdiPreviewUrl(null);
-                        }}
+                        onLoad={() => setIsStreamLoaded(true)}
+                        onError={() => setIsStreamLoaded(false)}
                       />
                     ) : null}
-                    {isLoadingPreview && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-muted/80">
-                        <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
-                      </div>
-                    )}
-                    {!ndiPreviewUrl && !isLoadingPreview && (
+                    {!isStreamLoaded && (
                       <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
-                        No preview available
+                        <RefreshCw className="h-4 w-4 animate-spin mr-1.5" />
+                        Connecting...
                       </div>
                     )}
                   </div>

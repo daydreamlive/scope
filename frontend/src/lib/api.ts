@@ -206,6 +206,7 @@ export const downloadPipelineModels = async (
 export interface HardwareInfoResponse {
   vram_gb: number | null;
   spout_available: boolean;
+  ndi_available: boolean;
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
@@ -315,12 +316,12 @@ export const getInputSourceResolution = async (
   return response.json();
 };
 
-export const getInputSourcePreviewUrl = (
+export const getInputSourceStreamUrl = (
   sourceType: string,
   identifier: string,
-  timeoutMs = 5000
+  fps = 2
 ): string =>
-  `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/preview?timeout_ms=${timeoutMs}`;
+  `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/stream?fps=${fps}`;
 
 export const fetchCurrentLogs = async (): Promise<string> => {
   const response = await fetch("/api/v1/logs/current", {
