@@ -15,6 +15,7 @@ import {
   restartServer,
   waitForServer,
   getServerInfo,
+  type FailedPluginInfo,
 } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -23,9 +24,6 @@ interface SettingsDialogProps {
   onClose: () => void;
   initialTab?: "general" | "account" | "api-keys" | "plugins";
   initialPluginPath?: string;
-  // Cloud mode callbacks
-  onCloudStatusChange?: (connected: boolean) => void;
-  onCloudConnectingChange?: (connecting: boolean) => void;
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
 }
@@ -62,8 +60,6 @@ export function SettingsDialog({
   onClose,
   initialTab = "general",
   initialPluginPath = "",
-  onCloudStatusChange,
-  onCloudConnectingChange,
   onPipelinesRefresh,
   cloudDisabled,
 }: SettingsDialogProps) {
@@ -75,6 +71,7 @@ export function SettingsDialog({
   const [reportBugOpen, setReportBugOpen] = useState(false);
   const [pluginInstallPath, setPluginInstallPath] = useState(initialPluginPath);
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
+  const [failedPlugins, setFailedPlugins] = useState<FailedPluginInfo[]>([]);
   const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(initialTab);
@@ -122,6 +119,7 @@ export function SettingsDialog({
           package_spec: p.package_spec,
         }))
       );
+      setFailedPlugins(response.failed_plugins ?? []);
     } catch (error) {
       console.error("Failed to fetch plugins:", error);
       // Don't show error toast during install/update/uninstall operations
@@ -279,6 +277,9 @@ export function SettingsDialog({
 
         // Optimistically remove plugin from local state
         setPlugins(prev => prev.filter(p => p.name !== pluginName));
+        setFailedPlugins(prev =>
+          prev.filter(fp => fp.package_name !== pluginName)
+        );
 
         // Trigger restart and wait for server to come back
         const oldStartTime = await restartServer();
@@ -372,8 +373,6 @@ export function SettingsDialog({
             </TabsContent>
             <TabsContent value="account" className="mt-0">
               <AccountTab
-                onCloudStatusChange={onCloudStatusChange}
-                onCloudConnectingChange={onCloudConnectingChange}
                 onPipelinesRefresh={onPipelinesRefresh ?? refetchPipelines}
                 cloudDisabled={cloudDisabled}
               />
@@ -384,6 +383,7 @@ export function SettingsDialog({
             <TabsContent value="plugins" className="mt-0">
               <PluginsTab
                 plugins={plugins}
+                failedPlugins={failedPlugins}
                 installPath={pluginInstallPath}
                 onInstallPathChange={setPluginInstallPath}
                 onBrowse={handleBrowseLocalPlugin}

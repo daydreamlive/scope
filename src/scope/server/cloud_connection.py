@@ -29,6 +29,8 @@ import aiohttp
 import numpy as np
 from av import VideoFrame
 
+from .kafka_publisher import publish_event
+
 if TYPE_CHECKING:
     from .cloud_webrtc_client import CloudWebRTCClient
 
@@ -91,6 +93,31 @@ class CloudConnectionManager:
         """Check if connected to cloud."""
         return self._connected and self.ws is not None and not self.ws.closed
 
+    def _publish_cloud_error(
+        self,
+        error_message: str,
+        exception_type: str,
+        error_type: str,
+        extra_error_fields: dict | None = None,
+    ) -> None:
+        """Publish a cloud connection error event (fire-and-forget)."""
+        error = {
+            "error_type": error_type,
+            "message": error_message,
+            "exception_type": exception_type,
+            "recoverable": True,
+        }
+        if extra_error_fields:
+            error.update(extra_error_fields)
+
+        publish_event(
+            event_type="error",
+            connection_id=self._connection_id,
+            user_id=self._user_id,
+            error=error,
+            metadata={"app_id": self.app_id},
+        )
+
     async def connect(
         self, app_id: str, api_key: str, user_id: str | None = None
     ) -> None:
@@ -143,8 +170,23 @@ class CloudConnectionManager:
                     raise RuntimeError(f"Expected 'ready' message, got: {data}")
                 # Extract connection_id for log correlation
                 self._connection_id = data.get("connection_id")
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                # Get the underlying exception for better diagnostics
+                ws_exception = self.ws.exception() if self.ws else None
+                raise RuntimeError(
+                    f"WebSocket error while waiting for ready message: {ws_exception}. "
+                )
+            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                close_code = self.ws.close_code if self.ws else None
+                raise RuntimeError(
+                    f"WebSocket closed before ready message (code={close_code}). "
+                )
+            elif msg.type == aiohttp.WSMsgType.CLOSE:
+                raise RuntimeError(
+                    f"WebSocket received close frame before ready message (data={msg.data})."
+                )
             else:
-                raise RuntimeError(f"Unexpected message type: {msg.type}")
+                raise RuntimeError(f"Unexpected WebSocket message type: {msg.type}")
         except TimeoutError:
             await self._cleanup()
             raise RuntimeError(
@@ -208,6 +250,9 @@ class CloudConnectionManager:
                 self._connecting = False
                 self._connect_error = str(e)
                 logger.error(f"Background cloud connection failed: {e}")
+                self._publish_cloud_error(
+                    str(e), type(e).__name__, error_type="cloud_connection_failed"
+                )
 
         self._connect_task = asyncio.create_task(_do_connect())
 
@@ -257,13 +302,31 @@ class CloudConnectionManager:
                     logger.warning(
                         f"Cloud WebSocket closed (code={close_code}, reason={close_reason})"
                     )
+
+                    # Publish error if this was an unexpected close
+                    if not self._stop_event.is_set():
+                        self._publish_cloud_error(
+                            f"Cloud WebSocket closed unexpectedly (code={close_code}, reason={close_reason})",
+                            "CloudWebSocketClosed",
+                            error_type="cloud_websocket_closed",
+                            extra_error_fields={"close_code": close_code},
+                        )
                     break
                 elif msg.type == aiohttp.WSMsgType.ERROR:
-                    logger.error(f"Cloud WebSocket error: {self.ws.exception()}")
+                    ws_exception = self.ws.exception() if self.ws else None
+                    logger.error(f"Cloud WebSocket error: {ws_exception}")
+                    self._publish_cloud_error(
+                        f"Cloud WebSocket error: {ws_exception}",
+                        "CloudWebSocketError",
+                        error_type="cloud_websocket_error",
+                    )
                     break
 
         except Exception as e:
             logger.error(f"Receive loop error: {e}")
+            self._publish_cloud_error(
+                str(e), type(e).__name__, error_type="cloud_receive_loop_error"
+            )
         finally:
             self._connected = False
 
@@ -600,52 +663,6 @@ class CloudConnectionManager:
         """Get the current cloud WebRTC session ID."""
         if self._webrtc_client is not None:
             return self._webrtc_client.session_id
-        return None
-
-    async def download_recording(self, session_id: str | None = None) -> bytes | None:
-        """Download a recording from cloud.ai.
-
-        Args:
-            session_id: The cloud session ID. If None, uses the current session.
-
-        Returns:
-            The recording file bytes, or None if not available.
-        """
-        if not self.is_connected:
-            raise RuntimeError("Not connected to cloud.ai")
-
-        # Use provided session ID or fall back to current
-        target_session_id = session_id or self.cloud_session_id
-        if not target_session_id:
-            raise RuntimeError("No cloud session ID available")
-
-        logger.info(f"[CLOUD] Downloading recording for session: {target_session_id}")
-
-        # Request recording via WebSocket - fal_app will base64 encode the response
-        response = await self.api_request(
-            method="GET",
-            path=f"/api/v1/recordings/{target_session_id}",
-            timeout=120.0,  # Longer timeout for large files
-        )
-
-        # Check if we got binary data (base64 encoded)
-        if response.get("_base64_content"):
-            import base64
-
-            content = base64.b64decode(response["_base64_content"])
-            logger.info(f"[CLOUD] Downloaded recording: {len(content)} bytes")
-            return content
-
-        # Check for error
-        if response.get("status") != 200:
-            error = response.get("error", "Unknown error")
-            logger.error(f"[CLOUD] Recording download failed: {error}")
-            return None
-
-        # Unexpected response format
-        logger.warning(
-            f"[CLOUD] Unexpected recording response format: {list(response.keys())}"
-        )
         return None
 
     async def _cleanup(self) -> None:

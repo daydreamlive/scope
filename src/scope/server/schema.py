@@ -114,13 +114,9 @@ class Parameters(BaseModel):
         default=None,
         description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
     )
-    spout_sender: "SpoutConfig | None" = Field(
+    output_sinks: "dict[str, OutputSinkConfig] | None" = Field(
         default=None,
-        description="Spout output configuration for sending frames to external apps",
-    )
-    spout_receiver: "SpoutConfig | None" = Field(
-        default=None,
-        description="Spout input configuration for receiving frames from external apps",
+        description="Output sinks config keyed by type (e.g., 'spout', 'ndi')",
     )
     vace_enabled: bool | None = Field(
         default=None,
@@ -162,11 +158,11 @@ class Parameters(BaseModel):
     )
 
 
-class SpoutConfig(BaseModel):
-    """Configuration for Spout sender/receiver."""
+class OutputSinkConfig(BaseModel):
+    """Configuration for a single output sink (Spout, NDI, etc.)."""
 
-    enabled: bool = Field(default=False, description="Enable Spout")
-    name: str = Field(default="", description="Spout sender name")
+    enabled: bool = Field(default=False, description="Enable this output sink")
+    name: str = Field(default="", description="Sender name visible to receivers")
 
 
 class WebRTCOfferRequest(BaseModel):
@@ -250,6 +246,10 @@ class HardwareInfoResponse(BaseModel):
     spout_available: bool = Field(
         default=False,
         description="Whether Spout is available (Windows only, not WSL)",
+    )
+    ndi_available: bool = Field(
+        default=False,
+        description="Whether NDI SDK is available for output",
     )
 
 
@@ -467,6 +467,10 @@ class PipelineLoadRequest(BaseModel):
         default=None,
         description="Connection info (gpu_type, fal_host) for event correlation",
     )
+    user_id: str | None = Field(
+        default=None,
+        description="User ID for event correlation and tracking",
+    )
 
 
 class PipelineStatusResponse(BaseModel):
@@ -565,11 +569,28 @@ class PluginInfo(BaseModel):
     )
 
 
+class FailedPluginInfoSchema(BaseModel):
+    """Information about a plugin entry point that failed to load."""
+
+    package_name: str = Field(..., description="Package name of the failed plugin")
+    entry_point_name: str = Field(
+        ..., description="Entry point name that failed to load"
+    )
+    error_type: str = Field(
+        ..., description="Exception type (e.g. ModuleNotFoundError)"
+    )
+    error_message: str = Field(..., description="Error message from the exception")
+
+
 class PluginListResponse(BaseModel):
     """Response containing list of all installed plugins."""
 
     plugins: list[PluginInfo] = Field(..., description="List of installed plugins")
     total: int = Field(..., description="Total number of plugins")
+    failed_plugins: list[FailedPluginInfoSchema] = Field(
+        default_factory=list,
+        description="Plugins that failed to load at startup",
+    )
 
 
 class PluginInstallRequest(BaseModel):

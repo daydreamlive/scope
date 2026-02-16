@@ -29,6 +29,11 @@ interface InitialParameters {
   images?: string[];
   first_frame_image?: string;
   last_frame_image?: string;
+  input_source?: {
+    enabled: boolean;
+    source_type: string;
+    source_name: string;
+  };
 }
 
 interface UseUnifiedWebRTCOptions {
@@ -453,8 +458,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       reset_cache?: boolean;
       kv_cache_attention_bias?: number;
       paused?: boolean;
-      spout_sender?: { enabled: boolean; name: string };
-      spout_receiver?: { enabled: boolean; name: string };
+      output_sinks?: Record<string, { enabled: boolean; name: string }>;
       vace_ref_images?: string[];
       vace_use_input_video?: boolean;
       vace_context_scale?: number;

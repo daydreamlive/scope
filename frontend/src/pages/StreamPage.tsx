@@ -16,6 +16,7 @@ import { useStreamState } from "../hooks/useStreamState";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useApi } from "../hooks/useApi";
 import { useCloudContext } from "../lib/cloudContext";
+import { useCloudStatus } from "../hooks/useCloudStatus";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import { adjustResolutionForPipeline } from "../lib/utils";
 import type {
@@ -27,6 +28,7 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
+import { getInputSourceResolution } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -72,8 +74,11 @@ export function StreamPage() {
   const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
     useCloudContext();
 
-  // Track backend cloud relay mode (local backend connected to cloud)
-  const [isBackendCloudConnected, setIsBackendCloudConnected] = useState(false);
+  // Track backend cloud relay mode (local backend connected to cloud or connecting)
+  const {
+    isConnected: isBackendCloudConnected,
+    isConnecting: isBackendCloudConnecting,
+  } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
@@ -100,9 +105,16 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    ndiOutputAvailable,
+    availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   } = useStreamState();
+
+  // Derive NDI input availability from dynamic input sources list
+  const ndiAvailable = availableInputSources.some(
+    s => s.source_id === "ndi" && s.available
+  );
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
@@ -307,6 +319,14 @@ export function StreamPage() {
         ? customVideoResolution
         : { height: modeDefaults.height, width: modeDefaults.width };
 
+    // Clear pre/postprocessors that don't support the new mode
+    const preprocessorStillValid = settings.preprocessorIds?.every(id =>
+      pipelines?.[id]?.supportedModes?.includes(newMode)
+    );
+    const postprocessorStillValid = settings.postprocessorIds?.every(id =>
+      pipelines?.[id]?.supportedModes?.includes(newMode)
+    );
+
     // Update settings with new mode and ALL mode-specific defaults including resolution
     updateSettings({
       inputMode: newMode,
@@ -314,6 +334,12 @@ export function StreamPage() {
       denoisingSteps: modeDefaults.denoisingSteps,
       noiseScale: modeDefaults.noiseScale,
       noiseController: modeDefaults.noiseController,
+      ...(preprocessorStillValid
+        ? {}
+        : { preprocessorIds: [], preprocessorSchemaFieldOverrides: {} }),
+      ...(postprocessorStillValid
+        ? {}
+        : { postprocessorIds: [], postprocessorSchemaFieldOverrides: {} }),
     });
 
     // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
@@ -389,6 +415,8 @@ export function StreamPage() {
       noiseScale: defaults.noiseScale,
       noiseController: defaults.noiseController,
       loras: [], // Clear LoRA controls when switching pipelines
+      preprocessorSchemaFieldOverrides: {},
+      postprocessorSchemaFieldOverrides: {},
     });
   };
 
@@ -653,13 +681,43 @@ export function StreamPage() {
     }
   };
 
-  const handlePreprocessorIdsChange = (ids: string[]) => {
-    updateSettings({ preprocessorIds: ids });
+  // Shared helpers for pre/postprocessor pipeline settings
+  const pipelineSettingsKeys = {
+    preprocessor: {
+      ids: "preprocessorIds",
+      overrides: "preprocessorSchemaFieldOverrides",
+    },
+    postprocessor: {
+      ids: "postprocessorIds",
+      overrides: "postprocessorSchemaFieldOverrides",
+    },
+  } as const;
+
+  type PipelineKind = keyof typeof pipelineSettingsKeys;
+
+  const makePipelineIdsHandler = (kind: PipelineKind) => (ids: string[]) => {
+    const k = pipelineSettingsKeys[kind];
+    updateSettings({ [k.ids]: ids, [k.overrides]: {} });
   };
 
-  const handlePostprocessorIdsChange = (ids: string[]) => {
-    updateSettings({ postprocessorIds: ids });
-  };
+  const makePipelineOverrideHandler =
+    (kind: PipelineKind) =>
+    (key: string, value: unknown, isRuntimeParam?: boolean) => {
+      const k = pipelineSettingsKeys[kind];
+      const currentOverrides =
+        (settings[k.overrides] as Record<string, unknown> | undefined) ?? {};
+      updateSettings({ [k.overrides]: { ...currentOverrides, [key]: value } });
+      if (isRuntimeParam && isStreaming) {
+        sendParameterUpdate({ [key]: value });
+      }
+    };
+
+  const handlePreprocessorIdsChange = makePipelineIdsHandler("preprocessor");
+  const handlePostprocessorIdsChange = makePipelineIdsHandler("postprocessor");
+  const handlePreprocessorSchemaFieldOverrideChange =
+    makePipelineOverrideHandler("preprocessor");
+  const handlePostprocessorSchemaFieldOverrideChange =
+    makePipelineOverrideHandler("postprocessor");
 
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
@@ -729,48 +787,76 @@ export function StreamPage() {
     });
   };
 
-  const handleSpoutSenderChange = (
-    spoutSender: { enabled: boolean; name: string } | undefined
+  const handleOutputSinkChange = (
+    sinkType: string,
+    config: { enabled: boolean; name: string }
   ) => {
-    updateSettings({ spoutSender });
-    // Send Spout output settings to backend
+    const updated = { ...settings.outputSinks, [sinkType]: config };
+    updateSettings({ outputSinks: updated });
     if (isStreaming) {
       sendParameterUpdate({
-        spout_sender: spoutSender,
+        output_sinks: updated,
       });
     }
   };
 
   // Handle Spout input name change from InputAndControlsPanel
-  const handleSpoutReceiverChange = (name: string) => {
+  const handleSpoutSourceChange = (name: string) => {
     updateSettings({
-      spoutReceiver: {
+      inputSource: {
         enabled: mode === "spout",
-        name: name,
+        source_type: "spout",
+        source_name: name,
       },
     });
   };
 
-  // Sync spoutReceiver.enabled with mode changes
+  // Sync input source settings with mode changes
   const handleModeChange = (newMode: typeof mode) => {
-    // When switching to spout mode, enable spout input
     if (newMode === "spout") {
       updateSettings({
-        spoutReceiver: {
+        inputSource: {
           enabled: true,
-          name: settings.spoutReceiver?.name ?? "",
+          source_type: "spout",
+          source_name: settings.inputSource?.source_name ?? "",
+        },
+      });
+    } else if (newMode === "ndi") {
+      updateSettings({
+        inputSource: {
+          enabled: true,
+          source_type: "ndi",
+          source_name: settings.inputSource?.source_name ?? "",
         },
       });
     } else {
-      // When switching away from spout mode, disable spout input
       updateSettings({
-        spoutReceiver: {
-          enabled: false,
-          name: settings.spoutReceiver?.name ?? "",
-        },
+        inputSource: { enabled: false, source_type: "", source_name: "" },
       });
     }
     switchMode(newMode);
+  };
+
+  // Handle NDI source selection — probe resolution and update pipeline dimensions
+  const handleNdiSourceChange = async (identifier: string) => {
+    updateSettings({
+      inputSource: {
+        enabled: true,
+        source_type: "ndi",
+        source_name: identifier,
+      },
+    });
+
+    // Probe the source's native resolution so the pipeline loads at the right aspect ratio
+    try {
+      const { width, height } = await getInputSourceResolution(
+        "ndi",
+        identifier
+      );
+      updateSettings({ resolution: { width, height } });
+    } catch (e) {
+      console.warn("Could not probe NDI source resolution:", e);
+    }
   };
 
   const handleLivePromptSubmit = (prompts: PromptItem[]) => {
@@ -927,31 +1013,34 @@ export function StreamPage() {
       }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
-      // Collect all missing pipelines/preprocessors
-      const missingPipelines: string[] = [];
-      for (const pipelineId of pipelineIds) {
-        const pipelineInfo = pipelines?.[pipelineId];
-        if (pipelineInfo?.requiresModels) {
-          try {
-            const status = await api.checkModelStatus(pipelineId);
-            if (!status.downloaded) {
-              missingPipelines.push(pipelineId);
+      // Skip this check if cloud is connecting - we'll wait for connection and then
+      // the model check will happen on the cloud side
+      if (!isBackendCloudConnecting) {
+        const missingPipelines: string[] = [];
+        for (const pipelineId of pipelineIds) {
+          const pipelineInfo = pipelines?.[pipelineId];
+          if (pipelineInfo?.requiresModels) {
+            try {
+              const status = await api.checkModelStatus(pipelineId);
+              if (!status.downloaded) {
+                missingPipelines.push(pipelineId);
+              }
+            } catch (error) {
+              console.error(
+                `Error checking model status for ${pipelineId}:`,
+                error
+              );
+              // Continue anyway if check fails
             }
-          } catch (error) {
-            console.error(
-              `Error checking model status for ${pipelineId}:`,
-              error
-            );
-            // Continue anyway if check fails
           }
         }
-      }
 
-      // If any pipelines are missing models, show download dialog
-      if (missingPipelines.length > 0) {
-        setPipelinesNeedingModels(missingPipelines);
-        setShowDownloadDialog(true);
-        return false; // Stream did not start
+        // If any pipelines are missing models, show download dialog
+        if (missingPipelines.length > 0) {
+          setPipelinesNeedingModels(missingPipelines);
+          setShowDownloadDialog(true);
+          return false; // Stream did not start
+        }
       }
 
       // If cloud connection is in progress, wait for it before loading pipeline
@@ -1054,6 +1143,18 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
         }
 
+        // Include pre/postprocessor schema overrides as flat params
+        for (const kind of ["preprocessor", "postprocessor"] as const) {
+          const k = pipelineSettingsKeys[kind];
+          const ids = settings[k.ids] as string[] | undefined;
+          const overrides = settings[k.overrides] as
+            | Record<string, unknown>
+            | undefined;
+          if (ids?.length && overrides && Object.keys(overrides).length > 0) {
+            Object.assign(loadParams, overrides);
+          }
+        }
+
         console.log(
           `Loading ${pipelineIds.length} pipeline(s) (${pipelineIds.join(", ")}) with resolution ${resolution.width}x${resolution.height}`,
           loadParams
@@ -1071,13 +1172,19 @@ export function StreamPage() {
 
       // Check video requirements based on input mode
       const needsVideoInput = currentMode === "video";
-      const isSpoutMode = mode === "spout" && settings.spoutReceiver?.enabled;
+      const isSpoutMode =
+        mode === "spout" && settings.inputSource?.source_type === "spout";
+      const isNdiMode =
+        mode === "ndi" && settings.inputSource?.source_type === "ndi";
+      const isServerSideInput = isSpoutMode || isNdiMode;
 
-      // Only send video stream for pipelines that need video input (not in Spout mode)
+      // Only send video stream for pipelines that need video input (not in Spout/NDI mode)
       const streamToSend =
-        needsVideoInput && !isSpoutMode ? localStream || undefined : undefined;
+        needsVideoInput && !isServerSideInput
+          ? localStream || undefined
+          : undefined;
 
-      if (needsVideoInput && !isSpoutMode && !localStream) {
+      if (needsVideoInput && !isServerSideInput && !localStream) {
         console.error("Video input required but no local stream available");
         return false;
       }
@@ -1092,8 +1199,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
-        spout_sender?: { enabled: boolean; name: string };
-        spout_receiver?: { enabled: boolean; name: string };
+        output_sinks?: Record<string, { enabled: boolean; name: string }>;
         vace_ref_images?: string[];
         vace_use_input_video?: boolean;
         vace_context_scale?: number;
@@ -1103,6 +1209,11 @@ export function StreamPage() {
         last_frame_image?: string;
         images?: string[];
         recording?: boolean;
+        input_source?: {
+          enabled: boolean;
+          source_type: string;
+          source_name: string;
+        };
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1170,12 +1281,19 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
-      // Spout settings - send if enabled
-      if (settings.spoutSender?.enabled) {
-        initialParameters.spout_sender = settings.spoutSender;
+      // Output sinks - send if any are enabled
+      if (settings.outputSinks) {
+        const enabledSinks = Object.fromEntries(
+          Object.entries(settings.outputSinks).filter(([, v]) => v.enabled)
+        );
+        if (Object.keys(enabledSinks).length > 0) {
+          initialParameters.output_sinks = enabledSinks;
+        }
       }
-      if (settings.spoutReceiver?.enabled) {
-        initialParameters.spout_receiver = settings.spoutReceiver;
+
+      // Generic input source (NDI, Spout, etc.) - send if enabled
+      if (settings.inputSource?.enabled) {
+        initialParameters.input_source = settings.inputSource;
       }
 
       // Include recording toggle state
@@ -1228,7 +1346,6 @@ export function StreamPage() {
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <Header
-        onCloudStatusChange={setIsBackendCloudConnected}
         onPipelinesRefresh={handlePipelinesRefresh}
         cloudDisabled={isStreaming}
         openSettingsTab={openSettingsTab}
@@ -1253,8 +1370,8 @@ export function StreamPage() {
             canStartStream={
               settings.inputMode === "text"
                 ? !isInitializing
-                : mode === "spout"
-                  ? !isInitializing // Spout mode doesn't need local stream
+                : mode === "spout" || mode === "ndi"
+                  ? !isInitializing
                   : !!localStream && !isInitializing
             }
             onStartStream={handleStartStream}
@@ -1279,13 +1396,20 @@ export function StreamPage() {
             timelinePrompts={timelinePrompts}
             transitionSteps={transitionSteps}
             onTransitionStepsChange={setTransitionSteps}
-            spoutReceiverName={settings.spoutReceiver?.name ?? ""}
-            onSpoutReceiverChange={handleSpoutReceiverChange}
+            spoutReceiverName={
+              settings.inputSource?.source_type === "spout"
+                ? (settings.inputSource?.source_name ?? "")
+                : ""
+            }
+            onSpoutReceiverChange={handleSpoutSourceChange}
             inputMode={
               settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
             }
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
+            ndiAvailable={ndiAvailable}
+            selectedNdiSource={settings.inputSource?.source_name ?? ""}
+            onNdiSourceChange={handleNdiSourceChange}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
@@ -1526,9 +1650,10 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            spoutSender={settings.spoutSender}
-            onSpoutSenderChange={handleSpoutSenderChange}
+            outputSinks={settings.outputSinks}
+            onOutputSinkChange={handleOutputSinkChange}
             spoutAvailable={spoutAvailable}
+            ndiAvailable={ndiOutputAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
@@ -1543,6 +1668,32 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
+            preprocessorConfigSchema={
+              settings.preprocessorIds?.[0]
+                ? (pipelines?.[settings.preprocessorIds[0]]?.configSchema as
+                    | import("../lib/schemaSettings").ConfigSchemaLike
+                    | undefined)
+                : undefined
+            }
+            postprocessorConfigSchema={
+              settings.postprocessorIds?.[0]
+                ? (pipelines?.[settings.postprocessorIds[0]]?.configSchema as
+                    | import("../lib/schemaSettings").ConfigSchemaLike
+                    | undefined)
+                : undefined
+            }
+            preprocessorSchemaFieldOverrides={
+              settings.preprocessorSchemaFieldOverrides ?? {}
+            }
+            postprocessorSchemaFieldOverrides={
+              settings.postprocessorSchemaFieldOverrides ?? {}
+            }
+            onPreprocessorSchemaFieldOverrideChange={
+              handlePreprocessorSchemaFieldOverrideChange
+            }
+            onPostprocessorSchemaFieldOverrideChange={
+              handlePostprocessorSchemaFieldOverrideChange
+            }
             schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
             onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
               updateSettings({

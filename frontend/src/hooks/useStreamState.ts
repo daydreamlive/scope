@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type {
   SystemMetrics,
   StreamStatus,
@@ -10,8 +10,10 @@ import type {
 import {
   getHardwareInfo as getHardwareInfoApi,
   getPipelineSchemas as getPipelineSchemasApi,
+  getInputSources as getInputSourcesApi,
   type HardwareInfoResponse,
   type PipelineSchemasResponse,
+  type InputSourceType,
 } from "../lib/api";
 import { useCloudContext } from "../lib/cloudContext";
 
@@ -61,6 +63,11 @@ export function useStreamState() {
       }
       return getHardwareInfoApi();
     }, [adapter, isCloudMode]);
+
+  const getInputSources = useCallback(async () => {
+    // Input sources are always fetched from the local backend
+    return getInputSourcesApi();
+  }, []);
 
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
@@ -183,6 +190,11 @@ export function useStreamState() {
     null
   );
 
+  // Store available input sources from backend
+  const [availableInputSources, setAvailableInputSources] = useState<
+    InputSourceType[]
+  >([]);
+
   // Function to refresh pipeline schemas (can be called externally)
   const refreshPipelineSchemas = useCallback(async () => {
     try {
@@ -241,10 +253,12 @@ export function useStreamState() {
 
     const fetchInitialData = async () => {
       try {
-        const [schemasResult, hardwareResult] = await Promise.allSettled([
-          getPipelineSchemas(),
-          getHardwareInfo(),
-        ]);
+        const [schemasResult, hardwareResult, inputSourcesResult] =
+          await Promise.allSettled([
+            getPipelineSchemas(),
+            getHardwareInfo(),
+            getInputSources(),
+          ]);
 
         if (schemasResult.status === "fulfilled") {
           const schemas = schemasResult.value;
@@ -282,27 +296,47 @@ export function useStreamState() {
             hardwareResult.reason
           );
         }
+
+        if (inputSourcesResult.status === "fulfilled") {
+          setAvailableInputSources(inputSourcesResult.value.input_sources);
+        } else {
+          console.error(
+            "useStreamState: Failed to fetch input sources:",
+            inputSourcesResult.reason
+          );
+        }
       } catch (error) {
         console.error("useStreamState: Failed to fetch initial data:", error);
       }
     };
 
     fetchInitialData();
-  }, [isCloudMode, isReady, getPipelineSchemas, getHardwareInfo]);
+  }, [
+    isCloudMode,
+    isReady,
+    getPipelineSchemas,
+    getHardwareInfo,
+    getInputSources,
+  ]);
 
-  // Update inputMode when schemas load or pipeline changes
-  // This sets the correct default mode for the pipeline
+  // Track previous pipelineId so we only reset inputMode when the pipeline actually changes
+  const prevPipelineIdRef = useRef<string | null>(null);
+
+  // Update inputMode when schemas first load or pipeline changes
   useEffect(() => {
     if (pipelineSchemas) {
       const schema = pipelineSchemas.pipelines[settings.pipelineId];
-      if (schema?.default_mode) {
+      if (
+        schema?.default_mode &&
+        prevPipelineIdRef.current !== settings.pipelineId
+      ) {
         setSettings(prev => ({
           ...prev,
           inputMode: schema.default_mode,
         }));
       }
+      prevPipelineIdRef.current = settings.pipelineId;
     }
-    // Only run when schemas load or pipeline changes, NOT when inputMode changes
   }, [pipelineSchemas, settings.pipelineId]);
 
   // Set recommended quantization based on pipeline schema and available VRAM
@@ -377,8 +411,9 @@ export function useStreamState() {
     setPromptData(prev => ({ ...prev, ...newPrompt }));
   }, []);
 
-  // Derive spoutAvailable from hardware info (server-side detection)
+  // Derive output sink availability from hardware info
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
+  const ndiOutputAvailable = hardwareInfo?.ndi_available ?? false;
 
   return {
     systemMetrics,
@@ -394,6 +429,8 @@ export function useStreamState() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    ndiOutputAvailable,
+    availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   };

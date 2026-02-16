@@ -40,6 +40,7 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
         return False, "No user ID provided"
 
     url = f"{DAYDREAM_API_BASE}/v1/users/{user_id}"
+    print(f"Validating user access for {user_id} via {url}")
 
     def fetch_user():
         req = urllib.request.Request(url)
@@ -219,7 +220,13 @@ def cleanup_session_data():
 
 
 def _get_git_sha() -> str:
-    """Get the short git SHA of the current checkout."""
+    """Get the deploy tag from env var SCOPE_DEPLOY_TAG, or fall back to git SHA."""
+    # Check for explicit deploy tag first
+    deploy_tag = os.environ.get("SCOPE_DEPLOY_TAG")
+    if deploy_tag:
+        return deploy_tag
+
+    # Fall back to git SHA
     try:
         result = _subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -325,7 +332,7 @@ class ScopeApp(fal.App, keep_alive=300):
         def start_server():
             print("Starting Scope server...")
             try:
-                subprocess.run(
+                result = subprocess.run(
                     [
                         "uv",
                         "run",
@@ -336,11 +343,17 @@ class ScopeApp(fal.App, keep_alive=300):
                         "--port",
                         "8000",
                     ],
-                    check=True,
                     env=scope_env,
                 )
+                # Log when process exits (regardless of exit code)
+                if result.returncode == 0:
+                    print("Scope server process exited normally (exit code 0)")
+                else:
+                    print(
+                        f"❌ Scope server process exited with code {result.returncode}"
+                    )
             except Exception as e:
-                print(f"Failed to start Scope server: {e}")
+                print(f"❌ Failed to start Scope server: {e}")
                 raise
 
         server_thread = threading.Thread(target=start_server, daemon=True)
@@ -437,7 +450,6 @@ class ScopeApp(fal.App, keep_alive=300):
         async def check_max_duration_exceeded() -> bool:
             """Check if connection has exceeded max duration. Returns True if should close."""
             elapsed_seconds = time.time() - connection_start_time
-            print(f"[{log_prefix()}] Checking max duration: {elapsed_seconds:.0f}s")
             if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
                 print(
                     f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)"
@@ -466,10 +478,21 @@ class ScopeApp(fal.App, keep_alive=300):
                     "status": response.status_code,
                 }
 
+        # Parse fal_log_labels as JSON if possible, otherwise use raw string
+        fal_log_labels_raw = os.getenv("FAL_LOG_LABELS", "unknown")
+        try:
+            fal_log_labels = json.loads(fal_log_labels_raw)
+        except (json.JSONDecodeError, TypeError):
+            fal_log_labels = fal_log_labels_raw
+
         # Build connection_info with GPU type and any available infrastructure info
         connection_info = {
             "gpu_type": ScopeApp.machine_type,
             "fal_region": os.getenv("NOMAD_DC", "unknown"),
+            "fal_runner_id": os.getenv(
+                "FAL_JOB_ID", os.getenv("FAL_RUNNER_ID", "unknown")
+            ),
+            "fal_log_labels": fal_log_labels,
         }
 
         async def handle_offer(payload: dict):
@@ -599,6 +622,7 @@ class ScopeApp(fal.App, keep_alive=300):
             ):
                 body["connection_id"] = connection_id
                 body["connection_info"] = connection_info
+                body["user_id"] = user_id
 
             async with httpx.AsyncClient() as client:
                 try:
@@ -718,9 +742,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
             if msg_type == "set_user_id":
                 requested_user_id = payload.get("user_id")
-                print(
-                    f"[{log_prefix()}] Validating user access for {requested_user_id}"
-                )
 
                 # Validate user has access to cloud mode
                 is_valid, reason = await validate_user_access(requested_user_id)

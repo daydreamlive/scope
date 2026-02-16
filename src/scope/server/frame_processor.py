@@ -13,6 +13,9 @@ from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
 if TYPE_CHECKING:
+    from scope.core.inputs import InputSource
+    from scope.core.outputs import OutputSink
+
     from .cloud_connection import CloudConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -28,18 +31,6 @@ DEFAULT_FPS = 30.0  # Default FPS
 HEARTBEAT_INTERVAL_SECONDS = 10.0
 
 
-class _SpoutFrame:
-    """Lightweight wrapper for Spout frames to match VideoFrame interface."""
-
-    __slots__ = ["_data"]
-
-    def __init__(self, data):
-        self._data = data
-
-    def to_ndarray(self, format="rgb24"):
-        return self._data
-
-
 class FrameProcessor:
     """Processes video frames through pipelines or cloud relay.
 
@@ -47,7 +38,7 @@ class FrameProcessor:
     1. Local mode: Frames processed through local GPU pipelines
     2. Cloud mode: Frames sent to cloud for processing
 
-    Spout integration works in both modes.
+    Output sink integration (NDI, Spout, etc.) works in both modes.
     """
 
     def __init__(
@@ -95,27 +86,18 @@ class FrameProcessor:
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
 
-        # Spout integration (works in both local and cloud modes)
-        self.spout_sender = None
-        self.spout_sender_enabled = False
-        self.spout_sender_name = "ScopeSyphonSpoutOut"
-        self._frame_spout_count = 0
-        self.spout_sender_queue = queue.Queue(
-            maxsize=30
-        )  # Queue for async Spout sending
-        self.spout_sender_thread = None
+        # Output sinks keyed by type
+        self.output_sinks: dict[str, dict] = {}
 
-        # Spout input
-        self.spout_receiver = None
-        self.spout_receiver_enabled = False
-        self.spout_receiver_name = ""
-        self.spout_receiver_thread = None
+        self.input_source: InputSource | None = None
+        self.input_source_enabled = False
+        self.input_source_type = ""
+        self.input_source_thread = None
 
-        # Input mode is signaled by the frontend at stream start.
-        # This determines whether we wait for video frames or generate immediately.
+        # Input mode: video waits for frames, text generates immediately
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Pipeline chaining support (local mode only)
+        # Pipeline chaining support
         self.pipeline_processors: list[PipelineProcessor] = []
         self.pipeline_ids: list[str] = []
 
@@ -138,14 +120,15 @@ class FrameProcessor:
 
         self.running = True
 
-        # Process any Spout settings from initial parameters
-        if "spout_sender" in self.parameters:
-            spout_config = self.parameters.pop("spout_sender")
-            self._update_spout_sender(spout_config)
+        # Process output sink settings from initial parameters
+        if "output_sinks" in self.parameters:
+            sinks_config = self.parameters.pop("output_sinks")
+            self._update_output_sinks_from_config(sinks_config)
 
-        if "spout_receiver" in self.parameters:
-            spout_config = self.parameters.pop("spout_receiver")
-            self._update_spout_receiver(spout_config)
+        # Process generic input source settings
+        if "input_source" in self.parameters:
+            input_source_config = self.parameters.pop("input_source")
+            self._update_input_source(input_source_config)
 
         # Reset frame counters on start
         self._frames_in = 0
@@ -180,8 +163,24 @@ class FrameProcessor:
 
         # Local mode: setup pipeline chain
         if not self.pipeline_ids:
-            logger.error("No pipeline IDs provided, cannot start")
+            error_msg = "No pipeline IDs provided, cannot start"
+            logger.error(error_msg)
             self.running = False
+            # Publish error for startup failure
+            publish_event(
+                event_type="error",
+                session_id=self.session_id,
+                connection_id=self.connection_id,
+                user_id=self.user_id,
+                error={
+                    "error_type": "stream_startup_failed",
+                    "message": error_msg,
+                    "exception_type": "ConfigurationError",
+                    "recoverable": False,
+                },
+                metadata={"mode": "local"},
+                connection_info=self.connection_info,
+            )
             return
 
         try:
@@ -189,6 +188,22 @@ class FrameProcessor:
         except Exception as e:
             logger.error(f"Pipeline chain setup failed: {e}")
             self.running = False
+            # Publish error for pipeline setup failure
+            publish_event(
+                event_type="error",
+                session_id=self.session_id,
+                connection_id=self.connection_id,
+                pipeline_ids=self.pipeline_ids,
+                user_id=self.user_id,
+                error={
+                    "error_type": "stream_startup_failed",
+                    "message": str(e),
+                    "exception_type": type(e).__name__,
+                    "recoverable": False,
+                },
+                metadata={"mode": "local"},
+                connection_info=self.connection_info,
+            )
             return
 
         logger.info(
@@ -219,30 +234,37 @@ class FrameProcessor:
         # Clear pipeline processors
         self.pipeline_processors.clear()
 
-        # Clean up Spout sender
-        self.spout_sender_enabled = False
-        if self.spout_sender_thread and self.spout_sender_thread.is_alive():
-            # Signal thread to stop by putting None in queue
-            try:
-                self.spout_sender_queue.put_nowait(None)
-            except queue.Full:
-                pass
-            self.spout_sender_thread.join(timeout=2.0)
-        if self.spout_sender is not None:
-            try:
-                self.spout_sender.release()
-            except Exception as e:
-                logger.error(f"Error releasing Spout sender: {e}")
-            self.spout_sender = None
+        # Clean up all output sinks
+        for sink_type, entry in list(self.output_sinks.items()):
+            q = entry["queue"]
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+            q.put_nowait(None)
 
-        # Clean up Spout receiver
-        self.spout_receiver_enabled = False
-        if self.spout_receiver is not None:
+            thread = entry.get("thread")
+            if thread and thread.is_alive():
+                thread.join(timeout=2.0)
+                if thread.is_alive():
+                    logger.warning(
+                        f"Output sink thread '{sink_type}' did not stop within 2s"
+                    )
             try:
-                self.spout_receiver.release()
+                entry["sink"].close()
             except Exception as e:
-                logger.error(f"Error releasing Spout receiver: {e}")
-            self.spout_receiver = None
+                logger.error(f"Error closing output sink '{sink_type}': {e}")
+        self.output_sinks.clear()
+
+        # Clean up generic input source
+        self.input_source_enabled = False
+        if self.input_source is not None:
+            try:
+                self.input_source.close()
+            except Exception as e:
+                logger.error(f"Error closing input source: {e}")
+            self.input_source = None
 
         # Clean up cloud callback in cloud mode
         if self._cloud_mode and self.cloud_manager:
@@ -271,16 +293,17 @@ class FrameProcessor:
                 logger.error(f"Error in frame processor stop callback: {e}")
         # Publish Kafka events for stream stop
         if error_message:
-            # Publish stream_error event
+            # Publish error event for stream failure
             publish_event(
-                event_type="stream_error",
+                event_type="error",
                 session_id=self.session_id,
                 connection_id=self.connection_id,
                 pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
                 user_id=self.user_id,
                 error={
+                    "error_type": "stream_failed",
                     "message": error_message,
-                    "type": "StreamError",
+                    "exception_type": "StreamError",
                     "recoverable": False,
                 },
                 metadata={
@@ -437,17 +460,17 @@ class FrameProcessor:
                 f"ttff={time_to_first_frame_ms}ms)"
             )
 
-        # Enqueue frame for async Spout sending (non-blocking)
-        if self.spout_sender_enabled and self.spout_sender is not None:
+        # Fan out frame to all active output sinks
+        if self.output_sinks:
             try:
-                # Frame is (H, W, C) uint8 [0, 255]
                 frame_np = frame.numpy()
-                self.spout_sender_queue.put_nowait(frame_np)
-            except queue.Full:
-                # Queue full, drop frame (non-blocking)
-                logger.debug("Spout output queue full, dropping frame")
+                for _sink_type, entry in self.output_sinks.items():
+                    try:
+                        entry["queue"].put_nowait(frame_np)
+                    except queue.Full:
+                        pass
             except Exception as e:
-                logger.error(f"Error enqueueing Spout frame: {e}")
+                logger.error(f"Error enqueueing output sink frame: {e}")
 
         return frame
 
@@ -549,8 +572,11 @@ class FrameProcessor:
             "fps_in": self._frames_in / elapsed if elapsed > 0 else 0,
             "fps_out": self._frames_out / elapsed if elapsed > 0 else 0,
             "pipeline_fps": self.get_fps(),
-            "spout_receiver_enabled": self.spout_receiver_enabled,
-            "spout_sender_enabled": self.spout_sender_enabled,
+            "output_sinks": {
+                k: {"name": v["name"]} for k, v in self.output_sinks.items()
+            },
+            "input_source_enabled": self.input_source_enabled,
+            "input_source_type": self.input_source_type,
             "relay_mode": self._cloud_mode,
         }
 
@@ -574,15 +600,15 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
-        # Handle Spout output settings
-        if "spout_sender" in parameters:
-            spout_config = parameters.pop("spout_sender")
-            self._update_spout_sender(spout_config)
+        # Handle generic output sinks config
+        if "output_sinks" in parameters:
+            sinks_config = parameters.pop("output_sinks")
+            self._update_output_sinks_from_config(sinks_config)
 
-        # Handle Spout input settings
-        if "spout_receiver" in parameters:
-            spout_config = parameters.pop("spout_receiver")
-            self._update_spout_receiver(spout_config)
+        # Handle generic input source settings
+        if "input_source" in parameters:
+            input_source_config = parameters.pop("input_source")
+            self._update_input_source(input_source_config)
 
         # Update parameters for all pipeline processors
         for processor in self.pipeline_processors:
@@ -593,243 +619,264 @@ class FrameProcessor:
 
         return True
 
-    def _update_spout_sender(self, config: dict):
-        """Update Spout output configuration."""
-        logger.info(f"Spout output config received: {config}")
+    def _update_output_sinks_from_config(self, config: dict):
+        """Handle the generic output_sinks config dict.
 
-        enabled = config.get("enabled", False)
-        sender_name = config.get("name", "ScopeSyphonSpoutOut")
+        Config format: {"spout": {"enabled": True, "name": "ScopeOut"}, "ndi": {...}}
+        """
+        from scope.core.outputs import get_output_sink_classes
 
-        # Get dimensions from active pipeline
+        sink_classes = get_output_sink_classes()
+        for sink_type, sink_config in config.items():
+            enabled = sink_config.get("enabled", False)
+            name = sink_config.get("name", "")
+            sink_cls = sink_classes.get(sink_type)
+            if sink_cls is None:
+                if enabled:
+                    logger.warning(f"Output sink '{sink_type}' not available")
+                continue
+            self._update_output_sink(
+                sink_type=sink_type,
+                enabled=enabled,
+                sink_name=name,
+                sink_class=sink_cls,
+            )
+
+    def _update_output_sink(
+        self,
+        sink_type: str,
+        enabled: bool,
+        sink_name: str,
+        sink_class: "type[OutputSink] | None" = None,
+    ):
+        """Create, update, or destroy a single output sink entry."""
         width, height = self._get_pipeline_dimensions()
+        existing = self.output_sinks.get(sink_type)
 
         logger.info(
-            f"Spout output: enabled={enabled}, name={sender_name}, size={width}x{height}"
+            f"Output sink config: type={sink_type}, enabled={enabled}, "
+            f"name={sink_name}, size={width}x{height}"
         )
 
-        # Lazy import SpoutSender
-        try:
-            from scope.server.spout import SpoutSender
-        except ImportError:
-            if enabled:
-                logger.warning("Spout module not available on this platform")
-            return
+        if enabled and existing is None:
+            # Create new sink
+            if sink_class is None:
+                from scope.core.outputs import get_output_sink_classes
 
-        if enabled and not self.spout_sender_enabled:
-            # Enable Spout output
+                sink_class = get_output_sink_classes().get(sink_type)
+            if sink_class is None:
+                logger.error(f"Unknown output sink type: {sink_type}")
+                return
             try:
-                self.spout_sender = SpoutSender(sender_name, width, height)
-                if self.spout_sender.create():
-                    self.spout_sender_enabled = True
-                    self.spout_sender_name = sender_name
-                    # Start background thread for async sending
-                    if (
-                        self.spout_sender_thread is None
-                        or not self.spout_sender_thread.is_alive()
-                    ):
-                        self.spout_sender_thread = threading.Thread(
-                            target=self._spout_sender_loop, daemon=True
-                        )
-                        self.spout_sender_thread.start()
-                    logger.info(f"Spout output enabled: '{sender_name}'")
+                sink = sink_class()
+                if sink.create(sink_name, width, height):
+                    q: queue.Queue = queue.Queue(maxsize=30)
+                    t = threading.Thread(
+                        target=self._output_sink_loop,
+                        args=(sink_type,),
+                        daemon=True,
+                    )
+                    self.output_sinks[sink_type] = {
+                        "sink": sink,
+                        "queue": q,
+                        "thread": t,
+                        "name": sink_name,
+                    }
+                    t.start()
+                    logger.info(f"Output sink enabled: {sink_type} '{sink_name}'")
                 else:
-                    logger.error("Failed to create Spout sender")
-                    self.spout_sender = None
+                    logger.error(f"Failed to create output sink: {sink_type}")
             except Exception as e:
-                logger.error(f"Error creating Spout sender: {e}")
-                self.spout_sender = None
+                logger.error(f"Error creating output sink '{sink_type}': {e}")
 
-        elif not enabled and self.spout_sender_enabled:
-            # Disable Spout output
-            if self.spout_sender is not None:
-                self.spout_sender.release()
-                self.spout_sender = None
-            self.spout_sender_enabled = False
-            logger.info("Spout output disabled")
+        elif not enabled and existing is not None:
+            # Destroy existing sink
+            self._close_output_sink(sink_type)
+            logger.info(f"Output sink disabled: {sink_type}")
 
-        elif enabled and (
-            sender_name != self.spout_sender_name
-            or (
-                self.spout_sender
-                and (
-                    self.spout_sender.width != width
-                    or self.spout_sender.height != height
+        elif enabled and existing is not None:
+            # Recreate if name or dimensions changed
+            old_sink = existing["sink"]
+            needs_recreate = sink_name != existing["name"]
+            if hasattr(old_sink, "width") and hasattr(old_sink, "height"):
+                if old_sink.width != width or old_sink.height != height:
+                    needs_recreate = True
+
+            if needs_recreate:
+                self._close_output_sink(sink_type)
+                self._update_output_sink(
+                    sink_type=sink_type,
+                    enabled=True,
+                    sink_name=sink_name,
+                    sink_class=sink_class,
                 )
-            )
-        ):
-            # Name or dimensions changed, recreate sender
-            if self.spout_sender is not None:
-                self.spout_sender.release()
-            try:
-                self.spout_sender = SpoutSender(sender_name, width, height)
-                if self.spout_sender.create():
-                    self.spout_sender_name = sender_name
-                    # Ensure output thread is running
-                    if (
-                        self.spout_sender_thread is None
-                        or not self.spout_sender_thread.is_alive()
-                    ):
-                        self.spout_sender_thread = threading.Thread(
-                            target=self._spout_sender_loop, daemon=True
-                        )
-                        self.spout_sender_thread.start()
-                    logger.info(
-                        f"Spout output updated: '{sender_name}' ({width}x{height})"
-                    )
-                else:
-                    logger.error("Failed to recreate Spout sender")
-                    self.spout_sender = None
-                    self.spout_sender_enabled = False
-            except Exception as e:
-                logger.error(f"Error recreating Spout sender: {e}")
-                self.spout_sender = None
-                self.spout_sender_enabled = False
 
-    def _update_spout_receiver(self, config: dict):
-        """Update Spout input configuration."""
-        enabled = config.get("enabled", False)
-        sender_name = config.get("name", "")
-
-        # Lazy import SpoutReceiver
-        try:
-            from scope.server.spout import SpoutReceiver
-        except ImportError:
-            if enabled:
-                logger.warning("Spout module not available on this platform")
+    def _close_output_sink(self, sink_type: str):
+        """Stop and remove a single output sink."""
+        entry = self.output_sinks.pop(sink_type, None)
+        if entry is None:
             return
 
-        if enabled and not self.spout_receiver_enabled:
-            # Enable Spout input
+        q = entry["queue"]
+        while not q.empty():
             try:
-                self.spout_receiver = SpoutReceiver(sender_name, 512, 512)
-                if self.spout_receiver.create():
-                    self.spout_receiver_enabled = True
-                    self.spout_receiver_name = sender_name
-                    # Start receiving thread
-                    self.spout_receiver_thread = threading.Thread(
-                        target=self._spout_receiver_loop, daemon=True
-                    )
-                    self.spout_receiver_thread.start()
-                    logger.info(f"Spout input enabled: '{sender_name or 'any'}'")
-                else:
-                    logger.error("Failed to create Spout receiver")
-                    self.spout_receiver = None
-            except Exception as e:
-                logger.error(f"Error creating Spout receiver: {e}")
-                self.spout_receiver = None
+                q.get_nowait()
+            except queue.Empty:
+                break
+        q.put_nowait(None)
 
-        elif not enabled and self.spout_receiver_enabled:
-            # Disable Spout input
-            self.spout_receiver_enabled = False
-            if self.spout_receiver is not None:
-                self.spout_receiver.release()
-                self.spout_receiver = None
-            logger.info("Spout input disabled")
+        thread = entry.get("thread")
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                logger.warning(
+                    f"Output sink thread '{sink_type}' did not stop within 2s"
+                )
+        try:
+            entry["sink"].close()
+        except Exception as e:
+            logger.error(f"Error closing output sink '{sink_type}': {e}")
 
-        elif enabled and sender_name != self.spout_receiver_name:
-            # Name changed, recreate receiver
-            self.spout_receiver_enabled = False
-            if self.spout_receiver is not None:
-                self.spout_receiver.release()
-            try:
-                self.spout_receiver = SpoutReceiver(sender_name, 512, 512)
-                if self.spout_receiver.create():
-                    self.spout_receiver_enabled = True
-                    self.spout_receiver_name = sender_name
-                    # Restart receiving thread if not running
-                    if (
-                        self.spout_receiver_thread is None
-                        or not self.spout_receiver_thread.is_alive()
-                    ):
-                        self.spout_receiver_thread = threading.Thread(
-                            target=self._spout_receiver_loop, daemon=True
-                        )
-                        self.spout_receiver_thread.start()
-                    logger.info(f"Spout input changed to: '{sender_name or 'any'}'")
-                else:
-                    logger.error("Failed to recreate Spout receiver")
-                    self.spout_receiver = None
-            except Exception as e:
-                logger.error(f"Error recreating Spout receiver: {e}")
-                self.spout_receiver = None
-
-    def _spout_sender_loop(self):
-        """Background thread that sends frames to Spout asynchronously."""
-        logger.info("Spout output thread started")
+    def _output_sink_loop(self, sink_type: str):
+        """Background thread that sends frames for a single output sink."""
+        logger.info(f"Output sink thread started: {sink_type}")
         frame_count = 0
 
-        while (
-            self.running and self.spout_sender_enabled and self.spout_sender is not None
-        ):
+        while self.running and sink_type in self.output_sinks:
+            entry = self.output_sinks.get(sink_type)
+            if entry is None:
+                break
             try:
-                # Get frame from queue (blocking with timeout)
                 try:
-                    frame_np = self.spout_sender_queue.get(timeout=0.1)
-                    # None is a sentinel value to stop the thread
+                    frame_np = entry["queue"].get(timeout=0.1)
                     if frame_np is None:
                         break
                 except queue.Empty:
                     continue
 
-                # Send frame to Spout
-                success = self.spout_sender.send(frame_np)
+                success = entry["sink"].send_frame(frame_np)
                 frame_count += 1
                 if frame_count % 100 == 0:
                     logger.info(
-                        f"Spout sent frame {frame_count}, "
+                        f"Output sink '{sink_type}' sent frame {frame_count}, "
                         f"shape={frame_np.shape}, success={success}"
                     )
-                self._frame_spout_count = frame_count
 
             except Exception as e:
-                logger.error(f"Error in Spout output loop: {e}")
+                logger.error(f"Error in output sink loop '{sink_type}': {e}")
                 time.sleep(0.01)
 
-        logger.info(f"Spout output thread stopped after {frame_count} frames")
+        logger.info(f"Output sink thread stopped: {sink_type} ({frame_count} frames)")
 
-    def _spout_receiver_loop(self):
-        """Background thread that receives frames from Spout and adds to buffer."""
-        logger.info("Spout input thread started")
+    def _update_input_source(self, config: dict):
+        """Update generic input source configuration."""
+        enabled = config.get("enabled", False)
+        source_type = config.get("source_type", "")
+        source_name = config.get("source_name", "")
 
-        # Initial target frame rate
+        logger.info(
+            f"Input source config: enabled={enabled}, "
+            f"type={source_type}, name={source_name}"
+        )
+
+        if enabled and not self.input_source_enabled:
+            self._create_and_connect_input_source(source_type, source_name)
+
+        elif not enabled and self.input_source_enabled:
+            self.input_source_enabled = False
+            if self.input_source is not None:
+                self.input_source.close()
+                self.input_source = None
+            logger.info("Input source disabled")
+
+        elif enabled and (
+            source_type != self.input_source_type or config.get("reconnect", False)
+        ):
+            self.input_source_enabled = False
+            if self.input_source is not None:
+                self.input_source.close()
+                self.input_source = None
+            self._create_and_connect_input_source(source_type, source_name)
+
+    def _create_and_connect_input_source(self, source_type: str, source_name: str):
+        """Create an input source instance and connect to the given source."""
+        from scope.core.inputs import get_input_source_classes
+
+        input_source_classes = get_input_source_classes()
+        source_class = input_source_classes.get(source_type)
+
+        if source_class is None:
+            logger.error(
+                f"Unknown input source type '{source_type}'. "
+                f"Available: {list(input_source_classes.keys())}"
+            )
+            return
+
+        if not source_class.is_available():
+            logger.error(
+                f"Input source '{source_type}' is not available on this platform"
+            )
+            return
+
+        try:
+            self.input_source = source_class()
+            if self.input_source.connect(source_name):
+                self.input_source_enabled = True
+                self.input_source_type = source_type
+                self.input_source_thread = threading.Thread(
+                    target=self._input_source_receiver_loop, daemon=True
+                )
+                self.input_source_thread.start()
+                logger.info(f"Input source enabled: {source_type} -> '{source_name}'")
+            else:
+                logger.error(
+                    f"Failed to connect to input source: "
+                    f"{source_type} -> '{source_name}'"
+                )
+                self.input_source.close()
+                self.input_source = None
+        except Exception as e:
+            logger.error(f"Error creating input source '{source_type}': {e}")
+            if self.input_source is not None:
+                try:
+                    self.input_source.close()
+                except Exception:
+                    pass
+            self.input_source = None
+
+    def _input_source_receiver_loop(self):
+        """Background thread that receives frames from a generic input source."""
+        logger.info(f"Input source thread started ({self.input_source_type})")
+
         target_fps = self.get_fps()
         frame_interval = 1.0 / target_fps
         last_frame_time = 0.0
         frame_count = 0
 
         while (
-            self.running
-            and self.spout_receiver_enabled
-            and self.spout_receiver is not None
+            self.running and self.input_source_enabled and self.input_source is not None
         ):
             try:
-                # Update target FPS dynamically from pipeline performance
                 current_pipeline_fps = self.get_fps()
                 if current_pipeline_fps > 0:
                     target_fps = current_pipeline_fps
                     frame_interval = 1.0 / target_fps
 
                 current_time = time.time()
-
-                # Frame rate limiting - don't receive faster than target FPS
                 time_since_last = current_time - last_frame_time
                 if time_since_last < frame_interval:
                     time.sleep(frame_interval - time_since_last)
                     continue
 
-                # Receive directly as RGB (avoids extra copy from RGBA slice)
-                rgb_frame = self.spout_receiver.receive(as_rgb=True)
+                rgb_frame = self.input_source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
                     last_frame_time = time.time()
 
                     if self._cloud_mode:
-                        # Cloud mode: send Spout frames to cloud (only in video mode)
-                        # In text mode, cloud generates video from prompts only - no input frames
                         if self._video_mode and self.cloud_manager:
                             if self.cloud_manager.send_frame(rgb_frame):
                                 self._frames_to_cloud += 1
                     elif self.pipeline_processors:
-                        # Local mode: put into first processor's input queue
                         first_processor = self.pipeline_processors[0]
 
                         if torch.cuda.is_available():
@@ -848,20 +895,27 @@ class FrameProcessor:
                             first_processor.input_queue.put_nowait(frame_tensor)
                         except queue.Full:
                             logger.debug(
-                                "First processor input queue full, dropping Spout frame"
+                                f"First processor input queue full, "
+                                f"dropping {self.input_source_type} frame"
                             )
 
                     frame_count += 1
                     if frame_count % 100 == 0:
-                        logger.debug(f"Spout input received {frame_count} frames")
+                        logger.debug(
+                            f"Input source ({self.input_source_type}) "
+                            f"received {frame_count} frames"
+                        )
                 else:
                     time.sleep(0.001)  # Small sleep when no frame available
 
             except Exception as e:
-                logger.error(f"Error in Spout input loop: {e}")
+                logger.error(f"Error in input source loop: {e}")
                 time.sleep(0.01)
 
-        logger.info(f"Spout input thread stopped after {frame_count} frames")
+        logger.info(
+            f"Input source thread stopped ({self.input_source_type}) "
+            f"after {frame_count} frames"
+        )
 
     def _setup_pipeline_chain_sync(self):
         """Create pipeline processor chain (synchronous).

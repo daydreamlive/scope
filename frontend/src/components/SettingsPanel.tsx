@@ -52,6 +52,71 @@ import { SchemaPrimitiveField } from "./PrimitiveFields";
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
 
+/** Renders primitive config fields from a plugin pipeline's configSchema. */
+function PluginConfigFields({
+  configSchema,
+  inputMode,
+  overrides,
+  onChange,
+  isStreaming = false,
+  isLoading = false,
+}: {
+  configSchema: import("../lib/schemaSettings").ConfigSchemaLike;
+  inputMode?: InputMode;
+  overrides?: Record<string, unknown>;
+  onChange?: (key: string, value: unknown, isRuntimeParam?: boolean) => void;
+  isStreaming?: boolean;
+  isLoading?: boolean;
+}) {
+  const fields = parseConfigurationFields(configSchema, inputMode);
+  const primitiveFields = fields.filter(
+    ({ fieldType }) =>
+      !(COMPLEX_COMPONENTS as readonly string[]).includes(fieldType) &&
+      fieldType !== "resolution"
+  );
+  if (primitiveFields.length === 0) return null;
+
+  const enumValuesByRef: Record<string, string[]> = {};
+  if (configSchema.$defs) {
+    for (const [defName, def] of Object.entries(configSchema.$defs)) {
+      if (def?.enum && Array.isArray(def.enum)) {
+        enumValuesByRef[defName] = def.enum as string[];
+      }
+    }
+  }
+
+  return (
+    <div className="rounded-lg border bg-card p-3 space-y-3">
+      {primitiveFields.map(({ key, prop, ui, fieldType }) => {
+        const value = overrides?.[key] ?? prop.default;
+        const isRuntimeParam = ui.is_load_param === false;
+        const enumValues =
+          fieldType === "enum" && typeof prop.$ref === "string"
+            ? enumValuesByRef[prop.$ref.split("/").pop() ?? ""]
+            : undefined;
+        return (
+          <SchemaPrimitiveField
+            key={key}
+            fieldKey={key}
+            prop={prop}
+            value={value}
+            onChange={v => onChange?.(key, v, isRuntimeParam)}
+            disabled={(isStreaming && !isRuntimeParam) || isLoading}
+            label={ui.label}
+            fieldType={
+              typeof fieldType === "string" &&
+              !(COMPLEX_COMPONENTS as readonly string[]).includes(fieldType)
+                ? (fieldType as import("../lib/schemaSettings").PrimitiveFieldType)
+                : undefined
+            }
+            enumValues={enumValues}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 interface SettingsPanelProps {
   className?: string;
   pipelines: Record<string, PipelineInfo> | null;
@@ -87,11 +152,14 @@ interface SettingsPanelProps {
   inputMode?: InputMode;
   // Whether this pipeline supports noise controls in video mode (schema-derived)
   supportsNoiseControls?: boolean;
-  // Spout settings
-  spoutSender?: SettingsState["spoutSender"];
-  onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
-  // Whether Spout is available (server-side detection for native Windows, not WSL)
+  // Output sinks
+  outputSinks?: SettingsState["outputSinks"];
+  onOutputSinkChange?: (
+    sinkType: string,
+    config: { enabled: boolean; name: string }
+  ) => void;
   spoutAvailable?: boolean;
+  ndiAvailable?: boolean;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -111,6 +179,19 @@ interface SettingsPanelProps {
     key: string,
     value: unknown,
     isRuntimeParam?: boolean
+  ) => void;
+  // Preprocessor/postprocessor config schemas and overrides
+  preprocessorConfigSchema?: import("../lib/schemaSettings").ConfigSchemaLike;
+  postprocessorConfigSchema?: import("../lib/schemaSettings").ConfigSchemaLike;
+  preprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  postprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  onPreprocessorSchemaFieldOverrideChange?: (
+    key: string,
+    value: unknown
+  ) => void;
+  onPostprocessorSchemaFieldOverrideChange?: (
+    key: string,
+    value: unknown
   ) => void;
   isCloudMode?: boolean;
 }
@@ -143,9 +224,10 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
-  spoutSender,
-  onSpoutSenderChange,
+  outputSinks,
+  onOutputSinkChange,
   spoutAvailable = false,
+  ndiAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -158,6 +240,12 @@ export function SettingsPanel({
   onPostprocessorIdsChange,
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
+  preprocessorConfigSchema,
+  postprocessorConfigSchema,
+  preprocessorSchemaFieldOverrides,
+  postprocessorSchemaFieldOverrides,
+  onPreprocessorSchemaFieldOverrideChange,
+  onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
@@ -425,6 +513,16 @@ export function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
+          {preprocessorConfigSchema && (
+            <PluginConfigFields
+              configSchema={preprocessorConfigSchema}
+              inputMode={inputMode}
+              overrides={preprocessorSchemaFieldOverrides}
+              onChange={onPreprocessorSchemaFieldOverrideChange}
+              isStreaming={isStreaming}
+              isLoading={isLoading}
+            />
+          )}
         </div>
 
         {/* Postprocessor Selector - fixed, always shown */}
@@ -466,6 +564,16 @@ export function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
+          {postprocessorConfigSchema && (
+            <PluginConfigFields
+              configSchema={postprocessorConfigSchema}
+              inputMode={inputMode}
+              overrides={postprocessorSchemaFieldOverrides}
+              onChange={onPostprocessorSchemaFieldOverrideChange}
+              isStreaming={isStreaming}
+              isLoading={isLoading}
+            />
+          )}
         </div>
 
         {/* Schema-driven configuration (when configSchema has ui.category===configuration) or legacy */}
@@ -982,50 +1090,100 @@ export function SettingsPanel({
           );
         })()}
 
-        {/* Spout Sender Settings (available on native Windows only) */}
+        {/* Spout Output */}
         {spoutAvailable && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
-                label={PARAMETER_METADATA.spoutSender.label}
-                tooltip={PARAMETER_METADATA.spoutSender.tooltip}
+                label="Spout Output"
+                tooltip="Send video to Spout-compatible apps (Windows) like TouchDesigner, Resolume, OBS."
                 className="text-sm font-medium"
               />
               <Toggle
-                pressed={spoutSender?.enabled ?? false}
+                pressed={outputSinks?.spout?.enabled ?? false}
                 onPressedChange={enabled => {
-                  onSpoutSenderChange?.({
+                  onOutputSinkChange?.("spout", {
                     enabled,
-                    name: spoutSender?.name ?? "ScopeOut",
+                    name: outputSinks?.spout?.name ?? "ScopeOut",
                   });
                 }}
                 variant="outline"
                 size="sm"
                 className="h-7"
               >
-                {spoutSender?.enabled ? "ON" : "OFF"}
+                {outputSinks?.spout?.enabled ? "ON" : "OFF"}
               </Toggle>
             </div>
 
-            {spoutSender?.enabled && (
+            {outputSinks?.spout?.enabled && (
               <div className="flex items-center gap-3">
                 <LabelWithTooltip
                   label="Sender Name"
-                  tooltip="The name of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS."
+                  tooltip="The name visible to Spout receivers."
                   className="text-xs text-muted-foreground whitespace-nowrap"
                 />
                 <Input
                   type="text"
-                  value={spoutSender?.name ?? "ScopeOut"}
+                  value={outputSinks?.spout?.name ?? "ScopeOut"}
                   onChange={e => {
-                    onSpoutSenderChange?.({
-                      enabled: spoutSender?.enabled ?? false,
+                    onOutputSinkChange?.("spout", {
+                      enabled: outputSinks?.spout?.enabled ?? false,
                       name: e.target.value,
                     });
                   }}
                   disabled={isStreaming}
                   className="h-8 text-sm flex-1"
                   placeholder="ScopeOut"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* NDI Output */}
+        {ndiAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.ndiSender.label}
+                tooltip={PARAMETER_METADATA.ndiSender.tooltip}
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={outputSinks?.ndi?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onOutputSinkChange?.("ndi", {
+                    enabled,
+                    name: outputSinks?.ndi?.name ?? "Scope",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {outputSinks?.ndi?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {outputSinks?.ndi?.enabled && (
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name"
+                  tooltip="The name visible to NDI receivers on the network."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={outputSinks?.ndi?.name ?? "Scope"}
+                  onChange={e => {
+                    onOutputSinkChange?.("ndi", {
+                      enabled: outputSinks?.ndi?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="Scope"
                 />
               </div>
             )}

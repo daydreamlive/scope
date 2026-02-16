@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Settings, Cloud, CloudOff } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
@@ -7,9 +7,6 @@ import { useCloudStatus } from "../hooks/useCloudStatus";
 
 interface HeaderProps {
   className?: string;
-  // Cloud mode callbacks
-  onCloudStatusChange?: (connected: boolean) => void;
-  onCloudConnectingChange?: (connecting: boolean) => void;
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
   // External settings tab control
@@ -19,8 +16,6 @@ interface HeaderProps {
 
 export function Header({
   className = "",
-  onCloudStatusChange,
-  onCloudConnectingChange,
   onPipelinesRefresh,
   cloudDisabled,
   openSettingsTab,
@@ -32,14 +27,9 @@ export function Header({
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
-  // Use shared cloud status hook - single source of truth for polling
-  const {
-    isConnected,
-    isConnecting,
-    lastCloseCode,
-    lastCloseReason,
-    refresh: refreshCloudStatus,
-  } = useCloudStatus();
+  // Use shared cloud status hook - single source of truth
+  const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
+    useCloudStatus();
 
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
@@ -69,15 +59,6 @@ export function Header({
     }
   }, [lastCloseCode, lastCloseReason, isConnected]);
 
-  // Notify parent when cloud status changes
-  useEffect(() => {
-    onCloudStatusChange?.(isConnected);
-  }, [isConnected, onCloudStatusChange]);
-
-  useEffect(() => {
-    onCloudConnectingChange?.(isConnecting);
-  }, [isConnecting, onCloudConnectingChange]);
-
   // Refresh pipelines when cloud connection status changes
   // This ensures pipeline list updates even if settings dialog is closed
   useEffect(() => {
@@ -92,16 +73,6 @@ export function Header({
     }
     prevConnectedRef.current = isConnected;
   }, [isConnected, onPipelinesRefresh]);
-
-  // Handle cloud status changes from settings dialog (manual refresh)
-  const handleCloudStatusChange = useCallback(
-    (connected: boolean) => {
-      // Refresh to sync state after manual connect/disconnect
-      refreshCloudStatus();
-      onCloudStatusChange?.(connected);
-    },
-    [onCloudStatusChange, refreshCloudStatus]
-  );
 
   const handleCloudIconClick = () => {
     setInitialTab("account");
@@ -187,8 +158,6 @@ export function Header({
         onClose={handleClose}
         initialTab={initialTab}
         initialPluginPath={initialPluginPath}
-        onCloudStatusChange={handleCloudStatusChange}
-        onCloudConnectingChange={onCloudConnectingChange}
         onPipelinesRefresh={onPipelinesRefresh}
         cloudDisabled={cloudDisabled}
       />

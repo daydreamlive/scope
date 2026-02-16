@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Select,
@@ -8,12 +8,18 @@ import {
   SelectValue,
 } from "./ui/select";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { Switch } from "./ui/switch";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Upload, ArrowUp } from "lucide-react";
+import { Upload, ArrowUp, RefreshCw } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
-import type { PromptItem, PromptTransition } from "../lib/api";
+import type {
+  PromptItem,
+  PromptTransition,
+  DiscoveredSource,
+} from "../lib/api";
+import { getInputSourceSources, getInputSourceStreamUrl } from "../lib/api";
 import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
@@ -27,6 +33,7 @@ import {
   parseInputFields,
 } from "../lib/schemaSettings";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
+import { useCloudStatus } from "../hooks/useCloudStatus";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -70,6 +77,11 @@ interface InputAndControlsPanelProps {
   onInputModeChange: (mode: InputMode) => void;
   // Whether Spout is available (server-side detection for native Windows, not WSL)
   spoutAvailable?: boolean;
+  // Whether NDI is available (NDI SDK installed on server)
+  ndiAvailable?: boolean;
+  // Currently selected NDI source identifier
+  selectedNdiSource?: string;
+  onNdiSourceChange?: (identifier: string) => void;
   // VACE reference images (only shown when VACE is enabled)
   vaceEnabled?: boolean;
   refImages?: string[];
@@ -135,6 +147,9 @@ export function InputAndControlsPanel({
   inputMode,
   onInputModeChange,
   spoutAvailable = false,
+  ndiAvailable = false,
+  selectedNdiSource = "",
+  onNdiSourceChange,
   vaceEnabled = true,
   refImages = [],
   onRefImagesChange,
@@ -152,6 +167,43 @@ export function InputAndControlsPanel({
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
 }: InputAndControlsPanelProps) {
+  // NDI source discovery
+  const [ndiSources, setNdiSources] = useState<DiscoveredSource[]>([]);
+  const [isDiscoveringNdi, setIsDiscoveringNdi] = useState(false);
+
+  const discoverNdiSources = useCallback(async () => {
+    setIsDiscoveringNdi(true);
+    try {
+      const result = await getInputSourceSources("ndi");
+      setNdiSources(result.sources);
+    } catch (e) {
+      console.error("Failed to discover NDI sources:", e);
+      setNdiSources([]);
+    } finally {
+      setIsDiscoveringNdi(false);
+    }
+  }, []);
+
+  // Live MJPEG preview URL
+  const [showNdiPreview, setShowNdiPreview] = useState(false);
+  const ndiStreamUrl =
+    mode === "ndi" && selectedNdiSource && showNdiPreview
+      ? getInputSourceStreamUrl("ndi", selectedNdiSource)
+      : null;
+  const [isStreamLoaded, setIsStreamLoaded] = useState(false);
+
+  // Reset loaded state when the stream URL changes
+  useEffect(() => {
+    setIsStreamLoaded(false);
+  }, [ndiStreamUrl]);
+
+  // Auto-discover NDI sources when switching to NDI mode
+  useEffect(() => {
+    if (mode === "ndi" && ndiAvailable) {
+      discoverNdiSources();
+    }
+  }, [mode, ndiAvailable, discoverNdiSources]);
+
   // Helper function to determine if playhead is at the end of timeline
   const isAtEndOfTimeline = () => {
     if (_timelinePrompts.length === 0) return true;
@@ -173,6 +225,33 @@ export function InputAndControlsPanel({
       videoRef.current.srcObject = localStream;
     }
   }, [localStream]);
+
+  // Track cloud connection state and clear images when it changes
+  // (switching between local/cloud means different asset lists)
+  const { isConnected: isCloudConnected } = useCloudStatus();
+  const prevCloudConnectedRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    // On first render, just store the initial state
+    if (prevCloudConnectedRef.current === null) {
+      prevCloudConnectedRef.current = isCloudConnected;
+      return;
+    }
+
+    // Clear images when cloud connection state changes (connected or disconnected)
+    if (prevCloudConnectedRef.current !== isCloudConnected) {
+      onRefImagesChange?.([]);
+      onFirstFrameImageChange?.(undefined);
+      onLastFrameImageChange?.(undefined);
+    }
+
+    prevCloudConnectedRef.current = isCloudConnected;
+  }, [
+    isCloudConnected,
+    onRefImagesChange,
+    onFirstFrameImageChange,
+    onLastFrameImageChange,
+  ]);
 
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -235,15 +314,36 @@ export function InputAndControlsPanel({
               }}
               className="justify-start"
             >
-              <ToggleGroupItem value="video" aria-label="Video file">
+              <ToggleGroupItem
+                value="video"
+                aria-label="Video file"
+                disabled={isStreaming && mode === "ndi"}
+              >
                 File
               </ToggleGroupItem>
-              <ToggleGroupItem value="camera" aria-label="Camera">
+              <ToggleGroupItem
+                value="camera"
+                aria-label="Camera"
+                disabled={isStreaming && mode === "ndi"}
+              >
                 Camera
               </ToggleGroupItem>
               {spoutAvailable && (
-                <ToggleGroupItem value="spout" aria-label="Spout Receiver">
-                  Spout Receiver
+                <ToggleGroupItem
+                  value="spout"
+                  aria-label="Spout Receiver"
+                  disabled={isStreaming && mode === "ndi"}
+                >
+                  Spout
+                </ToggleGroupItem>
+              )}
+              {ndiAvailable && (
+                <ToggleGroupItem
+                  value="ndi"
+                  aria-label="NDI"
+                  disabled={isStreaming && mode !== "ndi"}
+                >
+                  NDI
                 </ToggleGroupItem>
               )}
             </ToggleGroup>
@@ -254,7 +354,89 @@ export function InputAndControlsPanel({
         {inputMode === "video" && (
           <div>
             <h3 className="text-sm font-medium mb-2">Input</h3>
-            {mode === "spout" ? (
+            {mode === "ndi" ? (
+              /* NDI Source Picker */
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Select
+                    value={selectedNdiSource}
+                    onValueChange={value => onNdiSourceChange?.(value)}
+                    disabled={isStreaming || isDiscoveringNdi}
+                  >
+                    <SelectTrigger className="flex-1 min-w-0 h-8 text-sm [&>span]:truncate">
+                      <SelectValue
+                        placeholder={
+                          isDiscoveringNdi
+                            ? "Discovering..."
+                            : ndiSources.length === 0
+                              ? "No sources found"
+                              : "Select NDI source"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ndiSources.map(source => (
+                        <SelectItem
+                          key={source.identifier}
+                          value={source.identifier}
+                        >
+                          {source.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={discoverNdiSources}
+                    disabled={isStreaming || isDiscoveringNdi}
+                    title="Refresh NDI sources"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${isDiscoveringNdi ? "animate-spin" : ""}`}
+                    />
+                  </Button>
+                </div>
+                {/* Preview toggle */}
+                {selectedNdiSource && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Switch
+                      id="ndi-preview-toggle"
+                      checked={showNdiPreview}
+                      onCheckedChange={setShowNdiPreview}
+                      disabled={isStreaming}
+                    />
+                    <label
+                      htmlFor="ndi-preview-toggle"
+                      className="text-muted-foreground cursor-pointer select-none"
+                    >
+                      Show live preview
+                    </label>
+                  </div>
+                )}
+                {/* Live NDI preview (MJPEG stream) */}
+                {selectedNdiSource && showNdiPreview && (
+                  <div className="relative rounded-md overflow-hidden border border-border bg-muted min-w-0">
+                    {ndiStreamUrl ? (
+                      <img
+                        src={ndiStreamUrl}
+                        alt="NDI source preview"
+                        className="block w-full h-auto object-contain"
+                        onLoad={() => setIsStreamLoaded(true)}
+                        onError={() => setIsStreamLoaded(false)}
+                      />
+                    ) : null}
+                    {!isStreamLoaded && (
+                      <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin mr-1.5" />
+                        Connecting...
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : mode === "spout" ? (
               /* Spout Receiver Configuration */
               <div className="flex items-center gap-3">
                 <LabelWithTooltip

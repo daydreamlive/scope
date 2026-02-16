@@ -14,6 +14,7 @@ from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
+from .pipeline_throttler import PipelineThrottler
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,11 @@ class PipelineProcessor:
         # Cache VACE support check to avoid isinstance on every chunk
         self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
 
+        # Throttler for controlling processing rate in chained pipelines
+        # Throttling is applied when this pipeline produces frames faster than
+        # the next pipeline in the chain can consume them
+        self.throttler = PipelineThrottler()
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -141,6 +147,9 @@ class PipelineProcessor:
         """
         self.next_processor = next_processor
 
+        # Set throttler's reference to next processor for throttling decisions
+        self.throttler.set_next_processor(next_processor)
+
         # Calculate output queue size based on next processor's requirements
         next_pipeline = next_processor.pipeline
         if hasattr(next_pipeline, "prepare"):
@@ -174,6 +183,7 @@ class PipelineProcessor:
 
         self.running = False
         self.shutdown_event.set()
+        self.throttler.interrupt()
 
         if self.worker_thread and self.worker_thread.is_alive():
             if threading.current_thread() != self.worker_thread:
@@ -234,16 +244,17 @@ class PipelineProcessor:
                     logger.error(
                         f"Non-recoverable error in worker loop for {self.pipeline_id}: {e}, stopping"
                     )
-                    # Publish stream_error event for non-recoverable errors
+                    # Publish error event for pipeline processing failure
                     publish_event(
-                        event_type="stream_error",
+                        event_type="error",
                         session_id=self.session_id,
                         connection_id=self.connection_id,
                         pipeline_ids=[self.pipeline_id],
                         user_id=self.user_id,
                         error={
+                            "error_type": "pipeline_processing_failed",
                             "message": str(e),
-                            "type": type(e).__name__,
+                            "exception_type": type(e).__name__,
                             "recoverable": False,
                         },
                         connection_info=self.connection_info,
@@ -370,6 +381,7 @@ class PipelineProcessor:
             requirements = self.pipeline.prepare(**prepare_params)
 
         video_input = None
+        input_frame_count = 0
         if requirements is not None:
             current_chunk_size = requirements.input_size
 
@@ -386,6 +398,7 @@ class PipelineProcessor:
 
             # Use prepare_chunk to uniformly sample frames from the queue
             video_input = self.prepare_chunk(input_queue_ref, current_chunk_size)
+            input_frame_count = len(video_input) if video_input else 0
 
         try:
             # Pass parameters (excluding prepare-only parameters)
@@ -419,7 +432,9 @@ class PipelineProcessor:
                 else:
                     call_params["video"] = video_input
 
+            processing_start = time.time()
             output_dict = self.pipeline(**call_params)
+            processing_time = time.time() - processing_start
 
             # Extract video from the returned dictionary
             output = output_dict.get("video")
@@ -458,6 +473,12 @@ class PipelineProcessor:
 
             num_frames = output.shape[0]
 
+            # Record batch timing for throttling calculations
+            if input_frame_count > 0:
+                self.throttler.record_input_batch(input_frame_count, processing_time)
+            if num_frames > 0:
+                self.throttler.record_output_batch(num_frames, processing_time)
+
             # Normalize to [0, 255] and convert to uint8
             # Keep frames on GPU - frame_processor handles CPU transfer for streaming
             output = (
@@ -487,6 +508,12 @@ class PipelineProcessor:
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
                     continue
+
+            # Apply throttling if this pipeline is producing faster than next can consume
+            # Only throttle if: (1) has video input, (2) has next processor
+            if video_input is not None and self.next_processor is not None:
+                self.throttler.throttle()
+
         except Exception as e:
             if self._is_recoverable(e):
                 logger.error(

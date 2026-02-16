@@ -5,7 +5,7 @@
 !include "FileFunc.nsh"
 
 ; Define paths
-!define UV_DOWNLOAD_URL "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
+!define UV_DOWNLOAD_URL "https://github.com/astral-sh/uv/releases/download/0.9.11/uv-x86_64-pc-windows-msvc.zip"
 
 ; Helper macro to write log message to file
 ; Usage: !insertmacro WriteLog "message"
@@ -204,6 +204,8 @@
         CopyFiles /SILENT "$7\LICENSE.md" "$1\python-project\LICENSE.md"
         IfFileExists "$7\frontend" 0 +2
             CopyFiles /SILENT "$7\frontend" "$1\python-project\frontend"
+        IfFileExists "$7\patches.pth" 0 +2
+            CopyFiles /SILENT "$7\patches.pth" "$1\python-project\patches.pth"
         DetailPrint "Python project files copied"
         !insertmacro WriteLogWithTime "Python project files copied successfully"
     skip_python_copy:
@@ -254,7 +256,8 @@
     FileOpen $R9 $R6 "w"
     FileWrite $R9 "@echo off$\r$\n"
     FileWrite $R9 "cd /d $\"$1\python-project$\"$\r$\n"
-    FileWrite $R9 "$\"$1\uv\uv.exe$\" sync >> $\"$R7$\" 2>&1$\r$\n"
+    FileWrite $R9 "set $\"UV_PROJECT_ENVIRONMENT=$1\.venv$\"$\r$\n"
+    FileWrite $R9 "$\"$1\uv\uv.exe$\" sync --inexact >> $\"$R7$\" 2>&1$\r$\n"
     FileWrite $R9 "exit /b %ERRORLEVEL%$\r$\n"
     FileClose $R9
 

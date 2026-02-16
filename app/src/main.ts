@@ -828,6 +828,9 @@ function configureProcessSecurity(): void {
  * Application ready handler
  */
 app.on('ready', async () => {
+  // Clear HTTP cache to ensure fresh frontend after updates
+  await session.defaultSession.clearCache();
+
   // Configure session permissions early
   await configureSessionPermissions();
 

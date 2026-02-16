@@ -1,10 +1,18 @@
-import { ArrowUpSquare, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpSquare,
+  FolderOpen,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import type { InstalledPlugin } from "@/types/settings";
+import type { FailedPluginInfo } from "@/lib/api";
 
 interface PluginsTabProps {
   plugins: InstalledPlugin[];
+  failedPlugins?: FailedPluginInfo[];
   installPath: string;
   onInstallPathChange: (path: string) => void;
   onBrowse: () => void;
@@ -44,6 +52,7 @@ const transformGitUrl = (value: string): string => {
 
 export function PluginsTab({
   plugins,
+  failedPlugins = [],
   installPath,
   onInstallPathChange,
   onBrowse,
@@ -93,6 +102,19 @@ export function PluginsTab({
         </div>
       </div>
 
+      {/* Failed plugins warning */}
+      {failedPlugins.length > 0 && (
+        <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-3 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0 mt-0.5" />
+          <p className="text-sm text-yellow-500">
+            {failedPlugins.length === 1
+              ? "1 plugin failed to load."
+              : `${failedPlugins.length} plugins failed to load.`}{" "}
+            Contact the plugin developer for a fix, then reinstall.
+          </p>
+        </div>
+      )}
+
       {/* Installed Plugins Section */}
       <div className="rounded-lg bg-muted/50 p-4 space-y-3">
         <h3 className="text-sm font-medium text-foreground">
@@ -104,73 +126,90 @@ export function PluginsTab({
           <p className="text-sm text-muted-foreground">No plugins installed</p>
         ) : (
           <div className="space-y-3">
-            {plugins.map(plugin => (
-              <div
-                key={plugin.name}
-                className="flex items-start justify-between p-3 rounded-md border border-border bg-card"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-foreground">
-                      {plugin.name}
-                    </span>
-                    {plugin.version && (
-                      <span className="text-xs text-muted-foreground">
-                        v{plugin.version}
+            {plugins.map(plugin => {
+              const failure = failedPlugins.find(
+                fp => fp.package_name === plugin.name
+              );
+              return (
+                <div
+                  key={plugin.name}
+                  className={`flex items-start justify-between p-3 rounded-md border bg-card ${failure ? "border-yellow-500/50" : "border-border"}`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {plugin.name}
                       </span>
+                      {plugin.version && (
+                        <span className="text-xs text-muted-foreground">
+                          v{plugin.version}
+                        </span>
+                      )}
+                    </div>
+                    {plugin.author && (
+                      <p className="text-xs text-muted-foreground">
+                        by {plugin.author}
+                      </p>
+                    )}
+                    {plugin.description && (
+                      <p className="text-sm text-muted-foreground">
+                        {plugin.description}
+                      </p>
+                    )}
+                    {failure && (
+                      <div className="flex items-start gap-1.5 text-yellow-500 mt-1">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span
+                          className="text-xs line-clamp-2"
+                          title={`${failure.error_type}: ${failure.error_message}`}
+                        >
+                          Failed to load &mdash; {failure.error_type}:{" "}
+                          {failure.error_message}
+                        </span>
+                      </div>
                     )}
                   </div>
-                  {plugin.author && (
-                    <p className="text-xs text-muted-foreground">
-                      by {plugin.author}
-                    </p>
-                  )}
-                  {plugin.description && (
-                    <p className="text-sm text-muted-foreground">
-                      {plugin.description}
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-1">
-                  {plugin.update_available && plugin.package_spec && (
+                  <div className="flex items-center gap-1">
+                    {plugin.update_available && plugin.package_spec && (
+                      <Button
+                        onClick={() =>
+                          onUpdate(plugin.name, plugin.package_spec!)
+                        }
+                        variant="ghost"
+                        size="icon"
+                        disabled={isInstalling}
+                        title={
+                          plugin.latest_version
+                            ? `Update to ${plugin.latest_version}`
+                            : "Update available"
+                        }
+                      >
+                        <ArrowUpSquare className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {plugin.editable && (
+                      <Button
+                        onClick={() => onReload(plugin.name)}
+                        variant="ghost"
+                        size="icon"
+                        disabled={isInstalling}
+                        title="Reload plugin (restarts server)"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button
-                      onClick={() =>
-                        onUpdate(plugin.name, plugin.package_spec!)
-                      }
+                      onClick={() => onDelete(plugin.name)}
                       variant="ghost"
                       size="icon"
-                      disabled={isInstalling}
-                      title={
-                        plugin.latest_version
-                          ? `Update to ${plugin.latest_version}`
-                          : "Update available"
-                      }
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
-                      <ArrowUpSquare className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
-                  )}
-                  {plugin.editable && (
-                    <Button
-                      onClick={() => onReload(plugin.name)}
-                      variant="ghost"
-                      size="icon"
-                      disabled={isInstalling}
-                      title="Reload plugin (restarts server)"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                    </Button>
-                  )}
-                  <Button
-                    onClick={() => onDelete(plugin.name)}
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
