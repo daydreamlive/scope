@@ -46,7 +46,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: daydreamlive
+          username: zmiccer
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
       - name: Set image tag
@@ -54,24 +54,24 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # Manual dispatch: use provided version + latest
-            TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
+            TAGS="zmiccer/scope_persona:${{ github.event.inputs.version }},zmiccer/scope_persona:latest"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
             VERSION_TAG="${{ github.ref_name }}"
             VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAGS="daydreamlive/scope:$VERSION,daydreamlive/scope:latest"
+            TAGS="zmiccer/scope_persona:$VERSION,zmiccer/scope_persona:latest"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             # Main branch
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="daydreamlive/scope:main,daydreamlive/scope:$SHORT_SHA"
+            TAGS="zmiccer/scope_persona:main,zmiccer/scope_persona:$SHORT_SHA"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
             # Runpod serverless branch
-            TAGS="daydreamlive/scope:runpod-serverless"
+            TAGS="zmiccer/scope_persona:runpod-serverless"
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
             # Pull request: use sanitized branch name + short SHA
             BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            TAGS="daydreamlive/scope:$BRANCH_TAG,daydreamlive/scope:$SHORT_SHA"
+            TAGS="zmiccer/scope_persona:$BRANCH_TAG,zmiccer/scope_persona:$SHORT_SHA"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 

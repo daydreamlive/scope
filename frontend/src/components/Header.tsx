@@ -112,7 +112,7 @@ export function Header({
   return (
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-medium text-foreground">Daydream Scope</h1>
+        <h1 className="text-xl font-medium text-foreground">LivePersona</h1>
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
