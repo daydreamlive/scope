@@ -1,0 +1,48 @@
+name: Deploy to fal
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+        default: 'staging'
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install fal
+        run: pip install fal
+
+      - name: Deploy to fal
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          
+          # Use input environment for manual dispatch, default to staging for push
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="staging"
+          fi
+          
+          echo "Deploying to $ENV with tag $SHORT_SHA"
+          SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy --env $ENV --auth public src/scope/cloud/fal_app.py
