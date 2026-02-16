@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { Switch } from "./ui/switch";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Upload, ArrowUp, RefreshCw } from "lucide-react";
@@ -184,8 +185,9 @@ export function InputAndControlsPanel({
   }, []);
 
   // Live MJPEG preview URL
+  const [showNdiPreview, setShowNdiPreview] = useState(false);
   const ndiStreamUrl =
-    mode === "ndi" && selectedNdiSource
+    mode === "ndi" && selectedNdiSource && showNdiPreview
       ? getInputSourceStreamUrl("ndi", selectedNdiSource)
       : null;
   const [isStreamLoaded, setIsStreamLoaded] = useState(false);
@@ -396,8 +398,25 @@ export function InputAndControlsPanel({
                     />
                   </Button>
                 </div>
-                {/* Live NDI preview (MJPEG stream) */}
+                {/* Preview toggle */}
                 {selectedNdiSource && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Switch
+                      id="ndi-preview-toggle"
+                      checked={showNdiPreview}
+                      onCheckedChange={setShowNdiPreview}
+                      disabled={isStreaming}
+                    />
+                    <label
+                      htmlFor="ndi-preview-toggle"
+                      className="text-muted-foreground cursor-pointer select-none"
+                    >
+                      Show live preview
+                    </label>
+                  </div>
+                )}
+                {/* Live NDI preview (MJPEG stream) */}
+                {selectedNdiSource && showNdiPreview && (
                   <div className="relative rounded-md overflow-hidden border border-border bg-muted min-w-0">
                     {ndiStreamUrl ? (
                       <img
