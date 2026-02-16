@@ -1,8 +1,10 @@
+import json
 import logging
 import queue
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -31,6 +33,37 @@ DEFAULT_FPS = 30.0  # Default FPS
 
 # Heartbeat interval for stream stats logging and Kafka events
 HEARTBEAT_INTERVAL_SECONDS = 10.0
+
+# Path to input.json DAG configuration file (project root)
+_INPUT_JSON_PATH = Path(__file__).resolve().parents[3] / "input.json"
+
+
+def _load_dag_from_input_json() -> DagConfig | None:
+    """Load DAG config from input.json if it exists. Returns None otherwise."""
+    if not _INPUT_JSON_PATH.exists():
+        return None
+    try:
+        raw = json.loads(_INPUT_JSON_PATH.read_text())
+        dag = DagConfig.model_validate(raw)
+        logger.info(
+            f"Loaded DAG from {_INPUT_JSON_PATH}: {dag.get_pipeline_node_ids()}"
+        )
+        return dag
+    except Exception as e:
+        logger.error(f"Failed to load DAG from {_INPUT_JSON_PATH}: {e}")
+        return None
+
+
+def get_pipeline_ids_from_input_json() -> list[str] | None:
+    """Return pipeline IDs from input.json, or None if not available."""
+    dag = _load_dag_from_input_json()
+    if dag is None:
+        return None
+    return [
+        n.pipeline_id
+        for n in dag.nodes
+        if n.type == "pipeline" and n.pipeline_id is not None
+    ]
 
 
 class FrameProcessor:
@@ -117,10 +150,17 @@ class FrameProcessor:
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
 
-        # Store pipeline_ids from initial_parameters if provided
-        pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
-        if pipeline_ids is not None:
-            self.pipeline_ids = pipeline_ids
+        # Override pipeline_ids from input.json if available, else use UI params
+        dag_pipeline_ids = get_pipeline_ids_from_input_json()
+        if dag_pipeline_ids is not None:
+            self.pipeline_ids = dag_pipeline_ids
+            logger.info(
+                f"[FRAME-PROCESSOR] Using pipeline_ids from input.json: {dag_pipeline_ids}"
+            )
+        else:
+            pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
+            if pipeline_ids is not None:
+                self.pipeline_ids = pipeline_ids
 
     def start(self):
         if self.running:
@@ -924,22 +964,27 @@ class FrameProcessor:
     def _setup_pipeline_chain_sync(self):
         """Create pipeline DAG or linear chain (synchronous).
 
-        Uses DAG executor: if parameters contain "dag", build from that config;
-        otherwise build a linear DAG from pipeline_ids (backward compatible).
+        Loads DAG from input.json if it exists, otherwise falls back to
+        parameters or linear pipeline chain.
         Assumes all pipelines are already loaded by the pipeline manager.
         """
-        if not self.pipeline_ids and not self.parameters.get("dag"):
+        dag_config: DagConfig
+
+        # Try loading DAG from input.json first
+        dag_config = _load_dag_from_input_json()
+        if dag_config is not None:
+            logger.info("[FRAME-PROCESSOR] Using DAG from input.json")
+        elif not self.pipeline_ids and not self.parameters.get("dag"):
             logger.error("No pipeline IDs or DAG config provided")
             return
-
-        dag_config: DagConfig
-        dag_raw = self.parameters.get("dag")
-        if isinstance(dag_raw, dict):
-            dag_config = DagConfig.model_validate(dag_raw)
-        elif isinstance(dag_raw, str):
-            dag_config = DagConfig.model_validate_json(dag_raw)
         else:
-            dag_config = linear_dag_from_pipeline_ids(self.pipeline_ids)
+            dag_raw = self.parameters.get("dag")
+            if isinstance(dag_raw, dict):
+                dag_config = DagConfig.model_validate(dag_raw)
+            elif isinstance(dag_raw, str):
+                dag_config = DagConfig.model_validate_json(dag_raw)
+            else:
+                dag_config = linear_dag_from_pipeline_ids(self.pipeline_ids)
 
         self._dag_run = build_dag(
             dag=dag_config,

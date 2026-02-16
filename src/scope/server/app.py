@@ -496,16 +496,29 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Get pipeline IDs to load
-        pipeline_ids = request.pipeline_ids
+        # Override pipeline IDs from input.json DAG if available
+        from .frame_processor import get_pipeline_ids_from_input_json
+
+        dag_pipeline_ids = get_pipeline_ids_from_input_json()
+        if dag_pipeline_ids is not None:
+            logger.info(
+                f"Overriding pipeline_ids from input.json: {dag_pipeline_ids} "
+                f"(was: {request.pipeline_ids})"
+            )
+            pipeline_ids = dag_pipeline_ids
+            # Discard UI load_params — they belong to whatever pipeline the UI
+            # selected, not to the pipelines declared in input.json.
+            load_params_dict = None
+        else:
+            pipeline_ids = request.pipeline_ids
+            # load_params is already a dict (or None)
+            load_params_dict = request.load_params
+
         if not pipeline_ids:
             raise HTTPException(
                 status_code=400,
                 detail="pipeline_ids must be provided and cannot be empty",
             )
-
-        # load_params is already a dict (or None)
-        load_params_dict = request.load_params
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(
