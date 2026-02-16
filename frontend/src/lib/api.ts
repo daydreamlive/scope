@@ -319,7 +319,7 @@ export const getInputSourceResolution = async (
 export const getInputSourceStreamUrl = (
   sourceType: string,
   identifier: string,
-  fps = 10
+  fps = 2
 ): string =>
   `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/stream?fps=${fps}`;
 
