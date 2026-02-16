@@ -40,6 +40,7 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
         return False, "No user ID provided"
 
     url = f"{DAYDREAM_API_BASE}/v1/users/{user_id}"
+    print(f"Validating user access for {user_id} via {url}")
 
     def fetch_user():
         req = urllib.request.Request(url)
@@ -219,7 +220,13 @@ def cleanup_session_data():
 
 
 def _get_git_sha() -> str:
-    """Get the short git SHA of the current checkout."""
+    """Get the deploy tag from env var SCOPE_DEPLOY_TAG, or fall back to git SHA."""
+    # Check for explicit deploy tag first
+    deploy_tag = os.environ.get("SCOPE_DEPLOY_TAG")
+    if deploy_tag:
+        return deploy_tag
+
+    # Fall back to git SHA
     try:
         result = _subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -731,9 +738,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
             if msg_type == "set_user_id":
                 requested_user_id = payload.get("user_id")
-                print(
-                    f"[{log_prefix()}] Validating user access for {requested_user_id}"
-                )
 
                 # Validate user has access to cloud mode
                 is_valid, reason = await validate_user_access(requested_user_id)
