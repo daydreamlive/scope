@@ -994,6 +994,14 @@ class GenerateRequest(BaseModel):
         default=None,
         description="VACE masks ([1, 1, T, H, W] float32 {0, 1}). Used for inpainting (1 = regenerate, 0 = keep).",
     )
+    pre_processor_id: str | None = Field(
+        default=None,
+        description="Pipeline ID for pre-processing each chunk before the main pipeline.",
+    )
+    post_processor_id: str | None = Field(
+        default=None,
+        description="Pipeline ID for post-processing each chunk after the main pipeline.",
+    )
 
 
 class GenerateResponse(BaseModel):

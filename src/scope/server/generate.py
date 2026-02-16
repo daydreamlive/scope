@@ -3,6 +3,7 @@
 import base64
 import gc
 import json
+import queue
 import threading
 import time
 from collections.abc import Iterator
@@ -295,6 +296,332 @@ def build_chunk_kwargs(
     return kwargs
 
 
+def _log_chunk_info(kwargs: dict, chunk_idx: int, num_chunks: int, logger: "Logger"):
+    """Log detailed chunk information."""
+    logger.info(f"generate_video_stream: Starting chunk {chunk_idx + 1}/{num_chunks}")
+    if kwargs.get("init_cache"):
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Resetting cache (init_cache=True)"
+        )
+    if "prompts" in kwargs:
+        prompt_texts = [p["text"] for p in kwargs["prompts"]]
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Updating prompt to {prompt_texts}"
+        )
+    if "transition" in kwargs:
+        target_texts = [p["text"] for p in kwargs["transition"]["target_prompts"]]
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Temporal transition to {target_texts} "
+            f"over {kwargs['transition']['num_steps']} steps "
+            f"(method: {kwargs['transition']['temporal_interpolation_method']})"
+        )
+    if "first_frame_image" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Using first frame keyframe"
+        )
+    if "last_frame_image" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Using last frame keyframe"
+        )
+    if "extension_mode" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Extension mode: {kwargs['extension_mode']}"
+        )
+    if "vace_ref_images" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Using {len(kwargs['vace_ref_images'])} VACE reference images"
+        )
+    if "vace_input_frames" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: VACE input frames shape: {kwargs['vace_input_frames'].shape}"
+        )
+    if "vace_input_masks" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: VACE input masks shape: {kwargs['vace_input_masks'].shape}"
+        )
+    if "vace_context_scale" in kwargs and kwargs["vace_context_scale"] != 1.0:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: VACE context scale: {kwargs['vace_context_scale']}"
+        )
+    if "vace_use_input_video" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: VACE use input video: {kwargs['vace_use_input_video']}"
+        )
+    if "video" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Video-to-video mode with {len(kwargs['video'])} frames, noise_scale={kwargs.get('noise_scale', DEFAULT_NOISE_SCALE)}"
+        )
+    elif "num_frames" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Text-to-video mode generating {kwargs['num_frames']} frames"
+        )
+    if "denoising_step_list" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Denoising steps: {kwargs['denoising_step_list']}"
+        )
+    if "noise_controller" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: Using noise controller: {kwargs['noise_controller']}"
+        )
+    if "kv_cache_attention_bias" in kwargs:
+        logger.info(
+            f"generate_video_stream: Chunk {chunk_idx}: KV cache attention bias: {kwargs['kv_cache_attention_bias']}"
+        )
+
+
+def _write_chunk_output(
+    result: dict,
+    chunk_idx: int,
+    num_chunks: int,
+    chunk_latency: float,
+    output_file,
+    latency_measures: list,
+    fps_measures: list,
+    logger: "Logger",
+    total_frames_ref: list,
+    dimensions_ref: list,
+) -> str:
+    """Write chunk output to file and return SSE progress event."""
+    chunk_output = result["video"]
+    num_output_frames = chunk_output.shape[0]
+    chunk_fps = num_output_frames / chunk_latency
+
+    latency_measures.append(chunk_latency)
+    fps_measures.append(chunk_fps)
+
+    logger.info(
+        f"Chunk {chunk_idx + 1}/{num_chunks}: "
+        f"{num_output_frames} frames, latency={chunk_latency:.2f}s, fps={chunk_fps:.2f}"
+    )
+
+    chunk_np = chunk_output.detach().cpu().numpy()
+    chunk_uint8 = (chunk_np * 255).clip(0, 255).astype(np.uint8)
+    output_file.write(chunk_uint8.tobytes())
+
+    total_frames_ref[0] += num_output_frames
+    if dimensions_ref[0] is None:
+        dimensions_ref[0] = chunk_np.shape[1]
+        dimensions_ref[1] = chunk_np.shape[2]
+        dimensions_ref[2] = chunk_np.shape[3]
+
+    return sse_event(
+        "progress",
+        {
+            "chunk": chunk_idx + 1,
+            "total_chunks": num_chunks,
+            "frames": num_output_frames,
+            "latency": round(chunk_latency, 3),
+            "fps": round(chunk_fps, 2),
+        },
+    )
+
+
+def _generate_sequential(
+    request: "GenerateRequest",
+    pipeline,
+    inputs: DecodedInputs,
+    num_chunks: int,
+    chunk_size: int,
+    status_info: dict,
+    device: torch.device,
+    dtype: torch.dtype,
+    output_file,
+    latency_measures: list,
+    fps_measures: list,
+    logger: "Logger",
+    total_frames_ref: list,
+    dimensions_ref: list,
+) -> Iterator[str]:
+    """Sequential chunk processing (original code path, no processors)."""
+    for chunk_idx in range(num_chunks):
+        if _cancel_event.is_set():
+            logger.info("Generation cancelled by user")
+            yield sse_event(
+                "cancelled",
+                {
+                    "chunk": chunk_idx,
+                    "total_chunks": num_chunks,
+                    "frames_completed": total_frames_ref[0],
+                },
+            )
+            return
+
+        start_frame = chunk_idx * chunk_size
+        end_frame = min(start_frame + chunk_size, request.num_frames)
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        kwargs = build_chunk_kwargs(
+            request,
+            inputs,
+            chunk_idx,
+            chunk_size,
+            start_frame,
+            end_frame,
+            status_info,
+            device,
+            dtype,
+            logger,
+        )
+        _log_chunk_info(kwargs, chunk_idx, num_chunks, logger)
+
+        chunk_start = time.time()
+        with torch.amp.autocast("cuda", dtype=dtype):
+            result = pipeline(**kwargs)
+        chunk_latency = time.time() - chunk_start
+
+        yield _write_chunk_output(
+            result,
+            chunk_idx,
+            num_chunks,
+            chunk_latency,
+            output_file,
+            latency_measures,
+            fps_measures,
+            logger,
+            total_frames_ref,
+            dimensions_ref,
+        )
+
+
+def _generate_with_processors(
+    request: "GenerateRequest",
+    pipeline,
+    pipeline_manager: "PipelineManager",
+    inputs: DecodedInputs,
+    num_chunks: int,
+    chunk_size: int,
+    status_info: dict,
+    device: torch.device,
+    dtype: torch.dtype,
+    output_file,
+    latency_measures: list,
+    fps_measures: list,
+    logger: "Logger",
+    total_frames_ref: list,
+    dimensions_ref: list,
+) -> Iterator[str]:
+    """Chunk processing with pre/post processor pipeline chaining."""
+    from .pipeline_processor import _SENTINEL, PipelineProcessor
+
+    # Build the processor chain
+    processors: list[PipelineProcessor] = []
+
+    if request.pre_processor_id:
+        pre_pipeline = pipeline_manager.get_pipeline_by_id(request.pre_processor_id)
+        pre_proc = PipelineProcessor(
+            pipeline=pre_pipeline,
+            pipeline_id=request.pre_processor_id,
+            batch_mode=True,
+        )
+        processors.append(pre_proc)
+        logger.info(f"Pre-processor: {request.pre_processor_id}")
+
+    main_proc = PipelineProcessor(
+        pipeline=pipeline,
+        pipeline_id=request.pipeline_id,
+        batch_mode=True,
+    )
+    processors.append(main_proc)
+
+    if request.post_processor_id:
+        post_pipeline = pipeline_manager.get_pipeline_by_id(request.post_processor_id)
+        post_proc = PipelineProcessor(
+            pipeline=post_pipeline,
+            pipeline_id=request.post_processor_id,
+            batch_mode=True,
+        )
+        processors.append(post_proc)
+        logger.info(f"Post-processor: {request.post_processor_id}")
+
+    # Chain processors
+    for i in range(len(processors) - 1):
+        processors[i].set_next_processor(processors[i + 1])
+
+    # Start all processors
+    for proc in processors:
+        proc.start()
+
+    first_proc = processors[0]
+    last_proc = processors[-1]
+
+    try:
+        # Feed chunks into the first processor's input queue
+        for chunk_idx in range(num_chunks):
+            if _cancel_event.is_set():
+                logger.info("Generation cancelled by user")
+                yield sse_event(
+                    "cancelled",
+                    {
+                        "chunk": chunk_idx,
+                        "total_chunks": num_chunks,
+                        "frames_completed": total_frames_ref[0],
+                    },
+                )
+                return
+
+            start_frame = chunk_idx * chunk_size
+            end_frame = min(start_frame + chunk_size, request.num_frames)
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            kwargs = build_chunk_kwargs(
+                request,
+                inputs,
+                chunk_idx,
+                chunk_size,
+                start_frame,
+                end_frame,
+                status_info,
+                device,
+                dtype,
+                logger,
+            )
+            _log_chunk_info(kwargs, chunk_idx, num_chunks, logger)
+
+            chunk_start = time.time()
+
+            # Feed kwargs into chain (blocking put)
+            first_proc.input_queue.put(kwargs)
+
+            # Collect result from last processor (blocking get)
+            while True:
+                try:
+                    result = last_proc.output_queue.get(timeout=1.0)
+                    break
+                except queue.Empty:
+                    if _cancel_event.is_set():
+                        return
+                    continue
+
+            chunk_latency = time.time() - chunk_start
+
+            yield _write_chunk_output(
+                result,
+                chunk_idx,
+                num_chunks,
+                chunk_latency,
+                output_file,
+                latency_measures,
+                fps_measures,
+                logger,
+                total_frames_ref,
+                dimensions_ref,
+            )
+
+        # Signal end of input
+        first_proc.input_queue.put(_SENTINEL)
+
+    finally:
+        # Stop all processors
+        for proc in processors:
+            proc.stop()
+
+
 def generate_video_stream(
     request: "GenerateRequest",
     pipeline_manager: "PipelineManager",
@@ -346,175 +673,52 @@ def generate_video_stream(
         video_width = None
         video_channels = None
 
+        # Determine if we need processor chaining
+        use_processors = (
+            request.pre_processor_id is not None
+            or request.post_processor_id is not None
+        )
+
         try:
-            for chunk_idx in range(num_chunks):
-                if _cancel_event.is_set():
-                    logger.info("Generation cancelled by user")
-                    yield sse_event(
-                        "cancelled",
-                        {
-                            "chunk": chunk_idx,
-                            "total_chunks": num_chunks,
-                            "frames_completed": total_frames,
-                        },
-                    )
-                    return
-
-                start_frame = chunk_idx * chunk_size
-                end_frame = min(start_frame + chunk_size, request.num_frames)
-
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-                kwargs = build_chunk_kwargs(
+            if use_processors:
+                yield from _generate_with_processors(
                     request,
+                    pipeline,
+                    pipeline_manager,
                     inputs,
-                    chunk_idx,
+                    num_chunks,
                     chunk_size,
-                    start_frame,
-                    end_frame,
                     status_info,
                     device,
                     dtype,
+                    output_file,
+                    latency_measures,
+                    fps_measures,
                     logger,
+                    _total_frames_ref := [0],
+                    _dimensions_ref := [None, None, None],
                 )
-
-                # Log chunk operations
-                logger.info(
-                    f"generate_video_stream: Starting chunk {chunk_idx + 1}/{num_chunks}"
+                total_frames = _total_frames_ref[0]
+                video_height, video_width, video_channels = _dimensions_ref
+            else:
+                yield from _generate_sequential(
+                    request,
+                    pipeline,
+                    inputs,
+                    num_chunks,
+                    chunk_size,
+                    status_info,
+                    device,
+                    dtype,
+                    output_file,
+                    latency_measures,
+                    fps_measures,
+                    logger,
+                    _total_frames_ref := [0],
+                    _dimensions_ref := [None, None, None],
                 )
-
-                # Cache management
-                if kwargs.get("init_cache"):
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Resetting cache (init_cache=True)"
-                    )
-
-                # Prompt updates
-                if "prompts" in kwargs:
-                    prompt_texts = [p["text"] for p in kwargs["prompts"]]
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Updating prompt to {prompt_texts}"
-                    )
-
-                # Temporal transitions
-                if "transition" in kwargs:
-                    target_texts = [
-                        p["text"] for p in kwargs["transition"]["target_prompts"]
-                    ]
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Temporal transition to {target_texts} "
-                        f"over {kwargs['transition']['num_steps']} steps "
-                        f"(method: {kwargs['transition']['temporal_interpolation_method']})"
-                    )
-
-                # Keyframes
-                if "first_frame_image" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Using first frame keyframe"
-                    )
-                if "last_frame_image" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Using last frame keyframe"
-                    )
-                if "extension_mode" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Extension mode: {kwargs['extension_mode']}"
-                    )
-
-                # VACE
-                if "vace_ref_images" in kwargs:
-                    num_refs = len(kwargs["vace_ref_images"])
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Using {num_refs} VACE reference images"
-                    )
-                if "vace_input_frames" in kwargs:
-                    vace_shape = kwargs["vace_input_frames"].shape
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: VACE input frames shape: {vace_shape}"
-                    )
-                if "vace_input_masks" in kwargs:
-                    mask_shape = kwargs["vace_input_masks"].shape
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: VACE input masks shape: {mask_shape}"
-                    )
-                if (
-                    "vace_context_scale" in kwargs
-                    and kwargs["vace_context_scale"] != 1.0
-                ):
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: VACE context scale: {kwargs['vace_context_scale']}"
-                    )
-                if "vace_use_input_video" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: VACE use input video: {kwargs['vace_use_input_video']}"
-                    )
-
-                # Video-to-video
-                if "video" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Video-to-video mode with {len(kwargs['video'])} frames, noise_scale={kwargs.get('noise_scale', DEFAULT_NOISE_SCALE)}"
-                    )
-                elif "num_frames" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Text-to-video mode generating {kwargs['num_frames']} frames"
-                    )
-
-                # Other parameters
-                if "denoising_step_list" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Denoising steps: {kwargs['denoising_step_list']}"
-                    )
-                if "noise_controller" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: Using noise controller: {kwargs['noise_controller']}"
-                    )
-                if "kv_cache_attention_bias" in kwargs:
-                    logger.info(
-                        f"generate_video_stream: Chunk {chunk_idx}: KV cache attention bias: {kwargs['kv_cache_attention_bias']}"
-                    )
-
-                # Run pipeline
-                chunk_start = time.time()
-                with torch.amp.autocast("cuda", dtype=dtype):
-                    result = pipeline(**kwargs)
-                chunk_latency = time.time() - chunk_start
-
-                chunk_output = result["video"]
-                num_output_frames = chunk_output.shape[0]
-                chunk_fps = num_output_frames / chunk_latency
-
-                latency_measures.append(chunk_latency)
-                fps_measures.append(chunk_fps)
-
-                logger.info(
-                    f"Chunk {chunk_idx + 1}/{num_chunks}: "
-                    f"{num_output_frames} frames, latency={chunk_latency:.2f}s, fps={chunk_fps:.2f}"
-                )
-
-                # Write chunk to file immediately (convert to uint8)
-                chunk_np = chunk_output.detach().cpu().numpy()
-                chunk_uint8 = (chunk_np * 255).clip(0, 255).astype(np.uint8)
-                output_file.write(chunk_uint8.tobytes())
-
-                # Track dimensions
-                total_frames += num_output_frames
-                if video_height is None:
-                    video_height = chunk_np.shape[1]
-                    video_width = chunk_np.shape[2]
-                    video_channels = chunk_np.shape[3]
-
-                yield sse_event(
-                    "progress",
-                    {
-                        "chunk": chunk_idx + 1,
-                        "total_chunks": num_chunks,
-                        "frames": num_output_frames,
-                        "latency": round(chunk_latency, 3),
-                        "fps": round(chunk_fps, 2),
-                    },
-                )
+                total_frames = _total_frames_ref[0]
+                video_height, video_width, video_channels = _dimensions_ref
 
             # Update header with actual shape
             output_file.seek(0)
