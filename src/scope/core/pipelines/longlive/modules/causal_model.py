@@ -1,5 +1,6 @@
 # Modified from https://github.com/NVlabs/LongLive
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
+import logging
 import math
 
 import torch
@@ -13,6 +14,8 @@ from torch.nn.attention.flex_attention import (
 )
 
 from scope.core.pipelines.wan2_1.modules.attention import attention
+
+from .dummy_forcing import compute_df_score, dummy_forcing_attention, select_dummy_heads
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
@@ -22,6 +25,8 @@ from .model import (
     rope_params,
     sinusoidal_embedding_1d,
 )
+
+logger = logging.getLogger(__name__)
 
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
@@ -391,8 +396,27 @@ class CausalWanSelfAttention(nn.Module):
                     "is_recompute": is_recompute,
                 }
 
+            # Compute dummy forcing classification score if flagged
+            if kv_cache.get("df_compute_score"):
+                kv_cache["df_score"] = compute_df_score(
+                    roped_query, temp_k[:, :local_end_index], num_new_tokens
+                )
+
             # Use temporary k, v to compute attention
-            if sink_tokens > 0:
+            df_head_groups = kv_cache.get("df_head_groups")
+            if df_head_groups is not None and len(df_head_groups["dummy_heads"]) > 0:
+                x = dummy_forcing_attention(
+                    roped_query,
+                    roped_key,
+                    v,
+                    temp_k,
+                    temp_v,
+                    sink_tokens,
+                    local_end_index,
+                    self.max_attention_size,
+                    df_head_groups,
+                )
+            elif sink_tokens > 0:
                 # Concatenate sink tokens and local window tokens, keeping total length strictly below max_attention_size
                 local_budget = self.max_attention_size - sink_tokens
                 k_sink = temp_k[:, :sink_tokens]
@@ -739,6 +763,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         self.num_frame_per_block = 1
         self.independent_first_frame = False
 
+        # Dummy Forcing state (configured by pipeline after construction)
+        self._df_enabled = False
+        self._df_num_dummy = 180
+
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
 
@@ -1050,6 +1078,37 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 kv_cache[block_index]["global_end_index"].fill_(current_end)
                 kv_cache[block_index]["local_end_index"].fill_(local_end_index)
 
+    def _df_classify(self, kv_cache: list[dict]) -> None:
+        """Collect per-layer dummy forcing scores and assign head groups globally."""
+        scores = []
+        for i in range(len(kv_cache)):
+            score = kv_cache[i].pop("df_score", None)
+            kv_cache[i].pop("df_compute_score", None)
+            if score is not None:
+                scores.append(score)
+
+        if len(scores) != len(kv_cache):
+            logger.warning(
+                "Dummy Forcing: expected %d layer scores, got %d — skipping classification",
+                len(kv_cache),
+                len(scores),
+            )
+            return
+
+        scores_tensor = torch.stack(scores)
+        head_groups = select_dummy_heads(scores_tensor, self._df_num_dummy)
+
+        for i, groups in enumerate(head_groups):
+            kv_cache[i]["df_head_groups"] = groups
+
+    @staticmethod
+    def _df_clear_state(kv_cache: list[dict]) -> None:
+        """Remove dummy forcing state from all layers (e.g. after cache reset)."""
+        for cache in kv_cache:
+            cache.pop("df_head_groups", None)
+            cache.pop("df_score", None)
+            cache.pop("df_compute_score", None)
+
     def _forward_inference(
         self,
         x,
@@ -1157,6 +1216,25 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             sink_recache_after_switch=sink_recache_after_switch,
         )
 
+        # Dummy Forcing: detect cache-full and flag layers for score computation
+        df_should_classify = False
+        if self._df_enabled and kv_cache is not None:
+            # Clear stale DF state if cache was reset
+            if (
+                "df_head_groups" in kv_cache[0]
+                and kv_cache[0]["local_end_index"].item() == 0
+            ):
+                self._df_clear_state(kv_cache)
+
+            # Trigger classification when cache is full and not yet classified
+            if "df_head_groups" not in kv_cache[0]:
+                kv_cache_size = kv_cache[0]["k"].shape[1]
+                local_end = kv_cache[0]["local_end_index"].item()
+                if local_end >= kv_cache_size:
+                    df_should_classify = True
+                    for i in range(len(kv_cache)):
+                        kv_cache[i]["df_compute_score"] = True
+
         # print("kwargs done")
         def create_custom_forward(module):
             def custom_forward(*inputs, **kwargs):
@@ -1218,6 +1296,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         # After all blocks are processed, apply cache updates in a single pass
         if kv_cache is not None and cache_update_infos:
             self._apply_cache_updates(kv_cache, cache_update_infos)
+
+        # Dummy Forcing: run global head classification after cache updates
+        if df_should_classify:
+            self._df_classify(kv_cache)
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))

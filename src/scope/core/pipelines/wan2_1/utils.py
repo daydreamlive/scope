@@ -52,6 +52,10 @@ def initialize_kv_cache(
                     [0], dtype=torch.long, device=device
                 )
 
+            # Clear dummy forcing state so it re-classifies after cache refill
+            for df_key in ("df_head_groups", "df_score", "df_compute_score"):
+                kv_cache_existing[i].pop(df_key, None)
+
         return kv_cache_existing
     else:
         # Create new cache

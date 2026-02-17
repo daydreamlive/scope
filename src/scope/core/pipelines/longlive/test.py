@@ -74,6 +74,17 @@ def main():
         type=str,
         help="Path to a JSONL file containing prompt sequences",
     )
+    parser.add_argument(
+        "--dummy-forcing",
+        action="store_true",
+        help="Enable Dummy Forcing optimization",
+    )
+    parser.add_argument(
+        "--num-dummy",
+        type=int,
+        default=180,
+        help="Number of heads to classify as dummy (default: 180)",
+    )
     args = parser.parse_args()
 
     # Setup config and pipeline
@@ -95,8 +106,13 @@ def main():
             "model_config": OmegaConf.load(Path(__file__).parent / "model.yaml"),
             "height": 480,
             "width": 832,
+            "dummy_forcing": args.dummy_forcing,
+            "num_dummy": args.num_dummy,
         }
     )
+
+    if args.dummy_forcing:
+        print(f"Dummy Forcing enabled with num_dummy={args.num_dummy}")
 
     device = torch.device("cuda")
     pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)

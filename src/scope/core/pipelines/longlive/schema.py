@@ -125,6 +125,30 @@ class LongLiveConfig(BasePipelineConfig):
             order=8, component="quantization", is_load_param=True
         ),
     )
+    dummy_forcing: bool = Field(
+        default=False,
+        description=(
+            "Enable Dummy Forcing optimization. Identifies attention heads that "
+            "primarily attend to the current frame and routes them through a "
+            "shorter attention path (sink + current only) for faster inference."
+        ),
+        json_schema_extra=ui_field_config(
+            order=9, is_load_param=True, label="Dummy Forcing"
+        ),
+    )
+    num_dummy: int = Field(
+        default=180,
+        ge=0,
+        le=360,
+        description=(
+            "Number of attention heads to classify as dummy (out of 360 total = "
+            "30 layers x 12 heads for Wan2.1 1.3B). Higher values = faster "
+            "inference but potentially lower quality. Default: 180 (~50%)."
+        ),
+        json_schema_extra=ui_field_config(
+            order=10, is_load_param=True, label="Dummy Heads"
+        ),
+    )
 
     modes = {
         "text": ModeDefaults(default=True),
