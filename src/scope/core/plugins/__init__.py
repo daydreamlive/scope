@@ -10,6 +10,7 @@ from .manager import (
     PluginNameCollisionError,
     PluginNotEditableError,
     PluginNotFoundError,
+    ensure_plugins_installed,
     get_plugin_manager,
     load_plugins,
     pm,
@@ -18,6 +19,7 @@ from .manager import (
 
 __all__ = [
     "hookimpl",
+    "ensure_plugins_installed",
     "load_plugins",
     "pm",
     "register_plugin_pipelines",

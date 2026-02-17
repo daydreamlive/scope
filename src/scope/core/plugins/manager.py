@@ -311,6 +311,68 @@ class PluginManager:
             except Exception as e:
                 logger.debug(f"Error checking distribution {dist}: {e}")
 
+    def _is_package_installed(self, package_name: str) -> bool:
+        """Check if a package is installed in the current environment.
+
+        Args:
+            package_name: Package name (handles hyphen/underscore normalization)
+
+        Returns:
+            True if the package is installed, False otherwise
+        """
+        from importlib.metadata import PackageNotFoundError, distribution
+
+        normalized = self._normalize_package_name(package_name)
+        # Try both hyphen and underscore variants
+        for name in (normalized, normalized.replace("_", "-")):
+            try:
+                distribution(name)
+                return True
+            except PackageNotFoundError:
+                continue
+        return False
+
+    def ensure_plugins_installed(self) -> None:
+        """Re-install plugins from resolved.txt if any are missing.
+
+        This handles venv recreation (e.g., uv upgrade wiping .venv) by
+        detecting missing plugin packages and reinstalling them from the
+        persisted resolved.txt before plugin discovery runs.
+        """
+        plugins = self._read_plugins_file()
+        if not plugins:
+            return
+
+        missing = []
+        for spec in plugins:
+            name = self._extract_package_name(spec)
+            if not self._is_package_installed(name):
+                missing.append(name)
+
+        if not missing:
+            return
+
+        logger.warning(
+            f"Plugins missing from environment (venv may have been recreated): "
+            f"{missing}. Re-installing from plugin manifest..."
+        )
+
+        resolved_file = get_resolved_file()
+        if resolved_file.exists():
+            success, error = self._sync_plugins(str(resolved_file))
+        else:
+            logger.info("No resolved.txt found, recompiling plugins first...")
+            ok, resolved_path, compile_error = self._compile_plugins()
+            if not ok:
+                logger.error(f"Failed to compile plugins: {compile_error}")
+                return
+            success, error = self._sync_plugins(resolved_path)
+
+        if success:
+            logger.info("Successfully re-installed missing plugins")
+        else:
+            logger.error(f"Failed to re-install plugins: {error}")
+
     def load_plugins(self) -> None:
         """Discover and load all plugins via entry points."""
         with self._lock:
@@ -1364,6 +1426,11 @@ class _PMProxy:
 
 
 pm = _PMProxy()
+
+
+def ensure_plugins_installed() -> None:
+    """Re-install plugins if any are missing from the environment."""
+    get_plugin_manager().ensure_plugins_installed()
 
 
 def load_plugins() -> None:
