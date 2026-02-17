@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   ReactFlow,
   Controls,
@@ -190,6 +190,53 @@ export function DagEditor() {
     }
   }, [setNodes, setEdges]);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImport = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const dagConfig = JSON.parse(e.target?.result as string);
+          if (!dagConfig.nodes || !dagConfig.edges) {
+            setStatus("Import failed: invalid DAG format");
+            return;
+          }
+          const { nodes: flowNodes, edges: flowEdges } = dagConfigToFlow(
+            dagConfig,
+            portsMap
+          );
+          const enrichedNodes = flowNodes.map(n =>
+            n.data.nodeType === "pipeline"
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    availablePipelineIds,
+                    pipelinePortsMap: portsMap,
+                  },
+                }
+              : n
+          );
+          setNodes(enrichedNodes);
+          setEdges(flowEdges);
+          setDagSource(null);
+          setStatus(`Imported from ${file.name}`);
+        } catch {
+          setStatus("Import failed: invalid JSON");
+        }
+      };
+      reader.readAsText(file);
+
+      // Reset so the same file can be re-imported
+      event.target.value = "";
+    },
+    [portsMap, availablePipelineIds, setNodes, setEdges]
+  );
+
   const handleExport = useCallback(() => {
     const dagConfig = flowToDagConfig(nodes, edges);
     const dataStr = JSON.stringify(dagConfig, null, 2);
@@ -228,6 +275,19 @@ export function DagEditor() {
           + Sink
         </button>
         <div className="flex-1" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleImport}
+          className="hidden"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="px-3 py-1.5 text-xs font-medium rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors"
+        >
+          Import JSON
+        </button>
         <button
           onClick={handleExport}
           className="px-3 py-1.5 text-xs font-medium rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors"
