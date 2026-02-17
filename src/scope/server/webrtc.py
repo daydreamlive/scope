@@ -284,6 +284,10 @@ class WebRTCManager:
             # Add the relayed video track to WebRTC connection
             pc.addTrack(relayed_track)
 
+            # Add audio track to WebRTC connection. The browser's offer includes
+            # a recvonly audio m-line, so aiortc will match this transceiver to it.
+            pc.addTrack(audio_track)
+
             # Store relay for cleanup
             session.relay = relay
 
@@ -390,9 +394,6 @@ class WebRTCManager:
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
 
-            # Add audio track to WebRTC connection
-            pc.addTrack(audio_track)
-
             # Create answer
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
@@ -416,7 +417,7 @@ class WebRTCManager:
             }
 
         except Exception as e:
-            logger.error(f"Error handling WebRTC offer: {e}")
+            logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
             _publish_connection_error(
                 session.id if "session" in locals() else None,
                 request.connection_id,

@@ -208,6 +208,11 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           transceiver = pc.addTransceiver("video");
         }
 
+        // Add a receive-only audio transceiver so the SDP offer includes an
+        // audio m-line. The backend will match this and send audio back.
+        pc.addTransceiver("audio", { direction: "recvonly" });
+        console.log("[UnifiedWebRTC] Added recvonly audio transceiver");
+
         // Force VP8-only for aiortc compatibility
         if (transceiver) {
           const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
