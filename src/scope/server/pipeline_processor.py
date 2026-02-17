@@ -504,7 +504,7 @@ class PipelineProcessor:
                 try:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:
-                    logger.info(
+                    logger.debug(
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
                     continue
