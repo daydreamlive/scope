@@ -1194,7 +1194,8 @@ export function StreamPage() {
 
       const loadSuccess = await loadPipeline(
         pipelineIds,
-        loadParams || undefined
+        loadParams || undefined,
+        settings.graphMode ?? true
       );
       if (!loadSuccess) {
         console.error("Failed to load pipeline, cannot start stream");
@@ -1236,6 +1237,7 @@ export function StreamPage() {
         vace_context_scale?: number;
         vace_enabled?: boolean;
         pipeline_ids?: string[];
+        use_dag?: boolean;
         first_frame_image?: string;
         last_frame_image?: string;
         images?: string[];
@@ -1273,6 +1275,8 @@ export function StreamPage() {
 
       // Pipeline chain: preprocessors + main pipeline (already built above)
       initialParameters.pipeline_ids = pipelineIds;
+      // When graph mode is OFF, backend uses Pipeline ID + Preprocessor + Postprocessor only
+      initialParameters.use_dag = settings.graphMode ?? true;
 
       // VACE-specific parameters
       if (currentPipeline?.supportsVACE) {

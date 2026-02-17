@@ -450,6 +450,11 @@ class PipelineLoadRequest(BaseModel):
     """Pipeline load request schema."""
 
     pipeline_ids: list[str] = Field(..., description="List of pipeline IDs to load")
+    use_dag: bool = Field(
+        default=True,
+        description="When False, use request pipeline_ids only (Pipeline ID + Preprocessor + Postprocessor). "
+        "When True, server may override with API DAG or input.json.",
+    )
     load_params: dict[str, Any] | None = Field(
         default=None,
         description="Pipeline-specific load parameters (applies to all pipelines). "

@@ -40,6 +40,8 @@ export type PipelineLoadParamsGeneric = Record<string, unknown>;
 
 export interface PipelineLoadRequest {
   pipeline_ids: string[];
+  /** When false, use pipeline_ids only (Pipeline ID + Preprocessor + Postprocessor). When true, server may use DAG. */
+  use_dag?: boolean;
   load_params?: PipelineLoadParamsGeneric | null;
 }
 

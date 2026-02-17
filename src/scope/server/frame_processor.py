@@ -141,6 +141,8 @@ class FrameProcessor:
         self.pipeline_ids: list[str] = []
         # DAG run (set when using DAG executor; enables shared input and multi-port)
         self._dag_run: DagRun | None = None
+        # When False, use pipeline_ids from initial_parameters only (Pipeline ID + Preprocessor + Postprocessor)
+        self._use_dag: bool = (initial_parameters or {}).get("use_dag", True)
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -150,29 +152,38 @@ class FrameProcessor:
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
 
-        # Override pipeline_ids: API DAG > input.json > UI params
-        from .dag_state import get_api_dag
+        # Override pipeline_ids only when use_dag: API DAG > input.json > UI params
+        if self._use_dag:
+            from .dag_state import get_api_dag
 
-        api_dag = get_api_dag()
-        if api_dag is not None:
-            dag_pipeline_ids = [
-                n.pipeline_id
-                for n in api_dag.nodes
-                if n.type == "pipeline" and n.pipeline_id is not None
-            ]
-            self.pipeline_ids = dag_pipeline_ids
-            logger.info(
-                f"[FRAME-PROCESSOR] Using pipeline_ids from API DAG: {dag_pipeline_ids}"
-            )
-        elif (dag_pipeline_ids := get_pipeline_ids_from_input_json()) is not None:
-            self.pipeline_ids = dag_pipeline_ids
-            logger.info(
-                f"[FRAME-PROCESSOR] Using pipeline_ids from input.json: {dag_pipeline_ids}"
-            )
+            api_dag = get_api_dag()
+            if api_dag is not None:
+                dag_pipeline_ids = [
+                    n.pipeline_id
+                    for n in api_dag.nodes
+                    if n.type == "pipeline" and n.pipeline_id is not None
+                ]
+                self.pipeline_ids = dag_pipeline_ids
+                logger.info(
+                    f"[FRAME-PROCESSOR] Using pipeline_ids from API DAG: {dag_pipeline_ids}"
+                )
+            elif (dag_pipeline_ids := get_pipeline_ids_from_input_json()) is not None:
+                self.pipeline_ids = dag_pipeline_ids
+                logger.info(
+                    f"[FRAME-PROCESSOR] Using pipeline_ids from input.json: {dag_pipeline_ids}"
+                )
+            else:
+                pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
+                if pipeline_ids is not None:
+                    self.pipeline_ids = pipeline_ids
         else:
+            # Graph mode OFF: use standard Pipeline ID + Preprocessor + Postprocessor
             pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
             if pipeline_ids is not None:
                 self.pipeline_ids = pipeline_ids
+                logger.info(
+                    "[FRAME-PROCESSOR] Using pipeline_ids from settings (graph mode OFF)"
+                )
 
     def start(self):
         if self.running:
@@ -976,33 +987,44 @@ class FrameProcessor:
     def _setup_pipeline_chain_sync(self):
         """Create pipeline DAG or linear chain (synchronous).
 
-        Loads DAG from input.json if it exists, otherwise falls back to
-        parameters or linear pipeline chain.
+        When use_dag is False, builds a linear chain from pipeline_ids (Pipeline ID +
+        Preprocessor + Postprocessor). Otherwise: API DAG > input.json > parameters >
+        linear fallback.
         Assumes all pipelines are already loaded by the pipeline manager.
         """
         dag_config: DagConfig
 
-        # Priority: API DAG > input.json > parameters > linear fallback
-        from .dag_state import get_api_dag
-
-        api_dag = get_api_dag()
-        if api_dag is not None:
-            dag_config = api_dag
-            logger.info("[FRAME-PROCESSOR] Using DAG from API")
-        elif (file_dag := _load_dag_from_input_json()) is not None:
-            dag_config = file_dag
-            logger.info("[FRAME-PROCESSOR] Using DAG from input.json")
-        elif not self.pipeline_ids and not self.parameters.get("dag"):
-            logger.error("No pipeline IDs or DAG config provided")
-            return
+        if not self._use_dag:
+            # Graph mode OFF: linear chain from pipeline_ids only
+            if not self.pipeline_ids:
+                logger.error("No pipeline IDs provided (graph mode OFF)")
+                return
+            dag_config = linear_dag_from_pipeline_ids(self.pipeline_ids)
+            logger.info(
+                "[FRAME-PROCESSOR] Using linear chain from settings (graph mode OFF)"
+            )
         else:
-            dag_raw = self.parameters.get("dag")
-            if isinstance(dag_raw, dict):
-                dag_config = DagConfig.model_validate(dag_raw)
-            elif isinstance(dag_raw, str):
-                dag_config = DagConfig.model_validate_json(dag_raw)
+            # Priority: API DAG > input.json > parameters > linear fallback
+            from .dag_state import get_api_dag
+
+            api_dag = get_api_dag()
+            if api_dag is not None:
+                dag_config = api_dag
+                logger.info("[FRAME-PROCESSOR] Using DAG from API")
+            elif (file_dag := _load_dag_from_input_json()) is not None:
+                dag_config = file_dag
+                logger.info("[FRAME-PROCESSOR] Using DAG from input.json")
+            elif not self.pipeline_ids and not self.parameters.get("dag"):
+                logger.error("No pipeline IDs or DAG config provided")
+                return
             else:
-                dag_config = linear_dag_from_pipeline_ids(self.pipeline_ids)
+                dag_raw = self.parameters.get("dag")
+                if isinstance(dag_raw, dict):
+                    dag_config = DagConfig.model_validate(dag_raw)
+                elif isinstance(dag_raw, str):
+                    dag_config = DagConfig.model_validate_json(dag_raw)
+                else:
+                    dag_config = linear_dag_from_pipeline_ids(self.pipeline_ids)
 
         self._dag_run = build_dag(
             dag=dag_config,

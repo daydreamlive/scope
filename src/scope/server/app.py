@@ -496,38 +496,42 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Override pipeline IDs: API DAG > input.json > request
+        # Override pipeline IDs only when use_dag is True: API DAG > input.json > request
         from .dag_state import get_api_dag
         from .frame_processor import get_pipeline_ids_from_input_json
 
-        api_dag = get_api_dag()
-        if api_dag is not None:
-            dag_pipeline_ids = [
-                n.pipeline_id
-                for n in api_dag.nodes
-                if n.type == "pipeline" and n.pipeline_id is not None
-            ]
-            logger.info(
-                f"Overriding pipeline_ids from API DAG: {dag_pipeline_ids} "
-                f"(was: {request.pipeline_ids})"
-            )
-            pipeline_ids = dag_pipeline_ids
-            # Pass UI load_params (resolution, seed, vae_type, etc.) so each
-            # pipeline in the DAG is loaded with the same params; each pipeline
-            # uses only the params it needs (e.g. longlive uses height/width).
-            load_params_dict = request.load_params
-        elif (dag_pipeline_ids := get_pipeline_ids_from_input_json()) is not None:
-            logger.info(
-                f"Overriding pipeline_ids from input.json: {dag_pipeline_ids} "
-                f"(was: {request.pipeline_ids})"
-            )
-            pipeline_ids = dag_pipeline_ids
-            # Pass UI load_params so resolution and other params are applied to
-            # each pipeline in the DAG (e.g. longlive gets height/width/seed).
-            load_params_dict = request.load_params
+        if request.use_dag:
+            api_dag = get_api_dag()
+            if api_dag is not None:
+                dag_pipeline_ids = [
+                    n.pipeline_id
+                    for n in api_dag.nodes
+                    if n.type == "pipeline" and n.pipeline_id is not None
+                ]
+                logger.info(
+                    f"Overriding pipeline_ids from API DAG: {dag_pipeline_ids} "
+                    f"(was: {request.pipeline_ids})"
+                )
+                pipeline_ids = dag_pipeline_ids
+                # Pass UI load_params (resolution, seed, vae_type, etc.) so each
+                # pipeline in the DAG is loaded with the same params; each pipeline
+                # uses only the params it needs (e.g. longlive uses height/width).
+                load_params_dict = request.load_params
+            elif (dag_pipeline_ids := get_pipeline_ids_from_input_json()) is not None:
+                logger.info(
+                    f"Overriding pipeline_ids from input.json: {dag_pipeline_ids} "
+                    f"(was: {request.pipeline_ids})"
+                )
+                pipeline_ids = dag_pipeline_ids
+                # Pass UI load_params so resolution and other params are applied to
+                # each pipeline in the DAG (e.g. longlive gets height/width/seed).
+                load_params_dict = request.load_params
+            else:
+                pipeline_ids = request.pipeline_ids
+                load_params_dict = request.load_params
         else:
+            # Graph mode OFF: use standard Pipeline ID + Preprocessor + Postprocessor
             pipeline_ids = request.pipeline_ids
-            # load_params is already a dict (or None)
             load_params_dict = request.load_params
 
         if not pipeline_ids:
