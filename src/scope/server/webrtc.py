@@ -284,9 +284,6 @@ class WebRTCManager:
             # Add the relayed video track to WebRTC connection
             pc.addTrack(relayed_track)
 
-            # Add audio track to WebRTC connection
-            pc.addTrack(audio_track)
-
             # Store relay for cleanup
             session.relay = relay
 
@@ -392,6 +389,9 @@ class WebRTCManager:
             # Set remote description (the offer)
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
+
+            # Add audio track to WebRTC connection
+            pc.addTrack(audio_track)
 
             # Create answer
             answer = await pc.createAnswer()
