@@ -112,7 +112,7 @@ interface SettingsPanelProps {
     value: unknown,
     isRuntimeParam?: boolean
   ) => void;
-  isCloudMode?: boolean;
+  isDirectCloudMode?: boolean;
 }
 
 export function SettingsPanel({
@@ -158,7 +158,7 @@ export function SettingsPanel({
   onPostprocessorIdsChange,
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
-  isCloudMode = false,
+  isDirectCloudMode = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -530,7 +530,7 @@ export function SettingsPanel({
               supportsKvCacheBias: pipelines?.[pipelineId]?.supportsKvCacheBias,
               isStreaming,
               isLoading,
-              isCloudMode,
+              isDirectCloudMode,
               schemaFieldOverrides,
               onSchemaFieldOverrideChange,
             };
@@ -674,7 +674,7 @@ export function SettingsPanel({
                 </div>
               )}
 
-              {currentPipeline?.supportsLoRA && !isCloudMode && (
+              {currentPipeline?.supportsLoRA && !isDirectCloudMode && (
                 <div className="space-y-4">
                   <LoRAManager
                     loras={loras}

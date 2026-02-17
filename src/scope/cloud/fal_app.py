@@ -22,10 +22,6 @@ import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
 
-# Daydream API configuration
-DAYDREAM_API_BASE = os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
-
-
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
     """
     Validate that a user has access to cloud mode.
@@ -39,7 +35,7 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
     if not user_id:
         return False, "No user ID provided"
 
-    url = f"{DAYDREAM_API_BASE}/v1/users/{user_id}"
+    url = f"{os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")}/v1/users/{user_id}"
 
     def fetch_user():
         req = urllib.request.Request(url)

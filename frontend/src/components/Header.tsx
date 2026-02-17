@@ -4,6 +4,7 @@ import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useCloudContext } from "../lib/directCloudContext";
 
 interface HeaderProps {
   className?: string;
@@ -12,6 +13,8 @@ interface HeaderProps {
   // External settings tab control
   openSettingsTab?: string | null;
   onSettingsTabOpened?: () => void;
+  // Auth state for direct cloud mode
+  isSignedIn?: boolean;
 }
 
 export function Header({
@@ -20,16 +23,27 @@ export function Header({
   cloudDisabled,
   openSettingsTab,
   onSettingsTabOpened,
+  isSignedIn = true,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+
   const [initialTab, setInitialTab] = useState<
     "general" | "account" | "api-keys" | "plugins"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
+  // Get direct cloud mode from context (static, based on env var)
+  const { isDirectCloudMode } = useCloudContext();
+
   // Use shared cloud status hook - single source of truth
   const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
     useCloudStatus();
+
+  // In direct cloud mode, determine if we need to force the settings dialog to stay open
+  // Require both signed in AND connected to cloud
+  const requiresAuth = isDirectCloudMode && !isSignedIn;
+  const requiresConnection = isDirectCloudMode && isSignedIn && !isConnected;
+  const preventClose = requiresAuth || requiresConnection;
 
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
@@ -103,7 +117,32 @@ export function Header({
     }
   }, []);
 
+  // Force settings dialog open when in direct cloud mode and not authenticated/connected
+  useEffect(() => {
+    if (preventClose) {
+      setInitialTab("account");
+      setSettingsOpen(true);
+    }
+  }, [preventClose]);
+
+  // Track previous preventClose state to detect connection completion
+  const prevPreventCloseRef = useRef(preventClose);
+
+  // Auto-close settings dialog when connection completes (preventClose goes from true to false)
+  useEffect(() => {
+    if (prevPreventCloseRef.current && !preventClose && settingsOpen) {
+      // Connection just completed - auto-close the dialog
+      setSettingsOpen(false);
+      setInitialTab("general");
+    }
+    prevPreventCloseRef.current = preventClose;
+  }, [preventClose, settingsOpen]);
+
   const handleClose = () => {
+    // Prevent closing if auth or connection is required
+    if (preventClose) {
+      return;
+    }
     setSettingsOpen(false);
     setInitialTab("general");
     setInitialPluginPath("");
@@ -160,6 +199,8 @@ export function Header({
         initialPluginPath={initialPluginPath}
         onPipelinesRefresh={onPipelinesRefresh}
         cloudDisabled={cloudDisabled}
+        preventClose={preventClose}
+        isConnecting={isConnecting}
       />
     </header>
   );

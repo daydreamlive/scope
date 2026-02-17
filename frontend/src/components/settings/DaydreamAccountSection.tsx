@@ -28,11 +28,17 @@ interface DaydreamAccountSectionProps {
   onPipelinesRefresh?: () => Promise<unknown>;
   /** Disable the toggle (e.g., when streaming) */
   disabled?: boolean;
+  /** Whether the cloud is currently connecting */
+  isConnecting?: boolean;
+  /** Whether the dialog cannot be closed (auth gating mode) */
+  preventClose?: boolean;
 }
 
 export function DaydreamAccountSection({
   onPipelinesRefresh,
   disabled = false,
+  isConnecting: isConnectingProp = false,
+  preventClose = false,
 }: DaydreamAccountSectionProps) {
   // Auth state
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -43,7 +49,7 @@ export function DaydreamAccountSection({
   const { status, refresh: refreshStatus } = useCloudStatus();
 
   // Check if we're in direct cloud mode (no local backend, always cloud)
-  const { isCloudMode: isDirectCloudMode, disconnect: disconnectCloud } = useCloudContext();
+  const { isDirectCloudMode, disconnect: disconnectCloud } = useCloudContext();
 
   // Local action state
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -273,6 +279,23 @@ export function DaydreamAccountSection({
             <span className="text-sm font-medium">Cloud Connection</span>
           </div>
 
+          {/* Auth gating message - shown when dialog cannot be closed */}
+          {preventClose && !isSignedIn && (
+            <p className="text-sm text-muted-foreground">
+              Please log in to your Daydream account to continue.
+            </p>
+          )}
+
+          {/* Connecting state - shown when waiting for cloud connection */}
+          {preventClose && isSignedIn && isConnectingProp && (
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+              <p className="text-sm text-muted-foreground">
+                Connecting to cloud...
+              </p>
+            </div>
+          )}
+
           {/* Connection ID when connected */}
           {status.connected && status.connection_id && (
             <div className="flex items-center gap-2">
@@ -298,7 +321,8 @@ export function DaydreamAccountSection({
             </div>
           )}
 
-          {status.connecting && (
+          {/* Regular connecting state (not in preventClose mode) */}
+          {!preventClose && status.connecting && (
             <p className="text-xs text-muted-foreground">Connecting...</p>
           )}
 

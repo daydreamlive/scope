@@ -188,7 +188,7 @@ export function useCloudStatus() {
   }
 
   // If in direct cloud mode, use that status instead of proxy status
-  const isDirectMode = cloudContext?.isCloudMode ?? false;
+  const isDirectMode = cloudContext?.isDirectCloudMode ?? false;
 
   const status: CloudStatus = isDirectMode
     ? {

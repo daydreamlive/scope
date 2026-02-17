@@ -43,24 +43,24 @@ function getFallbackDefaults(mode?: InputMode) {
 }
 
 export function useStreamState() {
-  const { adapter, isCloudMode, isReady } = useCloudContext();
+  const { adapter, isDirectCloudMode, isReady } = useCloudContext();
 
   // Helper functions that use cloud adapter when available
   const getPipelineSchemas =
     useCallback(async (): Promise<PipelineSchemasResponse> => {
-      if (isCloudMode && adapter) {
+      if (isDirectCloudMode && adapter) {
         return adapter.api.getPipelineSchemas();
       }
       return getPipelineSchemasApi();
-    }, [adapter, isCloudMode]);
+    }, [adapter, isDirectCloudMode]);
 
   const getHardwareInfo =
     useCallback(async (): Promise<HardwareInfoResponse> => {
-      if (isCloudMode && adapter) {
+      if (isDirectCloudMode && adapter) {
         return adapter.api.getHardwareInfo();
       }
       return getHardwareInfoApi();
-    }, [adapter, isCloudMode]);
+    }, [adapter, isDirectCloudMode]);
 
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
     cpu: 0,
@@ -235,7 +235,7 @@ export function useStreamState() {
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
     // In cloud mode, wait until adapter is ready
-    if (isCloudMode && !isReady) {
+    if (isDirectCloudMode && !isReady) {
       return;
     }
 
@@ -288,7 +288,7 @@ export function useStreamState() {
     };
 
     fetchInitialData();
-  }, [isCloudMode, isReady, getPipelineSchemas, getHardwareInfo]);
+  }, [isDirectCloudMode, isReady, getPipelineSchemas, getHardwareInfo]);
 
   // Update inputMode when schemas load or pipeline changes
   // This sets the correct default mode for the pipeline

@@ -15,10 +15,13 @@ import React, {
 } from "react";
 import { CloudAdapter } from "./directCloudAdapter";
 
+// Check if direct cloud mode is enabled (static, never changes)
+const DIRECT_CLOUD_MODE = !!import.meta.env.VITE_CLOUD_WS_URL;
+
 interface CloudContextValue {
-  /** Whether we're in direct cloud mode (VITE_CLOUD_WS_URL is set) */
-  isCloudMode: boolean;
-  /** The CloudAdapter instance (null if not in cloud mode) */
+  /** Whether we're in direct cloud mode (VITE_CLOUD_WS_URL is set) - STATIC, always true if env var is set */
+  isDirectCloudMode: boolean;
+  /** The CloudAdapter instance (null if not in cloud mode or not connected) */
   adapter: CloudAdapter | null;
   /** Whether we're currently connecting (waiting for ready message) */
   isConnecting: boolean;
@@ -39,7 +42,7 @@ interface CloudContextValue {
 }
 
 const CloudContext = createContext<CloudContextValue>({
-  isCloudMode: false,
+  isDirectCloudMode: DIRECT_CLOUD_MODE,
   adapter: null,
   isConnecting: false,
   isReady: false,
@@ -168,7 +171,7 @@ export function CloudProvider({
   }, []);
 
   const value: CloudContextValue = {
-    isCloudMode: !!wsUrl,
+    isDirectCloudMode: DIRECT_CLOUD_MODE,
     adapter,
     isConnecting: !!wsUrl && !manuallyDisconnected && isConnecting,
     isReady: !!wsUrl && !manuallyDisconnected && isReady,
@@ -198,7 +201,7 @@ export function useCloudContext() {
 export function useCloudAdapter() {
   const {
     adapter,
-    isCloudMode,
+    isDirectCloudMode,
     isConnecting,
     isReady,
     error,
@@ -210,7 +213,7 @@ export function useCloudAdapter() {
   } = useCloudContext();
   return {
     adapter,
-    isCloudMode,
+    isDirectCloudMode,
     isConnecting,
     isReady,
     error,

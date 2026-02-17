@@ -26,6 +26,10 @@ interface SettingsDialogProps {
   initialPluginPath?: string;
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
+  /** When true, the dialog cannot be closed (used for auth gating in direct cloud mode) */
+  preventClose?: boolean;
+  /** When true, shows connecting state in the account tab */
+  isConnecting?: boolean;
 }
 
 const isLocalPath = (spec: string): boolean => {
@@ -62,9 +66,11 @@ export function SettingsDialog({
   initialPluginPath = "",
   onPipelinesRefresh,
   cloudDisabled,
+  preventClose = false,
+  isConnecting = false,
 }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
-  const { isCloudMode: isDirectCloudMode } = useCloudContext();
+  const { isDirectCloudMode } = useCloudContext();
   const { getServerInfo } = useApi();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
@@ -318,8 +324,27 @@ export function SettingsDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
-      <DialogContent className="sm:max-w-[600px] p-0 gap-0">
+    <Dialog
+      open={open}
+      onOpenChange={isOpen => {
+        // Prevent closing if preventClose is true
+        if (!isOpen && preventClose) {
+          return;
+        }
+        if (!isOpen) {
+          onClose();
+        }
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-[600px] p-0 gap-0"
+        closeButtonTitle={
+          preventClose
+            ? "Please log in and connect to cloud to continue"
+            : undefined
+        }
+        closeButtonDisabled={preventClose}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
@@ -378,6 +403,8 @@ export function SettingsDialog({
               <AccountTab
                 onPipelinesRefresh={onPipelinesRefresh ?? refetchPipelines}
                 cloudDisabled={cloudDisabled}
+                isConnecting={isConnecting}
+                preventClose={preventClose}
               />
             </TabsContent>
             {/* Hide API Keys and Plugins content in direct cloud mode */}

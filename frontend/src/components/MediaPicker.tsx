@@ -8,19 +8,19 @@ import { getAssetUrl, type AssetFileInfo } from "../lib/api";
 function AssetImage({
   assetPath,
   alt,
-  isCloudMode,
+  isDirectCloudMode,
   getAssetDataUrl,
 }: {
   assetPath: string;
   alt: string;
-  isCloudMode: boolean;
+  isDirectCloudMode: boolean;
   getAssetDataUrl: (path: string) => Promise<string>;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (isCloudMode) {
+    if (isDirectCloudMode) {
       // In cloud mode, fetch the image as a data URL
       getAssetDataUrl(assetPath)
         .then(setSrc)
@@ -29,7 +29,7 @@ function AssetImage({
       // In local mode, use the regular URL
       setSrc(getAssetUrl(assetPath));
     }
-  }, [assetPath, isCloudMode, getAssetDataUrl]);
+  }, [assetPath, isDirectCloudMode, getAssetDataUrl]);
 
   if (error) {
     return (
@@ -65,7 +65,7 @@ export function MediaPicker({
   onSelectImage,
   disabled,
 }: MediaPickerProps) {
-  const { listAssets, uploadAsset, isCloudMode, getAssetDataUrl } = useApi();
+  const { listAssets, uploadAsset, isDirectCloudMode, getAssetDataUrl } = useApi();
   const [images, setImages] = useState<AssetFileInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -216,7 +216,7 @@ export function MediaPicker({
                   <AssetImage
                     assetPath={image.path}
                     alt={image.name}
-                    isCloudMode={isCloudMode}
+                    isDirectCloudMode={isDirectCloudMode}
                     getAssetDataUrl={getAssetDataUrl}
                   />
                 </button>

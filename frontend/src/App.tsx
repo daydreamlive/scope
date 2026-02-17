@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
-import { Button } from "./components/ui/button";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { CloudProvider } from "./lib/directCloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
@@ -10,7 +9,6 @@ import {
   initElectronAuthListener,
   getDaydreamUserId,
   isAuthenticated,
-  redirectToSignIn,
 } from "./lib/auth";
 import { toast } from "sonner";
 import "./index.css";
@@ -26,38 +24,6 @@ type AuthResult =
   | { type: "success" }
   | { type: "error"; message: string }
   | null;
-
-/**
- * Component that gates the main content behind authentication in direct cloud mode
- */
-function AuthGatedContent({ isSignedIn }: { isSignedIn: boolean }) {
-  // Check if we're in direct cloud mode using the env var directly
-  // (can't use context.isCloudMode because it depends on effectiveWsUrl which is undefined when not signed in)
-  const isDirectCloudMode = !!CLOUD_WS_URL;
-
-  // In direct cloud mode, require authentication
-  if (isDirectCloudMode && !isSignedIn) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="text-center space-y-4 p-8">
-          <h1 className="text-2xl font-semibold">Daydream Scope</h1>
-          <p className="text-muted-foreground">
-            Please log in to your Daydream account to continue.
-          </p>
-          <Button onClick={() => redirectToSignIn()} size="lg">
-            Log in
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <PipelinesProvider>
-      <StreamPage />
-    </PipelinesProvider>
-  );
-}
 
 function App() {
   const [isHandlingAuth, setIsHandlingAuth] = useState(true);
@@ -158,7 +124,9 @@ function App() {
   return (
     <CloudStatusProvider skipPolling={!!CLOUD_WS_URL}>
       <CloudProvider wsUrl={effectiveWsUrl} apiKey={CLOUD_KEY} userId={userId}>
-        <AuthGatedContent isSignedIn={isSignedIn} />
+        <PipelinesProvider>
+          <StreamPage isSignedIn={isSignedIn} />
+        </PipelinesProvider>
         <Toaster />
       </CloudProvider>
     </CloudStatusProvider>

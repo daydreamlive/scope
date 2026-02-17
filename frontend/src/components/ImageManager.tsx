@@ -9,25 +9,25 @@ import { MediaPicker } from "./MediaPicker";
 function AssetImage({
   assetPath,
   alt,
-  isCloudMode,
+  isDirectCloudMode,
   getAssetDataUrl,
 }: {
   assetPath: string;
   alt: string;
-  isCloudMode: boolean;
+  isDirectCloudMode: boolean;
   getAssetDataUrl: (path: string) => Promise<string>;
 }) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isCloudMode) {
+    if (isDirectCloudMode) {
       getAssetDataUrl(assetPath)
         .then(setSrc)
         .catch(() => setSrc(null));
     } else {
       setSrc(getAssetUrl(assetPath));
     }
-  }, [assetPath, isCloudMode, getAssetDataUrl]);
+  }, [assetPath, isDirectCloudMode, getAssetDataUrl]);
 
   if (!src) {
     return (
@@ -66,7 +66,7 @@ export function ImageManager({
   hideLabel = false,
   singleColumn,
 }: ImageManagerProps) {
-  const { isCloudMode, getAssetDataUrl } = useApi();
+  const { isDirectCloudMode, getAssetDataUrl } = useApi();
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
 
   const handleAddImage = (imagePath: string) => {
@@ -120,7 +120,7 @@ export function ImageManager({
             <AssetImage
               assetPath={imagePath}
               alt={`${label} ${index + 1}`}
-              isCloudMode={isCloudMode}
+              isDirectCloudMode={isDirectCloudMode}
               getAssetDataUrl={getAssetDataUrl}
             />
             <button

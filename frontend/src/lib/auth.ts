@@ -55,6 +55,7 @@ function verifyAuthState(state: string | null): boolean {
   const storedState = sessionStorage.getItem(AUTH_STATE_KEY);
   // Clear the stored state regardless of match (one-time use)
   sessionStorage.removeItem(AUTH_STATE_KEY);
+  console.log("verifyAuthState", state, storedState);
 
   if (!state || !storedState) {
     return false;
@@ -277,6 +278,9 @@ export async function exchangeTokenForAPIKey(token: string): Promise<string> {
  * Handle OAuth callback - extract token from URL and exchange it for API key
  * Returns true if callback was handled, false otherwise
  */
+// Track if we're already processing an OAuth callback (prevents double-processing in React StrictMode)
+let isProcessingOAuthCallback = false;
+
 export async function handleOAuthCallback(): Promise<boolean> {
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("token");
@@ -287,15 +291,23 @@ export async function handleOAuthCallback(): Promise<boolean> {
     return false;
   }
 
+  // Prevent double-processing (React StrictMode calls useEffect twice)
+  if (isProcessingOAuthCallback) {
+    console.log("[Auth] OAuth callback already being processed, skipping");
+    return false;
+  }
+  isProcessingOAuthCallback = true;
+
+  // Clean up the URL IMMEDIATELY to prevent double-processing on re-renders
+  const url = new URL(window.location.href);
+  url.searchParams.delete("token");
+  url.searchParams.delete("state");
+  url.searchParams.delete("userId");
+  window.history.replaceState({}, document.title, url.toString());
+
   // Verify the state parameter to prevent CSRF attacks
   if (!verifyAuthState(state)) {
-    // Clean up URL even on state mismatch
-    const url = new URL(window.location.href);
-    url.searchParams.delete("token");
-    url.searchParams.delete("state");
-    url.searchParams.delete("userId");
-    window.history.replaceState({}, document.title, url.toString());
-
+    isProcessingOAuthCallback = false;
     throw new Error(
       "Invalid auth state. This may be a CSRF attack or the auth session expired. Please try signing in again."
     );
@@ -308,17 +320,12 @@ export async function handleOAuthCallback(): Promise<boolean> {
     // Save auth credentials and fetch profile in one operation
     await saveDaydreamAuth(apiKey, userId);
 
-    // Clean up the URL by removing the token parameter
-    const url = new URL(window.location.href);
-    url.searchParams.delete("token");
-    url.searchParams.delete("state");
-    url.searchParams.delete("userId");
-    window.history.replaceState({}, document.title, url.toString());
-
     return true;
   } catch (error) {
     console.error("Failed to exchange token for API key:", error);
     throw error;
+  } finally {
+    isProcessingOAuthCallback = false;
   }
 }
 

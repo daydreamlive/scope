@@ -43,7 +43,7 @@ interface UseUnifiedWebRTCOptions {
  * In cloud mode, uses the CloudAdapter WebSocket for signaling.
  */
 export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
-  const { adapter, isCloudMode } = useCloudContext();
+  const { adapter, isDirectCloudMode } = useCloudContext();
 
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] =
@@ -63,7 +63,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       console.log("[UnifiedWebRTC] Fetching ICE servers...");
       let iceServersResponse;
 
-      if (isCloudMode && adapter) {
+      if (isDirectCloudMode && adapter) {
         iceServersResponse = await adapter.getIceServers();
       } else {
         iceServersResponse = await getIceServers();
@@ -80,7 +80,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       );
       return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
     }
-  }, [adapter, isCloudMode]);
+  }, [adapter, isDirectCloudMode]);
 
   // Helper to send SDP offer
   const sendOffer = useCallback(
@@ -89,7 +89,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       type: string,
       initialParameters?: InitialParameters
     ) => {
-      if (isCloudMode && adapter) {
+      if (isDirectCloudMode && adapter) {
         return adapter.sendOffer(sdp, type, initialParameters);
       }
       return sendWebRTCOffer({
@@ -98,19 +98,19 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         initialParameters,
       });
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   // Helper to send ICE candidate
   const sendIceCandidate = useCallback(
     async (sessionId: string, candidate: RTCIceCandidate) => {
-      if (isCloudMode && adapter) {
+      if (isDirectCloudMode && adapter) {
         await adapter.sendIceCandidate(sessionId, candidate);
       } else {
         await sendIceCandidates(sessionId, candidate);
       }
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   const startStream = useCallback(
@@ -130,7 +130,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
         // Log peer connection configuration
         console.log("[UnifiedWebRTC] Created RTCPeerConnection with config:", {
-          mode: isCloudMode ? "CLOUD (frontend direct)" : "LOCAL (backend)",
+          mode: isDirectCloudMode ? "CLOUD (frontend direct)" : "LOCAL (backend)",
           iceServers: config.iceServers?.map((s: RTCIceServer) => ({
             urls: s.urls,
             hasCredentials: !!(s.username && s.credential),
@@ -237,7 +237,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             );
             console.log(
               "[UnifiedWebRTC] Mode:",
-              isCloudMode
+              isDirectCloudMode
                 ? "CLOUD (frontend → cloud)"
                 : "LOCAL (frontend → backend)"
             );
@@ -371,7 +371,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           console.log("[UnifiedWebRTC] Server SDP session:", sessionName);
           console.log(
             "[UnifiedWebRTC] Stream target:",
-            isCloudMode ? "cloud backend" : "local backend"
+            isDirectCloudMode ? "cloud backend" : "local backend"
           );
 
           // Flush queued ICE candidates

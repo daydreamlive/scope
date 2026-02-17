@@ -4,7 +4,7 @@ import { useCloudContext } from "../lib/directCloudContext";
 import type { InputMode, PipelineInfo } from "../types";
 
 export function usePipelines() {
-  const { adapter, isCloudMode, isReady } = useCloudContext();
+  const { adapter, isDirectCloudMode, isReady } = useCloudContext();
 
   const [pipelines, setPipelines] = useState<Record<
     string,
@@ -70,7 +70,7 @@ export function usePipelines() {
 
       // Use adapter if in cloud mode, otherwise direct API
       const schemas =
-        isCloudMode && adapter
+        isDirectCloudMode && adapter
           ? await adapter.api.getPipelineSchemas()
           : await getPipelineSchemas();
 
@@ -86,11 +86,11 @@ export function usePipelines() {
     } finally {
       setIsLoading(false);
     }
-  }, [adapter, isCloudMode, transformSchemas]);
+  }, [adapter, isDirectCloudMode, transformSchemas]);
 
   useEffect(() => {
     // In cloud mode, wait until adapter is ready
-    if (isCloudMode && !isReady) {
+    if (isDirectCloudMode && !isReady) {
       return;
     }
 
@@ -103,7 +103,7 @@ export function usePipelines() {
 
         // Use adapter if in cloud mode, otherwise direct API
         const schemas =
-          isCloudMode && adapter
+          isDirectCloudMode && adapter
             ? await adapter.api.getPipelineSchemas()
             : await getPipelineSchemas();
 
@@ -129,7 +129,7 @@ export function usePipelines() {
     return () => {
       mounted = false;
     };
-  }, [adapter, isCloudMode, isReady, transformSchemas]);
+  }, [adapter, isDirectCloudMode, isReady, transformSchemas]);
 
   return {
     pipelines,

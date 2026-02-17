@@ -27,13 +27,13 @@ import type { IceServersResponse, ModelStatusResponse } from "../types";
  * In local mode, requests go directly via HTTP fetch.
  */
 export function useApi() {
-  const { adapter, isCloudMode, isReady } = useCloudContext();
+  const { adapter, isDirectCloudMode, isReady } = useCloudContext();
 
   // Pipeline APIs
   const getPipelineStatus =
     useCallback(async (): Promise<PipelineStatusResponse> => {
-      if (isCloudMode) {
-        // In cloud mode, must go through adapter - never fall back to direct HTTP
+      if (isDirectCloudMode) {
+        // In direct cloud mode, must go through adapter - never fall back to direct HTTP
         if (adapter) {
           return adapter.api.getPipelineStatus();
         }
@@ -41,11 +41,11 @@ export function useApi() {
         return { status: "not_loaded" };
       }
       return api.getPipelineStatus();
-    }, [adapter, isCloudMode]);
+    }, [adapter, isDirectCloudMode]);
 
   const loadPipeline = useCallback(
     async (data: PipelineLoadRequest): Promise<{ message: string }> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.loadPipeline(data);
         }
@@ -53,12 +53,12 @@ export function useApi() {
       }
       return api.loadPipeline(data);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   const getPipelineSchemas =
     useCallback(async (): Promise<PipelineSchemasResponse> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.getPipelineSchemas();
         }
@@ -66,12 +66,12 @@ export function useApi() {
         return { pipelines: {} };
       }
       return api.getPipelineSchemas();
-    }, [adapter, isCloudMode]);
+    }, [adapter, isDirectCloudMode]);
 
   // Model APIs
   const checkModelStatus = useCallback(
     async (pipelineId: string): Promise<ModelStatusResponse> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.checkModelStatus(pipelineId);
         }
@@ -79,12 +79,12 @@ export function useApi() {
       }
       return api.checkModelStatus(pipelineId);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   const downloadPipelineModels = useCallback(
     async (pipelineId: string): Promise<{ message: string }> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.downloadPipelineModels(pipelineId);
         }
@@ -92,13 +92,13 @@ export function useApi() {
       }
       return api.downloadPipelineModels(pipelineId);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   // Hardware APIs
   const getHardwareInfo =
     useCallback(async (): Promise<HardwareInfoResponse> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.getHardwareInfo();
         }
@@ -106,11 +106,11 @@ export function useApi() {
         return { vram_gb: null, spout_available: false };
       }
       return api.getHardwareInfo();
-    }, [adapter, isCloudMode]);
+    }, [adapter, isDirectCloudMode]);
 
   // LoRA APIs
   const listLoRAFiles = useCallback(async (): Promise<LoRAFilesResponse> => {
-    if (isCloudMode) {
+    if (isDirectCloudMode) {
       if (adapter) {
         return adapter.api.listLoRAFiles();
       }
@@ -118,12 +118,12 @@ export function useApi() {
       return { lora_files: [] };
     }
     return api.listLoRAFiles();
-  }, [adapter, isCloudMode]);
+  }, [adapter, isDirectCloudMode]);
 
   // Asset APIs
   const listAssets = useCallback(
     async (type?: "image" | "video"): Promise<AssetsResponse> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.listAssets(type);
         }
@@ -132,12 +132,12 @@ export function useApi() {
       }
       return api.listAssets(type);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   const uploadAsset = useCallback(
     async (file: File): Promise<AssetFileInfo> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.uploadAsset(file);
         }
@@ -145,24 +145,24 @@ export function useApi() {
       }
       return api.uploadAsset(file);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   // Logs
   const fetchCurrentLogs = useCallback(async (): Promise<string> => {
-    if (isCloudMode) {
+    if (isDirectCloudMode) {
       if (adapter) {
         return adapter.api.fetchCurrentLogs();
       }
       throw new Error("Cloud connection not ready");
     }
     return api.fetchCurrentLogs();
-  }, [adapter, isCloudMode]);
+  }, [adapter, isDirectCloudMode]);
 
   // Recording download
   const downloadRecording = useCallback(
     async (sessionId: string): Promise<void> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.downloadRecording(sessionId);
         }
@@ -170,13 +170,13 @@ export function useApi() {
       }
       return api.downloadRecording(sessionId);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   // Get asset as data URL (for cloud mode where we can't serve files directly)
   const getAssetDataUrl = useCallback(
     async (assetPath: string): Promise<string> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.api.getAssetDataUrl(assetPath);
         }
@@ -185,34 +185,35 @@ export function useApi() {
       // In local mode, just return the regular URL
       return api.getAssetUrl(assetPath);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   // Server info
   const getServerInfo = useCallback(async (): Promise<ServerInfo> => {
-    if (isCloudMode) {
+    if (isDirectCloudMode) {
       if (adapter) {
         return adapter.api.getServerInfo();
       }
-      throw new Error("Cloud connection not ready");
+      // Return default info when not connected yet
+      return { version: "", gitCommit: "" };
     }
     return api.getServerInfo();
-  }, [adapter, isCloudMode]);
+  }, [adapter, isDirectCloudMode]);
 
   // WebRTC signaling
   const getIceServers = useCallback(async (): Promise<IceServersResponse> => {
-    if (isCloudMode) {
+    if (isDirectCloudMode) {
       if (adapter) {
         return adapter.getIceServers();
       }
       throw new Error("Cloud connection not ready");
     }
     return api.getIceServers();
-  }, [adapter, isCloudMode]);
+  }, [adapter, isDirectCloudMode]);
 
   const sendWebRTCOffer = useCallback(
     async (data: WebRTCOfferRequest): Promise<WebRTCOfferResponse> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           return adapter.sendOffer(
             data.sdp || "",
@@ -224,7 +225,7 @@ export function useApi() {
       }
       return api.sendWebRTCOffer(data);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   const sendIceCandidates = useCallback(
@@ -232,7 +233,7 @@ export function useApi() {
       sessionId: string,
       candidates: RTCIceCandidate | RTCIceCandidate[]
     ): Promise<void> => {
-      if (isCloudMode) {
+      if (isDirectCloudMode) {
         if (adapter) {
           const candidateArray = Array.isArray(candidates)
             ? candidates
@@ -246,12 +247,12 @@ export function useApi() {
       }
       return api.sendIceCandidates(sessionId, candidates);
     },
-    [adapter, isCloudMode]
+    [adapter, isDirectCloudMode]
   );
 
   return {
     // State
-    isCloudMode,
+    isDirectCloudMode,
     isReady,
 
     // Pipeline

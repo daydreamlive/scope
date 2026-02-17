@@ -659,8 +659,8 @@ export function getCloudAdapter(): CloudAdapter | null {
 }
 
 /**
- * Check if we're running in cloud mode (adapter is initialized)
+ * Check if we're running in direct cloud mode (adapter is initialized)
  */
-export function isCloudMode(): boolean {
+export function isDirectCloudMode(): boolean {
   return globalAdapter !== null && globalAdapter !== undefined;
 }

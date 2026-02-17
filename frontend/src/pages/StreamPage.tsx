@@ -67,20 +67,20 @@ function getVaceParams(
   return {};
 }
 
-export function StreamPage() {
+interface StreamPageProps {
+  isSignedIn?: boolean;
+}
+
+export function StreamPage({ isSignedIn = true }: StreamPageProps) {
   // Get API functions that work in both local and cloud modes
   const api = useApi();
-  const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
-    useCloudContext();
+  const { isDirectCloudMode, isReady: isCloudReady } = useCloudContext();
 
   // Track backend cloud relay mode (local backend connected to cloud or connecting)
   const {
-    isConnected: isBackendCloudConnected,
+    // isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
   } = useCloudStatus();
-
-  // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
-  const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
 
   // Show loading state while connecting to cloud
   useEffect(() => {
@@ -1239,6 +1239,7 @@ export function StreamPage() {
         cloudDisabled={isStreaming}
         openSettingsTab={openSettingsTab}
         onSettingsTabOpened={() => setOpenSettingsTab(null)}
+        isSignedIn={isSignedIn}
       />
 
       {/* Main Content Area */}
@@ -1561,7 +1562,7 @@ export function StreamPage() {
                 sendParameterUpdate({ [key]: value });
               }
             }}
-            isCloudMode={isCloudMode}
+            isDirectCloudMode={isDirectCloudMode}
           />
         </div>
       </div>
