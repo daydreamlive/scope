@@ -137,11 +137,13 @@ export function LoRAManager({
     const url = installUrl.trim();
     const filename = url.split("/").pop()?.split("?")[0] || "LoRA file";
     try {
-      await toast.promise(installLoRAFile({ url }), {
+      const installPromise = installLoRAFile({ url });
+      toast.promise(installPromise, {
         loading: `Installing ${filename}...`,
         success: response => response.message,
         error: err => err.message || "Install failed",
       });
+      await installPromise;
       setInstallUrl("");
       await loadAvailableLoRAs();
     } catch (error) {

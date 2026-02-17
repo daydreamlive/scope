@@ -351,7 +351,7 @@ export interface LoRAFilesResponse {
 }
 
 export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
-  const response = await fetch("/api/v1/lora/list", {
+  const response = await fetch("/api/v1/loras", {
     method: "GET",
   });
 
@@ -379,7 +379,7 @@ export interface LoRAInstallResponse {
 export const installLoRAFile = async (
   data: LoRAInstallRequest
 ): Promise<LoRAInstallResponse> => {
-  const response = await fetch("/api/v1/lora/install", {
+  const response = await fetch("/api/v1/loras", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),

@@ -399,12 +399,10 @@ export class CloudAdapter {
       this.apiRequest("GET", "/api/v1/hardware/info"),
 
     listLoRAFiles: (): Promise<LoRAFilesResponse> =>
-      this.apiRequest("GET", "/api/v1/lora/list"),
+      this.apiRequest("GET", "/api/v1/loras"),
 
-    installLoRAFile: (
-      data: LoRAInstallRequest
-    ): Promise<LoRAInstallResponse> =>
-      this.apiRequest("POST", "/api/v1/lora/install", data, 300000),
+    installLoRAFile: (data: LoRAInstallRequest): Promise<LoRAInstallResponse> =>
+      this.apiRequest("POST", "/api/v1/loras", data, 300000),
 
     listAssets: (type?: "image" | "video"): Promise<AssetsResponse> =>
       this.apiRequest(

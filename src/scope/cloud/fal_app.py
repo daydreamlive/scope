@@ -653,7 +653,7 @@ class ScopeApp(fal.App, keep_alive=300):
                             )
                         else:
                             # Use longer timeout for LoRA installs
-                            post_timeout = 300.0 if "/lora/install" in path else 30.0
+                            post_timeout = 300.0 if path == "/api/v1/loras" else 30.0
                             response = await client.post(
                                 f"{SCOPE_BASE_URL}{path}",
                                 json=body,

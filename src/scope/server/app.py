@@ -792,8 +792,10 @@ class LoRAFilesResponse(BaseModel):
     lora_files: list[LoRAFileInfo]
 
 
-@app.get("/api/v1/lora/list", response_model=LoRAFilesResponse)
+@app.get("/api/v1/loras", response_model=LoRAFilesResponse)
+@cloud_proxy()
 async def list_lora_files(
+    http_request: Request,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """List available LoRA files in the models/lora directory and its subdirectories.
@@ -816,25 +818,6 @@ async def list_lora_files(
         )
 
     try:
-        # If cloud mode is active, proxy to cloud
-        if cloud_manager.is_connected:
-            logger.info("[CLOUD] Fetching LoRA list from cloud")
-            response = await cloud_manager.api_request(
-                method="GET",
-                path="/api/v1/lora/list",
-                timeout=30.0,
-            )
-            status = response.get("status", 200)
-            if status >= 400:
-                detail = response.get("error") or response.get("data", {}).get(
-                    "detail", "Cloud LoRA list request failed"
-                )
-                raise HTTPException(status_code=status, detail=detail)
-            data = response.get("data", {})
-            return LoRAFilesResponse(
-                lora_files=[LoRAFileInfo(**f) for f in data.get("lora_files", [])]
-            )
-
         lora_dir = get_lora_dir()
         lora_files: list[LoRAFileInfo] = []
 
@@ -859,9 +842,11 @@ class LoRAInstallResponse(BaseModel):
     file: LoRAFileInfo
 
 
-@app.post("/api/v1/lora/install", response_model=LoRAInstallResponse)
+@app.post("/api/v1/loras", response_model=LoRAInstallResponse)
+@cloud_proxy(timeout=300.0)
 async def install_lora_file(
     request: LoRAInstallRequest,
+    http_request: Request,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Install a LoRA file from a URL (e.g. HuggingFace, CivitAI).
@@ -873,27 +858,6 @@ async def install_lora_file(
     from .download_models import http_get
 
     try:
-        # If cloud mode is active, proxy to cloud
-        if cloud_manager.is_connected:
-            logger.info("[CLOUD] Proxying LoRA install to cloud")
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/lora/install",
-                body=request.model_dump(),
-                timeout=300.0,
-            )
-            status = response.get("status", 200)
-            if status >= 400:
-                detail = response.get("error") or response.get("data", {}).get(
-                    "detail", "Cloud LoRA install failed"
-                )
-                raise HTTPException(status_code=status, detail=detail)
-            data = response.get("data", {})
-            return LoRAInstallResponse(
-                message=data.get("message", "Installed via cloud"),
-                file=LoRAFileInfo(**data["file"]),
-            )
-
         # Determine filename from URL if not provided
         filename = request.filename
         if not filename:
