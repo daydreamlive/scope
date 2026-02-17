@@ -48,12 +48,14 @@ vpx.MAX_BITRATE = 10000000
 
 
 class Session:
-    """WebRTC Session containing peer connection and associated video track."""
+    """WebRTC Session containing peer connection and associated tracks."""
 
     def __init__(
         self,
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
+        audio_track: "AudioProcessingTrack | None" = None,
+        media_clock: "MediaClock | None" = None,
         data_channel: RTCDataChannel | None = None,
         relay: MediaRelay | None = None,
         recording_manager: RecordingManager | None = None,
@@ -64,6 +66,8 @@ class Session:
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
+        self.audio_track = audio_track
+        self.media_clock = media_clock
         self.data_channel = data_channel
         self.relay = relay
         self.recording_manager = recording_manager
@@ -226,6 +230,9 @@ class WebRTCManager:
             # Create NotificationSender for this session to send notifications to the frontend
             notification_sender = NotificationSender()
 
+            # Create shared media clock for A/V synchronization
+            media_clock = MediaClock()
+
             video_track = VideoProcessingTrack(
                 pipeline_manager,
                 initial_parameters=initial_parameters,
@@ -236,6 +243,19 @@ class WebRTCManager:
                 connection_info=request.connection_info,
             )
             session.video_track = video_track
+            session.media_clock = media_clock
+
+            # Eagerly initialize the FrameProcessor so the AudioProcessingTrack
+            # can share it. VideoProcessingTrack.recv() normally does this lazily,
+            # but we need the reference now to wire audio.
+            video_track.initialize_output_processing()
+
+            # Create AudioProcessingTrack sharing the same FrameProcessor and MediaClock
+            audio_track = AudioProcessingTrack(
+                frame_processor=video_track.frame_processor,
+                media_clock=media_clock,
+            )
+            session.audio_track = audio_track
 
             # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
             relay = MediaRelay()
@@ -260,8 +280,11 @@ class WebRTCManager:
             else:
                 session.recording_manager = None
 
-            # Add the relayed track to WebRTC connection
+            # Add the relayed video track to WebRTC connection
             pc.addTrack(relayed_track)
+
+            # Add audio track to WebRTC connection
+            pc.addTrack(audio_track)
 
             # Store relay for cleanup
             session.relay = relay

@@ -67,6 +67,13 @@ class PipelineProcessor:
         # Lock to protect input_queue assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
+        # Audio output queue: stores (audio_tensor, sample_rate) tuples from pipeline output.
+        # Pipelines that produce audio return {"video": ..., "audio": ..., "audio_sample_rate": ...}.
+        # Only the last processor in a chain is read by FrameProcessor for audio output.
+        self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
+            maxsize=8
+        )
+
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
         # Queue for parameter updates from external threads
@@ -205,6 +212,13 @@ class PipelineProcessor:
                     self.output_queue.get_nowait()
                 except queue.Empty:
                     break
+
+        # Clear audio output queue
+        while not self.audio_output_queue.empty():
+            try:
+                self.audio_output_queue.get_nowait()
+            except queue.Empty:
+                break
 
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
@@ -371,6 +385,12 @@ class PipelineProcessor:
                         self.output_queue.get_nowait()
                     except queue.Empty:
                         break
+            # Clear audio output queue
+            while not self.audio_output_queue.empty():
+                try:
+                    self.audio_output_queue.get_nowait()
+                except queue.Empty:
+                    break
 
         requirements = None
         if hasattr(self.pipeline, "prepare"):
@@ -508,6 +528,21 @@ class PipelineProcessor:
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
                     continue
+
+            # Extract audio from pipeline output and queue it
+            audio_output = output_dict.get("audio")
+            audio_sample_rate = output_dict.get("audio_sample_rate")
+            if audio_output is not None and audio_sample_rate is not None:
+                # Detach and move to CPU for downstream consumption
+                audio_output = audio_output.detach().cpu()
+                try:
+                    self.audio_output_queue.put_nowait(
+                        (audio_output, audio_sample_rate)
+                    )
+                except queue.Full:
+                    logger.debug(
+                        f"Audio output queue full for {self.pipeline_id}, dropping audio chunk"
+                    )
 
             # Apply throttling if this pipeline is producing faster than next can consume
             # Only throttle if: (1) has video input, (2) has next processor

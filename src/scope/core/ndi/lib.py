@@ -275,3 +275,9 @@ def setup_send_functions(lib: ctypes.CDLL) -> None:
         ctypes.c_void_p,
         ctypes.POINTER(NDIlib_video_frame_v2_t),
     ]
+
+    lib.NDIlib_send_send_audio_v2.restype = None
+    lib.NDIlib_send_send_audio_v2.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(NDIlib_audio_frame_v2_t),
+    ]

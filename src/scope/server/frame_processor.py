@@ -3,8 +3,10 @@ import queue
 import threading
 import time
 import uuid
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
 from aiortc.mediastreams import VideoFrame
 
@@ -17,6 +19,13 @@ if TYPE_CHECKING:
     from scope.core.outputs import OutputSink
 
     from .cloud_connection import CloudConnectionManager
+
+# Audio constants
+WEBRTC_AUDIO_SAMPLE_RATE = 48000  # WebRTC standard output sample rate
+AUDIO_FRAME_DURATION_MS = 20  # Standard WebRTC audio frame duration
+AUDIO_SAMPLES_PER_FRAME = int(
+    WEBRTC_AUDIO_SAMPLE_RATE * AUDIO_FRAME_DURATION_MS / 1000
+)  # 960 samples
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +117,15 @@ class FrameProcessor:
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
+
+        # Audio buffer: accumulates resampled audio samples ready for WebRTC output.
+        # Stores interleaved float32 samples at WEBRTC_AUDIO_SAMPLE_RATE (48kHz).
+        # AudioProcessingTrack calls get_audio() to drain 20ms chunks.
+        self._audio_buffer = deque()  # deque of np.ndarray chunks (mono, float32)
+        self._audio_buffer_lock = threading.Lock()
+        self._audio_buffer_samples = 0  # total samples buffered
+        self._audio_drain_thread: threading.Thread | None = None
+        self._audio_chunks_out = 0
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -206,6 +224,12 @@ class FrameProcessor:
             )
             return
 
+        # Start audio drain thread to move audio from pipeline processor queue to buffer
+        self._audio_drain_thread = threading.Thread(
+            target=self._audio_drain_loop, daemon=True
+        )
+        self._audio_drain_thread.start()
+
         logger.info(
             f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
         )
@@ -233,6 +257,15 @@ class FrameProcessor:
 
         # Clear pipeline processors
         self.pipeline_processors.clear()
+
+        # Wait for audio drain thread to finish
+        if self._audio_drain_thread and self._audio_drain_thread.is_alive():
+            self._audio_drain_thread.join(timeout=2.0)
+
+        # Clear audio buffer
+        with self._audio_buffer_lock:
+            self._audio_buffer.clear()
+            self._audio_buffer_samples = 0
 
         # Clean up all output sinks
         for sink_type, entry in list(self.output_sinks.items()):
@@ -473,6 +506,129 @@ class FrameProcessor:
                 logger.error(f"Error enqueueing output sink frame: {e}")
 
         return frame
+
+    def _audio_drain_loop(self):
+        """Background thread that drains audio from the last pipeline processor's
+        audio_output_queue, resamples to 48kHz, and appends to the audio buffer.
+        """
+        logger.info("[FRAME-PROCESSOR] Audio drain thread started")
+
+        while self.running:
+            if not self.pipeline_processors:
+                time.sleep(0.01)
+                continue
+
+            last_processor = self.pipeline_processors[-1]
+            try:
+                audio_tensor, sample_rate = last_processor.audio_output_queue.get(
+                    timeout=0.1
+                )
+            except queue.Empty:
+                continue
+
+            try:
+                # Convert torch tensor to numpy float32
+                if isinstance(audio_tensor, torch.Tensor):
+                    audio_np = audio_tensor.float().numpy()
+                else:
+                    audio_np = np.asarray(audio_tensor, dtype=np.float32)
+
+                # Ensure shape is [C, S] (channels, samples)
+                if audio_np.ndim == 1:
+                    audio_np = audio_np[np.newaxis, :]  # mono -> [1, S]
+
+                # Mix down to mono for WebRTC (average channels)
+                if audio_np.shape[0] > 1:
+                    audio_mono = audio_np.mean(axis=0)
+                else:
+                    audio_mono = audio_np[0]
+
+                # Resample to 48kHz if necessary
+                if sample_rate != WEBRTC_AUDIO_SAMPLE_RATE:
+                    audio_mono = self._resample_audio(
+                        audio_mono, sample_rate, WEBRTC_AUDIO_SAMPLE_RATE
+                    )
+
+                # Append to buffer
+                with self._audio_buffer_lock:
+                    self._audio_buffer.append(audio_mono)
+                    self._audio_buffer_samples += len(audio_mono)
+
+                # Also fan out to output sinks that support audio
+                if self.output_sinks:
+                    for _sink_type, entry in self.output_sinks.items():
+                        sink = entry["sink"]
+                        if hasattr(sink, "send_audio"):
+                            try:
+                                sink.send_audio(audio_mono, WEBRTC_AUDIO_SAMPLE_RATE, 1)
+                            except Exception as e:
+                                logger.debug(
+                                    f"Error sending audio to sink '{_sink_type}': {e}"
+                                )
+
+            except Exception as e:
+                logger.error(f"[FRAME-PROCESSOR] Error processing audio chunk: {e}")
+
+        logger.info(
+            f"[FRAME-PROCESSOR] Audio drain thread stopped ({self._audio_chunks_out} chunks served)"
+        )
+
+    @staticmethod
+    def _resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
+        """Simple linear interpolation resampling.
+
+        For production quality, a proper resampler (e.g. libsamplerate) would be
+        better, but linear interpolation is sufficient for initial audio support.
+        """
+        if src_rate == dst_rate:
+            return audio
+        duration = len(audio) / src_rate
+        num_output_samples = int(duration * dst_rate)
+        indices = np.linspace(0, len(audio) - 1, num_output_samples)
+        return np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
+
+    def get_audio(
+        self, num_samples: int = AUDIO_SAMPLES_PER_FRAME
+    ) -> np.ndarray | None:
+        """Get the next chunk of audio samples for WebRTC output.
+
+        Returns a mono float32 numpy array of length num_samples (default 960 = 20ms at 48kHz),
+        or None if no audio is available.
+
+        Called by AudioProcessingTrack.recv().
+        """
+        if not self.running:
+            return None
+
+        with self._audio_buffer_lock:
+            if self._audio_buffer_samples < num_samples:
+                return None
+
+            # Collect enough samples from the buffer
+            collected = []
+            remaining = num_samples
+            while remaining > 0 and self._audio_buffer:
+                chunk = self._audio_buffer[0]
+                if len(chunk) <= remaining:
+                    collected.append(self._audio_buffer.popleft())
+                    self._audio_buffer_samples -= len(chunk)
+                    remaining -= len(chunk)
+                else:
+                    # Split chunk: take what we need, put the rest back
+                    collected.append(chunk[:remaining])
+                    self._audio_buffer[0] = chunk[remaining:]
+                    self._audio_buffer_samples -= remaining
+                    remaining = 0
+
+            self._audio_chunks_out += 1
+
+        return np.concatenate(collected) if collected else None
+
+    @property
+    def has_audio(self) -> bool:
+        """Check if any audio data is buffered."""
+        with self._audio_buffer_lock:
+            return self._audio_buffer_samples > 0
 
     def _on_frame_from_cloud(self, frame: "VideoFrame") -> None:
         """Callback when a processed frame is received from cloud (cloud mode)."""
