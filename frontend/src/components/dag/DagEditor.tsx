@@ -111,10 +111,13 @@ export function DagEditor() {
         } else {
           setStatus("No DAG configured");
         }
+        // Mark initial load complete so auto-save can start
+        initialLoadDone.current = true;
       })
       .catch(err => {
         console.error("Failed to load DAG:", err);
         setStatus("Failed to load DAG");
+        initialLoadDone.current = true;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portsMap]);
@@ -169,16 +172,27 @@ export function DagEditor() {
     setNodes(nds => [...nds, newNode]);
   }, [existingIds, nodes.length, setNodes]);
 
-  const handleSave = useCallback(async () => {
-    try {
-      const dagConfig = flowToDagConfig(nodes, edges);
-      const result = await setDag(dagConfig);
-      setDagSource("api");
-      setStatus(`Saved: ${result.nodes} nodes, ${result.edges} edges`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setStatus(`Save failed: ${message}`);
-    }
+  // Track whether initial load is complete to avoid auto-saving on mount
+  const initialLoadDone = useRef(false);
+
+  // Auto-save DAG on every change (debounced 500ms)
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    if (nodes.length === 0 && edges.length === 0) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const dagConfig = flowToDagConfig(nodes, edges);
+        const result = await setDag(dagConfig);
+        setDagSource("api");
+        setStatus(`Saved: ${result.nodes} nodes, ${result.edges} edges`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setStatus(`Save failed: ${message}`);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
   }, [nodes, edges]);
 
   const handleClear = useCallback(async () => {
@@ -297,12 +311,6 @@ export function DagEditor() {
           className="px-3 py-1.5 text-xs font-medium rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors"
         >
           Export JSON
-        </button>
-        <button
-          onClick={handleSave}
-          className="px-3 py-1.5 text-xs font-medium rounded bg-indigo-700 hover:bg-indigo-600 text-white transition-colors"
-        >
-          Save
         </button>
         <button
           onClick={handleClear}
