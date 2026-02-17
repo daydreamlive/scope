@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default queue sizes (match pipeline_processor)
-DEFAULT_INPUT_QUEUE_MAXSIZE = 30
+# Use larger size for inter-pipeline queues so downstream can accumulate a full chunk
+DEFAULT_INPUT_QUEUE_MAXSIZE = 64
 DEFAULT_OUTPUT_QUEUE_MAXSIZE = 8
 
 
@@ -106,7 +107,7 @@ def build_dag(
         with processor.input_queue_lock:
             processor.input_queue = processor.input_queues.get("video")
 
-    # 4) Set each producer's output_queues per port (replace with wired queues)
+    # 4) Set each producer's output_queues per port and wire consumer input to same queue
     for node in dag.nodes:
         if node.type != "pipeline" or node.id not in node_processors:
             continue
@@ -118,6 +119,12 @@ def build_dag(
             q = stream_queues.get((e.to_node, e.to_port))
             if q is not None and q not in out_by_port.get(e.from_port, []):
                 out_by_port.setdefault(e.from_port, []).append(q)
+                # Symmetric wiring: ensure consumer reads from this queue (fixes chained pipelines)
+                consumer = node_processors.get(e.to_node)
+                if consumer is not None:
+                    consumer.input_queues[e.to_port] = q
+                    with consumer.input_queue_lock:
+                        consumer.input_queue = consumer.input_queues.get("video")
         for port, qlist in out_by_port.items():
             proc.output_queues[port] = qlist
 

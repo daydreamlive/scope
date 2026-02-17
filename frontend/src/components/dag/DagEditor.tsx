@@ -19,6 +19,7 @@ import {
   dagConfigToFlow,
   flowToDagConfig,
   generateNodeId,
+  buildPipelinePortsMap,
 } from "../../lib/dagUtils";
 import type { FlowNodeData } from "../../lib/dagUtils";
 import { getDag, setDag, clearDag, getPipelineSchemas } from "../../lib/api";
@@ -39,42 +40,64 @@ export function DagEditor() {
   const [availablePipelineIds, setAvailablePipelineIds] = useState<string[]>(
     []
   );
+  const [portsMap, setPortsMap] = useState<
+    Record<string, { inputs: string[]; outputs: string[] }>
+  >({});
 
-  // Fetch available pipeline IDs on mount
+  // Fetch available pipeline IDs and port schemas on mount
   useEffect(() => {
     getPipelineSchemas()
       .then(schemas => {
         setAvailablePipelineIds(Object.keys(schemas.pipelines));
+        setPortsMap(buildPipelinePortsMap(schemas.pipelines));
       })
       .catch(err => {
         console.error("Failed to fetch pipeline schemas:", err);
       });
   }, []);
 
-  // Inject availablePipelineIds into all pipeline nodes when the list changes
+  // Inject availablePipelineIds and portsMap into all pipeline nodes when they change
   useEffect(() => {
     if (availablePipelineIds.length === 0) return;
     setNodes(nds =>
       nds.map(n =>
         n.data.nodeType === "pipeline"
-          ? { ...n, data: { ...n.data, availablePipelineIds } }
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                availablePipelineIds,
+                pipelinePortsMap: portsMap,
+              },
+            }
           : n
       )
     );
-  }, [availablePipelineIds, setNodes]);
+  }, [availablePipelineIds, portsMap, setNodes]);
 
-  // Load existing DAG on mount
+  // Load existing DAG on mount (after portsMap is ready)
   useEffect(() => {
+    // Wait until portsMap is populated
+    if (Object.keys(portsMap).length === 0) return;
+
     getDag()
       .then(response => {
         if (response.dag) {
           const { nodes: flowNodes, edges: flowEdges } = dagConfigToFlow(
-            response.dag
+            response.dag,
+            portsMap
           );
-          // Inject available pipeline IDs into pipeline nodes
+          // Inject available pipeline IDs and portsMap into pipeline nodes
           const enrichedNodes = flowNodes.map(n =>
             n.data.nodeType === "pipeline"
-              ? { ...n, data: { ...n.data, availablePipelineIds } }
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    availablePipelineIds,
+                    pipelinePortsMap: portsMap,
+                  },
+                }
               : n
           );
           setNodes(enrichedNodes);
@@ -90,7 +113,7 @@ export function DagEditor() {
         setStatus("Failed to load DAG");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [portsMap]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -99,10 +122,7 @@ export function DagEditor() {
     [setEdges]
   );
 
-  const existingIds = useMemo(
-    () => new Set(nodes.map(n => n.id)),
-    [nodes]
-  );
+  const existingIds = useMemo(() => new Set(nodes.map(n => n.id)), [nodes]);
 
   const addSourceNode = useCallback(() => {
     const id = generateNodeId("input", existingIds);
@@ -126,10 +146,13 @@ export function DagEditor() {
         pipelineId: null,
         nodeType: "pipeline",
         availablePipelineIds,
+        pipelinePortsMap: portsMap,
+        streamInputs: ["video"],
+        streamOutputs: ["video"],
       },
     };
     setNodes(nds => [...nds, newNode]);
-  }, [existingIds, nodes.length, setNodes, availablePipelineIds]);
+  }, [existingIds, nodes.length, setNodes, availablePipelineIds, portsMap]);
 
   const addSinkNode = useCallback(() => {
     const id = generateNodeId("output", existingIds);
@@ -167,6 +190,21 @@ export function DagEditor() {
     }
   }, [setNodes, setEdges]);
 
+  const handleExport = useCallback(() => {
+    const dagConfig = flowToDagConfig(nodes, edges);
+    const dataStr = JSON.stringify(dagConfig, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `dag-${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setStatus("DAG exported");
+  }, [nodes, edges]);
+
   return (
     <div className="flex flex-col h-full w-full">
       {/* Toolbar */}
@@ -190,6 +228,12 @@ export function DagEditor() {
           + Sink
         </button>
         <div className="flex-1" />
+        <button
+          onClick={handleExport}
+          className="px-3 py-1.5 text-xs font-medium rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors"
+        >
+          Export JSON
+        </button>
         <button
           onClick={handleSave}
           className="px-3 py-1.5 text-xs font-medium rounded bg-indigo-700 hover:bg-indigo-600 text-white transition-colors"
@@ -226,10 +270,7 @@ export function DagEditor() {
           deleteKeyCode={["Backspace", "Delete"]}
         >
           <Controls />
-          <MiniMap
-            nodeStrokeWidth={3}
-            className="!bg-zinc-900"
-          />
+          <MiniMap nodeStrokeWidth={3} className="!bg-zinc-900" />
           <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         </ReactFlow>
       </div>

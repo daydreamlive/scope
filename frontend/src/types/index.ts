@@ -86,6 +86,8 @@ export interface SettingsState {
     source_type: string;
     source_name: string;
   };
+  // Graph mode: when enabled, pipeline chain comes from DAG editor instead of manual controls
+  graphMode?: boolean;
   // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
   schemaFieldOverrides?: Record<string, unknown>;
   // Schema-driven overrides for preprocessor/postprocessor plugin configs

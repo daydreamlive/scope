@@ -161,7 +161,8 @@ export function useStreamState() {
   const defaultPipelineId = "longlive";
 
   // Get initial defaults (use fallback since schemas haven't loaded yet)
-  const initialDefaults = getFallbackDefaults("text");
+  // Use video mode defaults since graphMode (default ON) uses video input
+  const initialDefaults = getFallbackDefaults("video");
 
   const [settings, setSettings] = useState<SettingsState>({
     pipelineId: "longlive",
@@ -177,7 +178,8 @@ export function useStreamState() {
     kvCacheAttentionBias: 0.3,
     paused: false,
     loraMergeStrategy: "permanent_merge",
-    inputMode: initialDefaults.inputMode,
+    inputMode: "video",
+    graphMode: true,
   });
 
   const [promptData, setPromptData] = useState<PromptData>({
@@ -322,7 +324,9 @@ export function useStreamState() {
   // Track previous pipelineId so we only reset inputMode when the pipeline actually changes
   const prevPipelineIdRef = useRef<string | null>(null);
 
-  // Update inputMode when schemas first load or pipeline changes
+  // Update inputMode and resolution when schemas first load or pipeline changes.
+  // When graphMode is ON, force video input and apply video-mode resolution from schema.
+  // When graphMode is OFF, apply pipeline's default mode.
   useEffect(() => {
     if (pipelineSchemas) {
       const schema = pipelineSchemas.pipelines[settings.pipelineId];
@@ -330,14 +334,30 @@ export function useStreamState() {
         schema?.default_mode &&
         prevPipelineIdRef.current !== settings.pipelineId
       ) {
-        setSettings(prev => ({
-          ...prev,
-          inputMode: schema.default_mode,
-        }));
+        if (settings.graphMode) {
+          // Graph mode: keep video input, but apply video-mode resolution from schema
+          const videoDefaults = getDefaults(settings.pipelineId, "video");
+          setSettings(prev => ({
+            ...prev,
+            inputMode: "video",
+            resolution: {
+              height: videoDefaults.height,
+              width: videoDefaults.width,
+            },
+            denoisingSteps: videoDefaults.denoisingSteps,
+            noiseScale: videoDefaults.noiseScale,
+            noiseController: videoDefaults.noiseController,
+          }));
+        } else {
+          setSettings(prev => ({
+            ...prev,
+            inputMode: schema.default_mode,
+          }));
+        }
       }
       prevPipelineIdRef.current = settings.pipelineId;
     }
-  }, [pipelineSchemas, settings.pipelineId]);
+  }, [pipelineSchemas, settings.pipelineId, settings.graphMode, getDefaults]);
 
   // Set recommended quantization based on pipeline schema and available VRAM
   useEffect(() => {

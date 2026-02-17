@@ -520,6 +520,9 @@ export interface PipelineSchemaInfo {
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
   plugin_name: string | null;
+  // DAG port declarations
+  stream_inputs: string[];
+  stream_outputs: string[];
 }
 
 export interface PipelineSchemasResponse {

@@ -512,16 +512,19 @@ async def load_pipeline(
                 f"(was: {request.pipeline_ids})"
             )
             pipeline_ids = dag_pipeline_ids
-            load_params_dict = None
+            # Pass UI load_params (resolution, seed, vae_type, etc.) so each
+            # pipeline in the DAG is loaded with the same params; each pipeline
+            # uses only the params it needs (e.g. longlive uses height/width).
+            load_params_dict = request.load_params
         elif (dag_pipeline_ids := get_pipeline_ids_from_input_json()) is not None:
             logger.info(
                 f"Overriding pipeline_ids from input.json: {dag_pipeline_ids} "
                 f"(was: {request.pipeline_ids})"
             )
             pipeline_ids = dag_pipeline_ids
-            # Discard UI load_params — they belong to whatever pipeline the UI
-            # selected, not to the pipelines declared in input.json.
-            load_params_dict = None
+            # Pass UI load_params so resolution and other params are applied to
+            # each pipeline in the DAG (e.g. longlive gets height/width/seed).
+            load_params_dict = request.load_params
         else:
             pipeline_ids = request.pipeline_ids
             # load_params is already a dict (or None)

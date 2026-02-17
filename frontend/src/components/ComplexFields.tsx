@@ -72,6 +72,8 @@ export interface SchemaComplexFieldContext {
   isStreaming?: boolean;
   isLoading?: boolean;
   isCloudMode?: boolean;
+  /** When true, VACE controls are disabled (pipeline chain from DAG editor). */
+  graphMode?: boolean;
   /** Per-field overrides for schema-driven fields (e.g. image path). */
   schemaFieldOverrides?: Record<string, unknown>;
   onSchemaFieldOverrideChange?: (
@@ -132,7 +134,7 @@ export function SchemaComplexField({
   if (component === "vace" && !rendered.has("vace")) {
     rendered.add("vace");
     return (
-      <div key="vace" className="space-y-2">
+      <div key="vace" className={`space-y-2 ${ctx.graphMode ? "opacity-50 pointer-events-none" : ""}`}>
         <div className="flex items-center justify-between gap-2">
           <LabelWithTooltip
             label="VACE"

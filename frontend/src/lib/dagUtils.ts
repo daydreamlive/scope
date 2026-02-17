@@ -1,5 +1,5 @@
 import type { Node, Edge } from "@xyflow/react";
-import type { DagConfig, DagNode, DagEdge } from "./api";
+import type { DagConfig, DagNode, DagEdge, PipelineSchemaInfo } from "./api";
 
 // Layout constants
 const NODE_WIDTH = 200;
@@ -9,19 +9,48 @@ const ROW_GAP = 100;
 const START_X = 50;
 const START_Y = 50;
 
+export interface PortInfo {
+  name: string;
+}
+
 export interface FlowNodeData {
   label: string;
   pipelineId?: string | null;
   nodeType: "source" | "pipeline" | "sink";
   availablePipelineIds?: string[];
+  /** Declared input ports for the selected pipeline */
+  streamInputs?: string[];
+  /** Declared output ports for the selected pipeline */
+  streamOutputs?: string[];
+  /** Pipeline schemas keyed by pipeline_id, for looking up ports on selection change */
+  pipelinePortsMap?: Record<string, { inputs: string[]; outputs: string[] }>;
   [key: string]: unknown;
+}
+
+/**
+ * Build a map of pipeline_id -> { inputs, outputs } from schemas.
+ */
+export function buildPipelinePortsMap(
+  schemas: Record<string, PipelineSchemaInfo>
+): Record<string, { inputs: string[]; outputs: string[] }> {
+  const map: Record<string, { inputs: string[]; outputs: string[] }> = {};
+  for (const [id, schema] of Object.entries(schemas)) {
+    map[id] = {
+      inputs: schema.stream_inputs ?? ["video"],
+      outputs: schema.stream_outputs ?? ["video"],
+    };
+  }
+  return map;
 }
 
 /**
  * Convert backend DagConfig to React Flow nodes and edges.
  * Auto-layout: sources on the left, pipelines in the middle, sinks on the right.
  */
-export function dagConfigToFlow(dag: DagConfig): {
+export function dagConfigToFlow(
+  dag: DagConfig,
+  portsMap?: Record<string, { inputs: string[]; outputs: string[] }>
+): {
   nodes: Node<FlowNodeData>[];
   edges: Edge[];
 } {
@@ -43,6 +72,7 @@ export function dagConfigToFlow(dag: DagConfig): {
 
   // Layout pipelines (column 1)
   pipelines.forEach((n, i) => {
+    const ports = n.pipeline_id && portsMap ? portsMap[n.pipeline_id] : null;
     nodes.push({
       id: n.id,
       type: "pipeline",
@@ -54,6 +84,8 @@ export function dagConfigToFlow(dag: DagConfig): {
         label: n.pipeline_id || n.id,
         pipelineId: n.pipeline_id,
         nodeType: "pipeline",
+        streamInputs: ports?.inputs ?? ["video"],
+        streamOutputs: ports?.outputs ?? ["video"],
       },
     });
   });

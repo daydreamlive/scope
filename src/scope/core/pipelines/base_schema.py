@@ -389,6 +389,8 @@ class BasePipelineConfig(BaseModel):
         metadata["modified"] = cls.modified
         # Convert UsageType enum values to strings for JSON serialization
         metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
+        metadata["stream_inputs"] = list(cls.stream_inputs)
+        metadata["stream_outputs"] = list(cls.stream_outputs)
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults (excluding None values and the "default" flag)

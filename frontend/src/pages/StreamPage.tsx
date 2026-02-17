@@ -28,7 +28,7 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { getInputSourceResolution } from "../lib/api";
+import { getInputSourceResolution, getDag } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -786,6 +786,10 @@ export function StreamPage() {
     });
   };
 
+  const handleGraphModeChange = (enabled: boolean) => {
+    updateSettings({ graphMode: enabled });
+  };
+
   const handleSpoutSenderChange = (
     spoutSender: { enabled: boolean; name: string } | undefined
   ) => {
@@ -1000,14 +1004,43 @@ export function StreamPage() {
     const pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
-      // Build pipeline chain: preprocessors + main pipeline + postprocessors
-      const pipelineIds: string[] = [];
-      if (settings.preprocessorIds && settings.preprocessorIds.length > 0) {
-        pipelineIds.push(...settings.preprocessorIds);
-      }
-      pipelineIds.push(pipelineIdToUse);
-      if (settings.postprocessorIds && settings.postprocessorIds.length > 0) {
-        pipelineIds.push(...settings.postprocessorIds);
+      // Build pipeline chain depending on graph mode
+      let pipelineIds: string[];
+
+      if (settings.graphMode) {
+        // Graph mode: fetch pipeline IDs from the DAG
+        try {
+          const dagResponse = await getDag();
+          if (dagResponse.dag) {
+            const dagPipelineIds = dagResponse.dag.nodes
+              .filter(n => n.type === "pipeline" && n.pipeline_id)
+              .map(n => n.pipeline_id as string);
+            if (dagPipelineIds.length > 0) {
+              pipelineIds = dagPipelineIds;
+            } else {
+              console.warn(
+                "DAG has no pipeline nodes, falling back to settings"
+              );
+              pipelineIds = [pipelineIdToUse];
+            }
+          } else {
+            console.warn("No DAG configured, falling back to settings");
+            pipelineIds = [pipelineIdToUse];
+          }
+        } catch (err) {
+          console.error("Failed to fetch DAG, falling back to settings:", err);
+          pipelineIds = [pipelineIdToUse];
+        }
+      } else {
+        // Manual mode: build chain from preprocessors + main + postprocessors
+        pipelineIds = [];
+        if (settings.preprocessorIds && settings.preprocessorIds.length > 0) {
+          pipelineIds.push(...settings.preprocessorIds);
+        }
+        pipelineIds.push(pipelineIdToUse);
+        if (settings.postprocessorIds && settings.postprocessorIds.length > 0) {
+          pipelineIds.push(...settings.postprocessorIds);
+        }
       }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
@@ -1699,6 +1732,8 @@ export function StreamPage() {
               }
             }}
             isCloudMode={isCloudMode}
+            graphMode={settings.graphMode ?? true}
+            onGraphModeChange={handleGraphModeChange}
           />
         </div>
       </div>

@@ -191,6 +191,9 @@ interface SettingsPanelProps {
     value: unknown
   ) => void;
   isCloudMode?: boolean;
+  // Graph mode: pipeline chain comes from DAG editor
+  graphMode?: boolean;
+  onGraphModeChange?: (enabled: boolean) => void;
 }
 
 export function SettingsPanel({
@@ -243,6 +246,8 @@ export function SettingsPanel({
   onPreprocessorSchemaFieldOverrideChange,
   onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
+  graphMode = false,
+  onGraphModeChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -334,141 +339,168 @@ export function SettingsPanel({
         <CardTitle className="text-base font-medium">Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium">Pipeline ID</h3>
-          <Select
-            value={pipelineId}
-            onValueChange={handlePipelineIdChange}
+        {/* Graph Mode Toggle */}
+        <div className="flex items-center justify-between gap-2">
+          <LabelWithTooltip
+            label="Graph Mode"
+            tooltip="When enabled, the pipeline chain is controlled by the DAG editor. Pipeline ID, Preprocessor, Postprocessor, and VACE settings are ignored."
+            className="text-sm font-medium"
+          />
+          <Toggle
+            pressed={graphMode}
+            onPressedChange={onGraphModeChange || (() => {})}
+            variant="outline"
+            size="sm"
+            className="h-7"
             disabled={isStreaming || isLoading}
           >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select a pipeline" />
-            </SelectTrigger>
-            <SelectContent>
-              {pipelines &&
-                (() => {
-                  const entries = Object.entries(pipelines);
-                  const builtIn = entries.filter(
-                    ([, info]) => !info.pluginName
-                  );
-                  const plugin = entries.filter(([, info]) => info.pluginName);
-                  return (
-                    <>
-                      {builtIn.length > 0 && (
-                        <SelectGroup>
-                          <SelectLabel className="text-xs text-muted-foreground font-bold">
-                            Built-in Pipelines
-                          </SelectLabel>
-                          {builtIn.map(([id]) => (
-                            <SelectItem key={id} value={id}>
-                              {id}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      )}
-                      {builtIn.length > 0 && plugin.length > 0 && (
-                        <SelectSeparator />
-                      )}
-                      {plugin.length > 0 && (
-                        <SelectGroup>
-                          <SelectLabel className="text-xs text-muted-foreground font-bold">
-                            Plugin Pipelines
-                          </SelectLabel>
-                          {plugin.map(([id]) => (
-                            <SelectItem key={id} value={id}>
-                              {id}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      )}
-                    </>
-                  );
-                })()}
-            </SelectContent>
-          </Select>
+            {graphMode ? "ON" : "OFF"}
+          </Toggle>
         </div>
 
-        {currentPipeline && (
-          <Card>
-            <CardContent className="p-4 space-y-2">
-              <div>
-                <h4 className="text-sm font-semibold">
-                  {currentPipeline.name}
-                  {currentPipeline.pluginName && (
-                    <span className="font-normal text-muted-foreground">
-                      {" "}
-                      ({currentPipeline.pluginName})
-                    </span>
-                  )}
-                </h4>
-              </div>
+        <div
+          className={`space-y-6 ${graphMode ? "opacity-50 pointer-events-none" : ""}`}
+        >
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">Pipeline ID</h3>
+            <Select
+              value={pipelineId}
+              onValueChange={handlePipelineIdChange}
+              disabled={isStreaming || isLoading}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a pipeline" />
+              </SelectTrigger>
+              <SelectContent>
+                {pipelines &&
+                  (() => {
+                    const entries = Object.entries(pipelines);
+                    const builtIn = entries.filter(
+                      ([, info]) => !info.pluginName
+                    );
+                    const plugin = entries.filter(
+                      ([, info]) => info.pluginName
+                    );
+                    return (
+                      <>
+                        {builtIn.length > 0 && (
+                          <SelectGroup>
+                            <SelectLabel className="text-xs text-muted-foreground font-bold">
+                              Built-in Pipelines
+                            </SelectLabel>
+                            {builtIn.map(([id]) => (
+                              <SelectItem key={id} value={id}>
+                                {id}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        )}
+                        {builtIn.length > 0 && plugin.length > 0 && (
+                          <SelectSeparator />
+                        )}
+                        {plugin.length > 0 && (
+                          <SelectGroup>
+                            <SelectLabel className="text-xs text-muted-foreground font-bold">
+                              Plugin Pipelines
+                            </SelectLabel>
+                            {plugin.map(([id]) => (
+                              <SelectItem key={id} value={id}>
+                                {id}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        )}
+                      </>
+                    );
+                  })()}
+              </SelectContent>
+            </Select>
+          </div>
 
-              <div>
-                {(currentPipeline.about ||
-                  currentPipeline.docsUrl ||
-                  currentPipeline.modified) && (
-                  <div className="flex items-stretch gap-1 h-6">
-                    {currentPipeline.about && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="outline"
-                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
-                            >
-                              <Info className="h-3.5 w-3.5" />
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs">
-                            <p className="text-xs">{currentPipeline.about}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+          {currentPipeline && (
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <div>
+                  <h4 className="text-sm font-semibold">
+                    {currentPipeline.name}
+                    {currentPipeline.pluginName && (
+                      <span className="font-normal text-muted-foreground">
+                        {" "}
+                        ({currentPipeline.pluginName})
+                      </span>
                     )}
-                    {currentPipeline.modified && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="outline"
-                              className="cursor-help hover:bg-accent h-full flex items-center justify-center"
-                            >
-                              <Hammer className="h-3.5 w-3.5" />
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>
-                              This pipeline contains modifications based on the
-                              original project.
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                    {currentPipeline.docsUrl && (
-                      <a
-                        href={currentPipeline.docsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block h-full"
-                      >
-                        <Badge
-                          variant="outline"
-                          className="hover:bg-accent cursor-pointer h-full flex items-center"
+                  </h4>
+                </div>
+
+                <div>
+                  {(currentPipeline.about ||
+                    currentPipeline.docsUrl ||
+                    currentPipeline.modified) && (
+                    <div className="flex items-stretch gap-1 h-6">
+                      {currentPipeline.about && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge
+                                variant="outline"
+                                className="cursor-help hover:bg-accent h-full flex items-center justify-center"
+                              >
+                                <Info className="h-3.5 w-3.5" />
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs">
+                              <p className="text-xs">{currentPipeline.about}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                      {currentPipeline.modified && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge
+                                variant="outline"
+                                className="cursor-help hover:bg-accent h-full flex items-center justify-center"
+                              >
+                                <Hammer className="h-3.5 w-3.5" />
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>
+                                This pipeline contains modifications based on
+                                the original project.
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                      {currentPipeline.docsUrl && (
+                        <a
+                          href={currentPipeline.docsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block h-full"
                         >
-                          Docs
-                        </Badge>
-                      </a>
-                    )}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                          <Badge
+                            variant="outline"
+                            className="hover:bg-accent cursor-pointer h-full flex items-center"
+                          >
+                            Docs
+                          </Badge>
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
         {/* Preprocessor Selector */}
-        <div className="space-y-2">
+        <div
+          className={`space-y-2 ${graphMode ? "opacity-50 pointer-events-none" : ""}`}
+        >
           <div className="flex items-center justify-between gap-2">
             <LabelWithTooltip
               label={PARAMETER_METADATA.preprocessor.label}
@@ -522,7 +554,9 @@ export function SettingsPanel({
         </div>
 
         {/* Postprocessor Selector - fixed, always shown */}
-        <div className="space-y-2">
+        <div
+          className={`space-y-2 ${graphMode ? "opacity-50 pointer-events-none" : ""}`}
+        >
           <div className="flex items-center justify-between gap-2">
             <LabelWithTooltip
               label={PARAMETER_METADATA.postprocessor.label}
@@ -635,6 +669,7 @@ export function SettingsPanel({
               isStreaming,
               isLoading,
               isCloudMode,
+              graphMode,
               schemaFieldOverrides,
               onSchemaFieldOverrideChange,
             };
@@ -699,7 +734,9 @@ export function SettingsPanel({
           return (
             <>
               {currentPipeline?.supportsVACE && (
-                <div className="space-y-2">
+                <div
+                  className={`space-y-2 ${graphMode ? "opacity-50 pointer-events-none" : ""}`}
+                >
                   <div className="flex items-center justify-between gap-2">
                     <LabelWithTooltip
                       label="VACE"
