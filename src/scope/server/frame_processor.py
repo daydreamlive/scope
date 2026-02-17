@@ -491,7 +491,13 @@ class FrameProcessor:
                 if self._dag_run and self._dag_run.sink_processor
                 else self.pipeline_processors[-1]
             )
+            if not out_proc:
+                return None
             if not out_proc.output_queue:
+                logger.debug(
+                    "DAG sink processor %s has no output_queue (playback will wait)",
+                    getattr(out_proc, "pipeline_id", "?"),
+                )
                 return None
 
             try:

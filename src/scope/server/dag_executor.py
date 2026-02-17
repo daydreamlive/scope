@@ -141,6 +141,13 @@ def build_dag(
             sink_node_id = pipeline_node_ids[-1]
 
     sink_processor = node_processors.get(sink_node_id) if sink_node_id else None
+    if sink_node_id and sink_processor is None:
+        logger.warning(
+            "DAG sink node %s not found in processors (missing pipeline?)",
+            sink_node_id,
+        )
+    elif sink_node_id:
+        logger.info("DAG sink for playback: node_id=%s", sink_node_id)
 
     return DagRun(
         source_queues=source_queues,

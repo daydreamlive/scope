@@ -499,9 +499,12 @@ class PipelineProcessor:
                 .detach()
             )
 
-            # Resize primary video output queue to meet target max size
-            target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
-            self._resize_output_queue(target_output_queue_max_size)
+            # Resize primary video output queue to meet target max size.
+            # Skip for the sink (no next_processor): keep the DAG-wired queue so
+            # frame_processor.get() always reads from the same queue we write to.
+            if self.next_processor is not None:
+                target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
+                self._resize_output_queue(target_output_queue_max_size)
 
             # Put each output port's frames to its queues (all frame ports are streamed)
             for port, value in output_dict.items():
