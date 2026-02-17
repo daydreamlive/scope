@@ -284,10 +284,6 @@ class WebRTCManager:
             # Add the relayed video track to WebRTC connection
             pc.addTrack(relayed_track)
 
-            # Add audio track to WebRTC connection. The browser's offer includes
-            # a recvonly audio m-line, so aiortc will match this transceiver to it.
-            pc.addTrack(audio_track)
-
             # Store relay for cleanup
             session.relay = relay
 
@@ -393,6 +389,16 @@ class WebRTCManager:
             # Set remote description (the offer)
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
+
+            # Attach our audio track to the audio transceiver that aiortc created
+            # from the browser's recvonly audio m-line. We find it by kind and
+            # assign our track to its sender, then flip direction to sendonly so
+            # the answer tells the browser we'll be sending audio.
+            for t in pc.getTransceivers():
+                if t.kind == "audio" and t.sender.track is None:
+                    t.sender.replaceTrack(audio_track)
+                    t.direction = "sendonly"
+                    break
 
             # Create answer
             answer = await pc.createAnswer()
