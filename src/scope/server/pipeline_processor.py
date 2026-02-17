@@ -115,6 +115,10 @@ class PipelineProcessor:
         # the next pipeline in the chain can consume them
         self.throttler = PipelineThrottler()
 
+        # Latest output frame for DAG preview (read-only from preview side)
+        self._preview_frame: torch.Tensor | None = None
+        self._preview_frame_lock = threading.Lock()
+
     def _resize_output_queue(self, target_size: int):
         """Resize the primary video output queue, transferring existing frames."""
         video_queues = self.output_queues.get("video")
@@ -535,6 +539,25 @@ class PipelineProcessor:
                                 )
                             break
 
+            # Store the last video output frame for DAG preview
+            video_output = output_dict.get("video")
+            if (
+                video_output is not None
+                and isinstance(video_output, torch.Tensor)
+                and video_output.shape[0] > 0
+            ):
+                last_frame = video_output[-1].unsqueeze(0)
+                if last_frame.dtype != torch.uint8:
+                    last_frame = (
+                        (last_frame * 255.0)
+                        .clamp(0, 255)
+                        .to(dtype=torch.uint8)
+                        .contiguous()
+                        .detach()
+                    )
+                with self._preview_frame_lock:
+                    self._preview_frame = last_frame
+
             if chunks and self.next_processor is not None:
                 self.throttler.throttle()
 
@@ -576,6 +599,11 @@ class PipelineProcessor:
                     # Clamp to reasonable bounds
                     estimated_fps = max(MIN_FPS, min(MAX_FPS, estimated_fps))
                     self.current_output_fps = estimated_fps
+
+    def get_preview_frame(self) -> torch.Tensor | None:
+        """Get the latest output frame for preview (thread-safe)."""
+        with self._preview_frame_lock:
+            return self._preview_frame
 
     def get_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS.

@@ -144,6 +144,10 @@ class FrameProcessor:
         # When False, use pipeline_ids from initial_parameters only (Pipeline ID + Preprocessor + Postprocessor)
         self._use_dag: bool = (initial_parameters or {}).get("use_dag", True)
 
+        # Latest input frame for DAG preview
+        self._preview_input_frame: torch.Tensor | None = None
+        self._preview_input_lock = threading.Lock()
+
         # Frame counting for debug logging
         self._frames_in = 0
         self._frames_out = 0
@@ -447,6 +451,10 @@ class FrameProcessor:
 
             frame_tensor = frame_tensor.unsqueeze(0)
 
+            # Store input frame for DAG preview
+            with self._preview_input_lock:
+                self._preview_input_frame = frame_tensor
+
             if self._dag_run and self._dag_run.source_queues:
                 # DAG: fan-out to all source queues (e.g. shared input -> yolo + longlive)
                 for i, q in enumerate(self._dag_run.source_queues):
@@ -664,6 +672,56 @@ class FrameProcessor:
             stats["frames_from_cloud"] = self._frames_from_cloud
 
         return stats
+
+    def get_preview_frames(self) -> dict[str, bytes]:
+        """Collect preview frames from all processors and encode as JPEG thumbnails.
+
+        Returns a dict mapping node_id -> JPEG bytes for each node that has a frame.
+        """
+        import io
+
+        from PIL import Image
+
+        previews: dict[str, bytes] = {}
+        max_width = 192
+
+        def encode_frame(tensor: torch.Tensor) -> bytes:
+            """Convert a [1, H, W, C] uint8 tensor to JPEG bytes."""
+            frame = tensor.squeeze(0)
+            if frame.is_cuda:
+                frame = frame.cpu()
+            frame_np = frame.numpy()
+            h, w = frame_np.shape[:2]
+            if w > max_width:
+                scale = max_width / w
+                new_w = max_width
+                new_h = int(h * scale)
+                img = Image.fromarray(frame_np).resize((new_w, new_h), Image.LANCZOS)
+            else:
+                img = Image.fromarray(frame_np)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=60)
+            return buf.getvalue()
+
+        # Input frame (source nodes)
+        with self._preview_input_lock:
+            input_frame = self._preview_input_frame
+        if input_frame is not None:
+            try:
+                previews["input"] = encode_frame(input_frame)
+            except Exception:
+                pass
+
+        # Each pipeline processor's output frame
+        for processor in self.pipeline_processors:
+            frame = processor.get_preview_frame()
+            if frame is not None:
+                try:
+                    previews[processor.pipeline_id] = encode_frame(frame)
+                except Exception:
+                    pass
+
+        return previews
 
     def _get_pipeline_dimensions(self) -> tuple[int, int]:
         """Get current pipeline dimensions from pipeline manager."""

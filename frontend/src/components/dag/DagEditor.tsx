@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { DagPreviewContext } from "./DagPreviewContext";
+import { useDagPreviews } from "./useDagPreviews";
 import {
   ReactFlow,
   Controls,
@@ -43,6 +45,8 @@ export function DagEditor() {
   const [portsMap, setPortsMap] = useState<
     Record<string, { inputs: string[]; outputs: string[] }>
   >({});
+  const [previewsEnabled, setPreviewsEnabled] = useState(false);
+  const previews = useDagPreviews(previewsEnabled);
 
   // Fetch available pipeline IDs and port schemas on mount
   useEffect(() => {
@@ -306,6 +310,16 @@ export function DagEditor() {
         >
           Clear
         </button>
+        <button
+          onClick={() => setPreviewsEnabled(p => !p)}
+          className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+            previewsEnabled
+              ? "bg-violet-700 hover:bg-violet-600 text-white"
+              : "bg-zinc-700 hover:bg-zinc-600 text-zinc-200"
+          }`}
+        >
+          {previewsEnabled ? "Previews ON" : "Previews OFF"}
+        </button>
         {status && (
           <span className="text-xs text-zinc-400 ml-2">
             {status}
@@ -318,21 +332,23 @@ export function DagEditor() {
 
       {/* Flow Canvas */}
       <div className="flex-1">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          colorMode="dark"
-          fitView
-          deleteKeyCode={["Backspace", "Delete"]}
-        >
-          <Controls />
-          <MiniMap nodeStrokeWidth={3} className="!bg-zinc-900" />
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-        </ReactFlow>
+        <DagPreviewContext.Provider value={previews}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            colorMode="dark"
+            fitView
+            deleteKeyCode={["Backspace", "Delete"]}
+          >
+            <Controls />
+            <MiniMap nodeStrokeWidth={3} className="!bg-zinc-900" />
+            <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+          </ReactFlow>
+        </DagPreviewContext.Provider>
       </div>
     </div>
   );

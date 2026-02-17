@@ -1,6 +1,7 @@
 import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/dagUtils";
+import { useDagPreview } from "./DagPreviewContext";
 
 type PipelineNodeType = Node<FlowNodeData, "pipeline">;
 
@@ -18,6 +19,7 @@ function getPortColor(portName: string): string {
 
 export function PipelineNode({ id, data }: NodeProps<PipelineNodeType>) {
   const { setNodes } = useReactFlow();
+  const previewUrl = useDagPreview(id);
 
   const pipelineIds = data.availablePipelineIds || [];
   const portsMap = data.pipelinePortsMap;
@@ -50,7 +52,7 @@ export function PipelineNode({ id, data }: NodeProps<PipelineNodeType>) {
   const outputCount = streamOutputs.length;
 
   return (
-    <div className="rounded-lg border-2 border-blue-500 bg-blue-950/80 px-4 py-3 min-w-[200px]">
+    <div className="rounded-lg border-2 border-blue-500 bg-blue-950/80 px-4 py-3 min-w-[220px]">
       <div className="text-xs text-blue-400 font-medium mb-1">Pipeline</div>
       <select
         value={data.pipelineId || ""}
@@ -82,6 +84,15 @@ export function PipelineNode({ id, data }: NodeProps<PipelineNodeType>) {
           ))}
         </div>
       </div>
+
+      {/* Preview thumbnail */}
+      {previewUrl ? (
+        <img
+          src={previewUrl}
+          alt="preview"
+          className="mt-2 w-full max-w-[180px] rounded border border-blue-700/50"
+        />
+      ) : null}
 
       {/* Input handles (left side) */}
       {streamInputs.map((port, i) => (

@@ -19,7 +19,16 @@ from typing import TYPE_CHECKING
 
 import click
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -1819,6 +1828,46 @@ async def clear_dag_config():
 
     clear_api_dag()
     return {"message": "DAG configuration cleared"}
+
+
+@app.websocket("/api/v1/dag/previews")
+async def dag_previews_ws(ws: WebSocket):
+    """Stream live preview thumbnails from each DAG node at ~5 FPS."""
+    import base64
+
+    await ws.accept()
+
+    try:
+        while True:
+            # Find the active session's frame_processor
+            frame_processor = None
+            if webrtc_manager:
+                for session in webrtc_manager.list_sessions().values():
+                    vt = session.video_track
+                    if vt and hasattr(vt, "frame_processor") and vt.frame_processor:
+                        fp = vt.frame_processor
+                        if fp.running:
+                            frame_processor = fp
+                            break
+
+            if frame_processor is not None:
+                try:
+                    previews_raw = await asyncio.get_event_loop().run_in_executor(
+                        None, frame_processor.get_preview_frames
+                    )
+                    previews = {
+                        node_id: f"data:image/jpeg;base64,{base64.b64encode(jpeg_bytes).decode()}"
+                        for node_id, jpeg_bytes in previews_raw.items()
+                    }
+                    await ws.send_json({"previews": previews})
+                except Exception as e:
+                    logger.debug(f"Error getting preview frames: {e}")
+
+            await asyncio.sleep(0.2)  # ~5 FPS
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug(f"DAG preview WebSocket closed: {e}")
 
 
 # =============================================================================
