@@ -535,6 +535,10 @@ class PipelineProcessor:
             if audio_output is not None and audio_sample_rate is not None:
                 # Detach and move to CPU for downstream consumption
                 audio_output = audio_output.detach().cpu()
+                logger.info(
+                    f"[PIPELINE-PROC] Audio from {self.pipeline_id}: "
+                    f"shape={audio_output.shape}, sr={audio_sample_rate}"
+                )
                 try:
                     self.audio_output_queue.put_nowait(
                         (audio_output, audio_sample_rate)

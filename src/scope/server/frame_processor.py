@@ -553,6 +553,10 @@ class FrameProcessor:
                 with self._audio_buffer_lock:
                     self._audio_buffer.append(audio_mono)
                     self._audio_buffer_samples += len(audio_mono)
+                    logger.info(
+                        f"[FRAME-PROCESSOR] Audio buffered: {len(audio_mono)} samples "
+                        f"(total: {self._audio_buffer_samples}, sr={sample_rate})"
+                    )
 
                 # Also fan out to output sinks that support audio
                 if self.output_sinks:

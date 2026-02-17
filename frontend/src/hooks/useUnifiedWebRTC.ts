@@ -208,11 +208,6 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           transceiver = pc.addTransceiver("video");
         }
 
-        // Add a receive-only audio transceiver so the SDP offer includes an
-        // audio m-line. The backend will match this and send audio back.
-        pc.addTransceiver("audio", { direction: "recvonly" });
-        console.log("[UnifiedWebRTC] Added recvonly audio transceiver");
-
         // Force VP8-only for aiortc compatibility
         if (transceiver) {
           const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
@@ -227,17 +222,17 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
         // Event handlers
         // Collect all incoming tracks (video + audio) into a single MediaStream.
-        // The backend may send video and audio as separate streams, so we
-        // merge them into one MediaStream for the <video> element.
+        // The backend sends video and audio as separate tracks; we merge them
+        // into one MediaStream for the <video> element.
         const combinedStream = new MediaStream();
         pc.ontrack = (evt: RTCTrackEvent) => {
           console.log(
             `[UnifiedWebRTC] Track received: ${evt.track.kind} (id: ${evt.track.id})`
           );
           combinedStream.addTrack(evt.track);
-          // Update remoteStream reference each time a track is added so the
-          // component re-renders and picks up the latest tracks
-          setRemoteStream(combinedStream);
+          // Create a new MediaStream wrapper so React detects the state change
+          // (same object reference would not trigger a re-render)
+          setRemoteStream(new MediaStream(combinedStream.getTracks()));
         };
 
         pc.onconnectionstatechange = () => {

@@ -9,15 +9,17 @@ from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import AudioFrame, VideoFrame
 
-from .frame_processor import (
-    AUDIO_SAMPLES_PER_FRAME,
-    WEBRTC_AUDIO_SAMPLE_RATE,
-    FrameProcessor,
-)
+from .frame_processor import FrameProcessor
 from .media_clock import MediaClock
 from .pipeline_manager import PipelineManager
 
 logger = logging.getLogger(__name__)
+
+# Audio constants
+AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
+AUDIO_CLOCK_RATE = 48000  # WebRTC typically uses 48kHz for Opus codec
+AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
+AUDIO_SAMPLES_PER_FRAME = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960 samples
 
 
 class VideoProcessingTrack(MediaStreamTrack):
@@ -207,7 +209,7 @@ class AudioProcessingTrack(MediaStreamTrack):
 
     kind = "audio"
 
-    AUDIO_PTIME = AUDIO_SAMPLES_PER_FRAME / WEBRTC_AUDIO_SAMPLE_RATE  # 0.02s (20ms)
+    AUDIO_PTIME_S = AUDIO_SAMPLES_PER_FRAME / AUDIO_CLOCK_RATE  # 0.02s (20ms)
 
     def __init__(
         self,
@@ -228,7 +230,7 @@ class AudioProcessingTrack(MediaStreamTrack):
         # Pace audio output at 20ms intervals
         if self._last_frame_time is not None:
             elapsed = time.time() - self._last_frame_time
-            wait = self.AUDIO_PTIME - elapsed
+            wait = self.AUDIO_PTIME_S - elapsed
             if wait > 0:
                 await asyncio.sleep(wait)
 
@@ -253,11 +255,11 @@ class AudioProcessingTrack(MediaStreamTrack):
         frame = AudioFrame.from_ndarray(
             audio_int16.reshape(1, -1), format="s16", layout="mono"
         )
-        frame.sample_rate = WEBRTC_AUDIO_SAMPLE_RATE
+        frame.sample_rate = AUDIO_CLOCK_RATE
 
         # Set PTS from shared media clock for A/V sync
         media_time = self.media_clock.get_media_time()
         frame.pts = self.media_clock.media_time_to_audio_pts(media_time)
-        frame.time_base = fractions.Fraction(1, WEBRTC_AUDIO_SAMPLE_RATE)
+        frame.time_base = AUDIO_TIME_BASE
 
         return frame

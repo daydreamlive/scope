@@ -386,19 +386,14 @@ class WebRTCManager:
                     except Exception as e:
                         logger.error(f"Error handling parameter update: {e}")
 
+            # Add audio track BEFORE setRemoteDescription. The browser's offer
+            # includes a recvonly audio m-line (from addTransceiver("audio")).
+            # aiortc's setRemoteDescription will match our audio transceiver to it.
+            pc.addTrack(audio_track)
+
             # Set remote description (the offer)
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
-
-            # Attach our audio track to the audio transceiver that aiortc created
-            # from the browser's recvonly audio m-line. We find it by kind and
-            # assign our track to its sender, then flip direction to sendonly so
-            # the answer tells the browser we'll be sending audio.
-            for t in pc.getTransceivers():
-                if t.kind == "audio" and t.sender.track is None:
-                    t.sender.replaceTrack(audio_track)
-                    t.direction = "sendonly"
-                    break
 
             # Create answer
             answer = await pc.createAnswer()
