@@ -40,6 +40,8 @@ class DagRun:
     pipeline_ids: list[str]
     # Node id of the sink (for clarity)
     sink_node_id: str | None
+    # Node ids of output/sink nodes (e.g. "output") for preview mapping
+    output_node_ids: list[str]
 
 
 def build_dag(
@@ -149,12 +151,16 @@ def build_dag(
     elif sink_node_id:
         logger.info("DAG sink for playback: node_id=%s", sink_node_id)
 
+    # Collect output/sink node IDs for preview mapping
+    output_node_ids = [n.id for n in dag.nodes if n.type == "sink"]
+
     return DagRun(
         source_queues=source_queues,
         sink_processor=sink_processor,
         processors=list(node_processors.values()),
         pipeline_ids=pipeline_ids,
         sink_node_id=sink_node_id,
+        output_node_ids=output_node_ids,
     )
 
 

@@ -721,6 +721,17 @@ class FrameProcessor:
                 except Exception:
                     pass
 
+        # Sink/output nodes reuse the sink processor's preview
+        if self._dag_run and self._dag_run.sink_processor:
+            sink_frame = self._dag_run.sink_processor.get_preview_frame()
+            if sink_frame is not None:
+                try:
+                    sink_jpeg = encode_frame(sink_frame)
+                    for output_id in self._dag_run.output_node_ids:
+                        previews[output_id] = sink_jpeg
+                except Exception:
+                    pass
+
         return previews
 
     def _get_pipeline_dimensions(self) -> tuple[int, int]:
