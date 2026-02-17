@@ -496,11 +496,24 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Override pipeline IDs from input.json DAG if available
+        # Override pipeline IDs: API DAG > input.json > request
+        from .dag_state import get_api_dag
         from .frame_processor import get_pipeline_ids_from_input_json
 
-        dag_pipeline_ids = get_pipeline_ids_from_input_json()
-        if dag_pipeline_ids is not None:
+        api_dag = get_api_dag()
+        if api_dag is not None:
+            dag_pipeline_ids = [
+                n.pipeline_id
+                for n in api_dag.nodes
+                if n.type == "pipeline" and n.pipeline_id is not None
+            ]
+            logger.info(
+                f"Overriding pipeline_ids from API DAG: {dag_pipeline_ids} "
+                f"(was: {request.pipeline_ids})"
+            )
+            pipeline_ids = dag_pipeline_ids
+            load_params_dict = None
+        elif (dag_pipeline_ids := get_pipeline_ids_from_input_json()) is not None:
             logger.info(
                 f"Overriding pipeline_ids from input.json: {dag_pipeline_ids} "
                 f"(was: {request.pipeline_ids})"
@@ -1712,6 +1725,93 @@ async def reload_plugin(
             status_code=500,
             detail=f"Failed to reload {name}. Check server logs for details.",
         ) from e
+
+
+# =============================================================================
+# DAG Configuration Endpoints
+# =============================================================================
+
+
+@app.post("/api/v1/dag")
+async def set_dag_config(request: Request):
+    """Accept and store a DAG configuration.
+
+    Validates the structure and checks that pipeline_ids exist in the registry.
+    """
+    from scope.core.pipelines.registry import PipelineRegistry
+
+    from .dag_schema import DagConfig
+    from .dag_state import set_api_dag
+
+    try:
+        body = await request.json()
+        dag = DagConfig.model_validate(body)
+
+        # Structural validation
+        errors = dag.validate_structure()
+        if errors:
+            raise HTTPException(status_code=422, detail={"errors": errors})
+
+        # Validate that pipeline_ids exist in the registry
+        available = set(PipelineRegistry.list_pipelines())
+        for node in dag.nodes:
+            if node.type == "pipeline" and node.pipeline_id not in available:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "errors": [
+                            f"Pipeline '{node.pipeline_id}' not found in registry. "
+                            f"Available: {sorted(available)}"
+                        ]
+                    },
+                )
+
+        set_api_dag(dag)
+        return {
+            "message": "DAG configuration saved",
+            "nodes": len(dag.nodes),
+            "edges": len(dag.edges),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting DAG config: {e}")
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/v1/dag")
+async def get_dag_config():
+    """Return the current DAG configuration.
+
+    Priority: API-set DAG > input.json > none.
+    """
+    from .dag_state import get_api_dag
+    from .frame_processor import _load_dag_from_input_json
+
+    api_dag = get_api_dag()
+    if api_dag is not None:
+        return {
+            "source": "api",
+            "dag": api_dag.model_dump(by_alias=True),
+        }
+
+    file_dag = _load_dag_from_input_json()
+    if file_dag is not None:
+        return {
+            "source": "input.json",
+            "dag": file_dag.model_dump(by_alias=True),
+        }
+
+    return {"source": None, "dag": None}
+
+
+@app.delete("/api/v1/dag")
+async def clear_dag_config():
+    """Clear the API-set DAG, reverting to fallback behavior."""
+    from .dag_state import clear_api_dag
+
+    clear_api_dag()
+    return {"message": "DAG configuration cleared"}
 
 
 # =============================================================================

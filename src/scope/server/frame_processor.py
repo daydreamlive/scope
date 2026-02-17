@@ -150,9 +150,21 @@ class FrameProcessor:
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
 
-        # Override pipeline_ids from input.json if available, else use UI params
-        dag_pipeline_ids = get_pipeline_ids_from_input_json()
-        if dag_pipeline_ids is not None:
+        # Override pipeline_ids: API DAG > input.json > UI params
+        from .dag_state import get_api_dag
+
+        api_dag = get_api_dag()
+        if api_dag is not None:
+            dag_pipeline_ids = [
+                n.pipeline_id
+                for n in api_dag.nodes
+                if n.type == "pipeline" and n.pipeline_id is not None
+            ]
+            self.pipeline_ids = dag_pipeline_ids
+            logger.info(
+                f"[FRAME-PROCESSOR] Using pipeline_ids from API DAG: {dag_pipeline_ids}"
+            )
+        elif (dag_pipeline_ids := get_pipeline_ids_from_input_json()) is not None:
             self.pipeline_ids = dag_pipeline_ids
             logger.info(
                 f"[FRAME-PROCESSOR] Using pipeline_ids from input.json: {dag_pipeline_ids}"
@@ -970,9 +982,15 @@ class FrameProcessor:
         """
         dag_config: DagConfig
 
-        # Try loading DAG from input.json first
-        dag_config = _load_dag_from_input_json()
-        if dag_config is not None:
+        # Priority: API DAG > input.json > parameters > linear fallback
+        from .dag_state import get_api_dag
+
+        api_dag = get_api_dag()
+        if api_dag is not None:
+            dag_config = api_dag
+            logger.info("[FRAME-PROCESSOR] Using DAG from API")
+        elif (file_dag := _load_dag_from_input_json()) is not None:
+            dag_config = file_dag
             logger.info("[FRAME-PROCESSOR] Using DAG from input.json")
         elif not self.pipeline_ids and not self.parameters.get("dag"):
             logger.error("No pipeline IDs or DAG config provided")

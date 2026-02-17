@@ -797,6 +797,81 @@ export const deleteApiKey = async (
   return response.json();
 };
 
+// DAG Configuration types and API functions
+
+export interface DagNode {
+  id: string;
+  type: "source" | "pipeline" | "sink";
+  pipeline_id?: string | null;
+}
+
+export interface DagEdge {
+  from: string;
+  from_port: string;
+  to_node: string;
+  to_port: string;
+  kind?: "stream" | "parameter";
+}
+
+export interface DagConfig {
+  nodes: DagNode[];
+  edges: DagEdge[];
+}
+
+export interface DagResponse {
+  source: "api" | "input.json" | null;
+  dag: DagConfig | null;
+}
+
+export const getDag = async (): Promise<DagResponse> => {
+  const response = await fetch("/api/v1/dag", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get DAG failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const setDag = async (
+  dag: DagConfig
+): Promise<{ message: string; nodes: number; edges: number }> => {
+  const response = await fetch("/api/v1/dag", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dag),
+  });
+
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+
+  return response.json();
+};
+
+export const clearDag = async (): Promise<{ message: string }> => {
+  const response = await fetch("/api/v1/dag", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Clear DAG failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
 export const downloadRecording = async (sessionId: string): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");

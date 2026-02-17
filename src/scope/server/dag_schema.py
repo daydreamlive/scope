@@ -108,3 +108,47 @@ class DagConfig(BaseModel):
             if n.id == node_id:
                 return n
         return None
+
+    def validate_structure(self) -> list[str]:
+        """Validate the DAG structure and return a list of error messages.
+
+        Checks:
+        - No duplicate node IDs
+        - At least one source and one sink node
+        - Pipeline nodes have a pipeline_id
+        - All edge references point to existing nodes
+        """
+        errors: list[str] = []
+        node_ids = [n.id for n in self.nodes]
+
+        # Check for duplicate node IDs
+        seen: set[str] = set()
+        for nid in node_ids:
+            if nid in seen:
+                errors.append(f"Duplicate node ID: '{nid}'")
+            seen.add(nid)
+
+        # At least one source and one sink
+        if not self.get_source_node_ids():
+            errors.append("DAG must have at least one source node")
+        if not self.get_sink_node_ids():
+            errors.append("DAG must have at least one sink node")
+
+        # Pipeline nodes must have pipeline_id
+        for node in self.nodes:
+            if node.type == "pipeline" and not node.pipeline_id:
+                errors.append(f"Pipeline node '{node.id}' is missing pipeline_id")
+
+        # Edge references must point to existing nodes
+        node_id_set = set(node_ids)
+        for edge in self.edges:
+            if edge.from_node not in node_id_set:
+                errors.append(
+                    f"Edge references non-existent source node: '{edge.from_node}'"
+                )
+            if edge.to_node not in node_id_set:
+                errors.append(
+                    f"Edge references non-existent target node: '{edge.to_node}'"
+                )
+
+        return errors

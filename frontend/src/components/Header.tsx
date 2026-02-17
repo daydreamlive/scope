@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { Settings, Cloud, CloudOff } from "lucide-react";
+import { Settings, Cloud, CloudOff, GitBranch } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
+import { DagEditorDialog } from "./dag/DagEditorDialog";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 
@@ -22,6 +23,7 @@ export function Header({
   onSettingsTabOpened,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dagEditorOpen, setDagEditorOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
     "general" | "account" | "api-keys" | "plugins"
   >("general");
@@ -117,6 +119,15 @@ export function Header({
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => setDagEditorOpen(true)}
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
+            title="DAG Editor"
+          >
+            <GitBranch className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={handleCloudIconClick}
             className={`hover:opacity-80 transition-opacity h-8 w-8 ${
               isConnected
@@ -160,6 +171,11 @@ export function Header({
         initialPluginPath={initialPluginPath}
         onPipelinesRefresh={onPipelinesRefresh}
         cloudDisabled={cloudDisabled}
+      />
+
+      <DagEditorDialog
+        open={dagEditorOpen}
+        onClose={() => setDagEditorOpen(false)}
       />
     </header>
   );
