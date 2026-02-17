@@ -39,6 +39,21 @@ def initialize_kv_cache(
         and list(kv_cache_existing[0]["k"].shape) == k_shape
         and list(kv_cache_existing[0]["v"].shape) == v_shape
     ):
+        # Restore original head ordering if dummy forcing reordered the cache
+        for i in range(num_transformer_blocks):
+            inv_reorder = kv_cache_existing[i].get("df_inv_reorder")
+            if inv_reorder is not None:
+                kv_cache_existing[i]["k"] = (
+                    kv_cache_existing[i]["k"]
+                    .index_select(2, inv_reorder)
+                    .contiguous()
+                )
+                kv_cache_existing[i]["v"] = (
+                    kv_cache_existing[i]["v"]
+                    .index_select(2, inv_reorder)
+                    .contiguous()
+                )
+
         for i in range(num_transformer_blocks):
             if zero_cache:
                 kv_cache_existing[i]["k"].zero_()
@@ -53,7 +68,16 @@ def initialize_kv_cache(
                 )
 
             # Clear dummy forcing state so it re-classifies after cache refill
-            for df_key in ("df_head_groups", "df_score", "df_compute_score"):
+            for df_key in (
+                "df_head_groups",
+                "df_n_c",
+                "df_n_a",
+                "df_local_context_length",
+                "df_reorder",
+                "df_inv_reorder",
+                "df_score",
+                "df_compute_score",
+            ):
                 kv_cache_existing[i].pop(df_key, None)
 
         return kv_cache_existing

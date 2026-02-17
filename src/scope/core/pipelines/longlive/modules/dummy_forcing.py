@@ -1,19 +1,24 @@
-"""Dummy Forcing: binary head classification for KV cache optimization.
+"""Dummy Forcing: three-group head classification for KV cache optimization.
 
-Identifies 'dummy' attention heads that primarily attend to the current frame
-and routes them through a shorter attention path (sink + current only),
-reducing attention computation while maintaining quality.
+Classifies attention heads into three groups based on their attention patterns:
+  - Group A (first-frame heads): primarily attend to the first frame
+  - Group B (local heads): primarily attend to recent/mid-range context
+  - Group C (dummy heads): primarily attend to the current frame only
+
+Each group gets the minimum context it needs, dramatically reducing total
+attention computation while preserving quality.
 
 Based on arXiv:2601.20499 (Guo et al., Microsoft Research / Tsinghua).
 
-Simplified to binary classification (dummy vs. normal) for integration
-with the LongLive pipeline's existing cache management. Cache writes are
-uniform for all heads; only the read path differs per group.
+Performance: during classification, the cache's head dimension is reordered
+so that groups occupy contiguous positions [C | A | B]. This allows all
+subsequent per-group slices to be free contiguous views (no gather/copy).
 """
 
 from __future__ import annotations
 
 import logging
+import math
 
 import torch
 import torch.nn.functional as F
@@ -23,169 +28,249 @@ from scope.core.pipelines.wan2_1.modules.attention import attention
 logger = logging.getLogger(__name__)
 
 
-def compute_df_score(
+# ---------------------------------------------------------------------------
+# Head classification
+# ---------------------------------------------------------------------------
+
+
+def compute_head_scores(
     query: torch.Tensor,
     key: torch.Tensor,
-    num_current_tokens: int,
+    num_frames_per_block: int = 3,
 ) -> torch.Tensor:
-    """Compute per-head current-frame attention fraction for dummy head classification.
+    """Compute per-head attention distribution over first/mid/last regions.
 
-    Measures how much each attention head attends to the current frame tokens
-    vs. historical cache tokens. Heads with high scores are candidates for
-    dummy classification (they mostly attend to the current frame and don't
-    benefit from a long KV cache).
+    Mirrors the original ``online_head_classification`` from DummyForcing.
 
     Args:
         query: [B, L, num_heads, D] queries for the current block.
         key: [B, K, num_heads, D] all valid keys (cache + current).
-        num_current_tokens: number of tokens at the end of key that belong
-            to the current frame (= query length L).
+        num_frames_per_block: frames per AR block (default 3 for LongLive).
 
     Returns:
-        Tensor of shape [num_heads] with current-frame attention fraction per head.
+        [3, B, num_heads] — attention fractions for (first, mid, last) regions.
     """
     B, L, H, D = query.shape
+    HW = L // num_frames_per_block
 
-    num_sampled = max(L // 3, 1)
+    num_sampled = max(HW // 3, 1)
     sampled_idx = torch.randint(0, L, (num_sampled,), device=query.device)
 
     sampled_q = query[:, sampled_idx].transpose(1, 2).float()
     k_t = key.transpose(1, 2).float()
 
     scores = torch.matmul(sampled_q, k_t.transpose(-2, -1)) / (D**0.5)
-    attn_weights = F.softmax(scores, dim=-1)
+    attn = F.softmax(scores, dim=-1)
 
-    current_attn = attn_weights[:, :, :, -num_current_tokens:].sum(dim=-1).mean(dim=-1)
-    return current_attn[0]
+    last_chunk = attn[:, :, :, -L:].sum(dim=-1).mean(dim=-1)
+    mid_chunk = attn[:, :, :, HW:-L].sum(dim=-1).mean(dim=-1)
+    first_chunk = attn[:, :, :, :HW].sum(dim=-1).mean(dim=-1)
+
+    return torch.stack([first_chunk, mid_chunk, last_chunk])
 
 
-def select_dummy_heads(
+def classify_heads(
     scores: torch.Tensor,
     num_dummy: int,
 ) -> list[dict[str, list[int]]]:
-    """Select dummy heads globally across all layers.
+    """Classify heads into three groups (A, B, C) globally across all layers.
 
-    Heads with the highest current-frame attention fraction are classified
-    as dummy. The classification is global (across all layers) so that the
-    total number of dummy heads matches ``num_dummy``.
+    Mirrors the original ``dynamic_head_programming`` from DummyForcing.
+
+    - Group C (dummy): heads with lowest ``max(p_first, p_mid)`` — they don't
+      need historical context.
+    - Group A (first-frame): remaining heads where ``p_first >= p_mid``.
+    - Group B (local/mid): remaining heads where ``p_mid > p_first``.
 
     Args:
-        scores: [num_layers, num_heads] current-frame attention scores.
-        num_dummy: total number of heads to classify as dummy.
+        scores: [num_layers, num_heads, 3] attention scores (first, mid, last).
+        num_dummy: total number of heads to classify as dummy (Group C).
 
     Returns:
-        List of dicts (one per layer), each with keys:
-            ``dummy_heads``: list of head indices classified as dummy.
-            ``normal_heads``: list of head indices classified as normal.
+        List of dicts (one per layer), each with keys ``group_a``, ``group_b``,
+        ``group_c`` containing head index lists.
     """
-    num_layers, num_heads = scores.shape
+    num_layers, num_heads, _ = scores.shape
     total_heads = num_layers * num_heads
     num_dummy = min(num_dummy, total_heads)
 
-    flat_scores = scores.reshape(-1)
-    _, sorted_indices = torch.sort(flat_scores, descending=True)
+    p0_flat = scores[:, :, 0].reshape(-1)
+    p1_flat = scores[:, :, 1].reshape(-1)
+    p0_norm = p0_flat / (p0_flat.sum() + 1e-8)
+    p1_norm = p1_flat / (p1_flat.sum() + 1e-8)
 
-    is_dummy = torch.zeros(total_heads, dtype=torch.bool, device=scores.device)
-    is_dummy[sorted_indices[:num_dummy]] = True
-    is_dummy = is_dummy.reshape(num_layers, num_heads)
+    cost = torch.maximum(p0_norm, p1_norm)
+    sorted_indices = torch.argsort(cost)
+
+    assignment = torch.zeros(total_heads, dtype=torch.long, device=scores.device)
+    assignment[sorted_indices[:num_dummy]] = 2  # Group C
+
+    remaining = (assignment != 2).nonzero(as_tuple=True)[0]
+    for idx in remaining:
+        assignment[idx] = 1 if p0_norm[idx] < p1_norm[idx] else 0
+
+    assignment = assignment.reshape(num_layers, num_heads)
 
     head_groups = []
+    n_a_total, n_b_total, n_c_total = 0, 0, 0
     for layer_idx in range(num_layers):
-        dummy = is_dummy[layer_idx].nonzero(as_tuple=True)[0].tolist()
-        normal = (~is_dummy[layer_idx]).nonzero(as_tuple=True)[0].tolist()
-        head_groups.append({"dummy_heads": dummy, "normal_heads": normal})
+        ga = (assignment[layer_idx] == 0).nonzero(as_tuple=True)[0].tolist()
+        gb = (assignment[layer_idx] == 1).nonzero(as_tuple=True)[0].tolist()
+        gc = (assignment[layer_idx] == 2).nonzero(as_tuple=True)[0].tolist()
+        head_groups.append({"group_a": ga, "group_b": gb, "group_c": gc})
+        n_a_total += len(ga)
+        n_b_total += len(gb)
+        n_c_total += len(gc)
 
-    logger.info(
-        "Dummy Forcing classification complete: %d/%d heads classified as dummy",
-        num_dummy,
-        total_heads,
+    print(
+        f"Dummy Forcing classification: A={n_a_total} B={n_b_total} C={n_c_total} "
+        f"(total={total_heads})"
     )
-
     return head_groups
+
+
+# ---------------------------------------------------------------------------
+# Cache head reordering
+# ---------------------------------------------------------------------------
+
+
+def reorder_cache_heads(
+    kv_cache: list[dict],
+    head_groups: list[dict],
+) -> None:
+    """Reorder cache head dimension to [C | A | B] for contiguous slicing.
+
+    After reordering, per-group dim-2 slices are free views (no gather/copy).
+    Stores reorder indices, group sizes, and inverse reorder in each cache dict.
+    """
+    for layer_idx, cache in enumerate(kv_cache):
+        groups = head_groups[layer_idx]
+        gc = groups["group_c"]
+        ga = groups["group_a"]
+        gb = groups["group_b"]
+
+        reorder = gc + ga + gb
+        n_c = len(gc)
+        n_a = len(ga)
+
+        inv_reorder = [0] * len(reorder)
+        for new_idx, old_idx in enumerate(reorder):
+            inv_reorder[old_idx] = new_idx
+
+        reorder_t = torch.tensor(reorder, device=cache["k"].device, dtype=torch.long)
+        inv_reorder_t = torch.tensor(
+            inv_reorder, device=cache["k"].device, dtype=torch.long
+        )
+
+        cache["k"] = cache["k"].index_select(2, reorder_t).contiguous()
+        cache["v"] = cache["v"].index_select(2, reorder_t).contiguous()
+
+        cache["df_head_groups"] = groups
+        cache["df_n_c"] = n_c
+        cache["df_n_a"] = n_a
+        cache["df_reorder"] = reorder_t
+        cache["df_inv_reorder"] = inv_reorder_t
+
+
+def unreorder_cache_heads(kv_cache: list[dict]) -> None:
+    """Restore original head ordering in the KV cache."""
+    for cache in kv_cache:
+        inv_reorder = cache.get("df_inv_reorder")
+        if inv_reorder is not None:
+            cache["k"] = cache["k"].index_select(2, inv_reorder).contiguous()
+            cache["v"] = cache["v"].index_select(2, inv_reorder).contiguous()
+
+
+# ---------------------------------------------------------------------------
+# Three-path attention
+# ---------------------------------------------------------------------------
 
 
 def dummy_forcing_attention(
     roped_query: torch.Tensor,
-    roped_key: torch.Tensor,
-    v: torch.Tensor,
     temp_k: torch.Tensor,
     temp_v: torch.Tensor,
     sink_tokens: int,
+    frame_seqlen: int,
+    num_new_tokens: int,
     local_end_index: int,
-    max_attention_size: int,
-    head_groups: dict[str, list[int]],
+    local_context_length: int,
+    n_c: int,
+    n_a: int,
 ) -> torch.Tensor:
-    """Two-path attention: normal heads use full window, dummy heads use sink only.
+    """Three-path attention with contiguous head slices (cache heads pre-reordered).
 
-    Normal heads run the standard longlive attention (sink + local window).
-    Dummy heads only attend to sink tokens + current input tokens, skipping
-    the full rolling window. Cache writes are handled identically for all
-    heads by the caller; only the read path differs here.
+    Expects heads in reordered layout: [0:n_c] = C, [n_c:n_c+n_a] = A, [n_c+n_a:] = B.
+    All dim-2 slices are contiguous views.
+
+    - Group C (dummy): most recent frame + current — minimal context.
+    - Group A (first-frame): first frame from sink + current — anchoring context.
+    - Group B (local): recent local window + current — motion context.
 
     Args:
-        roped_query: [B, L, H, D] current queries with RoPE applied.
-        roped_key: [B, L, H, D] current keys with RoPE applied.
-        v: [B, L, H, D] current values (no RoPE).
-        temp_k: [B, cache_size, H, D] cache keys with current tokens inserted.
-        temp_v: [B, cache_size, H, D] cache values with current tokens inserted.
+        roped_query: [B, L, H, D] current queries (heads in reordered layout).
+        temp_k: [B, cache_size, H, D] cache keys (heads reordered, current inserted).
+        temp_v: [B, cache_size, H, D] cache values (heads reordered, current inserted).
         sink_tokens: number of persistent sink tokens at the front of cache.
+        frame_seqlen: tokens per single latent frame (HW).
+        num_new_tokens: number of current-frame tokens (already in temp_k).
         local_end_index: end index of valid data in temp_k/temp_v.
-        max_attention_size: maximum attention window size for normal heads.
-        head_groups: dict with ``dummy_heads`` and ``normal_heads`` index lists.
+        local_context_length: number of AR blocks of recent context for Group B.
+        n_c: number of Group C (dummy) heads.
+        n_a: number of Group A (first-frame) heads.
 
     Returns:
-        [B, L, H, D] attention output for all heads.
+        [B, L, H, D] attention output (heads in reordered layout).
     """
-    normal_heads = head_groups["normal_heads"]
-    dummy_heads = head_groups["dummy_heads"]
+    n_total = roped_query.shape[2]
+    n_b = n_total - n_c - n_a
+    ca_boundary = n_c + n_a  # start of B heads
 
-    out = torch.empty_like(roped_query)
+    results = []
 
-    # Path 1: Normal heads — full local window (standard longlive attention)
-    if len(normal_heads) > 0:
-        normal_q = roped_query[:, :, normal_heads, :]
-
-        if sink_tokens > 0:
-            local_budget = max_attention_size - sink_tokens
-            k_sink = temp_k[:, :sink_tokens, normal_heads, :]
-            v_sink = temp_v[:, :sink_tokens, normal_heads, :]
-
-            if local_budget > 0:
-                local_start = max(sink_tokens, local_end_index - local_budget)
-                k_local = temp_k[:, local_start:local_end_index, normal_heads, :]
-                v_local = temp_v[:, local_start:local_end_index, normal_heads, :]
-                k_cat = torch.cat([k_sink, k_local], dim=1)
-                v_cat = torch.cat([v_sink, v_local], dim=1)
-            else:
-                k_cat = k_sink
-                v_cat = v_sink
-
-            out[:, :, normal_heads, :] = attention(normal_q, k_cat, v_cat)
-        else:
-            window_start = max(0, local_end_index - max_attention_size)
-            out[:, :, normal_heads, :] = attention(
-                normal_q,
-                temp_k[:, window_start:local_end_index, normal_heads, :],
-                temp_v[:, window_start:local_end_index, normal_heads, :],
+    # ---- Group C (dummy): recent frame + current ----
+    if n_c > 0:
+        c_window = min(frame_seqlen + num_new_tokens, local_end_index)
+        c_start = max(0, local_end_index - c_window)
+        results.append(
+            attention(
+                roped_query[:, :, :n_c, :],
+                temp_k[:, c_start:local_end_index, :n_c, :],
+                temp_v[:, c_start:local_end_index, :n_c, :],
             )
-
-    # Path 2: Dummy heads — sink + current only (skip the rolling window)
-    if len(dummy_heads) > 0:
-        dummy_q = roped_query[:, :, dummy_heads, :]
-        dummy_k = torch.cat(
-            [
-                temp_k[:, :sink_tokens, dummy_heads, :],
-                roped_key[:, :, dummy_heads, :],
-            ],
-            dim=1,
         )
-        dummy_v = torch.cat(
-            [
-                temp_v[:, :sink_tokens, dummy_heads, :],
-                v[:, :, dummy_heads, :],
-            ],
-            dim=1,
-        )
-        out[:, :, dummy_heads, :] = attention(dummy_q, dummy_k, dummy_v)
 
-    return out
+    # ---- Group A (first-frame): first frame + current ----
+    if n_a > 0:
+        a_q = roped_query[:, :, n_c:ca_boundary, :]
+        # First frame from cache (beginning of sink region)
+        a_k_first = temp_k[:, :frame_seqlen, n_c:ca_boundary, :]
+        a_v_first = temp_v[:, :frame_seqlen, n_c:ca_boundary, :]
+        # Current tokens (end of valid region)
+        cur_start = max(0, local_end_index - num_new_tokens)
+        a_k_cur = temp_k[:, cur_start:local_end_index, n_c:ca_boundary, :]
+        a_v_cur = temp_v[:, cur_start:local_end_index, n_c:ca_boundary, :]
+        results.append(
+            attention(
+                a_q,
+                torch.cat([a_k_first, a_k_cur], dim=1),
+                torch.cat([a_v_first, a_v_cur], dim=1),
+            )
+        )
+
+    # ---- Group B (local): recent local window + current ----
+    if n_b > 0:
+        b_window = min(
+            num_new_tokens + 3 * frame_seqlen * local_context_length,
+            local_end_index,
+        )
+        b_start = max(0, local_end_index - b_window)
+        results.append(
+            attention(
+                roped_query[:, :, ca_boundary:, :],
+                temp_k[:, b_start:local_end_index, ca_boundary:, :],
+                temp_v[:, b_start:local_end_index, ca_boundary:, :],
+            )
+        )
+
+    return torch.cat(results, dim=2)

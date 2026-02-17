@@ -149,6 +149,18 @@ class LongLiveConfig(BasePipelineConfig):
             order=10, is_load_param=True, label="Dummy Heads"
         ),
     )
+    df_local_context_length: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description=(
+            "Rolling window size (in AR blocks) for 'local' group heads. "
+            "Higher = more context for local heads but less speedup. Default: 1."
+        ),
+        json_schema_extra=ui_field_config(
+            order=11, is_load_param=True, label="DF Local Context"
+        ),
+    )
 
     modes = {
         "text": ModeDefaults(default=True),

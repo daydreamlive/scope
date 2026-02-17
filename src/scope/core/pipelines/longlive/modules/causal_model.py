@@ -15,7 +15,13 @@ from torch.nn.attention.flex_attention import (
 
 from scope.core.pipelines.wan2_1.modules.attention import attention
 
-from .dummy_forcing import compute_df_score, dummy_forcing_attention, select_dummy_heads
+from .dummy_forcing import (
+    classify_heads,
+    compute_head_scores,
+    dummy_forcing_attention,
+    reorder_cache_heads,
+    unreorder_cache_heads,
+)
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
@@ -252,6 +258,13 @@ class CausalWanSelfAttention(nn.Module):
                     attn_out = attn_out[:, :, :-padded_length]
                 x = attn_out.transpose(2, 1)
         else:
+            # Reorder heads to match cache layout when dummy forcing is active
+            df_reorder = kv_cache.get("df_reorder")
+            if df_reorder is not None:
+                q = q.index_select(2, df_reorder)
+                k = k.index_select(2, df_reorder)
+                v = v.index_select(2, df_reorder)
+
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
             current_start_frame = current_start // frame_seqlen
             roped_query = causal_rope_apply(
@@ -398,24 +411,29 @@ class CausalWanSelfAttention(nn.Module):
 
             # Compute dummy forcing classification score if flagged
             if kv_cache.get("df_compute_score"):
-                kv_cache["df_score"] = compute_df_score(
-                    roped_query, temp_k[:, :local_end_index], num_new_tokens
+                HW = math.prod(grid_sizes[0][1:].tolist())
+                kv_cache["df_score"] = compute_head_scores(
+                    roped_query, temp_k[:, :local_end_index],
+                    num_frames_per_block=num_new_tokens // HW if HW > 0 else 3,
                 )
 
             # Use temporary k, v to compute attention
-            df_head_groups = kv_cache.get("df_head_groups")
-            if df_head_groups is not None and len(df_head_groups["dummy_heads"]) > 0:
+            df_n_c = kv_cache.get("df_n_c")
+            if df_n_c is not None:
                 x = dummy_forcing_attention(
                     roped_query,
-                    roped_key,
-                    v,
                     temp_k,
                     temp_v,
                     sink_tokens,
+                    frame_seqlen,
+                    num_new_tokens,
                     local_end_index,
-                    self.max_attention_size,
-                    df_head_groups,
+                    kv_cache.get("df_local_context_length", 1),
+                    df_n_c,
+                    kv_cache["df_n_a"],
                 )
+                # Un-reorder heads back to original layout for output projection
+                x = x.index_select(2, kv_cache["df_inv_reorder"])
             elif sink_tokens > 0:
                 # Concatenate sink tokens and local window tokens, keeping total length strictly below max_attention_size
                 local_budget = self.max_attention_size - sink_tokens
@@ -766,6 +784,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         # Dummy Forcing state (configured by pipeline after construction)
         self._df_enabled = False
         self._df_num_dummy = 180
+        self._df_local_context_length = 1
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
@@ -1079,7 +1098,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 kv_cache[block_index]["local_end_index"].fill_(local_end_index)
 
     def _df_classify(self, kv_cache: list[dict]) -> None:
-        """Collect per-layer dummy forcing scores and assign head groups globally."""
+        """Collect per-layer dummy forcing scores, assign head groups, and reorder cache."""
         scores = []
         for i in range(len(kv_cache)):
             score = kv_cache[i].pop("df_score", None)
@@ -1095,19 +1114,31 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             )
             return
 
-        scores_tensor = torch.stack(scores)
-        head_groups = select_dummy_heads(scores_tensor, self._df_num_dummy)
+        # Each score is [3, B, H]. Stack → [num_layers, 3, B, H].
+        # Take B=0 → [num_layers, 3, H], then permute to [num_layers, H, 3].
+        scores_tensor = torch.stack(scores)[:, :, 0, :].permute(0, 2, 1).contiguous()
 
-        for i, groups in enumerate(head_groups):
-            kv_cache[i]["df_head_groups"] = groups
+        head_groups = classify_heads(scores_tensor, self._df_num_dummy)
+
+        # Reorder cache head dimension to [C | A | B] for contiguous slicing.
+        reorder_cache_heads(kv_cache, head_groups)
+
+        # Store local_context_length in each cache for self-attention to read
+        for cache in kv_cache:
+            cache["df_local_context_length"] = self._df_local_context_length
 
     @staticmethod
     def _df_clear_state(kv_cache: list[dict]) -> None:
-        """Remove dummy forcing state from all layers (e.g. after cache reset)."""
+        """Remove dummy forcing state and restore original head ordering."""
+        unreorder_cache_heads(kv_cache)
         for cache in kv_cache:
-            cache.pop("df_head_groups", None)
-            cache.pop("df_score", None)
-            cache.pop("df_compute_score", None)
+            for key in (
+                "df_head_groups", "df_n_c", "df_n_a",
+                "df_local_context_length",
+                "df_reorder", "df_inv_reorder",
+                "df_score", "df_compute_score",
+            ):
+                cache.pop(key, None)
 
     def _forward_inference(
         self,
@@ -1232,6 +1263,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 local_end = kv_cache[0]["local_end_index"].item()
                 if local_end >= kv_cache_size:
                     df_should_classify = True
+                    print(
+                        f"Dummy Forcing: cache full (local_end={local_end} >= size={kv_cache_size}), triggering classification"
+                    )
                     for i in range(len(kv_cache)):
                         kv_cache[i]["df_compute_score"] = True
 

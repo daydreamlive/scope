@@ -86,6 +86,9 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         # Configure Dummy Forcing on the base model before any wrapping
         generator.model._df_enabled = getattr(config, "dummy_forcing", False)
         generator.model._df_num_dummy = getattr(config, "num_dummy", 180)
+        generator.model._df_local_context_length = getattr(
+            config, "df_local_context_length", 1
+        )
 
         # Apply VACE wrapper if vace_path is configured (upfront loading)
         # This must happen before LoRA to get correct ordering: LoRA -> VACE -> Base
