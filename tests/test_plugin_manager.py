@@ -1427,3 +1427,232 @@ class TestLoadPluginsErrorHandling:
 
         # Bad package's pipeline should NOT be in the mapping
         assert "bad-pkg" not in pm._pipeline_to_plugin.values()
+
+
+class TestIsPackageInstalled:
+    """Tests for _is_package_installed method."""
+
+    def test_returns_true_for_installed_package(self):
+        """Should return True for a package that exists."""
+        pm = PluginManager()
+
+        mock_dist = MagicMock()
+        with patch("importlib.metadata.distribution", return_value=mock_dist):
+            assert pm._is_package_installed("some-package") is True
+
+    def test_returns_false_for_missing_package(self):
+        """Should return False for a package that doesn't exist."""
+        from importlib.metadata import PackageNotFoundError
+
+        pm = PluginManager()
+
+        with patch(
+            "importlib.metadata.distribution",
+            side_effect=PackageNotFoundError("not found"),
+        ):
+            assert pm._is_package_installed("missing-package") is False
+
+    def test_normalizes_hyphens_and_underscores(self):
+        """Should find package regardless of hyphen/underscore in name."""
+        from importlib.metadata import PackageNotFoundError
+
+        pm = PluginManager()
+
+        # First call (underscore variant) fails, second (hyphen variant) succeeds
+        def side_effect(name):
+            if name == "my_plugin":
+                raise PackageNotFoundError("not found")
+            return MagicMock()  # "my-plugin" succeeds
+
+        with patch("importlib.metadata.distribution", side_effect=side_effect):
+            assert pm._is_package_installed("my_plugin") is True
+
+    def test_both_variants_missing(self):
+        """Should return False when neither hyphen nor underscore variant exists."""
+        from importlib.metadata import PackageNotFoundError
+
+        pm = PluginManager()
+
+        with patch(
+            "importlib.metadata.distribution",
+            side_effect=PackageNotFoundError("not found"),
+        ):
+            assert pm._is_package_installed("totally-missing") is False
+
+
+class TestEnsurePluginsInstalled:
+    """Tests for ensure_plugins_installed method."""
+
+    def test_noop_when_no_plugins_file(self):
+        """Should return immediately when plugins.txt is empty."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_is_package_installed") as mock_check:
+                pm.ensure_plugins_installed()
+
+        mock_check.assert_not_called()
+
+    def test_noop_when_all_installed(self):
+        """Should return without calling sync when all plugins are present."""
+        pm = PluginManager()
+
+        with patch.object(
+            pm, "_read_plugins_file", return_value=["plugin-a", "plugin-b"]
+        ):
+            with patch.object(pm, "_is_package_installed", return_value=True):
+                with patch.object(pm, "_sync_plugins") as mock_sync:
+                    pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+
+    def test_syncs_from_resolved_when_missing(self, tmp_path):
+        """Should call _sync_plugins with resolved.txt when plugins are missing."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("plugin-a==1.0.0\n")
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch(
+                    "scope.core.plugins.manager.get_resolved_file",
+                    return_value=resolved,
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(True, None)
+                    ) as mock_sync:
+                        pm.ensure_plugins_installed()
+
+        mock_sync.assert_called_once_with(str(resolved))
+
+    def test_compiles_then_syncs_when_no_resolved(self, tmp_path):
+        """Should compile first if resolved.txt doesn't exist."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"  # Does not exist
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch(
+                    "scope.core.plugins.manager.get_resolved_file",
+                    return_value=resolved,
+                ):
+                    with patch.object(
+                        pm,
+                        "_compile_plugins",
+                        return_value=(True, "/tmp/resolved.txt", None),
+                    ) as mock_compile:
+                        with patch.object(
+                            pm, "_sync_plugins", return_value=(True, None)
+                        ) as mock_sync:
+                            pm.ensure_plugins_installed()
+
+        mock_compile.assert_called_once()
+        mock_sync.assert_called_once_with("/tmp/resolved.txt")
+
+    def test_logs_error_on_compile_failure(self, tmp_path):
+        """Should log error and return if compile fails."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"  # Does not exist
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch(
+                    "scope.core.plugins.manager.get_resolved_file",
+                    return_value=resolved,
+                ):
+                    with patch.object(
+                        pm,
+                        "_compile_plugins",
+                        return_value=(False, "", "Resolution error"),
+                    ):
+                        with patch.object(pm, "_sync_plugins") as mock_sync:
+                            with patch(
+                                "scope.core.plugins.manager.logger"
+                            ) as mock_logger:
+                                pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+        mock_logger.error.assert_called()
+
+    def test_logs_error_on_sync_failure(self, tmp_path):
+        """Should log error if sync fails."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("plugin-a==1.0.0\n")
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch(
+                    "scope.core.plugins.manager.get_resolved_file",
+                    return_value=resolved,
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(False, "Install failed")
+                    ):
+                        with patch("scope.core.plugins.manager.logger") as mock_logger:
+                            pm.ensure_plugins_installed()
+
+        mock_logger.error.assert_called()
+        error_msg = str(mock_logger.error.call_args)
+        assert "Install failed" in error_msg
+
+    def test_only_syncs_when_some_missing(self, tmp_path):
+        """Should sync when at least one plugin is missing, even if others are present."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("plugin-a==1.0.0\nplugin-b==2.0.0\n")
+
+        def is_installed(name):
+            return name == "plugin-a"  # plugin-b is missing
+
+        with patch.object(
+            pm, "_read_plugins_file", return_value=["plugin-a", "plugin-b"]
+        ):
+            with patch.object(pm, "_is_package_installed", side_effect=is_installed):
+                with patch(
+                    "scope.core.plugins.manager.get_resolved_file",
+                    return_value=resolved,
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(True, None)
+                    ) as mock_sync:
+                        pm.ensure_plugins_installed()
+
+        mock_sync.assert_called_once()
+
+    def test_extracts_name_from_specifier(self, tmp_path):
+        """Should extract package name from version-pinned specifiers."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("my-plugin==1.0.0\n")
+
+        with patch.object(pm, "_read_plugins_file", return_value=["my-plugin==1.0.0"]):
+            with patch.object(pm, "_is_package_installed", return_value=True):
+                with patch.object(pm, "_sync_plugins") as mock_sync:
+                    pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+
+    def test_extracts_name_from_git_specifier(self, tmp_path):
+        """Should extract package name from git URL specifiers."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("my-repo==1.0.0\n")
+
+        with patch.object(
+            pm,
+            "_read_plugins_file",
+            return_value=["git+https://github.com/user/my-repo.git"],
+        ):
+            with patch.object(pm, "_is_package_installed", return_value=True):
+                with patch.object(pm, "_sync_plugins") as mock_sync:
+                    pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()

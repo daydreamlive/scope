@@ -221,8 +221,13 @@ def _initialize_registry():
 
     # Load and register plugin pipelines
     try:
-        from scope.core.plugins import load_plugins, register_plugin_pipelines
+        from scope.core.plugins import (
+            ensure_plugins_installed,
+            load_plugins,
+            register_plugin_pipelines,
+        )
 
+        ensure_plugins_installed()
         load_plugins()
         register_plugin_pipelines(PipelineRegistry)
     except Exception as e:
