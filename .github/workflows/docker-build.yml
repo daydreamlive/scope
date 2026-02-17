@@ -101,5 +101,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/daydreamlive/scope
+            org.opencontainers.image.description=Daydream Scope
+            org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max
