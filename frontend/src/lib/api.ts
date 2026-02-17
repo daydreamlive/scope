@@ -366,20 +366,20 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   return result;
 };
 
-export interface LoRADownloadRequest {
+export interface LoRAInstallRequest {
   url: string;
   filename?: string;
 }
 
-export interface LoRADownloadResponse {
+export interface LoRAInstallResponse {
   message: string;
   file: LoRAFileInfo;
 }
 
-export const downloadLoRAFile = async (
-  data: LoRADownloadRequest
-): Promise<LoRADownloadResponse> => {
-  const response = await fetch("/api/v1/lora/download", {
+export const installLoRAFile = async (
+  data: LoRAInstallRequest
+): Promise<LoRAInstallResponse> => {
+  const response = await fetch("/api/v1/lora/install", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -388,7 +388,7 @@ export const downloadLoRAFile = async (
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `Download LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
+      `Install LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
     );
   }
 

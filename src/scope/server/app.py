@@ -849,24 +849,24 @@ async def list_lora_files(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-class LoRADownloadRequest(BaseModel):
+class LoRAInstallRequest(BaseModel):
     url: str
     filename: str | None = None
 
 
-class LoRADownloadResponse(BaseModel):
+class LoRAInstallResponse(BaseModel):
     message: str
     file: LoRAFileInfo
 
 
-@app.post("/api/v1/lora/download", response_model=LoRADownloadResponse)
-async def download_lora_file(
-    request: LoRADownloadRequest,
+@app.post("/api/v1/lora/install", response_model=LoRAInstallResponse)
+async def install_lora_file(
+    request: LoRAInstallRequest,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Download a LoRA file from a URL (e.g. HuggingFace, CivitAI).
+    """Install a LoRA file from a URL (e.g. HuggingFace, CivitAI).
 
-    When cloud mode is active, the download happens on the cloud machine.
+    When cloud mode is active, the install happens on the cloud machine.
     """
     from urllib.parse import unquote, urlparse
 
@@ -875,22 +875,22 @@ async def download_lora_file(
     try:
         # If cloud mode is active, proxy to cloud
         if cloud_manager.is_connected:
-            logger.info("[CLOUD] Proxying LoRA download to cloud")
+            logger.info("[CLOUD] Proxying LoRA install to cloud")
             response = await cloud_manager.api_request(
                 method="POST",
-                path="/api/v1/lora/download",
+                path="/api/v1/lora/install",
                 body=request.model_dump(),
                 timeout=300.0,
             )
             status = response.get("status", 200)
             if status >= 400:
                 detail = response.get("error") or response.get("data", {}).get(
-                    "detail", "Cloud LoRA download failed"
+                    "detail", "Cloud LoRA install failed"
                 )
                 raise HTTPException(status_code=status, detail=detail)
             data = response.get("data", {})
-            return LoRADownloadResponse(
-                message=data.get("message", "Downloaded via cloud"),
+            return LoRAInstallResponse(
+                message=data.get("message", "Installed via cloud"),
                 file=LoRAFileInfo(**data["file"]),
             )
 
@@ -923,7 +923,7 @@ async def download_lora_file(
                 detail=f"File '{filename}' already exists.",
             )
 
-        # Download in a thread to avoid blocking the event loop
+        # Install in a thread to avoid blocking the event loop
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, http_get, request.url, dest_path)
 
@@ -935,15 +935,15 @@ async def download_lora_file(
             folder=None,
         )
 
-        return LoRADownloadResponse(
-            message=f"Successfully downloaded '{filename}'",
+        return LoRAInstallResponse(
+            message=f"Successfully installed '{filename}'",
             file=file_info,
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"download_lora_file: Error downloading LoRA: {e}")
+        logger.error(f"install_lora_file: Error installing LoRA: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

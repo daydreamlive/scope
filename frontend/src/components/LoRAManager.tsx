@@ -34,16 +34,16 @@ export function LoRAManager({
   isStreaming = false,
   loraMergeStrategy = "permanent_merge",
 }: LoRAManagerProps) {
-  const { listLoRAFiles, downloadLoRAFile } = useApi();
+  const { listLoRAFiles, installLoRAFile } = useApi();
   const { isConnected: isCloudConnected, isConnecting: isCloudConnecting } =
     useCloudStatus();
   const isCloudPending = isCloudConnecting && !isCloudConnected;
   const [availableLoRAs, setAvailableLoRAs] = useState<LoRAFileInfo[]>([]);
   const [isLoadingLoRAs, setIsLoadingLoRAs] = useState(false);
   const [localScales, setLocalScales] = useState<Record<string, number>>({});
-  const [downloadUrl, setDownloadUrl] = useState("");
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [installUrl, setInstallUrl] = useState("");
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
   const loadAvailableLoRAs = async () => {
     setIsLoadingLoRAs(true);
@@ -130,26 +130,26 @@ export function LoRAManager({
     return { isDisabled, tooltipText };
   };
 
-  const handleDownloadLoRA = async () => {
-    if (!downloadUrl.trim()) return;
-    setIsDownloading(true);
-    setDownloadError(null);
-    const url = downloadUrl.trim();
+  const handleInstallLoRA = async () => {
+    if (!installUrl.trim()) return;
+    setIsInstalling(true);
+    setInstallError(null);
+    const url = installUrl.trim();
     const filename = url.split("/").pop()?.split("?")[0] || "LoRA file";
     try {
-      await toast.promise(downloadLoRAFile({ url }), {
-        loading: `Downloading ${filename}...`,
+      await toast.promise(installLoRAFile({ url }), {
+        loading: `Installing ${filename}...`,
         success: response => response.message,
-        error: err => err.message || "Download failed",
+        error: err => err.message || "Install failed",
       });
-      setDownloadUrl("");
+      setInstallUrl("");
       await loadAvailableLoRAs();
     } catch (error) {
-      setDownloadError(
-        error instanceof Error ? error.message : "Download failed"
+      setInstallError(
+        error instanceof Error ? error.message : "Install failed"
       );
     } finally {
-      setIsDownloading(false);
+      setIsInstalling(false);
     }
   };
 
@@ -187,34 +187,34 @@ export function LoRAManager({
 
       <div className="flex items-center gap-1">
         <Input
-          value={downloadUrl}
+          value={installUrl}
           onChange={e => {
-            setDownloadUrl(e.target.value);
-            setDownloadError(null);
+            setInstallUrl(e.target.value);
+            setInstallError(null);
           }}
           placeholder="Paste LoRA URL (HuggingFace, CivitAI...)"
-          disabled={disabled || isDownloading || isCloudPending}
+          disabled={disabled || isInstalling || isCloudPending}
           className="h-7 text-xs flex-1"
           onKeyDown={e => {
-            if (e.key === "Enter") handleDownloadLoRA();
+            if (e.key === "Enter") handleInstallLoRA();
           }}
         />
         <Button
           size="sm"
           variant="outline"
-          onClick={handleDownloadLoRA}
+          onClick={handleInstallLoRA}
           disabled={
-            disabled || isDownloading || !downloadUrl.trim() || isCloudPending
+            disabled || isInstalling || !installUrl.trim() || isCloudPending
           }
           className="h-7 px-2"
           title={
             isCloudPending
               ? "Waiting for cloud connection..."
-              : "Download LoRA from URL"
+              : "Install LoRA from URL"
           }
         >
           <Download
-            className={`h-3 w-3 ${isDownloading ? "animate-pulse" : ""}`}
+            className={`h-3 w-3 ${isInstalling ? "animate-pulse" : ""}`}
           />
         </Button>
       </div>
@@ -223,8 +223,8 @@ export function LoRAManager({
           Waiting for cloud connection...
         </p>
       )}
-      {downloadError && (
-        <p className="text-xs text-destructive">{downloadError}</p>
+      {installError && (
+        <p className="text-xs text-destructive">{installError}</p>
       )}
 
       {loras.length === 0 && (

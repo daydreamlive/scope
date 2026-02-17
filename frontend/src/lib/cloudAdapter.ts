@@ -31,8 +31,8 @@ import type {
   PipelineSchemasResponse,
   HardwareInfoResponse,
   LoRAFilesResponse,
-  LoRADownloadRequest,
-  LoRADownloadResponse,
+  LoRAInstallRequest,
+  LoRAInstallResponse,
   AssetsResponse,
   AssetFileInfo,
 } from "./api";
@@ -401,10 +401,10 @@ export class CloudAdapter {
     listLoRAFiles: (): Promise<LoRAFilesResponse> =>
       this.apiRequest("GET", "/api/v1/lora/list"),
 
-    downloadLoRAFile: (
-      data: LoRADownloadRequest
-    ): Promise<LoRADownloadResponse> =>
-      this.apiRequest("POST", "/api/v1/lora/download", data, 300000),
+    installLoRAFile: (
+      data: LoRAInstallRequest
+    ): Promise<LoRAInstallResponse> =>
+      this.apiRequest("POST", "/api/v1/lora/install", data, 300000),
 
     listAssets: (type?: "image" | "video"): Promise<AssetsResponse> =>
       this.apiRequest(

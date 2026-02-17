@@ -12,8 +12,8 @@ import type {
   PipelineSchemasResponse,
   HardwareInfoResponse,
   LoRAFilesResponse,
-  LoRADownloadRequest,
-  LoRADownloadResponse,
+  LoRAInstallRequest,
+  LoRAInstallResponse,
   AssetsResponse,
   AssetFileInfo,
   WebRTCOfferRequest,
@@ -95,12 +95,12 @@ export function useApi() {
     return api.listLoRAFiles();
   }, [adapter, isCloudMode]);
 
-  const downloadLoRAFile = useCallback(
-    async (data: LoRADownloadRequest): Promise<LoRADownloadResponse> => {
+  const installLoRAFile = useCallback(
+    async (data: LoRAInstallRequest): Promise<LoRAInstallResponse> => {
       if (isCloudMode && adapter) {
-        return adapter.api.downloadLoRAFile(data);
+        return adapter.api.installLoRAFile(data);
       }
-      return api.downloadLoRAFile(data);
+      return api.installLoRAFile(data);
     },
     [adapter, isCloudMode]
   );
@@ -204,7 +204,7 @@ export function useApi() {
 
     // LoRA
     listLoRAFiles,
-    downloadLoRAFile,
+    installLoRAFile,
 
     // Assets
     listAssets,
