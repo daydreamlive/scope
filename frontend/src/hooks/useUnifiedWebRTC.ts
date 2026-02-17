@@ -221,11 +221,18 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         }
 
         // Event handlers
+        // Collect all incoming tracks (video + audio) into a single MediaStream.
+        // The backend may send video and audio as separate streams, so we
+        // merge them into one MediaStream for the <video> element.
+        const combinedStream = new MediaStream();
         pc.ontrack = (evt: RTCTrackEvent) => {
-          if (evt.streams && evt.streams[0]) {
-            console.log("[UnifiedWebRTC] Setting remote stream");
-            setRemoteStream(evt.streams[0]);
-          }
+          console.log(
+            `[UnifiedWebRTC] Track received: ${evt.track.kind} (id: ${evt.track.id})`
+          );
+          combinedStream.addTrack(evt.track);
+          // Update remoteStream reference each time a track is added so the
+          // component re-renders and picks up the latest tracks
+          setRemoteStream(combinedStream);
         };
 
         pc.onconnectionstatechange = () => {
