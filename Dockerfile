@@ -1,4 +1,42 @@
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
+# Stage 1: Builder
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  curl \
+  git \
+  build-essential \
+  software-properties-common \
+  python3-dev \
+  libgl1-mesa-glx \
+  libglib2.0-0 \
+  libsm6 \
+  libxext6 \
+  libxrender-dev \
+  libgomp1 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20.x (only needed for frontend build)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install uv (Python package manager)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Install Python dependencies (no dev deps, clean cache)
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
+RUN uv sync --frozen --no-dev && uv cache clean
+
+# Build frontend
+COPY frontend/ ./frontend/
+RUN cd frontend && npm install && npm run build
+
+# Stage 2: Runtime (no Node.js, no build tools, no caches)
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -10,38 +48,32 @@ ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-  # System dependencies
-  curl \
-  git \
-  build-essential \
-  software-properties-common \
-  # Dependencies required for OpenCV
+# Runtime-only system dependencies (OpenCV, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
   libgl1-mesa-glx \
   libglib2.0-0 \
   libsm6 \
   libxext6 \
   libxrender-dev \
   libgomp1 \
-  python3-dev \
-  # Cleanup
   && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20.x
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-  && apt-get install -y nodejs
-
-# Install uv (Python package manager)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+# Copy uv binary
+COPY --from=builder /root/.local/bin/uv /root/.local/bin/uv
+COPY --from=builder /root/.local/bin/uvx /root/.local/bin/uvx
 ENV PATH="/root/.local/bin:$PATH"
 
-# Install Python dependencies
-COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
-RUN uv sync --frozen
+# Copy Python virtual environment and project metadata
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/pyproject.toml /app/pyproject.toml
+COPY --from=builder /app/uv.lock /app/uv.lock
+COPY --from=builder /app/.python-version /app/.python-version
+COPY --from=builder /app/README.md /app/README.md
+COPY --from=builder /app/LICENSE.md /app/LICENSE.md
+COPY --from=builder /app/patches.pth /app/patches.pth
 
-# Build frontend
-COPY frontend/ ./frontend/
-RUN cd frontend && npm install && npm run build
+# Copy built frontend
+COPY --from=builder /app/frontend/dist /app/frontend/dist
 
 # Copy project files
 COPY src/ /app/src/
