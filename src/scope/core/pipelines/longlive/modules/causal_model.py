@@ -484,12 +484,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if not self._blocks_compiled and kv_cache is not None:
             cache_tokens = kv_cache[0]["k"].shape[1]
             if fill_level >= cache_tokens:
-                self._compiled_inner = torch.compile(self._inner_forward)
+                self._compiled_inner = torch.compile(self._inner_forward, dynamic=False, mode="max-autotune-no-cudagraphs")
                 self._blocks_compiled = True
 
         # Run the block loop (compiled when ready, eager otherwise)
         if self._blocks_compiled:
-            torch.compiler.cudagraph_mark_step_begin()
             x, new_kvs = self._compiled_inner(
                 x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
             )

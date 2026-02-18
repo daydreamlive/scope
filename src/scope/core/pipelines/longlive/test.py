@@ -99,7 +99,7 @@ def main():
     )
 
     device = torch.device("cuda")
-    pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
+    pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16, quantization="fp8_e4m3fn")
 
     # Create output directory
     output_dir = Path(__file__).parent / "output"
