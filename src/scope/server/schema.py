@@ -867,6 +867,28 @@ class ChunkRefImagesSpec(BaseModel):
     images: list[str] = Field(..., description="List of reference image paths")
 
 
+class ChunkVACESpec(BaseModel):
+    """Per-chunk VACE conditioning specification."""
+
+    chunk: int = Field(..., ge=0, description="Chunk index")
+    frames: "EncodedArray | None" = Field(
+        default=None,
+        description="VACE conditioning frames for this chunk ([1, C, T, H, W] float32 [-1, 1])",
+    )
+    masks: "EncodedArray | None" = Field(
+        default=None,
+        description="VACE masks for this chunk ([1, 1, T, H, W] float32 {0, 1})",
+    )
+    context_scale: float | None = Field(
+        default=None,
+        description="VACE context scale override for this chunk. If None, uses global vace_context_scale.",
+    )
+    vace_temporally_locked: bool = Field(
+        default=True,
+        description="When True, frames/masks are sliced temporally to match chunk position. When False, used as-is and padded.",
+    )
+
+
 class EncodedArray(BaseModel):
     """Base64-encoded numpy array with shape metadata."""
 
@@ -903,7 +925,7 @@ class GenerateRequest(BaseModel):
     num_frames: int = Field(
         default=64,
         ge=1,
-        le=1024,
+        le=10000,
         description="Total number of frames to generate",
     )
     height: int | None = Field(
@@ -993,6 +1015,10 @@ class GenerateRequest(BaseModel):
     vace_masks: EncodedArray | None = Field(
         default=None,
         description="VACE masks ([1, 1, T, H, W] float32 {0, 1}). Used for inpainting (1 = regenerate, 0 = keep).",
+    )
+    vace_chunk_specs: list[ChunkVACESpec] | None = Field(
+        default=None,
+        description="Per-chunk VACE conditioning. Each specifies frames/masks for a specific chunk. Overrides global vace_frames/vace_masks for that chunk.",
     )
     pre_processor_id: str | None = Field(
         default=None,

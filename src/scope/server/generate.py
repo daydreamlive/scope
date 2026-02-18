@@ -106,6 +106,7 @@ class DecodedInputs:
     ref_images: dict[int, list[str]] = field(default_factory=dict)
     prompts: dict[int, list[dict]] = field(default_factory=dict)
     transitions: dict[int, dict] = field(default_factory=dict)
+    vace_chunk_specs: dict[int, dict] = field(default_factory=dict)
 
 
 def load_video_from_file(file_path: str) -> np.ndarray:
@@ -169,6 +170,37 @@ def decode_inputs(
                 inputs.prompts[spec.chunk] = [
                     {"text": spec.text, "weight": PROMPT_WEIGHT}
                 ]
+
+    # Per-chunk VACE specs
+    if request.vace_chunk_specs:
+        logger.info(
+            f"decode_inputs: Found {len(request.vace_chunk_specs)} vace_chunk_specs"
+        )
+        for spec in request.vace_chunk_specs:
+            logger.info(
+                f"decode_inputs: vace_chunk_spec chunk={spec.chunk}, has_frames={spec.frames is not None}, has_masks={spec.masks is not None}, context_scale={spec.context_scale}, temporally_locked={spec.vace_temporally_locked}"
+            )
+            decoded_spec: dict = {
+                "vace_temporally_locked": spec.vace_temporally_locked,
+            }
+            if spec.frames is not None:
+                decoded_spec["frames"] = decode_array(spec.frames, np.float32)
+                logger.info(
+                    f"decode_inputs: chunk {spec.chunk} decoded frames shape={decoded_spec['frames'].shape}"
+                )
+            if spec.masks is not None:
+                decoded_spec["masks"] = decode_array(spec.masks, np.float32)
+                logger.info(
+                    f"decode_inputs: chunk {spec.chunk} decoded masks shape={decoded_spec['masks'].shape}"
+                )
+            if spec.context_scale is not None:
+                decoded_spec["context_scale"] = spec.context_scale
+            inputs.vace_chunk_specs[spec.chunk] = decoded_spec
+        logger.info(
+            f"decode_inputs: vace_chunk_specs keys={list(inputs.vace_chunk_specs.keys())}"
+        )
+    else:
+        logger.info("decode_inputs: No vace_chunk_specs in request")
 
     # Build transitions lookup
     if request.transitions:
@@ -281,17 +313,39 @@ def build_chunk_kwargs(
     if chunk_idx in inputs.ref_images:
         kwargs["vace_ref_images"] = inputs.ref_images[chunk_idx]
 
-    # VACE conditioning frames [1, C, T, H, W]
-    if inputs.vace_frames is not None:
-        chunk = inputs.vace_frames[:, :, start_frame:end_frame, :, :]
-        chunk = pad_chunk(chunk, chunk_size, axis=2)
-        kwargs["vace_input_frames"] = torch.from_numpy(chunk).to(device, dtype)
+    # VACE conditioning: per-chunk spec takes priority over global
+    logger.info(
+        f"build_chunk_kwargs: chunk {chunk_idx}, vace_chunk_specs keys={list(inputs.vace_chunk_specs.keys())}, has_global_frames={inputs.vace_frames is not None}, has_global_masks={inputs.vace_masks is not None}"
+    )
+    if chunk_idx in inputs.vace_chunk_specs:
+        logger.info(f"build_chunk_kwargs: chunk {chunk_idx} USING PER-CHUNK VACE SPEC")
+        spec = inputs.vace_chunk_specs[chunk_idx]
 
-    # VACE masks [1, 1, T, H, W]
-    if inputs.vace_masks is not None:
-        chunk = inputs.vace_masks[:, :, start_frame:end_frame, :, :]
-        chunk = pad_chunk(chunk, chunk_size, axis=2)
-        kwargs["vace_input_masks"] = torch.from_numpy(chunk).to(device, dtype)
+        if "frames" in spec:
+            frames = spec["frames"]
+            frames = pad_chunk(frames, chunk_size, axis=2)
+            kwargs["vace_input_frames"] = torch.from_numpy(frames).to(device, dtype)
+
+        if "masks" in spec:
+            masks = spec["masks"]
+            masks = pad_chunk(masks, chunk_size, axis=2)
+            kwargs["vace_input_masks"] = torch.from_numpy(masks).to(device, dtype)
+
+        if "context_scale" in spec:
+            kwargs["vace_context_scale"] = spec["context_scale"]
+    else:
+        logger.info(f"build_chunk_kwargs: chunk {chunk_idx} USING GLOBAL VACE FALLBACK")
+        # Global VACE conditioning frames [1, C, T, H, W]
+        if inputs.vace_frames is not None:
+            chunk = inputs.vace_frames[:, :, start_frame:end_frame, :, :]
+            chunk = pad_chunk(chunk, chunk_size, axis=2)
+            kwargs["vace_input_frames"] = torch.from_numpy(chunk).to(device, dtype)
+
+        # Global VACE masks [1, 1, T, H, W]
+        if inputs.vace_masks is not None:
+            chunk = inputs.vace_masks[:, :, start_frame:end_frame, :, :]
+            chunk = pad_chunk(chunk, chunk_size, axis=2)
+            kwargs["vace_input_masks"] = torch.from_numpy(chunk).to(device, dtype)
 
     return kwargs
 
