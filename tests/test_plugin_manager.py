@@ -1427,3 +1427,710 @@ class TestLoadPluginsErrorHandling:
 
         # Bad package's pipeline should NOT be in the mapping
         assert "bad-pkg" not in pm._pipeline_to_plugin.values()
+
+
+class TestIsPackageInstalled:
+    """Tests for _is_package_installed method."""
+
+    def test_returns_true_for_installed_package(self):
+        """Should return True for a package that exists."""
+        pm = PluginManager()
+
+        mock_dist = MagicMock()
+        with patch("importlib.metadata.distribution", return_value=mock_dist):
+            assert pm._is_package_installed("some-package") is True
+
+    def test_returns_false_for_missing_package(self):
+        """Should return False for a package that doesn't exist."""
+        from importlib.metadata import PackageNotFoundError
+
+        pm = PluginManager()
+
+        with patch(
+            "importlib.metadata.distribution",
+            side_effect=PackageNotFoundError("not found"),
+        ):
+            assert pm._is_package_installed("missing-package") is False
+
+    def test_normalizes_hyphens_and_underscores(self):
+        """Should find package regardless of hyphen/underscore in name."""
+        from importlib.metadata import PackageNotFoundError
+
+        pm = PluginManager()
+
+        # First call (underscore variant) fails, second (hyphen variant) succeeds
+        def side_effect(name):
+            if name == "my_plugin":
+                raise PackageNotFoundError("not found")
+            return MagicMock()  # "my-plugin" succeeds
+
+        with patch("importlib.metadata.distribution", side_effect=side_effect):
+            assert pm._is_package_installed("my_plugin") is True
+
+    def test_both_variants_missing(self):
+        """Should return False when neither hyphen nor underscore variant exists."""
+        from importlib.metadata import PackageNotFoundError
+
+        pm = PluginManager()
+
+        with patch(
+            "importlib.metadata.distribution",
+            side_effect=PackageNotFoundError("not found"),
+        ):
+            assert pm._is_package_installed("totally-missing") is False
+
+
+class TestEnsurePluginsInstalled:
+    """Tests for ensure_plugins_installed method."""
+
+    def test_noop_when_no_plugins_file(self):
+        """Should return immediately when plugins.txt is empty."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=[]):
+            with patch.object(pm, "_is_package_installed") as mock_check:
+                pm.ensure_plugins_installed()
+
+        mock_check.assert_not_called()
+
+    def test_noop_when_all_installed(self):
+        """Should return without calling sync when all plugins are present."""
+        pm = PluginManager()
+
+        with patch.object(
+            pm, "_read_plugins_file", return_value=["plugin-a", "plugin-b"]
+        ):
+            with patch.object(pm, "_is_package_installed", return_value=True):
+                with patch.object(pm, "_sync_plugins") as mock_sync:
+                    pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+
+    def test_syncs_from_compile_when_missing(self):
+        """Should call _compile_plugins then _sync_plugins when plugins are missing."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ) as mock_compile:
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(True, None)
+                    ) as mock_sync:
+                        pm.ensure_plugins_installed()
+
+        mock_compile.assert_called_once()
+        mock_sync.assert_called_once_with("/tmp/resolved.txt")
+
+    def test_always_recompiles_even_when_resolved_exists(self, tmp_path):
+        """Should always recompile, not use existing resolved.txt directly."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("plugin-a==1.0.0\n")
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/new-resolved.txt", None),
+                ) as mock_compile:
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(True, None)
+                    ) as mock_sync:
+                        pm.ensure_plugins_installed()
+
+        mock_compile.assert_called_once()
+        mock_sync.assert_called_once_with("/tmp/new-resolved.txt")
+
+    def test_logs_error_on_compile_failure(self, tmp_path):
+        """Should log error and return if compile fails."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"  # Does not exist
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch(
+                    "scope.core.plugins.manager.get_resolved_file",
+                    return_value=resolved,
+                ):
+                    with patch.object(
+                        pm,
+                        "_compile_plugins",
+                        return_value=(False, "", "Resolution error"),
+                    ):
+                        with patch.object(pm, "_sync_plugins") as mock_sync:
+                            with patch(
+                                "scope.core.plugins.manager.logger"
+                            ) as mock_logger:
+                                pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+        mock_logger.error.assert_called()
+
+    def test_logs_error_on_sync_failure(self):
+        """Should log error if sync fails."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(False, "Install failed")
+                    ):
+                        with patch("scope.core.plugins.manager.logger") as mock_logger:
+                            pm.ensure_plugins_installed()
+
+        mock_logger.error.assert_called()
+        error_msg = str(mock_logger.error.call_args)
+        assert "Install failed" in error_msg
+
+    def test_only_syncs_when_some_missing(self):
+        """Should sync when at least one plugin is missing, even if others are present."""
+        pm = PluginManager()
+
+        def is_installed(name):
+            return name == "plugin-a"  # plugin-b is missing
+
+        with patch.object(
+            pm, "_read_plugins_file", return_value=["plugin-a", "plugin-b"]
+        ):
+            with patch.object(pm, "_is_package_installed", side_effect=is_installed):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ):
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(True, None)
+                    ) as mock_sync:
+                        pm.ensure_plugins_installed()
+
+        mock_sync.assert_called_once()
+
+    def test_extracts_name_from_specifier(self, tmp_path):
+        """Should extract package name from version-pinned specifiers."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("my-plugin==1.0.0\n")
+
+        with patch.object(pm, "_read_plugins_file", return_value=["my-plugin==1.0.0"]):
+            with patch.object(pm, "_is_package_installed", return_value=True):
+                with patch.object(pm, "_sync_plugins") as mock_sync:
+                    pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+
+    def test_extracts_name_from_git_specifier(self, tmp_path):
+        """Should extract package name from git URL specifiers."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("my-repo==1.0.0\n")
+
+        with patch.object(
+            pm,
+            "_read_plugins_file",
+            return_value=["git+https://github.com/user/my-repo.git"],
+        ):
+            with patch.object(pm, "_is_package_installed", return_value=True):
+                with patch.object(pm, "_sync_plugins") as mock_sync:
+                    pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+
+
+class TestGenerateConstraints:
+    """Tests for _generate_constraints method."""
+
+    LOCK_FIXTURE = """\
+version = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "test-project"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "transformers" },
+    { name = "safetensors" },
+    { name = "torch" },
+]
+
+[[package]]
+name = "transformers"
+version = "4.57.5"
+
+[[package]]
+name = "safetensors"
+version = "0.6.3"
+
+[[package]]
+name = "torch"
+version = "2.9.1"
+"""
+
+    def test_returns_none_when_no_lock_file(self, tmp_path):
+        """uv.lock doesn't exist in cwd -> returns None."""
+        pm = PluginManager()
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = pm._generate_constraints()
+
+        assert result is None
+
+    def test_generates_floor_and_ceiling(self, tmp_path):
+        """Should generate >=locked,<next_major constraints."""
+        pm = PluginManager()
+
+        (tmp_path / "uv.lock").write_text(self.LOCK_FIXTURE)
+
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            with patch(
+                "scope.core.plugins.manager.get_plugins_dir",
+                return_value=plugins_dir,
+            ):
+                result = pm._generate_constraints()
+
+        assert result is not None
+        content = result.read_text()
+        assert "transformers>=4.57.5,<5" in content
+        assert "safetensors>=0.6.3,<1" in content
+        assert "torch>=2.9.1,<3" in content
+
+    def test_only_constrains_direct_dependencies(self, tmp_path):
+        """Transitive deps in uv.lock should be skipped."""
+        pm = PluginManager()
+
+        lock = """\
+version = 1
+
+[[package]]
+name = "test-project"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "transformers" },
+]
+
+[[package]]
+name = "transformers"
+version = "4.57.5"
+
+[[package]]
+name = "tokenizers"
+version = "0.21.1"
+"""
+        (tmp_path / "uv.lock").write_text(lock)
+
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            with patch(
+                "scope.core.plugins.manager.get_plugins_dir",
+                return_value=plugins_dir,
+            ):
+                result = pm._generate_constraints()
+
+        assert result is not None
+        content = result.read_text()
+        assert "transformers>=4.57.5,<5" in content
+        assert "tokenizers" not in content
+
+    def test_deduplicates_packages(self, tmp_path):
+        """Same dep listed twice should only appear once in constraints."""
+        pm = PluginManager()
+
+        lock = """\
+version = 1
+
+[[package]]
+name = "test-project"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "transformers" },
+    { name = "transformers" },
+]
+
+[[package]]
+name = "transformers"
+version = "4.57.5"
+"""
+        (tmp_path / "uv.lock").write_text(lock)
+
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            with patch(
+                "scope.core.plugins.manager.get_plugins_dir",
+                return_value=plugins_dir,
+            ):
+                result = pm._generate_constraints()
+
+        assert result is not None
+        content = result.read_text()
+        assert content.count("transformers") == 1
+
+    def test_skips_packages_with_plus_in_version(self, tmp_path):
+        """Locked version with + (e.g. 2.9.1+cu128) should be skipped."""
+        pm = PluginManager()
+
+        lock = """\
+version = 1
+
+[[package]]
+name = "test-project"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "torch" },
+    { name = "safetensors" },
+]
+
+[[package]]
+name = "torch"
+version = "2.9.1+cu128"
+
+[[package]]
+name = "safetensors"
+version = "0.6.3"
+"""
+        (tmp_path / "uv.lock").write_text(lock)
+
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            with patch(
+                "scope.core.plugins.manager.get_plugins_dir",
+                return_value=plugins_dir,
+            ):
+                result = pm._generate_constraints()
+
+        assert result is not None
+        content = result.read_text()
+        assert "torch" not in content
+        assert "safetensors>=0.6.3,<1" in content
+
+    def test_handles_marker_deps(self, tmp_path):
+        """Deps with markers in uv.lock should still be constrained."""
+        pm = PluginManager()
+
+        lock = """\
+version = 1
+
+[[package]]
+name = "test-project"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "triton", marker = "sys_platform == 'linux'" },
+    { name = "transformers" },
+]
+
+[[package]]
+name = "triton"
+version = "3.5.1"
+
+[[package]]
+name = "transformers"
+version = "4.57.5"
+"""
+        (tmp_path / "uv.lock").write_text(lock)
+
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir()
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            with patch(
+                "scope.core.plugins.manager.get_plugins_dir",
+                return_value=plugins_dir,
+            ):
+                result = pm._generate_constraints()
+
+        assert result is not None
+        content = result.read_text()
+        assert "triton>=3.5.1,<4" in content
+        assert "transformers>=4.57.5,<5" in content
+
+    def test_returns_none_on_parse_error(self, tmp_path):
+        """Invalid TOML in uv.lock -> returns None, doesn't raise."""
+        pm = PluginManager()
+
+        (tmp_path / "uv.lock").write_text("this is not valid { toml [")
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = pm._generate_constraints()
+
+        assert result is None
+
+
+class TestCompilePluginsConstraints:
+    """Tests that _compile_plugins() passes the constraint flag."""
+
+    def test_compile_includes_constraint_flag(self, tmp_path):
+        """Mock _generate_constraints to return a path -> verify --constraint in args."""
+        pm = PluginManager()
+
+        constraints_path = tmp_path / "lock-constraints.txt"
+        constraints_path.write_text("transformers==4.57.5\n")
+
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("[project]\nname = 'test'\n")
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            with patch.object(
+                pm, "_generate_constraints", return_value=constraints_path
+            ):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0, stdout="", stderr=""
+                    )
+                    pm._compile_plugins()
+
+        args = mock_run.call_args[0][0]
+        assert "--constraint" in args
+        assert str(constraints_path) in args
+
+    def test_compile_works_without_constraints(self, tmp_path):
+        """Mock _generate_constraints to return None -> verify no --constraint."""
+        pm = PluginManager()
+
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("[project]\nname = 'test'\n")
+
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            with patch.object(pm, "_generate_constraints", return_value=None):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0, stdout="", stderr=""
+                    )
+                    pm._compile_plugins()
+
+        args = mock_run.call_args[0][0]
+        assert "--constraint" not in args
+
+
+class TestEnsurePluginsInstalledRecompile:
+    """Tests for the always-recompile behavior in ensure_plugins_installed."""
+
+    def test_recompiles_when_plugins_missing(self):
+        """Plugins missing -> _compile_plugins is called before _sync_plugins."""
+        pm = PluginManager()
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(True, "/tmp/resolved.txt", None),
+                ) as mock_compile:
+                    with patch.object(
+                        pm, "_sync_plugins", return_value=(True, None)
+                    ) as mock_sync:
+                        pm.ensure_plugins_installed()
+
+        mock_compile.assert_called_once()
+        mock_sync.assert_called_once_with("/tmp/resolved.txt")
+
+    def test_falls_back_to_resolved_on_compile_failure(self, tmp_path):
+        """_compile_plugins fails, resolved.txt exists -> _sync_plugins still called."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("plugin-a==1.0.0\n")
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(False, "", "Resolution error"),
+                ):
+                    with patch(
+                        "scope.core.plugins.manager.get_resolved_file",
+                        return_value=resolved,
+                    ):
+                        with patch.object(
+                            pm, "_sync_plugins", return_value=(True, None)
+                        ) as mock_sync:
+                            pm.ensure_plugins_installed()
+
+        mock_sync.assert_called_once_with(str(resolved))
+
+    def test_errors_when_compile_fails_and_no_resolved(self, tmp_path):
+        """_compile_plugins fails, no resolved.txt -> logs error, _sync_plugins not called."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"  # Does not exist
+
+        with patch.object(pm, "_read_plugins_file", return_value=["plugin-a"]):
+            with patch.object(pm, "_is_package_installed", return_value=False):
+                with patch.object(
+                    pm,
+                    "_compile_plugins",
+                    return_value=(False, "", "Resolution error"),
+                ):
+                    with patch(
+                        "scope.core.plugins.manager.get_resolved_file",
+                        return_value=resolved,
+                    ):
+                        with patch.object(pm, "_sync_plugins") as mock_sync:
+                            with patch(
+                                "scope.core.plugins.manager.logger"
+                            ) as mock_logger:
+                                pm.ensure_plugins_installed()
+
+        mock_sync.assert_not_called()
+        mock_logger.error.assert_called()
+
+
+class TestGetNameFromResolved:
+    """Tests for _get_name_from_resolved method."""
+
+    def test_finds_name_for_git_url(self, tmp_path):
+        """resolved.txt has flashvsr @ git+url -> returns flashvsr."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text(
+            "flashvsr @ git+https://github.com/varshith15/FlashVSR-Pro@abc123\n"
+        )
+
+        with patch(
+            "scope.core.plugins.manager.get_resolved_file", return_value=resolved
+        ):
+            result = pm._get_name_from_resolved(
+                "git+https://github.com/varshith15/FlashVSR-Pro"
+            )
+
+        assert result == "flashvsr"
+
+    def test_handles_git_suffix_mismatch(self, tmp_path):
+        """URL has .git suffix but resolved.txt doesn't -> still matches."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text(
+            "flashvsr @ git+https://github.com/varshith15/FlashVSR-Pro@abc123\n"
+        )
+
+        with patch(
+            "scope.core.plugins.manager.get_resolved_file", return_value=resolved
+        ):
+            result = pm._get_name_from_resolved(
+                "git+https://github.com/varshith15/FlashVSR-Pro.git"
+            )
+
+        assert result == "flashvsr"
+
+    def test_returns_none_when_no_resolved(self, tmp_path):
+        """No resolved.txt -> returns None."""
+        pm = PluginManager()
+
+        with patch(
+            "scope.core.plugins.manager.get_resolved_file",
+            return_value=tmp_path / "nonexistent.txt",
+        ):
+            result = pm._get_name_from_resolved("git+https://github.com/user/repo")
+
+        assert result is None
+
+    def test_returns_none_when_url_not_found(self, tmp_path):
+        """URL not in resolved.txt -> returns None."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text("other-pkg @ git+https://github.com/user/other@abc\n")
+
+        with patch(
+            "scope.core.plugins.manager.get_resolved_file", return_value=resolved
+        ):
+            result = pm._get_name_from_resolved(
+                "git+https://github.com/user/not-in-resolved"
+            )
+
+        assert result is None
+
+
+class TestExtractPackageName:
+    """Tests for _extract_package_name method."""
+
+    def test_git_url_uses_resolved(self, tmp_path):
+        """resolved.txt maps URL -> name, _extract_package_name returns that name."""
+        pm = PluginManager()
+
+        resolved = tmp_path / "resolved.txt"
+        resolved.write_text(
+            "flashvsr @ git+https://github.com/varshith15/FlashVSR-Pro@abc123\n"
+        )
+
+        with patch(
+            "scope.core.plugins.manager.get_resolved_file", return_value=resolved
+        ):
+            result = pm._extract_package_name(
+                "git+https://github.com/varshith15/FlashVSR-Pro"
+            )
+
+        assert result == "flashvsr"
+
+    def test_git_url_falls_back_to_repo_name(self, tmp_path):
+        """No resolved.txt -> returns repo name (existing behavior)."""
+        pm = PluginManager()
+
+        with patch(
+            "scope.core.plugins.manager.get_resolved_file",
+            return_value=tmp_path / "nonexistent.txt",
+        ):
+            result = pm._extract_package_name(
+                "git+https://github.com/varshith15/FlashVSR-Pro.git"
+            )
+
+        assert result == "FlashVSR-Pro"
+
+    def test_local_path_reads_pyproject(self, tmp_path):
+        """Local dir with pyproject.toml -> returns project name."""
+        pm = PluginManager()
+
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "my-cool-plugin"\n')
+
+        result = pm._extract_package_name(str(tmp_path))
+
+        assert result == "my-cool-plugin"
+
+    def test_local_path_uses_dir_basename(self, tmp_path):
+        """No pyproject.toml -> returns dir basename."""
+        pm = PluginManager()
+
+        sub = tmp_path / "scope-circle-controller"
+        sub.mkdir()
+
+        result = pm._extract_package_name(str(sub))
+
+        assert result == "scope-circle-controller"
+
+    def test_pypi_spec_unchanged(self):
+        """Existing behavior for PyPI specifiers preserved."""
+        pm = PluginManager()
+
+        assert pm._extract_package_name("my-plugin==1.0.0") == "my-plugin"
+        assert pm._extract_package_name("my-plugin>=1.0") == "my-plugin"
+        assert pm._extract_package_name("my-plugin[extra]") == "my-plugin"
+        assert pm._extract_package_name("my-plugin") == "my-plugin"

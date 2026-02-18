@@ -51,7 +51,7 @@ First, copy the link address for the `.safetensors` file found under "Files and 
 
 https://github.com/user-attachments/assets/f02134e7-3658-4390-a4ec-6083dedbf5e6
 
-Then, navigate to `~/.daydream-scope/models/lora` and run:
+Then, navigate to `/workspace/models/lora` and run:
 
 ```
 wget -O <file name> <link address>
@@ -63,6 +63,8 @@ An example:
 wget -O pixar_10_epochs.safetensors https://huggingface.co/Remade-AI/Pixar/resolve/main/pixar_10_epochs.safetensors?download=true
 ```
 
+> **Tip:** On some RunPod templates, `wget` may not be pre-installed. If so, run `apt-get install wget` first.
+
 **CivitAI**
 
 First, get a [CivitAI API key](https://developer.civitai.com/docs/getting-started/setup-profile) which is required for programmatic downloads.
@@ -71,7 +73,7 @@ Then, copy the link address from the LoRA page:
 
 https://github.com/user-attachments/assets/2b3dd3ef-ba68-4254-b0dd-af2ee97bd8a9
 
-Then, navigate to `~/.daydream-scope/models/lora` and run:
+Then, navigate to `/workspace/models/lora` and run:
 
 ```
 wget -O <file name> "<link address>&token=<TOKEN>"
@@ -84,6 +86,9 @@ An example:
 ```
 wget -O arcane-jinx.safetensors "https://civitai.com/api/download/models/1679582?type=Model&format=SafeTensor&token=<TOKEN>"
 ```
+
+> [!WARNING]
+> Many LoRAs require a **trigger keyword** in your prompt to activate. Check the LoRA's model page (on HuggingFace or CivitAI) for the required trigger phrase and include it in your prompt.
 
 > [!IMPORTANT]
 > Make sure to surround the link address including the token with double quotes!
