@@ -392,6 +392,11 @@ class PipelineProcessor:
 
             # Check if queue has enough frames before consuming them
             if input_queue_ref.qsize() < current_chunk_size:
+                # Preserve popped one-shot parameters so they are applied once frames arrive
+                if reset_cache is not None:
+                    self.parameters["reset_cache"] = reset_cache
+                if lora_scales is not None:
+                    self.parameters["lora_scales"] = lora_scales
                 # Not enough frames in queue, sleep briefly and try again next iteration
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
