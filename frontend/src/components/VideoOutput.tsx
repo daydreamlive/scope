@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
@@ -49,14 +50,46 @@ export function VideoOutput({
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
 
+  // Audio state: start muted to comply with browser autoplay policy.
+  // User can click the speaker icon to unmute once the stream is playing.
+  const [isMuted, setIsMuted] = useState(true);
+  const [hasAudioTrack, setHasAudioTrack] = useState(false);
+
   // Use external ref if provided, otherwise use internal
   const containerRef = videoContainerRef || internalContainerRef;
 
   useEffect(() => {
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
+
+      // Check if the stream contains an audio track
+      const audioTracks = remoteStream.getAudioTracks();
+      setHasAudioTrack(audioTracks.length > 0);
+
+      // Listen for tracks being added later (audio may arrive after video)
+      const handleTrackAdded = () => {
+        const tracks = remoteStream.getAudioTracks();
+        setHasAudioTrack(tracks.length > 0);
+      };
+      remoteStream.addEventListener("addtrack", handleTrackAdded);
+
+      return () => {
+        remoteStream.removeEventListener("addtrack", handleTrackAdded);
+      };
     }
   }, [remoteStream]);
+
+  // Sync muted state to the video element
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
+  const toggleMute = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation(); // Don't trigger play/pause or pointer lock
+    setIsMuted(prev => !prev);
+  }, []);
 
   // Listen for video playing event to notify parent
   useEffect(() => {
@@ -174,9 +207,23 @@ export function VideoOutput({
                   : "max-w-full max-h-full object-contain"
               }
               autoPlay
-              muted
+              muted={isMuted}
               playsInline
             />
+            {/* Audio mute/unmute toggle - only shown when stream has audio */}
+            {hasAudioTrack && (
+              <button
+                onClick={toggleMute}
+                className="absolute bottom-4 right-4 p-2 rounded-lg bg-black/60 hover:bg-black/80 text-white transition-colors z-10"
+                title={isMuted ? "Unmute audio" : "Mute audio"}
+              >
+                {isMuted ? (
+                  <VolumeX className="w-5 h-5" />
+                ) : (
+                  <Volume2 className="w-5 h-5" />
+                )}
+              </button>
+            )}
             {/* Play/Pause Overlay */}
             {showOverlay && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
