@@ -26,6 +26,43 @@ export function getResolutionScaleFactor(
 }
 
 /**
+ * Scales a source resolution down to fit within a pixel budget while preserving
+ * aspect ratio. Dimensions are rounded to the nearest multiple of scaleFactor.
+ * If the source already fits, it is returned as-is (rounded to scaleFactor).
+ */
+export function fitResolutionToPixelBudget(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxPixels: number,
+  scaleFactor: number
+): { width: number; height: number } {
+  const sourcePixels = sourceWidth * sourceHeight;
+  if (sourcePixels <= maxPixels) {
+    return {
+      width: Math.max(
+        scaleFactor,
+        Math.round(sourceWidth / scaleFactor) * scaleFactor
+      ),
+      height: Math.max(
+        scaleFactor,
+        Math.round(sourceHeight / scaleFactor) * scaleFactor
+      ),
+    };
+  }
+  const scale = Math.sqrt(maxPixels / sourcePixels);
+  return {
+    width: Math.max(
+      scaleFactor,
+      Math.round((sourceWidth * scale) / scaleFactor) * scaleFactor
+    ),
+    height: Math.max(
+      scaleFactor,
+      Math.round((sourceHeight * scale) / scaleFactor) * scaleFactor
+    ),
+  };
+}
+
+/**
  * Adjusts resolution to be divisible by the required scale factor for the pipeline.
  * Returns the adjusted resolution and whether it was changed.
  */
