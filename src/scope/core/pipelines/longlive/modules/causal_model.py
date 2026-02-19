@@ -263,32 +263,25 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
 
-            is_recompute = (
-                current_end <= kv_cache["global_end_index"].item() and current_start > 0
-            )
+            cache_global_end = kv_cache["global_end_index"].item()
+            cache_local_end = kv_cache["local_end_index"].item()
+
+            is_recompute = current_end <= cache_global_end and current_start > 0
             if (
                 self.local_attn_size != -1
-                and (current_end > kv_cache["global_end_index"].item())
-                and (
-                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size
-                )
+                and (current_end > cache_global_end)
+                and (num_new_tokens + cache_local_end > kv_cache_size)
             ):
                 # Calculate the number of new tokens added in this step
                 # Shift existing cache content left to discard oldest tokens
-                num_evicted_tokens = (
-                    num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
-                )
-                num_rolled_tokens = (
-                    kv_cache["local_end_index"].item()
-                    - num_evicted_tokens
-                    - sink_tokens
-                )
+                num_evicted_tokens = num_new_tokens + cache_local_end - kv_cache_size
+                num_rolled_tokens = cache_local_end - num_evicted_tokens - sink_tokens
 
                 # Compute updated local indices
                 local_end_index = (
-                    kv_cache["local_end_index"].item()
+                    cache_local_end
                     + current_end
-                    - kv_cache["global_end_index"].item()
+                    - cache_global_end
                     - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
@@ -334,11 +327,7 @@ class CausalWanSelfAttention(nn.Module):
 
             else:
                 # Assign new keys/values directly up to current_end
-                local_end_index = (
-                    kv_cache["local_end_index"].item()
-                    + current_end
-                    - kv_cache["global_end_index"].item()
-                )
+                local_end_index = cache_local_end + current_end - cache_global_end
                 local_start_index = local_end_index - num_new_tokens
 
                 # Protect sink_tokens only during recomputation; regular forward generation allows writing into the initial sink region
