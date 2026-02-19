@@ -4,9 +4,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { AccountTab } from "./settings/AccountTab";
 import { ApiKeysTab } from "./settings/ApiKeysTab";
 import { GeneralTab } from "./settings/GeneralTab";
+import { LoRAsTab } from "./settings/LoRAsTab";
 import { PluginsTab } from "./settings/PluginsTab";
 import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
+import { useLoRAsContext } from "@/contexts/LoRAsContext";
 import type { InstalledPlugin } from "@/types/settings";
 import {
   listPlugins,
@@ -15,6 +17,7 @@ import {
   restartServer,
   waitForServer,
   getServerInfo,
+  installLoRAFile,
   type FailedPluginInfo,
 } from "@/lib/api";
 import { toast } from "sonner";
@@ -22,7 +25,7 @@ import { toast } from "sonner";
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
-  initialTab?: "general" | "account" | "api-keys" | "plugins";
+  initialTab?: "general" | "account" | "api-keys" | "plugins" | "loras";
   initialPluginPath?: string;
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
@@ -64,6 +67,7 @@ export function SettingsDialog({
   cloudDisabled,
 }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
+  const { loraFiles, isLoading: isLoadingLoRAs, refresh: refreshLoRAs } = useLoRAsContext();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
   );
@@ -75,6 +79,9 @@ export function SettingsDialog({
   const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(initialTab);
+  // LoRA install state (files come from context)
+  const [loraInstallUrl, setLoraInstallUrl] = useState("");
+  const [isInstallingLoRA, setIsInstallingLoRA] = useState(false);
   const [version, setVersion] = useState<string>("");
   const [gitCommit, setGitCommit] = useState<string>("");
   // Track install/update/uninstall operations to suppress spurious error toasts
@@ -138,6 +145,13 @@ export function SettingsDialog({
       fetchPlugins();
     }
   }, [open, activeTab, fetchPlugins]);
+
+  // Refresh LoRAs when switching to LoRAs tab
+  useEffect(() => {
+    if (open && activeTab === "loras") {
+      refreshLoRAs();
+    }
+  }, [open, activeTab, refreshLoRAs]);
 
   const handleModelsDirectoryChange = (value: string) => {
     console.log("Models directory changed:", value);
@@ -320,6 +334,26 @@ export function SettingsDialog({
     }
   };
 
+  const handleInstallLoRA = async (url: string) => {
+    setIsInstallingLoRA(true);
+    const filename = url.split("/").pop()?.split("?")[0] || "LoRA file";
+    try {
+      const installPromise = installLoRAFile({ url });
+      toast.promise(installPromise, {
+        loading: `Installing ${filename}...`,
+        success: response => response.message,
+        error: err => err.message || "Install failed",
+      });
+      await installPromise;
+      setLoraInstallUrl("");
+      await refreshLoRAs();
+    } catch (error) {
+      console.error("Failed to install LoRA:", error);
+    } finally {
+      setIsInstallingLoRA(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[600px] p-0 gap-0">
@@ -357,6 +391,12 @@ export function SettingsDialog({
             >
               Plugins
             </TabsTrigger>
+            <TabsTrigger
+              value="loras"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              LoRAs
+            </TabsTrigger>
           </TabsList>
           <div className="w-px bg-border self-stretch" />
           <div className="flex-1 min-w-0 p-4 pt-10 h-[40vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
@@ -393,6 +433,17 @@ export function SettingsDialog({
                 onReload={handleReloadPlugin}
                 isLoading={isLoadingPlugins}
                 isInstalling={isInstalling}
+              />
+            </TabsContent>
+            <TabsContent value="loras" className="mt-0">
+              <LoRAsTab
+                loraFiles={loraFiles}
+                installUrl={loraInstallUrl}
+                onInstallUrlChange={setLoraInstallUrl}
+                onInstall={handleInstallLoRA}
+                onRefresh={refreshLoRAs}
+                isLoading={isLoadingLoRAs}
+                isInstalling={isInstallingLoRA}
               />
             </TabsContent>
           </div>

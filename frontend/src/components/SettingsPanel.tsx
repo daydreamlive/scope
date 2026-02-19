@@ -194,6 +194,7 @@ interface SettingsPanelProps {
     value: unknown
   ) => void;
   isCloudMode?: boolean;
+  onOpenLoRAsSettings?: () => void;
 }
 
 export function SettingsPanel({
@@ -247,6 +248,7 @@ export function SettingsPanel({
   onPreprocessorSchemaFieldOverrideChange,
   onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
+  onOpenLoRAsSettings,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -641,6 +643,7 @@ export function SettingsPanel({
               isCloudMode,
               schemaFieldOverrides,
               onSchemaFieldOverrideChange,
+              onOpenLoRAsSettings,
             };
             return (
               <>
@@ -790,6 +793,7 @@ export function SettingsPanel({
                     disabled={isLoading}
                     isStreaming={isStreaming}
                     loraMergeStrategy={loraMergeStrategy}
+                    onOpenLoRAsSettings={onOpenLoRAsSettings}
                   />
                 </div>
               )}

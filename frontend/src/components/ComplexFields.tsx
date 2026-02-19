@@ -79,6 +79,7 @@ export interface SchemaComplexFieldContext {
     value: unknown,
     isRuntimeParam?: boolean
   ) => void;
+  onOpenLoRAsSettings?: () => void;
 }
 
 export interface SchemaComplexFieldProps {
@@ -220,6 +221,7 @@ export function SchemaComplexField({
           disabled={ctx.isLoading ?? false}
           isStreaming={ctx.isStreaming ?? false}
           loraMergeStrategy={ctx.loraMergeStrategy ?? "permanent_merge"}
+          onOpenLoRAsSettings={ctx.onOpenLoRAsSettings}
         />
       </div>
     );

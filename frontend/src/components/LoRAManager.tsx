@@ -8,15 +8,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Plus, X, RefreshCw, Download } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { LoRAConfig, LoraMergeStrategy } from "../types";
-import type { LoRAFileInfo } from "../lib/api";
-import { useApi } from "../hooks/useApi";
+import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { useCloudStatus } from "../hooks/useCloudStatus";
-import { toast } from "sonner";
-import { Input } from "./ui/input";
 import { FilePicker } from "./ui/file-picker";
 
 interface LoRAManagerProps {
@@ -25,6 +22,7 @@ interface LoRAManagerProps {
   disabled?: boolean;
   isStreaming?: boolean;
   loraMergeStrategy?: LoraMergeStrategy;
+  onOpenLoRAsSettings?: () => void;
 }
 
 export function LoRAManager({
@@ -33,33 +31,11 @@ export function LoRAManager({
   disabled,
   isStreaming = false,
   loraMergeStrategy = "permanent_merge",
+  onOpenLoRAsSettings,
 }: LoRAManagerProps) {
-  const { listLoRAFiles, installLoRAFile } = useApi();
-  const { isConnected: isCloudConnected, isConnecting: isCloudConnecting } =
-    useCloudStatus();
-  const isCloudPending = isCloudConnecting && !isCloudConnected;
-  const [availableLoRAs, setAvailableLoRAs] = useState<LoRAFileInfo[]>([]);
-  const [isLoadingLoRAs, setIsLoadingLoRAs] = useState(false);
+  const { loraFiles: availableLoRAs } = useLoRAsContext();
+  const { isConnected: isCloudConnected } = useCloudStatus();
   const [localScales, setLocalScales] = useState<Record<string, number>>({});
-  const [installUrl, setInstallUrl] = useState("");
-  const [isInstalling, setIsInstalling] = useState(false);
-  const [installError, setInstallError] = useState<string | null>(null);
-
-  const loadAvailableLoRAs = async () => {
-    setIsLoadingLoRAs(true);
-    try {
-      const response = await listLoRAFiles();
-      setAvailableLoRAs(response.lora_files);
-    } catch (error) {
-      console.error("loadAvailableLoRAs: Failed to load LoRA files:", error);
-    } finally {
-      setIsLoadingLoRAs(false);
-    }
-  };
-
-  useEffect(() => {
-    loadAvailableLoRAs();
-  }, []);
 
   // Sync localScales from loras prop when it changes from outside
   useEffect(() => {
@@ -70,21 +46,19 @@ export function LoRAManager({
     setLocalScales(newLocalScales);
   }, [loras]);
 
-  // Track cloud connection state and clear LoRAs when it changes
+  // Track cloud connection state and clear configured LoRAs when it changes
   // (switching between local/cloud means different LoRA file lists)
   const prevCloudConnectedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
-    // On first render, just store the initial state
     if (prevCloudConnectedRef.current === null) {
       prevCloudConnectedRef.current = isCloudConnected;
       return;
     }
 
-    // Clear LoRAs when cloud connection state changes (connected or disconnected)
+    // Clear configured LoRAs when cloud connection state changes
     if (prevCloudConnectedRef.current !== isCloudConnected) {
       onLorasChange([]);
-      loadAvailableLoRAs();
     }
 
     prevCloudConnectedRef.current = isCloudConnected;
@@ -130,117 +104,48 @@ export function LoRAManager({
     return { isDisabled, tooltipText };
   };
 
-  const handleInstallLoRA = async () => {
-    if (!installUrl.trim()) return;
-    setIsInstalling(true);
-    setInstallError(null);
-    const url = installUrl.trim();
-    const filename = url.split("/").pop()?.split("?")[0] || "LoRA file";
-    try {
-      const installPromise = installLoRAFile({ url });
-      toast.promise(installPromise, {
-        loading: `Installing ${filename}...`,
-        success: response => response.message,
-        error: err => err.message || "Install failed",
-      });
-      await installPromise;
-      setInstallUrl("");
-      await loadAvailableLoRAs();
-    } catch (error) {
-      setInstallError(
-        error instanceof Error ? error.message : "Install failed"
-      );
-    } finally {
-      setIsInstalling(false);
-    }
-  };
-
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">LoRA Adapters</h3>
-        <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={loadAvailableLoRAs}
-            disabled={disabled || isLoadingLoRAs}
-            className="h-6 px-2"
-            title="Refresh LoRA list"
-          >
-            <RefreshCw
-              className={`h-3 w-3 ${isLoadingLoRAs ? "animate-spin" : ""}`}
-            />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAddLora}
-            disabled={disabled || isStreaming}
-            className="h-6 px-2"
-            title={
-              isStreaming ? "Cannot add LoRAs while streaming" : "Add LoRA"
-            }
-          >
-            <Plus className="h-3 w-3" />
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1">
-        <Input
-          value={installUrl}
-          onChange={e => {
-            setInstallUrl(e.target.value);
-            setInstallError(null);
-          }}
-          placeholder="Paste LoRA URL (HuggingFace, CivitAI...)"
-          disabled={disabled || isInstalling || isCloudPending}
-          className="h-7 text-xs flex-1"
-          onKeyDown={e => {
-            if (e.key === "Enter") handleInstallLoRA();
-          }}
-        />
         <Button
           size="sm"
           variant="outline"
-          onClick={handleInstallLoRA}
-          disabled={
-            disabled || isInstalling || !installUrl.trim() || isCloudPending
-          }
-          className="h-7 px-2"
-          title={
-            isCloudPending
-              ? "Waiting for cloud connection..."
-              : "Install LoRA from URL"
-          }
+          onClick={handleAddLora}
+          disabled={disabled || isStreaming}
+          className="h-6 px-2"
+          title={isStreaming ? "Cannot add LoRAs while streaming" : "Add LoRA"}
         >
-          <Download
-            className={`h-3 w-3 ${isInstalling ? "animate-pulse" : ""}`}
-          />
+          <Plus className="h-3 w-3" />
         </Button>
       </div>
-      {isCloudPending && (
-        <p className="text-xs text-muted-foreground animate-pulse">
-          Waiting for cloud connection...
-        </p>
-      )}
-      {installError && (
-        <p className="text-xs text-destructive">{installError}</p>
-      )}
 
       {loras.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          No LoRA adapters configured. Follow the{" "}
+          No LoRA adapters configured.{" "}
+          {onOpenLoRAsSettings ? (
+            <>
+              <button
+                type="button"
+                onClick={onOpenLoRAsSettings}
+                className="underline hover:text-foreground"
+              >
+                Click here
+              </button>{" "}
+              to install LoRAs or follow the{" "}
+            </>
+          ) : (
+            "Follow the "
+          )}
           <a
-            href="https://github.com/daydreamlive/scope/blob/main/docs/lora.md"
+            href="https://docs.daydream.live/scope/guides/loras"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline"
+            className="underline hover:text-foreground"
           >
             docs
           </a>{" "}
-          to add LoRA files.
+          for manual installation.
         </p>
       )}
 

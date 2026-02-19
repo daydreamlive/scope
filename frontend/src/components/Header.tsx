@@ -23,7 +23,7 @@ export function Header({
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "account" | "api-keys" | "plugins"
+    "general" | "account" | "api-keys" | "plugins" | "loras"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
@@ -83,7 +83,7 @@ export function Header({
   useEffect(() => {
     if (openSettingsTab) {
       setInitialTab(
-        openSettingsTab as "general" | "account" | "api-keys" | "plugins"
+        openSettingsTab as "general" | "account" | "api-keys" | "plugins" | "loras"
       );
       setSettingsOpen(true);
       onSettingsTabOpened?.();
