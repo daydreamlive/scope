@@ -341,17 +341,15 @@ export function SettingsDialog({
   const handleInstallLoRA = async (url: string) => {
     setIsInstallingLoRA(true);
     const filename = url.split("/").pop()?.split("?")[0] || "LoRA file";
+    const toastId = toast.loading(`Installing ${filename}...`);
     try {
-      const installPromise = installLoRAFile({ url });
-      toast.promise(installPromise, {
-        loading: `Installing ${filename}...`,
-        success: response => response.message,
-        error: err => err.message || "Install failed",
-      });
-      await installPromise;
+      const response = await installLoRAFile({ url });
+      toast.success(response.message, { id: toastId });
       setLoraInstallUrl("");
       await refreshLoRAs();
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Install failed";
+      toast.error(message, { id: toastId });
       console.error("Failed to install LoRA:", error);
     } finally {
       setIsInstallingLoRA(false);
