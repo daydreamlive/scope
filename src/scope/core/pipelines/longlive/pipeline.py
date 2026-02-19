@@ -134,6 +134,28 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         else:
             generator = generator.to(device=device, dtype=dtype)
 
+        if getattr(config, "dummy_forcing_enabled", False):
+            from .modules.dummyforcing import DummyForcingConfig
+
+            model = generator.model
+            if hasattr(model, "module"):
+                model = model.module
+            num_dummy = int(
+                model.num_heads * model.num_layers * config.dummy_forcing_ratio
+            )
+            df_config = DummyForcingConfig(
+                num_dummy=num_dummy,
+                ar_start=config.dummy_forcing_ar_start,
+                local_context_length=config.dummy_forcing_local_context_length,
+            )
+            model.set_dummy_forcing_config(df_config)
+            logger.info(
+                "Dummy Forcing enabled: %d dummy heads (%.0f%% of %d total)",
+                num_dummy,
+                config.dummy_forcing_ratio * 100,
+                model.num_heads * model.num_layers,
+            )
+
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
             model_name=base_model_name,

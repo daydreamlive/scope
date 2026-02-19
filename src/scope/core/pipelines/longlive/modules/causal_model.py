@@ -13,6 +13,7 @@ from torch.nn.attention.flex_attention import (
 )
 
 from scope.core.pipelines.wan2_1.modules.attention import attention
+
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
@@ -97,6 +98,54 @@ class CausalWanSelfAttention(nn.Module):
         self.o = nn.Linear(dim, dim)
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        self.dummy_forcing_config = None
+
+    def _forward_dummy_forcing(
+        self, roped_query, roped_key, v, kv_cache, frame_seqlen, update_cache
+    ):
+        from .extract_heads import extract_heads
+
+        headgroup_first = kv_cache["headgroup_first"]
+        headgroup_mid = kv_cache["headgroup_mid"]
+        headgroup_last = kv_cache["headgroup_last"]
+
+        q1, k1, v1, q2, k2, v2 = extract_heads(
+            roped_query,
+            roped_key,
+            v,
+            headgroup_mid,
+            headgroup_first + headgroup_last,
+        )
+
+        k1 = torch.cat([kv_cache["sink_k"], k1], dim=1).contiguous()
+        v1 = torch.cat([kv_cache["sink_v"], v1], dim=1).contiguous()
+        k2 = torch.cat([kv_cache["local_k"], k2], dim=1).contiguous()
+        v2 = torch.cat([kv_cache["local_v"], v2], dim=1).contiguous()
+
+        x1 = attention(q1, k1, v1)
+        x2 = attention(q2, k2, v2)
+
+        x = torch.empty_like(roped_query)
+        x[:, :, headgroup_first + headgroup_last, :] = x1
+        x[:, :, headgroup_mid, :] = x2
+
+        update_info = None
+        if update_cache:
+            HW = frame_seqlen
+            ctx_len = self.dummy_forcing_config.local_context_length
+            update_info = {
+                "action": "dummy_forcing_update",
+                "sink_k_update": k1[:, -HW:, len(headgroup_first) :].clone(),
+                "sink_v_update": v1[:, -HW:, len(headgroup_first) :].clone(),
+                "local_k_update": k2[:, -3 * HW * ctx_len :].clone(),
+                "local_v_update": v2[:, -3 * HW * ctx_len :].clone(),
+            }
+
+        x = x.flatten(2)
+        x = self.o(x)
+        current_end = kv_cache.get("global_end_index", torch.tensor([0])).item()
+        local_end_index = kv_cache.get("local_end_index", torch.tensor([0])).item()
+        return x, (current_end, local_end_index, update_info)
 
     def forward(
         self,
@@ -255,6 +304,12 @@ class CausalWanSelfAttention(nn.Module):
             roped_key = causal_rope_apply(
                 k, grid_sizes, freqs, start_frame=current_start_frame
             ).type_as(v)
+
+            if kv_cache.get("dummy_forcing_active", False):
+                update_cache = kv_cache.get("_is_last_denoise_step", False)
+                return self._forward_dummy_forcing(
+                    roped_query, roped_key, v, kv_cache, frame_seqlen, update_cache
+                )
 
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
@@ -417,6 +472,20 @@ class CausalWanSelfAttention(nn.Module):
                     temp_k[:, window_start:local_end_index],
                     temp_v[:, window_start:local_end_index],
                 )
+
+        if (
+            kv_cache is not None
+            and self.dummy_forcing_config is not None
+            and kv_cache.get("_is_last_denoise_step", False)
+            and kv_cache.get("_ar_step") == self.dummy_forcing_config.ar_start
+            and not kv_cache.get("dummy_forcing_active", False)
+        ):
+            from .dummyforcing import online_head_classification
+
+            k_full = temp_k[:, :local_end_index]
+            kv_cache["frame_attn_score"] = online_head_classification(
+                roped_query, k_full, self.dummy_forcing_config.ar_start
+            )
 
         # output
         x = x.flatten(2)
@@ -713,6 +782,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # head
         self.head = CausalHead(dim, out_dim, patch_size, eps)
+        self.dummy_forcing_config = None
 
         # buffers (don't use register_buffer otherwise dtype will be changed in to())
         assert (dim % num_heads) == 0 and (dim // num_heads) % 2 == 0
@@ -738,6 +808,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         self.num_frame_per_block = 1
         self.independent_first_frame = False
+
+    def set_dummy_forcing_config(self, config):
+        self.dummy_forcing_config = config
+        for block in self.blocks:
+            block.self_attn.dummy_forcing_config = config
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
@@ -1042,6 +1117,13 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         cache["k"][:, write_start_index:write_end_index] = new_k
                         cache["v"][:, write_start_index:write_end_index] = new_v
 
+                elif update_info["action"] == "dummy_forcing_update":
+                    n_sink_heads = len(cache["headgroup_first"])
+                    cache["sink_k"][:, :, n_sink_heads:] = update_info["sink_k_update"]
+                    cache["sink_v"][:, :, n_sink_heads:] = update_info["sink_v_update"]
+                    cache["local_k"] = update_info["local_k_update"]
+                    cache["local_v"] = update_info["local_v_update"]
+
             # Update indices: do not roll back pointers during recomputation
             is_recompute = (
                 False if update_info is None else update_info.get("is_recompute", False)
@@ -1164,10 +1246,18 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
             return custom_forward
 
+        df_cfg = self.dummy_forcing_config
+        if df_cfg is not None and kv_cache is not None:
+            frame_seqlen = (grid_sizes[0, 1] * grid_sizes[0, 2]).item()
+            ar_step = current_start // (frame_seqlen * 3)
+            is_last_denoise = t[0, 0].item() == 0
+            for blk_cache in kv_cache:
+                blk_cache["_is_last_denoise_step"] = is_last_denoise
+                blk_cache["_ar_step"] = ar_step
+
         cache_update_info = None
-        cache_update_infos = []  # Collect cache update info for all blocks
+        cache_update_infos = []
         for block_index, block in enumerate(self.blocks):
-            # print(f"block_index: {block_index}")
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 kwargs.update(
                     {
@@ -1176,21 +1266,16 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         "cache_start": cache_start,
                     }
                 )
-                # print(f"forward checkpointing")
                 result = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x,
                     **kwargs,
                     use_reentrant=False,
                 )
-                # Handle the result
                 if kv_cache is not None and isinstance(result, tuple):
                     x, block_cache_update_info = result
                     cache_update_infos.append((block_index, block_cache_update_info))
-                    # Extract base info for subsequent blocks (without concrete cache update details)
-                    cache_update_info = block_cache_update_info[
-                        :2
-                    ]  # (current_end, local_end_index)
+                    cache_update_info = block_cache_update_info[:2]
                 else:
                     x = result
             else:
@@ -1202,22 +1287,32 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         "cache_start": cache_start,
                     }
                 )
-                # print(f"forward no checkpointing")
                 result = block(x, **kwargs)
-                # Handle the result
                 if kv_cache is not None and isinstance(result, tuple):
                     x, block_cache_update_info = result
                     cache_update_infos.append((block_index, block_cache_update_info))
-                    # Extract base info for subsequent blocks (without concrete cache update details)
-                    cache_update_info = block_cache_update_info[
-                        :2
-                    ]  # (current_end, local_end_index)
+                    cache_update_info = block_cache_update_info[:2]
                 else:
                     x = result
-        # log_gpu_memory(f"in _forward_inference: {x[0].device}")
-        # After all blocks are processed, apply cache updates in a single pass
+
         if kv_cache is not None and cache_update_infos:
             self._apply_cache_updates(kv_cache, cache_update_infos)
+
+        if (
+            df_cfg is not None
+            and kv_cache is not None
+            and is_last_denoise
+            and ar_step == df_cfg.ar_start
+            and not kv_cache[0].get("dummy_forcing_active", False)
+        ):
+            from .dummyforcing import heterogeneous_memory_allocation
+
+            heterogeneous_memory_allocation(
+                kv_cache,
+                df_cfg.num_dummy,
+                frame_seqlen,
+                df_cfg.local_context_length,
+            )
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))

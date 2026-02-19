@@ -125,6 +125,38 @@ class LongLiveConfig(BasePipelineConfig):
             order=8, component="quantization", is_load_param=True
         ),
     )
+    dummy_forcing_enabled: bool = Field(
+        default=False,
+        description="Enable Dummy Forcing KV cache compression for faster inference",
+        json_schema_extra=ui_field_config(
+            order=9, component="dummy_forcing", is_load_param=True
+        ),
+    )
+    dummy_forcing_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of total head positions classified as dummy heads",
+        json_schema_extra=ui_field_config(
+            order=9, component="dummy_forcing", is_load_param=True
+        ),
+    )
+    dummy_forcing_ar_start: int = Field(
+        default=2,
+        ge=1,
+        description="AR step at which head classification is performed (0-indexed)",
+        json_schema_extra=ui_field_config(
+            order=9, component="dummy_forcing", is_load_param=True
+        ),
+    )
+    dummy_forcing_local_context_length: int = Field(
+        default=1,
+        ge=1,
+        description="Number of recent chunks neighbor heads attend to",
+        json_schema_extra=ui_field_config(
+            order=9, component="dummy_forcing", is_load_param=True
+        ),
+    )
 
     modes = {
         "text": ModeDefaults(default=True),
