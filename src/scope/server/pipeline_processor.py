@@ -105,7 +105,7 @@ class PipelineProcessor:
         self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
 
         # Flag to track pending cache initialization after queue flush
-        # Set when reset_cache flushes queues, cleared after successful init
+        # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
 
         # Throttler for controlling processing rate in chained pipelines
@@ -420,8 +420,6 @@ class PipelineProcessor:
             call_params = dict(self.parameters.items())
 
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init
-            if self._pending_cache_init:
-                self._pending_cache_init = False
 
             # Pass lora_scales only when present
             if lora_scales is not None:
@@ -537,6 +535,7 @@ class PipelineProcessor:
                 raise e
 
         self.is_prepared = True
+        self._pending_cache_init = False
 
     def _track_output_frame(self):
         """Track when a frame is added to the output queue (production rate).
