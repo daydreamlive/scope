@@ -36,6 +36,26 @@ The easiest way to install LoRAs is through the Settings dialog:
 
 The LoRA will be downloaded and saved to your LoRA directory automatically. Once installed, you can select it from the LoRA Adapters section in the Settings panel.
 
+#### CivitAI API Token
+
+CivitAI requires an API token for programmatic downloads. You can configure this in one of two ways:
+
+**Option 1: Settings Dialog**
+
+1. Click the **Settings** icon (gear) in the header
+2. Select the **API Keys** tab
+3. Enter your CivitAI API token and click **Save**
+
+**Option 2: Environment Variable**
+
+```bash
+export CIVITAI_API_TOKEN=your_civitai_token_here
+```
+
+> **Note:** The environment variable takes precedence over a token stored through the UI.
+
+Get your API key at [civitai.com/user/account](https://civitai.com/user/account).
+
 ### Manual Installation
 
 For manual installation, follow the steps below.

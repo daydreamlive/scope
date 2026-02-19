@@ -846,7 +846,6 @@ ALLOWED_LORA_HOSTS = {"civitai.com", "huggingface.co"}
 
 
 @app.post("/api/v1/loras", response_model=LoRAInstallResponse)
-@cloud_proxy(timeout=300.0)
 async def install_lora_file(
     request: LoRAInstallRequest,
     http_request: Request,
@@ -855,19 +854,73 @@ async def install_lora_file(
     """Install a LoRA file from a URL (e.g. HuggingFace, CivitAI).
 
     When cloud mode is active, the install happens on the cloud machine.
+    Token injection for CivitAI URLs happens locally before proxying.
     """
+    from urllib.parse import parse_qs, urlparse
+
+    from .models_config import get_civitai_token
+
+    # Inject CivitAI token if needed (before cloud proxying)
+    url = request.url
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    is_civitai = hostname == "civitai.com" or hostname.endswith(".civitai.com")
+
+    if is_civitai:
+        query_params = parse_qs(parsed.query)
+        if "token" not in query_params:
+            stored_token = get_civitai_token()
+            if stored_token:
+                separator = "&" if parsed.query else "?"
+                url = f"{url}{separator}token={stored_token}"
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="CivitAI requires an API token for programmatic downloads. "
+                    "Add your CivitAI API key in Settings > API Keys. "
+                    "Get your API key at https://civitai.com/user/account",
+                )
+
+    # If connected to cloud, proxy with the (potentially modified) URL
+    if cloud_manager.is_connected:
+        logger.info("Proxying LoRA install to cloud")
+        body = {"url": url, "filename": request.filename}
+        try:
+            response = await cloud_manager.api_request(
+                method="POST",
+                path="/api/v1/loras",
+                body=body,
+                timeout=300.0,
+            )
+        except Exception as e:
+            logger.error(f"Cloud proxy request failed: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Cloud request failed: {e}",
+            ) from e
+
+        status = response.get("status", 200)
+        if status >= 400:
+            raise HTTPException(
+                status_code=status,
+                detail=response.get("error", "Cloud request failed"),
+            )
+        return response.get("data", {})
+
+    # Local installation
     import re
-    from urllib.parse import unquote, urlparse
+    from urllib.parse import unquote
 
     import httpx
 
     from .download_models import http_get
 
     try:
-        # Validate hostname is from allowed sources
-        parsed = urlparse(request.url)
+        # Re-parse URL (may have been modified with token)
+        parsed = urlparse(url)
         hostname = parsed.hostname or ""
-        # Allow the domain itself or any subdomain (e.g., cdn.civitai.com)
+
+        # Validate hostname is from allowed sources
         is_allowed = any(
             hostname == allowed or hostname.endswith(f".{allowed}")
             for allowed in ALLOWED_LORA_HOSTS
@@ -878,20 +931,6 @@ async def install_lora_file(
                 detail=f"URL must be from {' or '.join(sorted(ALLOWED_LORA_HOSTS))}",
             )
 
-        # CivitAI requires a token for programmatic downloads
-        is_civitai = hostname == "civitai.com" or hostname.endswith(".civitai.com")
-        if is_civitai:
-            from urllib.parse import parse_qs
-
-            query_params = parse_qs(parsed.query)
-            if "token" not in query_params:
-                raise HTTPException(
-                    status_code=400,
-                    detail="CivitAI requires an API token for programmatic downloads. "
-                    "Add your token to the URL: &token=YOUR_TOKEN. "
-                    "Get your API key at https://civitai.com/user/account",
-                )
-
         # Determine filename from URL if not provided
         filename = request.filename
         if not filename:
@@ -900,7 +939,7 @@ async def install_lora_file(
         if not filename or "." not in filename:
             # Use streaming GET instead of HEAD (some servers return 403 for HEAD)
             with httpx.Client(follow_redirects=True, timeout=10.0) as client:
-                with client.stream("GET", request.url) as response:
+                with client.stream("GET", url) as response:
                     if response.status_code == 401 or response.status_code == 403:
                         raise HTTPException(
                             status_code=response.status_code,
@@ -951,7 +990,7 @@ async def install_lora_file(
 
         # Install in a thread to avoid blocking the event loop
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, http_get, request.url, dest_path)
+        await loop.run_in_executor(None, http_get, url, dest_path)
 
         size_mb = dest_path.stat().st_size / (1024 * 1024)
         file_info = LoRAFileInfo(
@@ -1503,25 +1542,40 @@ async def list_api_keys():
 
     from huggingface_hub import get_token
 
-    token = get_token()
-    env_var_set = bool(os.environ.get("HF_TOKEN"))
+    from .models_config import get_civitai_token, get_civitai_token_source
 
-    if token:
-        source = "env_var" if env_var_set else "stored"
+    # HuggingFace
+    hf_token = get_token()
+    hf_env_var_set = bool(os.environ.get("HF_TOKEN"))
+    if hf_token:
+        hf_source = "env_var" if hf_env_var_set else "stored"
     else:
-        source = None
+        hf_source = None
 
     hf_key = ApiKeyInfo(
         id="huggingface",
         name="HuggingFace",
         description="Required for downloading gated models",
-        is_set=token is not None,
-        source=source,
+        is_set=hf_token is not None,
+        source=hf_source,
         env_var="HF_TOKEN",
         key_url="https://huggingface.co/settings/tokens",
     )
 
-    return ApiKeysListResponse(keys=[hf_key])
+    # CivitAI
+    civitai_token = get_civitai_token()
+
+    civitai_key = ApiKeyInfo(
+        id="civitai",
+        name="CivitAI",
+        description="Required for downloading LoRAs from CivitAI",
+        is_set=civitai_token is not None,
+        source=get_civitai_token_source(),
+        env_var="CIVITAI_API_TOKEN",
+        key_url="https://civitai.com/user/account",
+    )
+
+    return ApiKeysListResponse(keys=[hf_key, civitai_key])
 
 
 @app.put("/api/v1/keys/{service_id}", response_model=ApiKeySetResponse)
@@ -1529,20 +1583,32 @@ async def set_api_key(service_id: str, request: ApiKeySetRequest):
     """Set/save an API key for a service."""
     import os
 
-    if service_id != "huggingface":
+    from .models_config import CIVITAI_TOKEN_ENV_VAR, set_civitai_token
+
+    if service_id == "huggingface":
+        if os.environ.get("HF_TOKEN"):
+            raise HTTPException(
+                status_code=409,
+                detail="HF_TOKEN environment variable is already set. Remove it to manage this key from the UI.",
+            )
+
+        from huggingface_hub import login
+
+        login(token=request.value, add_to_git_credential=False)
+        return ApiKeySetResponse(success=True, message="HuggingFace token saved")
+
+    elif service_id == "civitai":
+        if os.environ.get(CIVITAI_TOKEN_ENV_VAR):
+            raise HTTPException(
+                status_code=409,
+                detail="CIVITAI_API_TOKEN environment variable is already set. Remove it to manage this key from the UI.",
+            )
+
+        set_civitai_token(request.value)
+        return ApiKeySetResponse(success=True, message="CivitAI token saved")
+
+    else:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service_id}")
-
-    if os.environ.get("HF_TOKEN"):
-        raise HTTPException(
-            status_code=409,
-            detail="HF_TOKEN environment variable is already set. Remove it to manage this key from the UI.",
-        )
-
-    from huggingface_hub import login
-
-    login(token=request.value, add_to_git_credential=False)
-
-    return ApiKeySetResponse(success=True, message="HuggingFace token saved")
 
 
 @app.delete("/api/v1/keys/{service_id}", response_model=ApiKeyDeleteResponse)
@@ -1550,22 +1616,40 @@ async def delete_api_key(service_id: str):
     """Remove a stored API key for a service."""
     import os
 
-    if service_id != "huggingface":
+    from .models_config import (
+        CIVITAI_TOKEN_ENV_VAR,
+        clear_civitai_token,
+        get_civitai_token_source,
+    )
+
+    if service_id == "huggingface":
+        env_var_set = bool(os.environ.get("HF_TOKEN"))
+        if env_var_set:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot remove token set via HF_TOKEN environment variable. Unset the environment variable instead.",
+            )
+
+        from huggingface_hub import logout
+
+        logout()
+        return ApiKeyDeleteResponse(success=True, message="HuggingFace token removed")
+
+    elif service_id == "civitai":
+        source = get_civitai_token_source()
+        if source == "env_var":
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot remove token set via CIVITAI_API_TOKEN environment variable. Unset the environment variable instead.",
+            )
+        if source != "stored":
+            raise HTTPException(status_code=404, detail="No CivitAI token to remove")
+
+        clear_civitai_token()
+        return ApiKeyDeleteResponse(success=True, message="CivitAI token removed")
+
+    else:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service_id}")
-
-    # Check current source
-    env_var_set = bool(os.environ.get("HF_TOKEN"))
-    if env_var_set:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot remove token set via HF_TOKEN environment variable. Unset the environment variable instead.",
-        )
-
-    from huggingface_hub import logout
-
-    logout()
-
-    return ApiKeyDeleteResponse(success=True, message="HuggingFace token removed")
 
 
 @app.get("/api/v1/logs/current")

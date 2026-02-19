@@ -32,6 +32,9 @@ ASSETS_DIR_ENV_VAR = "DAYDREAM_SCOPE_ASSETS_DIR"
 # Environment variable for overriding lora directory
 LORA_DIR_ENV_VAR = "DAYDREAM_SCOPE_LORA_DIR"
 
+# Environment variable for CivitAI API token
+CIVITAI_TOKEN_ENV_VAR = "CIVITAI_API_TOKEN"
+
 
 def get_models_dir() -> Path:
     """
@@ -226,3 +229,49 @@ def models_are_downloaded(pipeline_id: str) -> bool:
                 return False
 
     return True
+
+
+# In-memory storage for CivitAI token (set via API)
+_civitai_token: str | None = None
+
+
+def get_civitai_token() -> str | None:
+    """
+    Get the CivitAI API token.
+
+    Priority:
+    1. CIVITAI_API_TOKEN environment variable
+    2. In-memory token (set via API)
+
+    Returns:
+        str | None: The CivitAI API token, or None if not set
+    """
+    return os.environ.get(CIVITAI_TOKEN_ENV_VAR) or _civitai_token
+
+
+def get_civitai_token_source() -> str | None:
+    """
+    Get the source of the CivitAI token.
+
+    Returns:
+        "env_var" if from environment, "stored" if in memory, None if not set
+    """
+    if os.environ.get(CIVITAI_TOKEN_ENV_VAR):
+        return "env_var"
+    if _civitai_token:
+        return "stored"
+    return None
+
+
+def set_civitai_token(token: str) -> None:
+    """Set the CivitAI token in memory."""
+    global _civitai_token
+    _civitai_token = token
+    logger.info("CivitAI token set in memory")
+
+
+def clear_civitai_token() -> None:
+    """Clear the in-memory CivitAI token."""
+    global _civitai_token
+    _civitai_token = None
+    logger.info("CivitAI token cleared from memory")
