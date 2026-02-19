@@ -74,6 +74,11 @@ def main():
         type=str,
         help="Path to a JSONL file containing prompt sequences",
     )
+    parser.add_argument(
+        "--dummy-forcing",
+        action="store_true",
+        help="Enable Dummy Forcing KV cache compression",
+    )
     args = parser.parse_args()
 
     # Setup config and pipeline
@@ -95,8 +100,12 @@ def main():
             "model_config": OmegaConf.load(Path(__file__).parent / "model.yaml"),
             "height": 480,
             "width": 832,
+            "dummy_forcing_enabled": args.dummy_forcing,
         }
     )
+
+    if args.dummy_forcing:
+        print("Dummy Forcing: ENABLED")
 
     device = torch.device("cuda")
     pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)

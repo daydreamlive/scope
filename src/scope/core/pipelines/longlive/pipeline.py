@@ -137,23 +137,26 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         if getattr(config, "dummy_forcing_enabled", False):
             from .modules.dummyforcing import DummyForcingConfig
 
+            DUMMY_RATIO = 0.5
+            AR_START = 2
+            LOCAL_CONTEXT_LENGTH = 1
+
             model = generator.model
             if hasattr(model, "module"):
                 model = model.module
-            num_dummy = int(
-                model.num_heads * model.num_layers * config.dummy_forcing_ratio
-            )
+            total_heads = model.num_heads * model.num_layers
+            num_dummy = int(total_heads * DUMMY_RATIO)
             df_config = DummyForcingConfig(
                 num_dummy=num_dummy,
-                ar_start=config.dummy_forcing_ar_start,
-                local_context_length=config.dummy_forcing_local_context_length,
+                ar_start=AR_START,
+                local_context_length=LOCAL_CONTEXT_LENGTH,
             )
             model.set_dummy_forcing_config(df_config)
             logger.info(
                 "Dummy Forcing enabled: %d dummy heads (%.0f%% of %d total)",
                 num_dummy,
-                config.dummy_forcing_ratio * 100,
-                model.num_heads * model.num_layers,
+                DUMMY_RATIO * 100,
+                total_heads,
             )
 
         start = time.time()
