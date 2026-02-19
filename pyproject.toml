@@ -1,6 +1,6 @@
 [project]
 name = "daydream-scope"
-version = "0.1.3"
+version = "0.1.4"
 description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
 requires-python = ">=3.12"
