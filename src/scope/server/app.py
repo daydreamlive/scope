@@ -1617,7 +1617,6 @@ async def delete_api_key(service_id: str):
     import os
 
     from .models_config import (
-        CIVITAI_TOKEN_ENV_VAR,
         clear_civitai_token,
         get_civitai_token_source,
     )

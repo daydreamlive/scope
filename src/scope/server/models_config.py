@@ -231,8 +231,26 @@ def models_are_downloaded(pipeline_id: str) -> bool:
     return True
 
 
-# In-memory storage for CivitAI token (set via API)
-_civitai_token: str | None = None
+# CivitAI token file location
+CIVITAI_TOKEN_FILE = "~/.daydream-scope/civitai_token"
+
+
+def _get_civitai_token_file() -> Path:
+    """Get the path to the CivitAI token file."""
+    return Path(CIVITAI_TOKEN_FILE).expanduser().resolve()
+
+
+def _read_civitai_token_file() -> str | None:
+    """Read the CivitAI token from the token file."""
+    token_file = _get_civitai_token_file()
+    if token_file.exists():
+        try:
+            token = token_file.read_text().strip()
+            if token:
+                return token
+        except Exception as e:
+            logger.warning(f"Failed to read CivitAI token file: {e}")
+    return None
 
 
 def get_civitai_token() -> str | None:
@@ -241,12 +259,12 @@ def get_civitai_token() -> str | None:
 
     Priority:
     1. CIVITAI_API_TOKEN environment variable
-    2. In-memory token (set via API)
+    2. Stored token file (~/.daydream-scope/civitai_token)
 
     Returns:
         str | None: The CivitAI API token, or None if not set
     """
-    return os.environ.get(CIVITAI_TOKEN_ENV_VAR) or _civitai_token
+    return os.environ.get(CIVITAI_TOKEN_ENV_VAR) or _read_civitai_token_file()
 
 
 def get_civitai_token_source() -> str | None:
@@ -254,24 +272,28 @@ def get_civitai_token_source() -> str | None:
     Get the source of the CivitAI token.
 
     Returns:
-        "env_var" if from environment, "stored" if in memory, None if not set
+        "env_var" if from environment, "stored" if from file, None if not set
     """
     if os.environ.get(CIVITAI_TOKEN_ENV_VAR):
         return "env_var"
-    if _civitai_token:
+    if _read_civitai_token_file():
         return "stored"
     return None
 
 
 def set_civitai_token(token: str) -> None:
-    """Set the CivitAI token in memory."""
-    global _civitai_token
-    _civitai_token = token
-    logger.info("CivitAI token set in memory")
+    """Save the CivitAI token to the token file."""
+    token_file = _get_civitai_token_file()
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(token)
+    # Set restrictive permissions (owner read/write only)
+    token_file.chmod(0o600)
+    logger.info("CivitAI token saved to file")
 
 
 def clear_civitai_token() -> None:
-    """Clear the in-memory CivitAI token."""
-    global _civitai_token
-    _civitai_token = None
-    logger.info("CivitAI token cleared from memory")
+    """Delete the CivitAI token file."""
+    token_file = _get_civitai_token_file()
+    if token_file.exists():
+        token_file.unlink()
+        logger.info("CivitAI token file deleted")
