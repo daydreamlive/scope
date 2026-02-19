@@ -13,6 +13,7 @@ from torch.nn.attention.flex_attention import (
 )
 
 from scope.core.pipelines.wan2_1.modules.attention import attention
+
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
@@ -262,8 +263,6 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
 
-            # Compute cache update parameters without modifying kv_cache directly
-            cache_update_info = None
             is_recompute = (
                 current_end <= kv_cache["global_end_index"].item() and current_start > 0
             )
@@ -294,26 +293,23 @@ class CausalWanSelfAttention(nn.Module):
                 )
                 local_start_index = local_end_index - num_new_tokens
 
-                # Construct full k, v for attention computation (without modifying the original cache)
-                # Create temporary k, v for computation
-                temp_k = kv_cache["k"].clone()
-                temp_v = kv_cache["v"].clone()
+                kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
+                    kv_cache["k"][
+                        :,
+                        sink_tokens + num_evicted_tokens : sink_tokens
+                        + num_evicted_tokens
+                        + num_rolled_tokens,
+                    ].clone()
+                )
+                kv_cache["v"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
+                    kv_cache["v"][
+                        :,
+                        sink_tokens + num_evicted_tokens : sink_tokens
+                        + num_evicted_tokens
+                        + num_rolled_tokens,
+                    ].clone()
+                )
 
-                # Apply rolling update to the temporary cache
-                temp_k[:, sink_tokens : sink_tokens + num_rolled_tokens] = temp_k[
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                temp_v[:, sink_tokens : sink_tokens + num_rolled_tokens] = temp_v[
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-
-                # Insert new key/value into the temporary cache
                 # Protect sink_tokens only during recomputation; regular forward generation allows writing into the initial sink region
                 write_start_index = (
                     max(local_start_index, sink_tokens)
@@ -325,28 +321,16 @@ class CausalWanSelfAttention(nn.Module):
                 roped_offset = max(0, write_start_index - local_start_index)
                 write_len = max(0, local_end_index - write_start_index)
                 if write_len > 0:
-                    temp_k[:, write_start_index:local_end_index] = roped_key[
+                    kv_cache["k"][:, write_start_index:local_end_index] = roped_key[
                         :, roped_offset : roped_offset + write_len
                     ]
-                    temp_v[:, write_start_index:local_end_index] = v[
+                    kv_cache["v"][:, write_start_index:local_end_index] = v[
                         :, roped_offset : roped_offset + write_len
                     ]
 
-                # Save cache update info for later use
-                cache_update_info = {
-                    "action": "roll_and_insert",
-                    "sink_tokens": sink_tokens,
-                    "num_rolled_tokens": num_rolled_tokens,
-                    "num_evicted_tokens": num_evicted_tokens,
-                    "local_start_index": local_start_index,
-                    "local_end_index": local_end_index,
-                    "write_start_index": write_start_index,
-                    "write_end_index": local_end_index,
-                    "new_k": roped_key[:, roped_offset : roped_offset + write_len],
-                    "new_v": v[:, roped_offset : roped_offset + write_len],
-                    "current_end": current_end,
-                    "is_recompute": is_recompute,
-                }
+                if not is_recompute:
+                    kv_cache["global_end_index"].fill_(current_end)
+                    kv_cache["local_end_index"].fill_(local_end_index)
 
             else:
                 # Assign new keys/values directly up to current_end
@@ -357,9 +341,6 @@ class CausalWanSelfAttention(nn.Module):
                 )
                 local_start_index = local_end_index - num_new_tokens
 
-                # Construct full k, v for attention computation (without modifying the original cache)
-                temp_k = kv_cache["k"].clone()
-                temp_v = kv_cache["v"].clone()
                 # Protect sink_tokens only during recomputation; regular forward generation allows writing into the initial sink region
                 write_start_index = (
                     max(local_start_index, sink_tokens)
@@ -371,39 +352,29 @@ class CausalWanSelfAttention(nn.Module):
                 roped_offset = max(0, write_start_index - local_start_index)
                 write_len = max(0, local_end_index - write_start_index)
                 if write_len > 0:
-                    temp_k[:, write_start_index:local_end_index] = roped_key[
+                    kv_cache["k"][:, write_start_index:local_end_index] = roped_key[
                         :, roped_offset : roped_offset + write_len
                     ]
-                    temp_v[:, write_start_index:local_end_index] = v[
+                    kv_cache["v"][:, write_start_index:local_end_index] = v[
                         :, roped_offset : roped_offset + write_len
                     ]
 
-                # Save cache update info for later use
-                cache_update_info = {
-                    "action": "direct_insert",
-                    "local_start_index": local_start_index,
-                    "local_end_index": local_end_index,
-                    "write_start_index": write_start_index,
-                    "write_end_index": local_end_index,
-                    "new_k": roped_key[:, roped_offset : roped_offset + write_len],
-                    "new_v": v[:, roped_offset : roped_offset + write_len],
-                    "current_end": current_end,
-                    "is_recompute": is_recompute,
-                }
+                if not is_recompute:
+                    kv_cache["global_end_index"].fill_(current_end)
+                    kv_cache["local_end_index"].fill_(local_end_index)
 
-            # Use temporary k, v to compute attention
             if sink_tokens > 0:
                 # Concatenate sink tokens and local window tokens, keeping total length strictly below max_attention_size
                 local_budget = self.max_attention_size - sink_tokens
-                k_sink = temp_k[:, :sink_tokens]
-                v_sink = temp_v[:, :sink_tokens]
+                k_sink = kv_cache["k"][:, :sink_tokens]
+                v_sink = kv_cache["v"][:, :sink_tokens]
 
                 if local_budget > 0:
                     local_start_for_window = max(
                         sink_tokens, local_end_index - local_budget
                     )
-                    k_local = temp_k[:, local_start_for_window:local_end_index]
-                    v_local = temp_v[:, local_start_for_window:local_end_index]
+                    k_local = kv_cache["k"][:, local_start_for_window:local_end_index]
+                    v_local = kv_cache["v"][:, local_start_for_window:local_end_index]
                     k_cat = torch.cat([k_sink, k_local], dim=1)
                     v_cat = torch.cat([v_sink, v_local], dim=1)
                 else:
@@ -414,19 +385,14 @@ class CausalWanSelfAttention(nn.Module):
                 window_start = max(0, local_end_index - self.max_attention_size)
                 x = attention(
                     roped_query,
-                    temp_k[:, window_start:local_end_index],
-                    temp_v[:, window_start:local_end_index],
+                    kv_cache["k"][:, window_start:local_end_index],
+                    kv_cache["v"][:, window_start:local_end_index],
                 )
 
         # output
         x = x.flatten(2)
         x = self.o(x)
-
-        # Return both output and cache update info
-        if kv_cache is not None:
-            return x, (current_end, local_end_index, cache_update_info)
-        else:
-            return x
+        return x
 
 
 class CausalWanAttentionBlock(nn.Module):
@@ -505,7 +471,7 @@ class CausalWanAttentionBlock(nn.Module):
         # assert e[0].dtype == torch.float32
 
         # self-attention
-        self_attn_result = self.self_attn(
+        y = self.self_attn(
             (
                 self.norm1(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen))
                 * (1 + e[1])
@@ -520,12 +486,6 @@ class CausalWanAttentionBlock(nn.Module):
             cache_start,
             sink_recache_after_switch,
         )
-
-        if kv_cache is not None:
-            y, cache_update_info = self_attn_result
-        else:
-            y = self_attn_result
-            cache_update_info = None
 
         # with amp.autocast(dtype=torch.float32):
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(
@@ -551,12 +511,7 @@ class CausalWanAttentionBlock(nn.Module):
             return x
 
         x = cross_attn_ffn(x, context, context_lens, e, crossattn_cache)
-
-        if cache_update_info is not None:
-            # cache_update_info is already in the format (current_end, local_end_index, cache_update_info)
-            return x, cache_update_info
-        else:
-            return x
+        return x
 
 
 class CausalHead(nn.Module):
@@ -1164,10 +1119,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
             return custom_forward
 
-        cache_update_info = None
-        cache_update_infos = []  # Collect cache update info for all blocks
         for block_index, block in enumerate(self.blocks):
-            # print(f"block_index: {block_index}")
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 kwargs.update(
                     {
@@ -1176,23 +1128,12 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         "cache_start": cache_start,
                     }
                 )
-                # print(f"forward checkpointing")
-                result = torch.utils.checkpoint.checkpoint(
+                x = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x,
                     **kwargs,
                     use_reentrant=False,
                 )
-                # Handle the result
-                if kv_cache is not None and isinstance(result, tuple):
-                    x, block_cache_update_info = result
-                    cache_update_infos.append((block_index, block_cache_update_info))
-                    # Extract base info for subsequent blocks (without concrete cache update details)
-                    cache_update_info = block_cache_update_info[
-                        :2
-                    ]  # (current_end, local_end_index)
-                else:
-                    x = result
             else:
                 kwargs.update(
                     {
@@ -1202,22 +1143,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         "cache_start": cache_start,
                     }
                 )
-                # print(f"forward no checkpointing")
-                result = block(x, **kwargs)
-                # Handle the result
-                if kv_cache is not None and isinstance(result, tuple):
-                    x, block_cache_update_info = result
-                    cache_update_infos.append((block_index, block_cache_update_info))
-                    # Extract base info for subsequent blocks (without concrete cache update details)
-                    cache_update_info = block_cache_update_info[
-                        :2
-                    ]  # (current_end, local_end_index)
-                else:
-                    x = result
-        # log_gpu_memory(f"in _forward_inference: {x[0].device}")
-        # After all blocks are processed, apply cache updates in a single pass
-        if kv_cache is not None and cache_update_infos:
-            self._apply_cache_updates(kv_cache, cache_update_infos)
+                x = block(x, **kwargs)
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
