@@ -1484,8 +1484,16 @@ def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
 
 
 @app.get("/api/v1/plugins")
-async def list_plugins():
-    """List all installed plugins with metadata."""
+@cloud_proxy()
+async def list_plugins(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """List all installed plugins with metadata.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import get_plugin_manager
 
     from .schema import FailedPluginInfoSchema, PluginListResponse
@@ -1515,11 +1523,17 @@ async def list_plugins():
 
 
 @app.post("/api/v1/plugins")
+@cloud_proxy(timeout=60.0)
 async def install_plugin(
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Install a plugin from PyPI, git URL, or local path."""
+    """Install a plugin from PyPI, git URL, or local path.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginDependencyError,
         PluginInstallError,
@@ -1530,7 +1544,7 @@ async def install_plugin(
     from .schema import PluginInstallRequest, PluginInstallResponse
 
     # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     install_request = PluginInstallRequest(**body)
 
     logger.info(f"Installing plugin: {install_request.package}")
@@ -1598,11 +1612,18 @@ async def install_plugin(
 
 
 @app.delete("/api/v1/plugins/{name}")
+@cloud_proxy(timeout=60.0)
 async def uninstall_plugin(
     name: str,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Uninstall a plugin, cleaning up loaded pipelines."""
+    """Uninstall a plugin, cleaning up loaded pipelines.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginInstallError,
         PluginNotFoundError,
@@ -1648,12 +1669,18 @@ async def uninstall_plugin(
 
 
 @app.post("/api/v1/plugins/{name}/reload")
+@cloud_proxy(timeout=60.0)
 async def reload_plugin(
     name: str,
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Reload an editable plugin for development (without server restart)."""
+    """Reload an editable plugin for development (without server restart).
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginInUseError,
         PluginNotEditableError,
@@ -1664,7 +1691,7 @@ async def reload_plugin(
     from .schema import PluginReloadRequest, PluginReloadResponse
 
     # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     reload_request = PluginReloadRequest(**body)
 
     try:
