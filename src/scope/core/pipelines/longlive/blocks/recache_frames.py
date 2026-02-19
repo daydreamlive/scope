@@ -2,8 +2,6 @@ import logging
 
 import torch
 from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
-
-logger = logging.getLogger(__name__)
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     ConfigSpec,
@@ -15,6 +13,8 @@ from scope.core.pipelines.wan2_1.utils import (
     initialize_crossattn_cache,
     initialize_kv_cache,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RecacheFramesBlock(ModularPipelineBlocks):
