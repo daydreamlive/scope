@@ -1234,6 +1234,50 @@ async def upload_video_for_generate(request: Request):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.post("/api/v1/generate/upload-data")
+async def upload_data_blob(request: Request):
+    """Upload binary data blob for batch generation.
+
+    Accepts raw binary data containing VACE frames/masks, input video, or other
+    array data referenced by ChunkSpec offsets in the generate request.
+
+    Returns data_blob_path to use in the generate request.
+    """
+
+    from .recording import TEMP_FILE_PREFIXES, RecordingManager
+    from .schema import DataUploadResponse
+
+    try:
+        # Create temp file
+        file_path = RecordingManager._create_temp_file(
+            ".bin", TEMP_FILE_PREFIXES["generate_data"]
+        )
+
+        # Stream body to file
+        bytes_written = 0
+        with open(file_path, "wb") as f:
+            async for chunk in request.stream():
+                f.write(chunk)
+                bytes_written += len(chunk)
+
+        if bytes_written == 0:
+            Path(file_path).unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="Empty request body")
+
+        logger.info(f"Uploaded data blob: {file_path} ({bytes_written} bytes)")
+
+        return DataUploadResponse(
+            data_blob_path=file_path,
+            size_bytes=bytes_written,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading data blob: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/generate/download")
 async def download_generated_video(
     path: str = Query(..., description="Path to output video file"),

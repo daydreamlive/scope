@@ -1,6 +1,5 @@
 """Video generation service for batch mode with chunked processing."""
 
-import base64
 import gc
 import json
 import queue
@@ -40,13 +39,7 @@ if TYPE_CHECKING:
     from logging import Logger
 
     from .pipeline_manager import PipelineManager
-    from .schema import EncodedArray, GenerateRequest
-
-
-def decode_array(encoded: "EncodedArray", dtype: np.dtype) -> np.ndarray:
-    """Decode EncodedArray to numpy array."""
-    data = base64.b64decode(encoded.base64)
-    return np.frombuffer(data, dtype=dtype).reshape(encoded.shape)
+    from .schema import ChunkSpec, GenerateRequest
 
 
 def loop_to_length(arr: np.ndarray, target: int, axis: int) -> np.ndarray:
@@ -73,22 +66,6 @@ def pad_chunk(arr: np.ndarray, target_size: int, axis: int) -> np.ndarray:
     return np.concatenate([arr, padding], axis=axis)
 
 
-def build_lookup(specs: list | None, value_attr: str = "image") -> dict:
-    """Build chunk -> value lookup from list of specs."""
-    if not specs:
-        return {}
-    return {spec.chunk: getattr(spec, value_attr) for spec in specs}
-
-
-def get_chunk_value(value, chunk_idx: int, default=None):
-    """Get per-chunk value from scalar or list."""
-    if value is None:
-        return default
-    if isinstance(value, list):
-        return value[chunk_idx] if chunk_idx < len(value) else value[-1]
-    return value
-
-
 def sse_event(event_type: str, data: dict) -> str:
     """Format a server-sent event."""
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
@@ -99,14 +76,14 @@ class DecodedInputs:
     """Decoded and preprocessed inputs for generation."""
 
     input_video: np.ndarray | None = None
-    vace_frames: np.ndarray | None = None
-    vace_masks: np.ndarray | None = None
     first_frames: dict[int, str] = field(default_factory=dict)
     last_frames: dict[int, str] = field(default_factory=dict)
     ref_images: dict[int, list[str]] = field(default_factory=dict)
     prompts: dict[int, list[dict]] = field(default_factory=dict)
     transitions: dict[int, dict] = field(default_factory=dict)
     vace_chunk_specs: dict[int, dict] = field(default_factory=dict)
+    input_video_chunks: dict[int, np.ndarray] = field(default_factory=dict)
+    chunk_specs_map: "dict[int, ChunkSpec]" = field(default_factory=dict)
 
 
 def load_video_from_file(file_path: str) -> np.ndarray:
@@ -128,30 +105,16 @@ def load_video_from_file(file_path: str) -> np.ndarray:
 def decode_inputs(
     request: "GenerateRequest", num_frames: int, logger: "Logger"
 ) -> DecodedInputs:
-    """Decode all inputs from request (base64 or file-based)."""
+    """Decode all inputs from request using unified ChunkSpec."""
     inputs = DecodedInputs()
 
-    # Handle input video - either from file path or base64
+    # Input video from file path
     if request.input_path:
         logger.info(f"Loading input video from file: {request.input_path}")
         inputs.input_video = load_video_from_file(request.input_path)
         inputs.input_video = loop_to_length(inputs.input_video, num_frames, axis=0)
-    elif request.input_video:
-        inputs.input_video = decode_array(request.input_video, np.uint8)
-        inputs.input_video = loop_to_length(inputs.input_video, num_frames, axis=0)
 
-    if request.vace_frames:
-        inputs.vace_frames = decode_array(request.vace_frames, np.float32)
-        inputs.vace_frames = loop_to_length(inputs.vace_frames, num_frames, axis=2)
-
-    if request.vace_masks:
-        inputs.vace_masks = decode_array(request.vace_masks, np.float32)
-        inputs.vace_masks = loop_to_length(inputs.vace_masks, num_frames, axis=2)
-
-    inputs.first_frames = build_lookup(request.first_frames, "image")
-    inputs.last_frames = build_lookup(request.last_frames, "image")
-    inputs.ref_images = build_lookup(request.vace_ref_images, "images")
-    # Normalize prompt to weighted list format
+    # Default prompt
     if isinstance(request.prompt, str):
         inputs.prompts = {0: [{"text": request.prompt, "weight": PROMPT_WEIGHT}]}
     else:
@@ -159,59 +122,110 @@ def decode_inputs(
             0: [{"text": p.text, "weight": p.weight} for p in request.prompt]
         }
 
-    # Chunk prompts: support both text and weighted prompt lists
-    if request.chunk_prompts:
-        for spec in request.chunk_prompts:
-            if spec.prompts:
-                inputs.prompts[spec.chunk] = [
-                    {"text": p.text, "weight": p.weight} for p in spec.prompts
-                ]
-            elif spec.text:
-                inputs.prompts[spec.chunk] = [
-                    {"text": spec.text, "weight": PROMPT_WEIGHT}
-                ]
+    # Load binary blob if provided
+    blob: bytes | None = None
+    if request.data_blob_path:
+        import tempfile
 
-    # Per-chunk VACE specs
-    if request.vace_chunk_specs:
-        logger.info(
-            f"decode_inputs: Found {len(request.vace_chunk_specs)} vace_chunk_specs"
-        )
-        for spec in request.vace_chunk_specs:
-            logger.info(
-                f"decode_inputs: vace_chunk_spec chunk={spec.chunk}, has_frames={spec.frames is not None}, has_masks={spec.masks is not None}, context_scale={spec.context_scale}, temporally_locked={spec.vace_temporally_locked}"
+        from .recording import TEMP_FILE_PREFIXES
+
+        # Security: validate path prefix and temp dir
+        blob_path = Path(request.data_blob_path)
+        temp_dir = Path(tempfile.gettempdir())
+        if not blob_path.is_relative_to(temp_dir) or not blob_path.name.startswith(
+            TEMP_FILE_PREFIXES["generate_data"]
+        ):
+            raise ValueError(
+                f"Invalid data_blob_path: must be a temp file with prefix {TEMP_FILE_PREFIXES['generate_data']}"
             )
-            decoded_spec: dict = {
-                "vace_temporally_locked": spec.vace_temporally_locked,
-            }
-            if spec.frames is not None:
-                decoded_spec["frames"] = decode_array(spec.frames, np.float32)
-                logger.info(
-                    f"decode_inputs: chunk {spec.chunk} decoded frames shape={decoded_spec['frames'].shape}"
-                )
-            if spec.masks is not None:
-                decoded_spec["masks"] = decode_array(spec.masks, np.float32)
-                logger.info(
-                    f"decode_inputs: chunk {spec.chunk} decoded masks shape={decoded_spec['masks'].shape}"
-                )
-            if spec.context_scale is not None:
-                decoded_spec["context_scale"] = spec.context_scale
-            inputs.vace_chunk_specs[spec.chunk] = decoded_spec
+        with open(blob_path, "rb") as f:
+            blob = f.read()
         logger.info(
-            f"decode_inputs: vace_chunk_specs keys={list(inputs.vace_chunk_specs.keys())}"
+            f"decode_inputs: Loaded data blob from {request.data_blob_path} ({len(blob)} bytes)"
         )
-    else:
-        logger.info("decode_inputs: No vace_chunk_specs in request")
 
-    # Build transitions lookup
-    if request.transitions:
-        for t in request.transitions:
-            inputs.transitions[t.chunk] = {
+    # Process chunk specs — single loop, single source of truth
+    for spec in request.chunk_specs or []:
+        # Store spec for build_chunk_kwargs
+        inputs.chunk_specs_map[spec.chunk] = spec
+
+        # Prompts
+        if spec.prompts:
+            inputs.prompts[spec.chunk] = [
+                {"text": p.text, "weight": p.weight} for p in spec.prompts
+            ]
+        elif spec.text:
+            inputs.prompts[spec.chunk] = [{"text": spec.text, "weight": PROMPT_WEIGHT}]
+
+        # Transitions
+        if spec.transition_target_prompts:
+            inputs.transitions[spec.chunk] = {
                 "target_prompts": [
-                    {"text": p.text, "weight": p.weight} for p in t.target_prompts
+                    {"text": p.text, "weight": p.weight}
+                    for p in spec.transition_target_prompts
                 ],
-                "num_steps": t.num_steps,
-                "temporal_interpolation_method": t.temporal_interpolation_method,
+                "num_steps": spec.transition_num_steps or 4,
+                "temporal_interpolation_method": spec.transition_method or "linear",
             }
+
+        # Keyframes
+        if spec.first_frame_image:
+            inputs.first_frames[spec.chunk] = spec.first_frame_image
+        if spec.last_frame_image:
+            inputs.last_frames[spec.chunk] = spec.last_frame_image
+        if spec.vace_ref_images:
+            inputs.ref_images[spec.chunk] = spec.vace_ref_images
+
+        # VACE from blob
+        if blob is not None and spec.vace_frames_offset is not None:
+            decoded: dict = {"vace_temporally_locked": spec.vace_temporally_locked}
+            if spec.vace_frames_shape and spec.vace_frames_offset is not None:
+                count = 1
+                for d in spec.vace_frames_shape:
+                    count *= d
+                arr = np.frombuffer(
+                    blob, dtype=np.float32, count=count, offset=spec.vace_frames_offset
+                ).reshape(spec.vace_frames_shape)
+                decoded["frames"] = arr
+                logger.info(
+                    f"decode_inputs: chunk {spec.chunk} VACE frames shape={arr.shape}"
+                )
+            if spec.vace_masks_shape and spec.vace_masks_offset is not None:
+                count = 1
+                for d in spec.vace_masks_shape:
+                    count *= d
+                arr = np.frombuffer(
+                    blob, dtype=np.float32, count=count, offset=spec.vace_masks_offset
+                ).reshape(spec.vace_masks_shape)
+                decoded["masks"] = arr
+                logger.info(
+                    f"decode_inputs: chunk {spec.chunk} VACE masks shape={arr.shape}"
+                )
+            if spec.vace_context_scale is not None:
+                decoded["context_scale"] = spec.vace_context_scale
+            inputs.vace_chunk_specs[spec.chunk] = decoded
+
+        # Input video from blob (per-chunk video-to-video)
+        if (
+            blob is not None
+            and spec.input_video_offset is not None
+            and spec.input_video_shape is not None
+        ):
+            count = 1
+            for d in spec.input_video_shape:
+                count *= d
+            inputs.input_video_chunks[spec.chunk] = np.frombuffer(
+                blob, dtype=np.uint8, count=count, offset=spec.input_video_offset
+            ).reshape(spec.input_video_shape)
+
+    logger.info(
+        f"decode_inputs: prompts={list(inputs.prompts.keys())}, "
+        f"transitions={list(inputs.transitions.keys())}, "
+        f"vace_specs={list(inputs.vace_chunk_specs.keys())}, "
+        f"input_video_chunks={list(inputs.input_video_chunks.keys())}, "
+        f"first_frames={list(inputs.first_frames.keys())}, "
+        f"last_frames={list(inputs.last_frames.keys())}"
+    )
 
     return inputs
 
@@ -228,19 +242,25 @@ def build_chunk_kwargs(
     dtype: torch.dtype,
     logger: "Logger",
 ) -> dict:
-    """Build pipeline kwargs for a single chunk."""
+    """Build pipeline kwargs for a single chunk.
+
+    Per-chunk ChunkSpec values override request-level globals.
+    """
+    # Get per-chunk spec (if any)
+    spec = inputs.chunk_specs_map.get(chunk_idx)
+
     kwargs = {
         "height": request.height
         or status_info.get("load_params", {}).get("height", DEFAULT_HEIGHT),
         "width": request.width
         or status_info.get("load_params", {}).get("width", DEFAULT_WIDTH),
-        "base_seed": get_chunk_value(request.seed, chunk_idx, DEFAULT_SEED),
-        "init_cache": chunk_idx == 0
-        or (
-            request.cache_reset_chunks is not None
-            and chunk_idx in request.cache_reset_chunks
+        "base_seed": spec.seed if spec and spec.seed is not None else request.seed,
+        "init_cache": chunk_idx == 0 or (spec is not None and spec.reset_cache),
+        "manage_cache": (
+            spec.manage_cache
+            if spec and spec.manage_cache is not None
+            else request.manage_cache
         ),
-        "manage_cache": request.manage_cache,
     }
 
     # Prompt (sticky behavior - only send when it changes)
@@ -254,43 +274,73 @@ def build_chunk_kwargs(
     if request.denoising_steps:
         kwargs["denoising_step_list"] = request.denoising_steps
 
-    # Video-to-video
-    if inputs.input_video is not None:
+    # Video-to-video: per-chunk input video takes priority over global input video
+    if chunk_idx in inputs.input_video_chunks:
+        # Per-chunk input video from blob (enables v2v/t2v switching per chunk)
+        chunk_frames = inputs.input_video_chunks[chunk_idx]
+        chunk_frames = pad_chunk(chunk_frames, chunk_size, axis=0)
+        kwargs["video"] = [torch.from_numpy(f).unsqueeze(0) for f in chunk_frames]
+        kwargs["noise_scale"] = (
+            spec.noise_scale
+            if spec and spec.noise_scale is not None
+            else request.noise_scale
+        )
+        logger.info(
+            f"Chunk {chunk_idx}: Using per-chunk input video ({chunk_frames.shape[0]} frames)"
+        )
+    elif inputs.input_video is not None:
         chunk_frames = inputs.input_video[start_frame:end_frame]
         chunk_frames = pad_chunk(chunk_frames, chunk_size, axis=0)
         kwargs["video"] = [torch.from_numpy(f).unsqueeze(0) for f in chunk_frames]
-        kwargs["noise_scale"] = get_chunk_value(
-            request.noise_scale, chunk_idx, DEFAULT_NOISE_SCALE
+        kwargs["noise_scale"] = (
+            spec.noise_scale
+            if spec and spec.noise_scale is not None
+            else request.noise_scale
         )
     else:
         kwargs["num_frames"] = chunk_size
 
     # VACE context scale
-    kwargs["vace_context_scale"] = get_chunk_value(
-        request.vace_context_scale, chunk_idx, 1.0
+    kwargs["vace_context_scale"] = (
+        spec.vace_context_scale
+        if spec and spec.vace_context_scale is not None
+        else request.vace_context_scale
     )
 
     # Noise controller
-    if request.noise_controller is not None:
-        kwargs["noise_controller"] = request.noise_controller
+    noise_ctrl = (
+        spec.noise_controller
+        if spec and spec.noise_controller is not None
+        else request.noise_controller
+    )
+    if noise_ctrl is not None:
+        kwargs["noise_controller"] = noise_ctrl
 
     # KV cache attention bias
-    kv_bias = get_chunk_value(request.kv_cache_attention_bias, chunk_idx)
+    kv_bias = (
+        spec.kv_cache_attention_bias
+        if spec and spec.kv_cache_attention_bias is not None
+        else request.kv_cache_attention_bias
+    )
     if kv_bias is not None:
         kwargs["kv_cache_attention_bias"] = kv_bias
 
     # Prompt interpolation method
-    kwargs["prompt_interpolation_method"] = request.prompt_interpolation_method
+    kwargs["prompt_interpolation_method"] = (
+        spec.prompt_interpolation_method
+        if spec and spec.prompt_interpolation_method is not None
+        else request.prompt_interpolation_method
+    )
 
     # VACE use input video
     if request.vace_use_input_video is not None:
         kwargs["vace_use_input_video"] = request.vace_use_input_video
 
-    # LoRA scales
-    if request.lora_scales:
+    # LoRA scales: per-chunk spec overrides global
+    lora_scales = spec.lora_scales if spec and spec.lora_scales else request.lora_scales
+    if lora_scales:
         lora_scale_updates = []
-        for path, scale_value in request.lora_scales.items():
-            scale = get_chunk_value(scale_value, chunk_idx, 1.0)
+        for path, scale in lora_scales.items():
             lora_scale_updates.append({"path": path, "scale": scale})
             logger.info(
                 f"Chunk {chunk_idx}: LoRA scale={scale:.3f} for {Path(path).name}"
@@ -313,40 +363,26 @@ def build_chunk_kwargs(
     if chunk_idx in inputs.ref_images:
         kwargs["vace_ref_images"] = inputs.ref_images[chunk_idx]
 
-    # VACE conditioning: per-chunk spec takes priority over global
+    # VACE conditioning from blob
     logger.info(
-        f"build_chunk_kwargs: chunk {chunk_idx}, vace_chunk_specs keys={list(inputs.vace_chunk_specs.keys())}, has_global_frames={inputs.vace_frames is not None}, has_global_masks={inputs.vace_masks is not None}"
+        f"build_chunk_kwargs: chunk {chunk_idx}, vace_chunk_specs keys={list(inputs.vace_chunk_specs.keys())}"
     )
     if chunk_idx in inputs.vace_chunk_specs:
         logger.info(f"build_chunk_kwargs: chunk {chunk_idx} USING PER-CHUNK VACE SPEC")
-        spec = inputs.vace_chunk_specs[chunk_idx]
+        vace_spec = inputs.vace_chunk_specs[chunk_idx]
 
-        if "frames" in spec:
-            frames = spec["frames"]
+        if "frames" in vace_spec:
+            frames = vace_spec["frames"]
             frames = pad_chunk(frames, chunk_size, axis=2)
             kwargs["vace_input_frames"] = torch.from_numpy(frames).to(device, dtype)
 
-        if "masks" in spec:
-            masks = spec["masks"]
+        if "masks" in vace_spec:
+            masks = vace_spec["masks"]
             masks = pad_chunk(masks, chunk_size, axis=2)
             kwargs["vace_input_masks"] = torch.from_numpy(masks).to(device, dtype)
 
-        if "context_scale" in spec:
-            kwargs["vace_context_scale"] = spec["context_scale"]
-    else:
-        logger.info(f"build_chunk_kwargs: chunk {chunk_idx} USING GLOBAL VACE FALLBACK")
-        # Global VACE conditioning frames [1, C, T, H, W]
-        if inputs.vace_frames is not None:
-            chunk = inputs.vace_frames[:, :, start_frame:end_frame, :, :]
-            chunk = pad_chunk(chunk, chunk_size, axis=2)
-            kwargs["vace_input_frames"] = torch.from_numpy(chunk).to(device, dtype)
-
-        # Global VACE masks [1, 1, T, H, W]
-        if inputs.vace_masks is not None:
-            chunk = inputs.vace_masks[:, :, start_frame:end_frame, :, :]
-            chunk = pad_chunk(chunk, chunk_size, axis=2)
-            kwargs["vace_input_masks"] = torch.from_numpy(chunk).to(device, dtype)
-
+        if "context_scale" in vace_spec:
+            kwargs["vace_context_scale"] = vace_spec["context_scale"]
     return kwargs
 
 
@@ -694,7 +730,7 @@ def generate_video_stream(
         pipeline = pipeline_manager.get_pipeline_by_id(request.pipeline_id)
 
         # Determine chunk size from pipeline
-        has_video = request.input_video is not None or request.input_path is not None
+        has_video = request.input_path is not None
         requirements = pipeline.prepare(video=[] if has_video else None)
         chunk_size = requirements.input_size if requirements else DEFAULT_CHUNK_SIZE
         num_chunks = (request.num_frames + chunk_size - 1) // chunk_size
@@ -817,6 +853,14 @@ def generate_video_stream(
         yield sse_event("error", {"error": str(e)})
 
     finally:
+        # Clean up uploaded data blob file
+        if request.data_blob_path:
+            try:
+                Path(request.data_blob_path).unlink(missing_ok=True)
+                logger.info(f"Cleaned up data blob file: {request.data_blob_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up data blob file: {e}")
+
         # Clean up uploaded input file
         if request.input_path:
             try:

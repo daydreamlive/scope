@@ -818,82 +818,100 @@ class ApiKeyDeleteResponse(BaseModel):
     message: str
 
 
-class ChunkFrameSpec(BaseModel):
-    """Specification for a frame image at a specific chunk."""
+class ChunkSpec(BaseModel):
+    """Unified per-chunk specification. All fields optional — only set what changes."""
 
-    chunk: int = Field(..., ge=0, description="Chunk index")
-    image: str = Field(..., description="Path to image file")
+    chunk: int = Field(..., ge=0, description="Chunk index (required)")
 
-
-class ChunkPromptSpec(BaseModel):
-    """Specification for a prompt at a specific chunk.
-
-    Supports both simple text and weighted prompt lists for spatial blending.
-    """
-
-    chunk: int = Field(..., ge=0, description="Chunk index")
+    # Prompt
     text: str | None = Field(
         default=None,
-        description="Simple prompt text for this chunk (mutually exclusive with prompts)",
+        description="Simple prompt text (mutually exclusive with prompts)",
     )
     prompts: list[PromptItem] | None = Field(
         default=None,
-        description="Weighted prompt list for spatial blending at this chunk (mutually exclusive with text)",
+        description="Weighted prompt list for spatial blending (mutually exclusive with text)",
+    )
+    prompt_interpolation_method: Literal["linear", "slerp"] | None = Field(
+        default=None,
+        description="Spatial interpolation method override for this chunk",
     )
 
-
-class ChunkTransitionSpec(BaseModel):
-    """Specification for a temporal transition starting at a specific chunk."""
-
-    chunk: int = Field(..., ge=0, description="Chunk index where transition starts")
-    target_prompts: list[PromptItem] = Field(
-        ..., description="Target prompt blend to interpolate to"
+    # Temporal transition
+    transition_target_prompts: list[PromptItem] | None = Field(
+        default=None,
+        description="Target prompt blend to interpolate to",
     )
-    num_steps: int = Field(
-        default=4,
+    transition_num_steps: int | None = Field(
+        default=None,
         ge=0,
         description="Number of generation calls to transition over (0 = instant)",
     )
-    temporal_interpolation_method: Literal["linear", "slerp"] = Field(
-        default="linear",
-        description="Method for temporal interpolation between blends across frames",
+    transition_method: Literal["linear", "slerp"] | None = Field(
+        default=None,
+        description="Method for temporal interpolation between blends",
     )
 
-
-class ChunkRefImagesSpec(BaseModel):
-    """Specification for reference images at a specific chunk."""
-
-    chunk: int = Field(default=0, ge=0, description="Chunk index (default: 0)")
-    images: list[str] = Field(..., description="List of reference image paths")
-
-
-class ChunkVACESpec(BaseModel):
-    """Per-chunk VACE conditioning specification."""
-
-    chunk: int = Field(..., ge=0, description="Chunk index")
-    frames: "EncodedArray | None" = Field(
-        default=None,
-        description="VACE conditioning frames for this chunk ([1, C, T, H, W] float32 [-1, 1])",
+    # Keyframe images (paths)
+    first_frame_image: str | None = Field(
+        default=None, description="Path to first frame reference image"
     )
-    masks: "EncodedArray | None" = Field(
-        default=None,
-        description="VACE masks for this chunk ([1, 1, T, H, W] float32 {0, 1})",
+    last_frame_image: str | None = Field(
+        default=None, description="Path to last frame reference image"
     )
-    context_scale: float | None = Field(
-        default=None,
-        description="VACE context scale override for this chunk. If None, uses global vace_context_scale.",
+    vace_ref_images: list[str] | None = Field(
+        default=None, description="List of reference image paths for VACE conditioning"
+    )
+
+    # Generation parameters
+    seed: int | None = Field(default=None, description="Random seed override")
+    noise_scale: float | None = Field(default=None, description="Noise scale override")
+    kv_cache_attention_bias: float | None = Field(
+        default=None, description="KV cache attention bias override"
+    )
+    reset_cache: bool = Field(
+        default=False, description="Force cache reset at this chunk"
+    )
+    noise_controller: bool | None = Field(
+        default=None, description="Noise controller override"
+    )
+    manage_cache: bool | None = Field(
+        default=None, description="Cache management override"
+    )
+
+    # LoRA scales: {path: scale}
+    lora_scales: dict[str, float] | None = Field(
+        default=None, description="LoRA scales by path for this chunk"
+    )
+
+    # VACE conditioning (offsets into binary blob)
+    vace_context_scale: float | None = Field(
+        default=None, description="VACE context scale override"
     )
     vace_temporally_locked: bool = Field(
         default=True,
-        description="When True, frames/masks are sliced temporally to match chunk position. When False, used as-is and padded.",
+        description="When True, frames/masks are sliced temporally. When False, used as-is.",
+    )
+    vace_frames_shape: list[int] | None = Field(
+        default=None, description="Shape of VACE frames ([1, C, T, H, W] float32)"
+    )
+    vace_frames_offset: int | None = Field(
+        default=None, description="Byte offset into blob for VACE frames"
+    )
+    vace_masks_shape: list[int] | None = Field(
+        default=None, description="Shape of VACE masks ([1, 1, T, H, W] float32)"
+    )
+    vace_masks_offset: int | None = Field(
+        default=None, description="Byte offset into blob for VACE masks"
     )
 
-
-class EncodedArray(BaseModel):
-    """Base64-encoded numpy array with shape metadata."""
-
-    base64: str = Field(..., description="Base64-encoded numpy array bytes")
-    shape: list[int] = Field(..., description="Array shape for decoding")
+    # Input video for this chunk (offset into binary blob)
+    input_video_shape: list[int] | None = Field(
+        default=None, description="Shape of per-chunk input video [T, H, W, C] uint8"
+    )
+    input_video_offset: int | None = Field(
+        default=None, description="Byte offset into blob for per-chunk input video"
+    )
 
 
 class VideoUploadResponse(BaseModel):
@@ -914,14 +932,6 @@ class GenerateRequest(BaseModel):
         ...,
         description="Text prompt for generation (sent on chunk 0). Can be a simple string or a list of weighted prompts for spatial blending.",
     )
-    chunk_prompts: list[ChunkPromptSpec] | None = Field(
-        default=None,
-        description="Prompt changes at later chunks (sticky behavior). Each entry supports simple text or weighted prompt lists.",
-    )
-    transitions: list[ChunkTransitionSpec] | None = Field(
-        default=None,
-        description="Temporal transitions at specific chunks. Each specifies a target prompt blend and number of interpolation steps.",
-    )
     num_frames: int = Field(
         default=64,
         ge=1,
@@ -940,86 +950,70 @@ class GenerateRequest(BaseModel):
         le=2048,
         description="Output width (defaults to pipeline's native resolution)",
     )
-    seed: int | list[int] = Field(
+
+    # Per-chunk specs (replaces all scattered per-chunk lists)
+    chunk_specs: list[ChunkSpec] | None = Field(
+        default=None,
+        description="Unified per-chunk specifications. Each entry can override prompt, transition, "
+        "keyframes, generation parameters, LoRA scales, and VACE conditioning for a specific chunk.",
+    )
+
+    # Binary blob path (from /generate/upload-data)
+    data_blob_path: str | None = Field(
+        default=None,
+        description="Path to uploaded binary data blob (from /generate/upload-data). "
+        "Contains raw arrays referenced by chunk_specs offsets (VACE frames/masks, input video).",
+    )
+
+    # Global defaults (applied to chunks without per-chunk override)
+    seed: int = Field(
         default=42,
-        description="Random seed. Single int applies to all chunks; list applies per-chunk.",
+        description="Random seed (default for all chunks).",
     )
-    # Video-to-video input (optional) - two mutually exclusive options
-    input_video: EncodedArray | None = Field(
-        default=None,
-        description="Input video frames (THWC, uint8). If provided, enables video-to-video mode. For large videos, use input_path instead.",
-    )
-    input_path: str | None = Field(
-        default=None,
-        description="Path to uploaded video file (from /generate/upload). Alternative to input_video for large files.",
-    )
-    noise_scale: float | list[float] = Field(
+    noise_scale: float = Field(
         default=0.7,
-        description="Noise scale for video-to-video mode. Single float applies to all chunks; list applies per-chunk.",
-    )
-    denoising_steps: list[int] | None = Field(
-        default=None,
-        description="Denoising timesteps (e.g., [1000, 750, 500, 250])",
+        description="Noise scale for video-to-video mode (default for all chunks).",
     )
     manage_cache: bool = Field(
         default=True,
-        description="Enable automatic cache management. Set to False to prevent cache resets when parameters change (e.g., LoRA scales).",
-    )
-    cache_reset_chunks: list[int] | None = Field(
-        default=None,
-        description="List of chunk indices where the KV cache should be forcibly reset (init_cache=True). Chunk 0 always resets.",
+        description="Enable automatic cache management.",
     )
     noise_controller: bool | None = Field(
         default=None,
         description="Enable automatic noise scale adjustment based on motion detection.",
     )
-    kv_cache_attention_bias: float | list[float] | None = Field(
+    kv_cache_attention_bias: float | None = Field(
         default=None,
-        description="Controls reliance on past frames in cache. Lower values mitigate error accumulation. Single float applies to all chunks; list applies per-chunk. Typical values: 0.3-0.7 moderate, 0.1-0.2 strong.",
+        description="Controls reliance on past frames in cache. Lower values mitigate error accumulation.",
     )
     prompt_interpolation_method: Literal["linear", "slerp"] = Field(
         default="linear",
-        description="Spatial interpolation method for blending multiple prompts: linear (weighted average) or slerp (spherical).",
+        description="Spatial interpolation method for blending multiple prompts.",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        description="VACE context scale (default for all chunks).",
     )
     vace_use_input_video: bool | None = Field(
         default=None,
-        description="When enabled in video-to-video mode, input video is used for VACE conditioning instead of latent initialization.",
+        description="When enabled in video-to-video mode, input video is used for VACE conditioning.",
     )
-    # Per-chunk parameters
-    lora_scales: dict[str, float | list[float]] | None = Field(
+    denoising_steps: list[int] | None = Field(
         default=None,
-        description="LoRA scales by path. Single float applies to all chunks; list applies per-chunk. Example: {'path/to/lora.pt': 0.8} or {'path/to/lora.pt': [0.5, 0.7, 0.9]}",
+        description="Denoising timesteps (e.g., [1000, 750, 500, 250])",
     )
-    vace_context_scale: float | list[float] = Field(
-        default=1.0,
-        description="VACE context scale. Single float applies to all chunks; list applies per-chunk.",
-    )
-    # Keyframe specifications (chunk, image) pairs
-    first_frames: list[ChunkFrameSpec] | None = Field(
+    lora_scales: dict[str, float] | None = Field(
         default=None,
-        description="First frame anchors. Each specifies a chunk index and image path to use as that chunk's first frame.",
+        description="Global LoRA scales by path (default for all chunks).",
     )
-    last_frames: list[ChunkFrameSpec] | None = Field(
+
+    # Video-to-video input (file-based upload)
+    input_path: str | None = Field(
         default=None,
-        description="Last frame anchors. Each specifies a chunk index and image path to use as that chunk's last frame.",
+        description="Path to uploaded video file (from /generate/upload).",
     )
-    vace_ref_images: list[ChunkRefImagesSpec] | None = Field(
-        default=None,
-        description="Reference images for VACE conditioning. Each specifies a chunk index and list of image paths.",
-    )
-    # VACE conditioning frames/masks (for depth guidance, inpainting, etc.)
-    vace_frames: EncodedArray | None = Field(
-        default=None,
-        description="VACE conditioning frames ([1, C, T, H, W] float32 [-1, 1]). Used for depth guidance, structural control, etc.",
-    )
-    vace_masks: EncodedArray | None = Field(
-        default=None,
-        description="VACE masks ([1, 1, T, H, W] float32 {0, 1}). Used for inpainting (1 = regenerate, 0 = keep).",
-    )
-    vace_chunk_specs: list[ChunkVACESpec] | None = Field(
-        default=None,
-        description="Per-chunk VACE conditioning. Each specifies frames/masks for a specific chunk. Overrides global vace_frames/vace_masks for that chunk.",
-    )
+
+    # Processors
     pre_processor_id: str | None = Field(
         default=None,
         description="Pipeline ID for pre-processing each chunk before the main pipeline.",
@@ -1028,6 +1022,15 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Pipeline ID for post-processing each chunk after the main pipeline.",
     )
+
+
+class DataUploadResponse(BaseModel):
+    """Response after uploading binary data blob for generate request."""
+
+    data_blob_path: str = Field(
+        ..., description="Path to uploaded data blob file for generate request"
+    )
+    size_bytes: int = Field(..., description="Size of the uploaded blob in bytes")
 
 
 class GenerateResponse(BaseModel):

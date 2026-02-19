@@ -5,7 +5,6 @@ Usage:
     python test_generate_endpoint.py --list
 """
 
-import base64
 import json
 import sys
 import time
@@ -92,33 +91,87 @@ TESTS = {
 # =============================================================================
 
 
-def encode_array(arr: np.ndarray) -> dict:
-    """Encode numpy array as EncodedArray dict."""
-    return {
-        "base64": base64.b64encode(arr.tobytes()).decode("utf-8"),
-        "shape": list(arr.shape),
-    }
-
-
-def load_video_for_v2v(path: str, height: int, width: int) -> dict:
-    """Load video as [T, H, W, C] uint8 for video-to-video mode."""
+def upload_video_for_v2v(path: str, height: int, width: int) -> str:
+    """Load and upload video for video-to-video mode. Returns input_path."""
     tensor = load_video(path, resize_hw=(height, width), normalize=False)
     arr = tensor.permute(1, 2, 3, 0).numpy().astype(np.uint8)
-    return encode_array(arr)
+    num_frames, h, w, c = arr.shape
+
+    response = requests.post(
+        f"{SERVER_URL}/api/v1/generate/upload",
+        data=arr.tobytes(),
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Video-Frames": str(num_frames),
+            "X-Video-Height": str(h),
+            "X-Video-Width": str(w),
+            "X-Video-Channels": str(c),
+        },
+        timeout=300,
+    )
+    response.raise_for_status()
+    return response.json()["input_path"]
 
 
-def load_video_for_vace(path: str, height: int, width: int) -> dict:
-    """Load video as [1, C, T, H, W] float32 for VACE conditioning."""
-    tensor = load_video(path, resize_hw=(height, width))
-    arr = tensor.unsqueeze(0).numpy().astype(np.float32)
-    return encode_array(arr)
+def upload_vace_data(
+    vace_frames_path: str | None,
+    vace_masks_path: str | None,
+    height: int,
+    width: int,
+    num_frames: int,
+    chunk_size: int,
+    vace_context_scale: float = 1.0,
+) -> tuple[str, list[dict]]:
+    """Load VACE frames/masks, pack into blob, upload, return (data_blob_path, chunk_specs)."""
+    blob = bytearray()
+    num_chunks = (num_frames + chunk_size - 1) // chunk_size
+    chunk_specs = []
 
+    # Load tensors
+    vace_frames_tensor = None
+    vace_masks_tensor = None
+    if vace_frames_path:
+        vace_frames_tensor = load_video(vace_frames_path, resize_hw=(height, width))
+        vace_frames_tensor = vace_frames_tensor.unsqueeze(0).numpy().astype(np.float32)
+    if vace_masks_path:
+        masks_tensor = load_video(vace_masks_path, resize_hw=(height, width))
+        vace_masks_tensor = (masks_tensor[0:1].unsqueeze(0).numpy() > 0.0).astype(
+            np.float32
+        )
 
-def load_mask_for_vace(path: str, height: int, width: int) -> dict:
-    """Load video as [1, 1, T, H, W] binary mask for VACE inpainting."""
-    tensor = load_video(path, resize_hw=(height, width))
-    arr = (tensor[0:1].unsqueeze(0).numpy() > 0.0).astype(np.float32)
-    return encode_array(arr)
+    for chunk_idx in range(num_chunks):
+        spec = {"chunk": chunk_idx, "vace_temporally_locked": True}
+        start = chunk_idx * chunk_size
+        end = start + chunk_size
+
+        if vace_frames_tensor is not None:
+            sliced = vace_frames_tensor[:, :, start:end, :, :]
+            spec["vace_frames_offset"] = len(blob)
+            spec["vace_frames_shape"] = list(sliced.shape)
+            blob.extend(sliced.tobytes())
+
+        if vace_masks_tensor is not None:
+            sliced_masks = vace_masks_tensor[:, :, start:end, :, :]
+            spec["vace_masks_offset"] = len(blob)
+            spec["vace_masks_shape"] = list(sliced_masks.shape)
+            blob.extend(sliced_masks.tobytes())
+
+        if vace_context_scale != 1.0:
+            spec["vace_context_scale"] = vace_context_scale
+
+        chunk_specs.append(spec)
+
+    # Upload blob
+    response = requests.post(
+        f"{SERVER_URL}/api/v1/generate/upload-data",
+        data=bytes(blob),
+        headers={"Content-Type": "application/octet-stream"},
+        timeout=300,
+    )
+    response.raise_for_status()
+    data_blob_path = response.json()["data_blob_path"]
+
+    return data_blob_path, chunk_specs
 
 
 def parse_sse_events(response):
@@ -158,6 +211,30 @@ def wait_for_pipeline(timeout: int = 300):
     raise TimeoutError(f"Pipeline did not load within {timeout}s")
 
 
+def download_video(output_path: str) -> np.ndarray:
+    """Download generated video from server."""
+    response = requests.get(
+        f"{SERVER_URL}/api/v1/generate/download",
+        params={"path": output_path},
+        timeout=300,
+    )
+    response.raise_for_status()
+
+    num_frames = int(response.headers.get("X-Video-Frames", 0))
+    height = int(response.headers.get("X-Video-Height", 0))
+    width = int(response.headers.get("X-Video-Width", 0))
+    channels = int(response.headers.get("X-Video-Channels", 3))
+
+    # Skip header (ndim + shape)
+    content = response.content
+    header_size = 4 + 4 * 4
+    video_bytes = content[header_size:]
+
+    return np.frombuffer(video_bytes, dtype=np.uint8).reshape(
+        (num_frames, height, width, channels)
+    )
+
+
 # =============================================================================
 # Test Runner
 # =============================================================================
@@ -189,8 +266,8 @@ def run_test(name: str):
             )
         ]
         if "lora_ramp" in cfg:
-            lora_scales = {cfg["lora"]: cfg["lora_ramp"]}
-            print(f"LoRA ramp: {cfg['lora_ramp']}")
+            lora_scales = cfg["lora_ramp"]
+            print(f"LoRA ramp: {lora_scales}")
 
     # Load pipeline
     print(f"Loading pipeline '{pipeline_id}' at {width}x{height}...")
@@ -205,37 +282,65 @@ def run_test(name: str):
     load_time = wait_for_pipeline()
     print(f"Pipeline loaded in {load_time:.1f}s")
 
-    # Load input video if specified
-    input_video = None
+    # Build request kwargs
+    request_kwargs = {
+        "pipeline_id": pipeline_id,
+        "prompt": cfg["prompt"],
+        "num_frames": cfg["num_frames"],
+        "noise_scale": cfg.get("noise_scale", 0.7),
+        "vace_context_scale": cfg.get("vace_context_scale", 1.0),
+        "manage_cache": cfg.get("manage_cache", True),
+    }
+
+    # Upload input video if specified
     if "input_video" in cfg:
-        input_video = load_video_for_v2v(cfg["input_video"], height, width)
-        print(f"Input video: {input_video['shape']}")
+        input_path = upload_video_for_v2v(cfg["input_video"], height, width)
+        request_kwargs["input_path"] = input_path
+        print(f"Input video uploaded: {input_path}")
 
-    # Load VACE frames if specified
-    vace_frames = None
-    if "vace_frames" in cfg:
-        vace_frames = load_video_for_vace(cfg["vace_frames"], height, width)
-        print(f"VACE frames: {vace_frames['shape']}")
+    # Build chunk_specs for LoRA ramp
+    chunk_specs = []
+    if lora_scales and "lora" in cfg:
+        for i, scale in enumerate(lora_scales):
+            chunk_specs.append(
+                {
+                    "chunk": i,
+                    "lora_scales": {cfg["lora"]: scale},
+                }
+            )
 
-    # Load VACE masks if specified
-    vace_masks = None
-    if "vace_masks" in cfg:
-        vace_masks = load_mask_for_vace(cfg["vace_masks"], height, width)
-        print(f"VACE masks: {vace_masks['shape']}")
+    # Handle VACE data
+    if "vace_frames" in cfg or "vace_masks" in cfg:
+        # Assume chunk_size=12 (default for longlive)
+        chunk_size = 12
+        data_blob_path, vace_specs = upload_vace_data(
+            vace_frames_path=cfg.get("vace_frames"),
+            vace_masks_path=cfg.get("vace_masks"),
+            height=height,
+            width=width,
+            num_frames=cfg["num_frames"],
+            chunk_size=chunk_size,
+            vace_context_scale=cfg.get("vace_context_scale", 1.0),
+        )
+        request_kwargs["data_blob_path"] = data_blob_path
+        # Merge VACE specs into chunk_specs
+        existing_chunks = {s["chunk"] for s in chunk_specs}
+        for vs in vace_specs:
+            if vs["chunk"] in existing_chunks:
+                # Merge into existing spec
+                for cs in chunk_specs:
+                    if cs["chunk"] == vs["chunk"]:
+                        cs.update(vs)
+                        break
+            else:
+                chunk_specs.append(vs)
+        print(f"VACE data uploaded: {data_blob_path}")
 
-    # Build and send request
-    gen_request = GenerateRequest(
-        pipeline_id=pipeline_id,
-        prompt=cfg["prompt"],
-        num_frames=cfg["num_frames"],
-        input_video=input_video,
-        noise_scale=cfg.get("noise_scale", 0.7),
-        vace_frames=vace_frames,
-        vace_masks=vace_masks,
-        vace_context_scale=cfg.get("vace_context_scale", 1.0),
-        lora_scales=lora_scales,
-        manage_cache=cfg.get("manage_cache", True),
-    )
+    if chunk_specs:
+        chunk_specs.sort(key=lambda s: s["chunk"])
+        request_kwargs["chunk_specs"] = chunk_specs
+
+    gen_request = GenerateRequest(**request_kwargs)
 
     print(f"Generating {cfg['num_frames']} frames...")
     start = time.time()
@@ -262,13 +367,15 @@ def run_test(name: str):
     if result is None:
         raise RuntimeError("No complete event received")
 
-    # Decode and save
-    video = np.frombuffer(
-        base64.b64decode(result["video_base64"]), dtype=np.float32
-    ).reshape(result["video_shape"])
+    # Download and save
+    if "output_path" in result:
+        video = download_video(result["output_path"])
+        video_float = video.astype(np.float32) / 255.0
+    else:
+        raise RuntimeError("No output_path in result")
 
     output_path = f"test_{name}.mp4"
-    export_to_video(video, output_path, fps=16)
+    export_to_video(video_float, output_path, fps=16)
 
     print(f"\nComplete in {time.time() - start:.1f}s")
     print(f"Output: {output_path} ({result['video_shape']})")

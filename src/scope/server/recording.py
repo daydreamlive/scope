@@ -19,6 +19,7 @@ TEMP_FILE_PREFIXES = {
     "download": "scope_download_",
     "generate_input": "scope_gen_input_",
     "generate_output": "scope_gen_output_",
+    "generate_data": "scope_gen_data_",
 }
 
 # Environment variables
@@ -441,6 +442,7 @@ def cleanup_recording_files():
         f"{TEMP_FILE_PREFIXES['download']}*.mp4",
         f"{TEMP_FILE_PREFIXES['generate_input']}*.bin",
         f"{TEMP_FILE_PREFIXES['generate_output']}*.bin",
+        f"{TEMP_FILE_PREFIXES['generate_data']}*.bin",
     ]
 
     deleted_count = 0
