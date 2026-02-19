@@ -497,8 +497,14 @@ class CausalWanSelfAttention(nn.Module):
         if (
             kv_cache is not None
             and self.dummy_forcing_config is not None
-            and kv_cache.get("_ar_step") == self.dummy_forcing_config.ar_start
             and not kv_cache.get("dummy_forcing_active", False)
+            and (
+                kv_cache.get("_ar_step", 0) == self.dummy_forcing_config.ar_start
+                or (
+                    kv_cache.get("_ar_step", 0) > self.dummy_forcing_config.ar_start
+                    and "frame_attn_score" not in kv_cache
+                )
+            )
         ):
             from .dummyforcing import online_head_classification
 
