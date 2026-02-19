@@ -145,15 +145,16 @@ class CausalWanSelfAttention(nn.Module):
         else:
             k1 = v1 = k2 = v2 = None
 
-        HW = frame_seqlen
-        ctx_len = self.dummy_forcing_config.local_context_length
-        update_info = {"action": "dummy_forcing_update"}
-        if k1 is not None:
-            update_info["sink_k_update"] = k1[:, -HW:, len(headgroup_first) :].clone()
-            update_info["sink_v_update"] = v1[:, -HW:, len(headgroup_first) :].clone()
-        if k2 is not None:
-            update_info["local_k_update"] = k2[:, -3 * HW * ctx_len :].clone()
-            update_info["local_v_update"] = v2[:, -3 * HW * ctx_len :].clone()
+        if kv_cache.get("_is_last_step", False):
+            HW = frame_seqlen
+            ctx_len = self.dummy_forcing_config.local_context_length
+            n_sink = len(headgroup_first)
+            if k1 is not None:
+                kv_cache["sink_k"][:, :, n_sink:] = k1[:, -HW:, n_sink:]
+                kv_cache["sink_v"][:, :, n_sink:] = v1[:, -HW:, n_sink:]
+            if k2 is not None:
+                kv_cache["local_k"] = k2[:, -3 * HW * ctx_len :]
+                kv_cache["local_v"] = v2[:, -3 * HW * ctx_len :]
 
         x = x.flatten(2)
         x = self.o(x)
@@ -167,6 +168,7 @@ class CausalWanSelfAttention(nn.Module):
         else:
             local_end_index = current_end
 
+        update_info = {"action": "df_indices_only"}
         return x, (current_end, local_end_index, update_info)
 
     def forward(
@@ -498,6 +500,7 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache is not None
             and self.dummy_forcing_config is not None
             and not kv_cache.get("dummy_forcing_active", False)
+            and kv_cache.get("_is_last_step", False)
             and (
                 kv_cache.get("_ar_step", 0) == self.dummy_forcing_config.ar_start
                 or (
@@ -1143,19 +1146,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         cache["k"][:, write_start_index:write_end_index] = new_k
                         cache["v"][:, write_start_index:write_end_index] = new_v
 
-                elif update_info["action"] == "dummy_forcing_update":
-                    if "sink_k_update" in update_info:
-                        n_sink_heads = len(cache["headgroup_first"])
-                        cache["sink_k"][:, :, n_sink_heads:] = update_info[
-                            "sink_k_update"
-                        ]
-                        cache["sink_v"][:, :, n_sink_heads:] = update_info[
-                            "sink_v_update"
-                        ]
-                    if "local_k_update" in update_info:
-                        cache["local_k"] = update_info["local_k_update"]
-                        cache["local_v"] = update_info["local_v_update"]
-
             # Update indices: do not roll back pointers during recomputation
             is_recompute = (
                 False if update_info is None else update_info.get("is_recompute", False)
@@ -1279,11 +1269,14 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             return custom_forward
 
         df_cfg = self.dummy_forcing_config
+        is_last_step = False
         if df_cfg is not None and kv_cache is not None:
             frame_seqlen = (grid_sizes[0, 1] * grid_sizes[0, 2]).item()
             ar_step = current_start // (frame_seqlen * 3)
+            is_last_step = t[0, 0].item() == df_cfg.last_timestep
             for blk_cache in kv_cache:
                 blk_cache["_ar_step"] = ar_step
+                blk_cache["_is_last_step"] = is_last_step
 
         cache_update_info = None
         cache_update_infos = []
@@ -1331,7 +1324,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if (
             df_cfg is not None
             and kv_cache is not None
-            and ar_step > df_cfg.ar_start
+            and is_last_step
+            and ar_step >= df_cfg.ar_start
             and not kv_cache[0].get("dummy_forcing_active", False)
             and "frame_attn_score" in kv_cache[0]
         ):

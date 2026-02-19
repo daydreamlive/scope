@@ -12,6 +12,7 @@ class DummyForcingConfig:
     num_dummy: int
     ar_start: int
     local_context_length: int
+    last_timestep: int = 250
 
 
 def online_head_classification(

@@ -467,6 +467,16 @@ class CausalVaceWanModel(nn.Module):
 
             return custom_forward
 
+        df_cfg = getattr(self.causal_wan_model, "dummy_forcing_config", None)
+        is_last_step = False
+        if df_cfg is not None and kv_cache is not None:
+            frame_seqlen = (grid_sizes[0, 1] * grid_sizes[0, 2]).item()
+            ar_step = current_start // (frame_seqlen * 3)
+            is_last_step = t[0, 0].item() == df_cfg.last_timestep
+            for blk_cache in kv_cache:
+                blk_cache["_ar_step"] = ar_step
+                blk_cache["_is_last_step"] = is_last_step
+
         # Process through blocks
         cache_update_infos = []
         for block_index, block in enumerate(self.blocks):
@@ -507,6 +517,25 @@ class CausalVaceWanModel(nn.Module):
         if kv_cache is not None and cache_update_infos:
             self.causal_wan_model._apply_cache_updates(
                 kv_cache, cache_update_infos, **block_kwargs
+            )
+
+        if (
+            df_cfg is not None
+            and kv_cache is not None
+            and is_last_step
+            and ar_step >= df_cfg.ar_start
+            and not kv_cache[0].get("dummy_forcing_active", False)
+            and "frame_attn_score" in kv_cache[0]
+        ):
+            from scope.core.pipelines.longlive.modules.dummyforcing import (
+                heterogeneous_memory_allocation,
+            )
+
+            heterogeneous_memory_allocation(
+                kv_cache,
+                df_cfg.num_dummy,
+                frame_seqlen,
+                df_cfg.local_context_length,
             )
 
         x = self.causal_wan_model.head(

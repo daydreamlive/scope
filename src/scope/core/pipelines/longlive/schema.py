@@ -129,7 +129,7 @@ class LongLiveConfig(BasePipelineConfig):
         default=False,
         description="Enable Dummy Forcing KV cache compression for faster inference",
         json_schema_extra=ui_field_config(
-            order=9, component="dummy_forcing", is_load_param=True
+            order=9, is_load_param=True, label="Dummy Forcing"
         ),
     )
 

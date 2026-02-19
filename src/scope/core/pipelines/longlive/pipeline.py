@@ -150,6 +150,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
                 num_dummy=num_dummy,
                 ar_start=AR_START,
                 local_context_length=LOCAL_CONTEXT_LENGTH,
+                last_timestep=DEFAULT_DENOISING_STEP_LIST[-1],
             )
             model.set_dummy_forcing_config(df_config)
             logger.info(

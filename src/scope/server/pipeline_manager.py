@@ -814,6 +814,8 @@ class PipelineManager:
             quantization = None
             if load_params:
                 quantization = load_params.get("quantization", None)
+                if load_params.get("dummy_forcing_enabled", False):
+                    config["dummy_forcing_enabled"] = True
 
             pipeline = LongLivePipeline(
                 config,
