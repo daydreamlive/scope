@@ -100,7 +100,9 @@ class CausalWanSelfAttention(nn.Module):
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.dummy_forcing_config = None
 
-    def _forward_dummy_forcing(self, roped_query, roped_key, v, kv_cache, frame_seqlen):
+    def _forward_dummy_forcing(
+        self, roped_query, roped_key, v, kv_cache, frame_seqlen, current_start
+    ):
         from .extract_heads import extract_heads
 
         headgroup_first = kv_cache["headgroup_first"]
@@ -155,8 +157,16 @@ class CausalWanSelfAttention(nn.Module):
 
         x = x.flatten(2)
         x = self.o(x)
-        current_end = kv_cache.get("global_end_index", torch.tensor([0])).item()
-        local_end_index = kv_cache.get("local_end_index", torch.tensor([0])).item()
+
+        num_new_tokens = roped_query.shape[1]
+        current_end = current_start + num_new_tokens
+        kv_cache_size = kv_cache["k"].shape[1]
+        if current_end > kv_cache_size:
+            local_start = current_start % kv_cache_size if current_start > 0 else 0
+            local_end_index = local_start + num_new_tokens
+        else:
+            local_end_index = current_end
+
         return x, (current_end, local_end_index, update_info)
 
     def forward(
@@ -319,7 +329,7 @@ class CausalWanSelfAttention(nn.Module):
 
             if kv_cache.get("dummy_forcing_active", False):
                 return self._forward_dummy_forcing(
-                    roped_query, roped_key, v, kv_cache, frame_seqlen
+                    roped_query, roped_key, v, kv_cache, frame_seqlen, current_start
                 )
 
             current_end = current_start + roped_query.shape[1]
