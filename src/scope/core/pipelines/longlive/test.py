@@ -106,6 +106,8 @@ def main():
 
     if args.dummy_forcing:
         print("Dummy Forcing: ENABLED")
+        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+        logging.getLogger("scope").setLevel(logging.INFO)
 
     device = torch.device("cuda")
     pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)

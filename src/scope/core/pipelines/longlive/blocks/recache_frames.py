@@ -1,5 +1,9 @@
+import logging
+
 import torch
 from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
+
+logger = logging.getLogger(__name__)
 from diffusers.modular_pipelines.modular_pipeline_utils import (
     ComponentSpec,
     ConfigSpec,
@@ -183,6 +187,9 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             )
         )
 
+        df_was_active = any(
+            c.get("dummy_forcing_active", False) for c in block_state.kv_cache
+        )
         for blk_cache in block_state.kv_cache:
             blk_cache.pop("frame_attn_score", None)
             if blk_cache.get("dummy_forcing_active", False):
@@ -194,6 +201,9 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 blk_cache.pop("headgroup_first", None)
                 blk_cache.pop("headgroup_mid", None)
                 blk_cache.pop("headgroup_last", None)
+
+        if df_was_active:
+            logger.info("[DummyForcing] Deactivated for recache, will reclassify")
 
         context_timestep = (
             torch.ones(

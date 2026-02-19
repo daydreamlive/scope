@@ -1,7 +1,10 @@
+import logging
 from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -9,7 +12,6 @@ class DummyForcingConfig:
     num_dummy: int
     ar_start: int
     local_context_length: int
-    denoise_start: int = 0
 
 
 def online_head_classification(
@@ -132,3 +134,16 @@ def heterogeneous_memory_allocation(
         cur_cache["headgroup_mid"] = group_mid
         cur_cache["headgroup_last"] = group_last
         cur_cache["dummy_forcing_active"] = True
+
+    num_layers = len(kv_cache)
+    total_heads = num_layers * len(global_frame_attn_score[0])
+    n_a = sum(len(global_group_first[i]) for i in range(num_layers))
+    n_b = sum(len(global_group_mid[i]) for i in range(num_layers))
+    n_c = sum(len(global_group_last[i]) for i in range(num_layers))
+    logger.info(
+        "[DummyForcing] Activated: sink=%d neighbor=%d dummy=%d (of %d total heads)",
+        n_a,
+        n_b,
+        n_c,
+        total_heads,
+    )
