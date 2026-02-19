@@ -469,6 +469,10 @@ class PipelineProcessor:
 
                 transition = call_params.get("transition")
                 if not transition_active or transition is None:
+                    # Update prompts to target_prompts so subsequent frames don't
+                    # snap back to the pre-transition prompt
+                    if transition and "target_prompts" in transition:
+                        self.parameters["prompts"] = transition["target_prompts"]
                     self.parameters.pop("transition", None)
 
             num_frames = output.shape[0]
