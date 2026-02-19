@@ -83,7 +83,12 @@ export function Header({
   useEffect(() => {
     if (openSettingsTab) {
       setInitialTab(
-        openSettingsTab as "general" | "account" | "api-keys" | "plugins" | "loras"
+        openSettingsTab as
+          | "general"
+          | "account"
+          | "api-keys"
+          | "plugins"
+          | "loras"
       );
       setSettingsOpen(true);
       onSettingsTabOpened?.();

@@ -67,7 +67,11 @@ export function SettingsDialog({
   cloudDisabled,
 }: SettingsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
-  const { loraFiles, isLoading: isLoadingLoRAs, refresh: refreshLoRAs } = useLoRAsContext();
+  const {
+    loraFiles,
+    isLoading: isLoadingLoRAs,
+    refresh: refreshLoRAs,
+  } = useLoRAsContext();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
   );

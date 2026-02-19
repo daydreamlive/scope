@@ -842,6 +842,9 @@ class LoRAInstallResponse(BaseModel):
     file: LoRAFileInfo
 
 
+ALLOWED_LORA_HOSTS = {"civitai.com", "huggingface.co"}
+
+
 @app.post("/api/v1/loras", response_model=LoRAInstallResponse)
 @cloud_proxy(timeout=300.0)
 async def install_lora_file(
@@ -853,18 +856,77 @@ async def install_lora_file(
 
     When cloud mode is active, the install happens on the cloud machine.
     """
+    import re
     from urllib.parse import unquote, urlparse
+
+    import httpx
 
     from .download_models import http_get
 
     try:
+        # Validate hostname is from allowed sources
+        parsed = urlparse(request.url)
+        hostname = parsed.hostname or ""
+        # Allow the domain itself or any subdomain (e.g., cdn.civitai.com)
+        is_allowed = any(
+            hostname == allowed or hostname.endswith(f".{allowed}")
+            for allowed in ALLOWED_LORA_HOSTS
+        )
+        if not is_allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"URL must be from {' or '.join(sorted(ALLOWED_LORA_HOSTS))}",
+            )
+
+        # CivitAI requires a token for programmatic downloads
+        is_civitai = hostname == "civitai.com" or hostname.endswith(".civitai.com")
+        if is_civitai:
+            from urllib.parse import parse_qs
+
+            query_params = parse_qs(parsed.query)
+            if "token" not in query_params:
+                raise HTTPException(
+                    status_code=400,
+                    detail="CivitAI requires an API token for programmatic downloads. "
+                    "Add your token to the URL: &token=YOUR_TOKEN. "
+                    "Get your API key at https://civitai.com/user/account",
+                )
+
         # Determine filename from URL if not provided
         filename = request.filename
         if not filename:
-            parsed = urlparse(request.url)
             filename = unquote(parsed.path.split("/")[-1])
+        # If still no filename (or it doesn't look like a file), try Content-Disposition
+        if not filename or "." not in filename:
+            # Use streaming GET instead of HEAD (some servers return 403 for HEAD)
+            with httpx.Client(follow_redirects=True, timeout=10.0) as client:
+                with client.stream("GET", request.url) as response:
+                    if response.status_code == 401 or response.status_code == 403:
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail="Access denied. Check that the URL is correct and includes any required authentication.",
+                        )
+                    if response.status_code == 404:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="File not found. Check that the URL is correct.",
+                        )
+                    if response.status_code >= 400:
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail=f"Failed to fetch URL: HTTP {response.status_code}",
+                        )
+                    content_disp = response.headers.get("content-disposition", "")
+                    # Parse filename from Content-Disposition header
+                    # e.g., 'attachment; filename="model.safetensors"'
+                    match = re.search(
+                        r'filename[*]?=["\']?([^"\';]+)["\']?', content_disp
+                    )
+                    if match:
+                        filename = unquote(match.group(1).strip())
+                    # Don't read the body - just close the connection
 
-        if not filename:
+        if not filename or "." not in filename:
             raise HTTPException(
                 status_code=400,
                 detail="Could not determine filename from URL. Please provide a filename.",
