@@ -250,7 +250,7 @@ function ProcessorListSection({
         );
       })}
 
-      {unselected.length > 0 && (
+      {unselected.length > 0 ? (
         <Select value="" onValueChange={add} disabled={disabled}>
           <SelectTrigger className="w-full h-7">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -264,6 +264,15 @@ function ProcessorListSection({
                 {pid}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <Select value="none" disabled>
+          <SelectTrigger className="w-full h-7">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">None</SelectItem>
           </SelectContent>
         </Select>
       )}
