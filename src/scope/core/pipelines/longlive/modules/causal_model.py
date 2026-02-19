@@ -100,46 +100,58 @@ class CausalWanSelfAttention(nn.Module):
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.dummy_forcing_config = None
 
-    def _forward_dummy_forcing(
-        self, roped_query, roped_key, v, kv_cache, frame_seqlen, update_cache
-    ):
+    def _forward_dummy_forcing(self, roped_query, roped_key, v, kv_cache, frame_seqlen):
         from .extract_heads import extract_heads
 
         headgroup_first = kv_cache["headgroup_first"]
         headgroup_mid = kv_cache["headgroup_mid"]
         headgroup_last = kv_cache["headgroup_last"]
-
-        q1, k1, v1, q2, k2, v2 = extract_heads(
-            roped_query,
-            roped_key,
-            v,
-            headgroup_mid,
-            headgroup_first + headgroup_last,
-        )
-
-        k1 = torch.cat([kv_cache["sink_k"], k1], dim=1).contiguous()
-        v1 = torch.cat([kv_cache["sink_v"], v1], dim=1).contiguous()
-        k2 = torch.cat([kv_cache["local_k"], k2], dim=1).contiguous()
-        v2 = torch.cat([kv_cache["local_v"], v2], dim=1).contiguous()
-
-        x1 = attention(q1, k1, v1)
-        x2 = attention(q2, k2, v2)
+        headgroup_sink_dummy = headgroup_first + headgroup_last
 
         x = torch.empty_like(roped_query)
-        x[:, :, headgroup_first + headgroup_last, :] = x1
-        x[:, :, headgroup_mid, :] = x2
 
-        update_info = None
-        if update_cache:
-            HW = frame_seqlen
-            ctx_len = self.dummy_forcing_config.local_context_length
-            update_info = {
-                "action": "dummy_forcing_update",
-                "sink_k_update": k1[:, -HW:, len(headgroup_first) :].clone(),
-                "sink_v_update": v1[:, -HW:, len(headgroup_first) :].clone(),
-                "local_k_update": k2[:, -3 * HW * ctx_len :].clone(),
-                "local_v_update": v2[:, -3 * HW * ctx_len :].clone(),
-            }
+        if headgroup_sink_dummy and headgroup_mid:
+            q1, k1, v1, q2, k2, v2 = extract_heads(
+                roped_query, roped_key, v, headgroup_mid, headgroup_sink_dummy
+            )
+            k1 = torch.cat([kv_cache["sink_k"], k1], dim=1).contiguous()
+            v1 = torch.cat([kv_cache["sink_v"], v1], dim=1).contiguous()
+            k2 = torch.cat([kv_cache["local_k"], k2], dim=1).contiguous()
+            v2 = torch.cat([kv_cache["local_v"], v2], dim=1).contiguous()
+            x[:, :, headgroup_sink_dummy, :] = attention(q1, k1, v1)
+            x[:, :, headgroup_mid, :] = attention(q2, k2, v2)
+        elif headgroup_sink_dummy:
+            q1 = roped_query[:, :, headgroup_sink_dummy, :]
+            k1 = torch.cat(
+                [kv_cache["sink_k"], roped_key[:, :, headgroup_sink_dummy, :]], dim=1
+            ).contiguous()
+            v1 = torch.cat(
+                [kv_cache["sink_v"], v[:, :, headgroup_sink_dummy, :]], dim=1
+            ).contiguous()
+            x[:, :, headgroup_sink_dummy, :] = attention(q1, k1, v1)
+            k2 = v2 = None
+        elif headgroup_mid:
+            q2 = roped_query[:, :, headgroup_mid, :]
+            k2 = torch.cat(
+                [kv_cache["local_k"], roped_key[:, :, headgroup_mid, :]], dim=1
+            ).contiguous()
+            v2 = torch.cat(
+                [kv_cache["local_v"], v[:, :, headgroup_mid, :]], dim=1
+            ).contiguous()
+            x[:, :, headgroup_mid, :] = attention(q2, k2, v2)
+            k1 = v1 = None
+        else:
+            k1 = v1 = k2 = v2 = None
+
+        HW = frame_seqlen
+        ctx_len = self.dummy_forcing_config.local_context_length
+        update_info = {"action": "dummy_forcing_update"}
+        if k1 is not None:
+            update_info["sink_k_update"] = k1[:, -HW:, len(headgroup_first) :].clone()
+            update_info["sink_v_update"] = v1[:, -HW:, len(headgroup_first) :].clone()
+        if k2 is not None:
+            update_info["local_k_update"] = k2[:, -3 * HW * ctx_len :].clone()
+            update_info["local_v_update"] = v2[:, -3 * HW * ctx_len :].clone()
 
         x = x.flatten(2)
         x = self.o(x)
@@ -306,9 +318,8 @@ class CausalWanSelfAttention(nn.Module):
             ).type_as(v)
 
             if kv_cache.get("dummy_forcing_active", False):
-                update_cache = kv_cache.get("_is_last_denoise_step", False)
                 return self._forward_dummy_forcing(
-                    roped_query, roped_key, v, kv_cache, frame_seqlen, update_cache
+                    roped_query, roped_key, v, kv_cache, frame_seqlen
                 )
 
             current_end = current_start + roped_query.shape[1]
@@ -476,7 +487,6 @@ class CausalWanSelfAttention(nn.Module):
         if (
             kv_cache is not None
             and self.dummy_forcing_config is not None
-            and kv_cache.get("_is_last_denoise_step", False)
             and kv_cache.get("_ar_step") == self.dummy_forcing_config.ar_start
             and not kv_cache.get("dummy_forcing_active", False)
         ):
@@ -1118,11 +1128,17 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         cache["v"][:, write_start_index:write_end_index] = new_v
 
                 elif update_info["action"] == "dummy_forcing_update":
-                    n_sink_heads = len(cache["headgroup_first"])
-                    cache["sink_k"][:, :, n_sink_heads:] = update_info["sink_k_update"]
-                    cache["sink_v"][:, :, n_sink_heads:] = update_info["sink_v_update"]
-                    cache["local_k"] = update_info["local_k_update"]
-                    cache["local_v"] = update_info["local_v_update"]
+                    if "sink_k_update" in update_info:
+                        n_sink_heads = len(cache["headgroup_first"])
+                        cache["sink_k"][:, :, n_sink_heads:] = update_info[
+                            "sink_k_update"
+                        ]
+                        cache["sink_v"][:, :, n_sink_heads:] = update_info[
+                            "sink_v_update"
+                        ]
+                    if "local_k_update" in update_info:
+                        cache["local_k"] = update_info["local_k_update"]
+                        cache["local_v"] = update_info["local_v_update"]
 
             # Update indices: do not roll back pointers during recomputation
             is_recompute = (
@@ -1250,9 +1266,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if df_cfg is not None and kv_cache is not None:
             frame_seqlen = (grid_sizes[0, 1] * grid_sizes[0, 2]).item()
             ar_step = current_start // (frame_seqlen * 3)
-            is_last_denoise = t[0, 0].item() == 0
             for blk_cache in kv_cache:
-                blk_cache["_is_last_denoise_step"] = is_last_denoise
                 blk_cache["_ar_step"] = ar_step
 
         cache_update_info = None
@@ -1301,9 +1315,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if (
             df_cfg is not None
             and kv_cache is not None
-            and is_last_denoise
-            and ar_step == df_cfg.ar_start
+            and ar_step > df_cfg.ar_start
             and not kv_cache[0].get("dummy_forcing_active", False)
+            and "frame_attn_score" in kv_cache[0]
         ):
             from .dummyforcing import heterogeneous_memory_allocation
 

@@ -184,6 +184,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         )
 
         for blk_cache in block_state.kv_cache:
+            blk_cache.pop("frame_attn_score", None)
             if blk_cache.get("dummy_forcing_active", False):
                 blk_cache.pop("dummy_forcing_active", None)
                 blk_cache.pop("sink_k", None)
@@ -193,7 +194,6 @@ class RecacheFramesBlock(ModularPipelineBlocks):
                 blk_cache.pop("headgroup_first", None)
                 blk_cache.pop("headgroup_mid", None)
                 blk_cache.pop("headgroup_last", None)
-                blk_cache.pop("frame_attn_score", None)
 
         context_timestep = (
             torch.ones(
