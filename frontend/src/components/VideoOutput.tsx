@@ -23,6 +23,8 @@ interface VideoOutputProps {
   videoContainerRef?: React.RefObject<HTMLDivElement | null>;
   /** Video scale mode: 'fit' fills available space, 'native' shows at actual resolution */
   videoScaleMode?: "fit" | "native";
+  /** Expected output aspect ratio (width/height) from pipeline settings, used as fallback before stream reports dimensions */
+  expectedAspectRatio?: number;
 }
 
 export function VideoOutput({
@@ -41,21 +43,62 @@ export function VideoOutput({
   isPointerLocked = false,
   onRequestPointerLock,
   videoContainerRef,
-  videoScaleMode = "fit",
+  videoScaleMode: _videoScaleMode = "fit",
+  expectedAspectRatio,
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
+  const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
 
   // Use external ref if provided, otherwise use internal
   const containerRef = videoContainerRef || internalContainerRef;
 
+  // Set to a local video path to test CSS layout without a WebRTC stream.
+  // e.g. "/assets/test.mp4"  Set to "" to use the normal WebRTC stream.
+  const DEBUG_VIDEO_SRC = "";
+
   useEffect(() => {
-    if (videoRef.current && remoteStream) {
+    if (!videoRef.current) return;
+    if (DEBUG_VIDEO_SRC) {
+      videoRef.current.srcObject = null;
+      videoRef.current.src = DEBUG_VIDEO_SRC;
+    } else if (remoteStream) {
+      videoRef.current.src = "";
       videoRef.current.srcObject = remoteStream;
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteStream]);
+
+  // Track video intrinsic dimensions for correct aspect ratio display.
+  // Call immediately in case dimensions are already known, then listen for changes.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || (!remoteStream && !DEBUG_VIDEO_SRC)) return;
+    const updateAspect = () => {
+      // videoWidth/videoHeight may be 0 for WebRTC streams even when playing;
+      // fall back to the MediaStreamTrack settings which are more reliable.
+      const track = remoteStream?.getVideoTracks()?.[0];
+      const trackSettings = track?.getSettings?.();
+      const w = video.videoWidth || trackSettings?.width || 0;
+      const h = video.videoHeight || trackSettings?.height || 0;
+      console.log(`[VideoOutput] videoWidth=${video.videoWidth} videoHeight=${video.videoHeight} trackW=${trackSettings?.width} trackH=${trackSettings?.height}`);
+      if (w && h) {
+        setVideoAspectRatio(w / h);
+      }
+    };
+    updateAspect(); // catch already-known dimensions (race condition fix)
+    video.addEventListener("resize", updateAspect);
+    video.addEventListener("loadedmetadata", updateAspect);
+    video.addEventListener("playing", updateAspect);
+    return () => {
+      video.removeEventListener("resize", updateAspect);
+      video.removeEventListener("loadedmetadata", updateAspect);
+      video.removeEventListener("playing", updateAspect);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remoteStream]);
 
   // Listen for video playing event to notify parent
@@ -160,22 +203,24 @@ export function VideoOutput({
         <CardTitle className="text-base font-medium">Video Output</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
-        {remoteStream ? (
+        {(remoteStream || DEBUG_VIDEO_SRC) ? (
           <div
             ref={containerRef}
-            className="relative w-full h-full cursor-pointer flex items-center justify-center"
+            className="relative cursor-pointer"
+            style={{
+              aspectRatio: String(videoAspectRatio ?? expectedAspectRatio ?? 1),
+              width: "100%",
+              maxHeight: "100%",
+            }}
             onClick={handleVideoClick}
           >
             <video
               ref={videoRef}
-              className={
-                videoScaleMode === "fit"
-                  ? "w-full h-full object-contain"
-                  : "max-w-full max-h-full object-contain"
-              }
+              className="w-full h-full"
               autoPlay
               muted
               playsInline
+              loop={!!DEBUG_VIDEO_SRC}
             />
             {/* Play/Pause Overlay */}
             {showOverlay && (

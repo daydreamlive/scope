@@ -1556,6 +1556,12 @@ export function StreamPage() {
               videoContainerRef={videoContainerRef}
               // Video scale mode
               videoScaleMode={videoScaleMode}
+              // Expected aspect ratio from pipeline settings (width/height) — used as fallback
+              // before the stream reports its dimensions via videoWidth/videoHeight
+              expectedAspectRatio={(() => {
+                const res = settings.resolution || getDefaults(settings.pipelineId, settings.inputMode);
+                return res.width && res.height ? res.width / res.height : undefined;
+              })()}
             />
           </div>
           {/* Timeline area - compact, always visible */}
