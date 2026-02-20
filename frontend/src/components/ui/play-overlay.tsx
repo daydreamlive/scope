@@ -38,8 +38,17 @@ export function PlayOverlay({
   if (variant === "themed") {
     return (
       <div
+        role="button"
+        tabIndex={onClick ? 0 : -1}
+        aria-label={isPlaying ? "Pause" : "Play"}
         className={`${sizes.circle} rounded-full border-2 border-input bg-background hover:bg-accent transition-colors flex items-center justify-center cursor-pointer shadow-lg ${className}`}
         onClick={onClick}
+        onKeyDown={e => {
+          if (onClick && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            onClick();
+          }
+        }}
       >
         {isPlaying ? (
           <Pause className={`${sizes.icon} text-foreground`} />
@@ -53,8 +62,17 @@ export function PlayOverlay({
   // Default variant - semi-transparent black background with white icons
   return (
     <div
+      role="button"
+      tabIndex={onClick ? 0 : -1}
+      aria-label={isPlaying ? "Pause" : "Play"}
       className={`bg-black/50 rounded-full ${sizes.padding} transition-colors hover:bg-black/60 cursor-pointer ${className}`}
       onClick={onClick}
+      onKeyDown={e => {
+        if (onClick && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
     >
       {isPlaying ? (
         <Pause className={`${sizes.icon} text-white`} />

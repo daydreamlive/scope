@@ -229,7 +229,10 @@ export function PromptInput({
     <div className={`space-y-3 ${className}`}>
       {managedPrompts.map((prompt, index) => {
         return (
-          <div key={index} className="space-y-2">
+          <div
+            key={`prompt-${index}-${managedPrompts.length}`}
+            className="space-y-2"
+          >
             <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
               <PromptField
                 prompt={prompt}
