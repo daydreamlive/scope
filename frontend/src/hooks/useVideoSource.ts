@@ -83,8 +83,23 @@ export function useVideoSource(props?: UseVideoSourceProps) {
             video
               .play()
               .then(() => {
-                // Draw video frame to canvas at original resolution
-                const drawFrame = () => {
+                // Use captureStream(0) for manual frame capture to avoid
+                // GPU stalls from automatic ReadPixels at mismatched rates.
+                // See: https://github.com/daydreamlive/scope/issues/509
+                const stream = canvas.captureStream(0);
+                const videoTrack = stream.getVideoTracks()[0];
+
+                // Draw video frames to canvas at the target FPS rate only,
+                // then manually request a frame capture. This avoids the
+                // "GPU stall due to ReadPixels" warning caused by drawing
+                // at ~60fps via requestAnimationFrame while capturing at a
+                // lower rate.
+                const intervalMs = 1000 / fps;
+                const intervalId = setInterval(() => {
+                  if (video.paused || video.ended) {
+                    clearInterval(intervalId);
+                    return;
+                  }
                   ctx.drawImage(
                     video,
                     0,
@@ -92,14 +107,24 @@ export function useVideoSource(props?: UseVideoSourceProps) {
                     detectedResolution.width,
                     detectedResolution.height
                   );
-                  if (!video.paused && !video.ended) {
-                    requestAnimationFrame(drawFrame);
+                  // Manually request frame capture from the stream
+                  if (
+                    videoTrack &&
+                    "requestFrame" in videoTrack &&
+                    videoTrack.readyState === "live"
+                  ) {
+                    (
+                      videoTrack as MediaStreamTrack & {
+                        requestFrame: () => void;
+                      }
+                    ).requestFrame();
                   }
-                };
-                drawFrame();
+                }, intervalMs);
 
-                // Capture stream from canvas at original resolution
-                const stream = canvas.captureStream(fps);
+                // Clean up interval when track ends
+                videoTrack?.addEventListener("ended", () => {
+                  clearInterval(intervalId);
+                });
 
                 resolve({ stream, resolution: detectedResolution });
               })
