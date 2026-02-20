@@ -19,6 +19,9 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout code
@@ -49,29 +52,45 @@ jobs:
           username: daydreamlive
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set image tag
         id: tag
         run: |
+          DOCKERHUB="daydreamlive/scope"
+          GHCR="ghcr.io/daydreamlive/scope"
+
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # Manual dispatch: use provided version + latest
-            TAGS="daydreamlive/scope:${{ github.event.inputs.version }},daydreamlive/scope:latest"
+            VERSION="${{ github.event.inputs.version }}"
+            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
+            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
             VERSION_TAG="${{ github.ref_name }}"
             VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAGS="daydreamlive/scope:$VERSION,daydreamlive/scope:latest"
+            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
+            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             # Main branch
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="daydreamlive/scope:main,daydreamlive/scope:$SHORT_SHA"
+            TAGS="$DOCKERHUB:main,$DOCKERHUB:$SHORT_SHA"
+            TAGS="$TAGS,$GHCR:main,$GHCR:$SHORT_SHA"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
             # Runpod serverless branch
-            TAGS="daydreamlive/scope:runpod-serverless"
+            TAGS="$DOCKERHUB:runpod-serverless"
+            TAGS="$TAGS,$GHCR:runpod-serverless"
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
             # Pull request: use sanitized branch name + short SHA
             BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            TAGS="daydreamlive/scope:$BRANCH_TAG,daydreamlive/scope:$SHORT_SHA"
+            TAGS="$DOCKERHUB:$BRANCH_TAG,$DOCKERHUB:$SHORT_SHA"
+            TAGS="$TAGS,$GHCR:$BRANCH_TAG,$GHCR:$SHORT_SHA"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
@@ -82,5 +101,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/daydreamlive/scope
+            org.opencontainers.image.description=Daydream Scope
+            org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -729,16 +729,40 @@ export function StreamPage() {
 
   const makePipelineIdsHandler = (kind: PipelineKind) => (ids: string[]) => {
     const k = pipelineSettingsKeys[kind];
-    updateSettings({ [k.ids]: ids, [k.overrides]: {} });
+    // Preserve overrides for processors that remain in the list
+    const currentOverrides =
+      (settings[k.overrides] as
+        | Record<string, Record<string, unknown>>
+        | undefined) ?? {};
+    const kept: Record<string, Record<string, unknown>> = {};
+    for (const id of ids) {
+      if (currentOverrides[id]) {
+        kept[id] = currentOverrides[id];
+      }
+    }
+    updateSettings({ [k.ids]: ids, [k.overrides]: kept });
   };
 
   const makePipelineOverrideHandler =
     (kind: PipelineKind) =>
-    (key: string, value: unknown, isRuntimeParam?: boolean) => {
+    (
+      processorId: string,
+      key: string,
+      value: unknown,
+      isRuntimeParam?: boolean
+    ) => {
       const k = pipelineSettingsKeys[kind];
       const currentOverrides =
-        (settings[k.overrides] as Record<string, unknown> | undefined) ?? {};
-      updateSettings({ [k.overrides]: { ...currentOverrides, [key]: value } });
+        (settings[k.overrides] as
+          | Record<string, Record<string, unknown>>
+          | undefined) ?? {};
+      const processorOverrides = currentOverrides[processorId] ?? {};
+      updateSettings({
+        [k.overrides]: {
+          ...currentOverrides,
+          [processorId]: { ...processorOverrides, [key]: value },
+        },
+      });
       if (isRuntimeParam && isStreaming) {
         sendParameterUpdate({ [key]: value });
       }
@@ -1181,15 +1205,23 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
         }
 
-        // Include pre/postprocessor schema overrides as flat params
+        // Include per-processor schema overrides as flat params
         for (const kind of ["preprocessor", "postprocessor"] as const) {
           const k = pipelineSettingsKeys[kind];
           const ids = settings[k.ids] as string[] | undefined;
           const overrides = settings[k.overrides] as
-            | Record<string, unknown>
+            | Record<string, Record<string, unknown>>
             | undefined;
-          if (ids?.length && overrides && Object.keys(overrides).length > 0) {
-            Object.assign(loadParams, overrides);
+          if (ids?.length && overrides) {
+            for (const id of ids) {
+              const processorOverrides = overrides[id];
+              if (
+                processorOverrides &&
+                Object.keys(processorOverrides).length > 0
+              ) {
+                Object.assign(loadParams, processorOverrides);
+              }
+            }
           }
         }
 
@@ -1706,20 +1738,6 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
-            preprocessorConfigSchema={
-              settings.preprocessorIds?.[0]
-                ? (pipelines?.[settings.preprocessorIds[0]]?.configSchema as
-                    | import("../lib/schemaSettings").ConfigSchemaLike
-                    | undefined)
-                : undefined
-            }
-            postprocessorConfigSchema={
-              settings.postprocessorIds?.[0]
-                ? (pipelines?.[settings.postprocessorIds[0]]?.configSchema as
-                    | import("../lib/schemaSettings").ConfigSchemaLike
-                    | undefined)
-                : undefined
-            }
             preprocessorSchemaFieldOverrides={
               settings.preprocessorSchemaFieldOverrides ?? {}
             }

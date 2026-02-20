@@ -104,6 +104,10 @@ class PipelineProcessor:
         # Cache VACE support check to avoid isinstance on every chunk
         self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
 
+        # Flag to track pending cache initialization after queue flush
+        # Set when reset_cache flushes queues, cleared after successful pipeline call
+        self._pending_cache_init = False
+
         # Throttler for controlling processing rate in chained pipelines
         # Throttling is applied when this pipeline produces frames faster than
         # the next pipeline in the chain can consume them
@@ -361,16 +365,24 @@ class PipelineProcessor:
         reset_cache = self.parameters.pop("reset_cache", None)
         lora_scales = self.parameters.pop("lora_scales", None)
 
-        # Handle reset_cache: clear this processor's cache
+        # Handle reset_cache: clear this processor's queues and mark for cache init
         if reset_cache:
             logger.info(f"Clearing cache for pipeline processor: {self.pipeline_id}")
-            # Clear output queue
+            with self.input_queue_lock:
+                input_queue_ref = self.input_queue
+            if input_queue_ref:
+                while not input_queue_ref.empty():
+                    try:
+                        input_queue_ref.get_nowait()
+                    except queue.Empty:
+                        break
             if self.output_queue:
                 while not self.output_queue.empty():
                     try:
                         self.output_queue.get_nowait()
                     except queue.Empty:
                         break
+            self._pending_cache_init = True
 
         requirements = None
         if hasattr(self.pipeline, "prepare"):
@@ -392,6 +404,9 @@ class PipelineProcessor:
 
             # Check if queue has enough frames before consuming them
             if input_queue_ref.qsize() < current_chunk_size:
+                # Preserve popped one-shot parameters so they are applied once frames arrive
+                if lora_scales is not None:
+                    self.parameters["lora_scales"] = lora_scales
                 # Not enough frames in queue, sleep briefly and try again next iteration
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
@@ -404,10 +419,7 @@ class PipelineProcessor:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
 
-            # Pass reset_cache as init_cache to pipeline
-            call_params["init_cache"] = not self.is_prepared
-            if reset_cache is not None:
-                call_params["init_cache"] = reset_cache
+            call_params["init_cache"] = not self.is_prepared or self._pending_cache_init
 
             # Pass lora_scales only when present
             if lora_scales is not None:
@@ -523,6 +535,7 @@ class PipelineProcessor:
                 raise e
 
         self.is_prepared = True
+        self._pending_cache_init = False
 
     def _track_output_frame(self):
         """Track when a frame is added to the output queue (production rate).
