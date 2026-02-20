@@ -23,6 +23,9 @@ OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
 
 SLEEP_TIME = 0.01
 
+# Sentinel value to signal end of batch input
+_SENTINEL = object()
+
 # FPS calculation constants
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
 MAX_FPS = 60.0  # Maximum FPS cap
@@ -42,6 +45,7 @@ class PipelineProcessor:
         user_id: str | None = None,
         connection_id: str | None = None,
         connection_info: dict | None = None,
+        batch_mode: bool = False,
     ):
         """Initialize a pipeline processor.
 
@@ -60,10 +64,15 @@ class PipelineProcessor:
         self.user_id = user_id
         self.connection_id = connection_id
         self.connection_info = connection_info
+        self.batch_mode = batch_mode
 
         # Each processor creates its own queues
-        self.input_queue = queue.Queue(maxsize=30)
-        self.output_queue = queue.Queue(maxsize=8)
+        if batch_mode:
+            self.input_queue = queue.Queue(maxsize=2)
+            self.output_queue = queue.Queue(maxsize=2)
+        else:
+            self.input_queue = queue.Queue(maxsize=30)
+            self.output_queue = queue.Queue(maxsize=8)
         # Lock to protect input_queue assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
@@ -226,6 +235,10 @@ class PipelineProcessor:
         """Main worker loop that processes frames."""
         logger.info(f"Worker thread started for pipeline: {self.pipeline_id}")
 
+        if self.batch_mode:
+            self._worker_loop_batch()
+            return
+
         while self.running and not self.shutdown_event.is_set():
             try:
                 self.process_chunk()
@@ -266,6 +279,69 @@ class PipelineProcessor:
                     break
 
         logger.info(f"Worker thread stopped for pipeline: {self.pipeline_id}")
+
+    def _worker_loop_batch(self):
+        """Batch-mode worker loop: processes chunk kwargs dicts from queue."""
+        while self.running and not self.shutdown_event.is_set():
+            try:
+                item = self.input_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if item is _SENTINEL:
+                if self.next_processor:
+                    self.next_processor.input_queue.put(_SENTINEL)
+                break
+            try:
+                self.process_chunk_batch(item)
+            except Exception as e:
+                logger.error(
+                    f"Error in batch processing for {self.pipeline_id}: {e}",
+                    exc_info=True,
+                )
+                if not self._is_recoverable(e):
+                    break
+        logger.info(f"Batch worker thread stopped for pipeline: {self.pipeline_id}")
+
+    def process_chunk_batch(self, chunk_kwargs: dict):
+        """Process a single chunk in batch mode.
+
+        Args:
+            chunk_kwargs: Pre-built kwargs dict for the pipeline call.
+        """
+        dtype = torch.bfloat16
+        with torch.amp.autocast("cuda", dtype=dtype):
+            result = self.pipeline(**chunk_kwargs)
+
+        # Forward extra params to downstream processor
+        extra_params = {k: v for k, v in result.items() if k != "video"}
+        if extra_params and self.next_processor is not None:
+            self.next_processor.update_parameters(extra_params)
+
+        if self.next_processor is not None:
+            # Convert video output to list-of-frames format for next pipeline.
+            # Pipeline __call__ expects video as list of [1, H, W, C] uint8 tensors
+            # (same format as real-time path: process_chunk converts to uint8
+            # before putting on output queue, and preprocess_chunk expects [0, 255]).
+            video = result.get("video")
+            if video is not None:
+                video_uint8 = (
+                    (video * 255.0)
+                    .clamp(0, 255)
+                    .to(dtype=torch.uint8)
+                    .contiguous()
+                    .detach()
+                )
+                next_kwargs = dict(chunk_kwargs)
+                next_kwargs["video"] = [f.unsqueeze(0) for f in video_uint8]
+                # Remove keys that are only valid for the original pipeline
+                for key in ("init_cache", "num_frames"):
+                    next_kwargs.pop(key, None)
+                self.output_queue.put(next_kwargs)
+            else:
+                self.output_queue.put(chunk_kwargs)
+        else:
+            # Last processor: put raw result for collection
+            self.output_queue.put(result)
 
     def prepare_chunk(
         self, input_queue_ref: queue.Queue, chunk_size: int
