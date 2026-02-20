@@ -125,7 +125,6 @@ class LongLiveConfig(BasePipelineConfig):
             order=8, component="quantization", is_load_param=True
         ),
     )
-
     modes = {
         "text": ModeDefaults(default=True),
         "video": ModeDefaults(

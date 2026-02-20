@@ -134,6 +134,12 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         else:
             generator = generator.to(device=device, dtype=dtype)
 
+        generator.model = torch.compile(
+            generator.model,
+            backend="inductor",
+            fullgraph=False,
+        )
+
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
             model_name=base_model_name,
