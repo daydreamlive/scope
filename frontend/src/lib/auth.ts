@@ -104,6 +104,12 @@ async function fetchUserProfile(apiKey: string): Promise<UserProfile> {
   const response = await fetch(`${DAYDREAM_API_BASE}/users/profile`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  if (response.status === 401) {
+    // Clear invalid auth data to prevent repeated 401 polling
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    window.dispatchEvent(new CustomEvent("daydream-auth-change"));
+    throw new Error("Authentication expired or invalid");
+  }
   if (!response.ok) {
     throw new Error(`Failed to fetch profile: ${response.status}`);
   }
@@ -182,10 +188,11 @@ export async function saveDaydreamAuth(
 
 /**
  * Refresh user profile in localStorage (for existing auth)
+ * Only makes API call if user has valid stored auth credentials.
  */
 export async function refreshUserProfile(): Promise<void> {
   const authData = getAuthData();
-  if (!authData) return;
+  if (!authData?.apiKey) return;
 
   try {
     const profile = await fetchUserProfile(authData.apiKey);

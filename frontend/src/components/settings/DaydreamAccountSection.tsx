@@ -56,8 +56,11 @@ export function DaydreamAccountSection({
     setShowCloudMode(shouldShowCloudMode());
 
     // If signed in but no display name cached, refresh the profile
+    // Only attempt if we have valid stored auth (not just env var fallback)
     if (authed && !cachedName) {
-      refreshUserProfile();
+      refreshUserProfile().catch(() => {
+        // If refresh fails (e.g. 401), auth state will be cleared automatically
+      });
     }
 
     const handleAuthChange = () => {
