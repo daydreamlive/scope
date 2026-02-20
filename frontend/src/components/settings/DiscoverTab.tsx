@@ -170,12 +170,6 @@ export function DiscoverTab({
                         v{plugin.version}
                       </span>
                     )}
-                    <Badge
-                      variant="secondary"
-                      className="text-[10px] px-1.5 py-0"
-                    >
-                      {plugin.pluginType}
-                    </Badge>
                   </div>
                   {plugin.description && (
                     <p className="text-sm text-muted-foreground line-clamp-2">
