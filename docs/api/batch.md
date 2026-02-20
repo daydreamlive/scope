@@ -1,6 +1,6 @@
-# Generate Endpoint
+# Batch Endpoint
 
-Batch video generation via HTTP. Unlike the WebRTC streaming path (real-time, interactive), the generate endpoint produces a complete video in one request, processing it chunk-by-chunk with SSE progress events.
+Batch video generation via HTTP. Unlike the WebRTC streaming path (real-time, interactive), the batch endpoint produces a complete video in one request, processing it chunk-by-chunk with SSE progress events.
 
 Primary consumer: ComfyUI custom nodes (`comfyui-scope`).
 
@@ -8,29 +8,29 @@ Primary consumer: ComfyUI custom nodes (`comfyui-scope`).
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/v1/generate` | POST | Generate video (SSE stream) |
-| `/api/v1/generate/cancel` | POST | Cancel after current chunk |
-| `/api/v1/generate/upload` | POST | Upload input video for v2v |
-| `/api/v1/generate/upload-data` | POST | Upload binary data blob (VACE, per-chunk video) |
-| `/api/v1/generate/download` | GET | Download output video |
+| `/api/v1/batch` | POST | Generate video (SSE stream) |
+| `/api/v1/batch/cancel` | POST | Cancel after current chunk |
+| `/api/v1/batch/upload` | POST | Upload input video for v2v |
+| `/api/v1/batch/upload-data` | POST | Upload binary data blob (VACE, per-chunk video) |
+| `/api/v1/batch/download` | GET | Download output video |
 
 Only one generation can run at a time (409 if busy).
 
 ## Flow
 
 ```
-1. [optional] POST /generate/upload      → input_path
-2. [optional] POST /generate/upload-data  → data_blob_path
-3. POST /generate (JSON body, references paths from steps 1-2)
+1. [optional] POST /batch/upload      → input_path
+2. [optional] POST /batch/upload-data  → data_blob_path
+3. POST /batch (JSON body, references paths from steps 1-2)
    ← SSE: event: progress  {chunk, total_chunks, frames, latency, fps}
    ← SSE: event: complete  {output_path, video_shape, num_frames, ...}
-4. GET /generate/download?path=<output_path>
+4. GET /batch/download?path=<output_path>
    ← binary video data
 ```
 
 ## Binary Protocol
 
-### Video Upload (`/generate/upload`)
+### Video Upload (`/batch/upload`)
 
 **Request**: Raw uint8 bytes in THWC order (frames × height × width × channels).
 
@@ -47,11 +47,11 @@ Only one generation can run at a time (409 if busy).
 [raw uint8 video bytes]
 ```
 
-### Data Blob Upload (`/generate/upload-data`)
+### Data Blob Upload (`/batch/upload-data`)
 
 **Request**: Raw binary blob containing packed arrays. Max size: 2 GB.
 
-The blob is an opaque byte buffer. `ChunkSpec` entries in the generate request reference regions of this blob by offset:
+The blob is an opaque byte buffer. `ChunkSpec` entries in the batch request reference regions of this blob by offset:
 
 ```json
 {
@@ -65,14 +65,14 @@ The blob is an opaque byte buffer. `ChunkSpec` entries in the generate request r
 
 Arrays are packed as contiguous float32 (VACE frames/masks) or uint8 (input video). The client is responsible for computing offsets when packing the blob.
 
-### Video Download (`/generate/download`)
+### Video Download (`/batch/download`)
 
 **Response**: Same binary format as upload (20-byte header + raw uint8 THWC data).
 
 **Response headers**:
 - `X-Video-Frames`, `X-Video-Height`, `X-Video-Width`, `X-Video-Channels`
 
-## GenerateRequest
+## BatchRequest
 
 ```json
 {
@@ -81,8 +81,8 @@ Arrays are packed as contiguous float32 (VACE frames/masks) or uint8 (input vide
   "num_frames": 48,
   "seed": 42,
   "noise_scale": 0.7,
-  "input_path": "<from /generate/upload>",
-  "data_blob_path": "<from /generate/upload-data>",
+  "input_path": "<from /batch/upload>",
+  "data_blob_path": "<from /batch/upload-data>",
   "chunk_specs": [
     {
       "chunk": 0,

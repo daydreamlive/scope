@@ -1,4 +1,4 @@
-"""Test script for the /api/v1/generate endpoint.
+"""Test script for the /api/v1/batch endpoint.
 
 Usage:
     python test_generate_endpoint.py <test_name>
@@ -98,7 +98,7 @@ def upload_video_for_v2v(path: str, height: int, width: int) -> str:
     num_frames, h, w, c = arr.shape
 
     response = requests.post(
-        f"{SERVER_URL}/api/v1/generate/upload",
+        f"{SERVER_URL}/api/v1/batch/upload",
         data=arr.tobytes(),
         headers={
             "Content-Type": "application/octet-stream",
@@ -163,7 +163,7 @@ def upload_vace_data(
 
     # Upload blob
     response = requests.post(
-        f"{SERVER_URL}/api/v1/generate/upload-data",
+        f"{SERVER_URL}/api/v1/batch/upload-data",
         data=bytes(blob),
         headers={"Content-Type": "application/octet-stream"},
         timeout=300,
@@ -214,7 +214,7 @@ def wait_for_pipeline(timeout: int = 300):
 def download_video(output_path: str) -> np.ndarray:
     """Download generated video from server."""
     response = requests.get(
-        f"{SERVER_URL}/api/v1/generate/download",
+        f"{SERVER_URL}/api/v1/batch/download",
         params={"path": output_path},
         timeout=300,
     )
@@ -346,7 +346,7 @@ def run_test(name: str):
     start = time.time()
 
     with requests.post(
-        f"{SERVER_URL}/api/v1/generate",
+        f"{SERVER_URL}/api/v1/batch",
         json=gen_request.model_dump(exclude_none=True),
         stream=True,
         headers={"Accept": "text/event-stream"},

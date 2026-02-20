@@ -17,25 +17,25 @@ import torch
 _cancel_event = threading.Event()
 
 # Generation lock (single-client: only one generation at a time)
-_generation_lock = threading.Lock()
+_batch_lock = threading.Lock()
 
 # Max data blob upload size (2 GB)
 MAX_DATA_BLOB_BYTES = 2 * 1024 * 1024 * 1024
 
 
-def cancel_generation():
+def cancel_batch():
     """Signal the current generation to stop after the current chunk."""
     _cancel_event.set()
 
 
-def is_generation_cancelled() -> bool:
+def is_batch_cancelled() -> bool:
     """Check if cancellation has been requested."""
     return _cancel_event.is_set()
 
 
-def is_generation_active() -> bool:
+def is_batch_active() -> bool:
     """Check if a generation is currently in progress."""
-    return _generation_lock.locked()
+    return _batch_lock.locked()
 
 
 # Defaults
@@ -113,7 +113,7 @@ class DecodedInputs:
 
 
 @dataclass
-class GenerationState:
+class BatchState:
     """Mutable state accumulated during chunk-by-chunk generation."""
 
     output_file: IO[bytes]
@@ -234,10 +234,10 @@ def decode_inputs(
         blob_path = Path(request.data_blob_path)
         temp_dir = Path(tempfile.gettempdir())
         if not blob_path.is_relative_to(temp_dir) or not blob_path.name.startswith(
-            TEMP_FILE_PREFIXES["generate_data"]
+            TEMP_FILE_PREFIXES["batch_data"]
         ):
             raise ValueError(
-                f"Invalid data_blob_path: must be a temp file with prefix {TEMP_FILE_PREFIXES['generate_data']}"
+                f"Invalid data_blob_path: must be a temp file with prefix {TEMP_FILE_PREFIXES['batch_data']}"
             )
         with open(blob_path, "rb") as f:
             blob = f.read()
@@ -522,7 +522,7 @@ def _log_chunk_info(kwargs: dict, chunk_idx: int, num_chunks: int, logger: "Logg
 # ---------------------------------------------------------------------------
 
 
-def _generate_chunks(
+def _batch_chunks(
     request: "GenerateRequest",
     pipeline,
     pipeline_manager: "PipelineManager",
@@ -532,7 +532,7 @@ def _generate_chunks(
     status_info: dict,
     device: torch.device,
     dtype: torch.dtype,
-    state: GenerationState,
+    state: BatchState,
     logger: "Logger",
 ) -> Iterator[str]:
     """Process chunks through a processor chain, yielding SSE events.
@@ -665,7 +665,7 @@ def _generate_chunks(
 # ---------------------------------------------------------------------------
 
 
-def generate_video_stream(
+def batch_video_stream(
     request: "GenerateRequest",
     pipeline_manager: "PipelineManager",
     status_info: dict,
@@ -676,7 +676,7 @@ def generate_video_stream(
     Writes output to temp file incrementally, returns output_path for download.
     Only one generation can run at a time (single-client).
     """
-    if not _generation_lock.acquire(blocking=False):
+    if not _batch_lock.acquire(blocking=False):
         yield sse_event("error", {"error": "A generation is already in progress"})
         return
 
@@ -702,7 +702,7 @@ def generate_video_stream(
         from .recording import TEMP_FILE_PREFIXES, RecordingManager
 
         output_file_path = RecordingManager._create_temp_file(
-            ".bin", TEMP_FILE_PREFIXES["generate_output"]
+            ".bin", TEMP_FILE_PREFIXES["batch_output"]
         )
         output_file = open(output_file_path, "wb")
 
@@ -710,12 +710,12 @@ def generate_video_stream(
         header_size = 4 + 4 * 4
         output_file.write(b"\x00" * header_size)
 
-        state = GenerationState(
+        state = BatchState(
             output_file=output_file, num_chunks=num_chunks, logger=logger
         )
 
         try:
-            yield from _generate_chunks(
+            yield from _batch_chunks(
                 request,
                 pipeline,
                 pipeline_manager,
@@ -777,4 +777,4 @@ def generate_video_stream(
             except Exception as e:
                 logger.warning(f"Failed to clean up output file: {e}")
 
-        _generation_lock.release()
+        _batch_lock.release()

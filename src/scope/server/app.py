@@ -45,7 +45,6 @@ from .file_utils import (
     VIDEO_EXTENSIONS,
     iter_files,
 )
-from .generate import generate_video_stream
 from .kafka_publisher import (
     KafkaPublisher,
     is_kafka_enabled,
@@ -1128,15 +1127,15 @@ async def download_pipeline_models(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.post("/api/v1/generate")
-async def generate_video(
+@app.post("/api/v1/batch")
+async def batch_video(
     request: "GenerateRequest",
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
 ):
     """Generate video frames in batch mode with SSE progress streaming."""
-    from .generate import is_generation_active
+    from .batch import batch_video_stream, is_batch_active
 
-    if is_generation_active():
+    if is_batch_active():
         raise HTTPException(
             status_code=409,
             detail="A generation is already in progress. Cancel it first or wait for completion.",
@@ -1150,7 +1149,7 @@ async def generate_video(
         )
 
     return StreamingResponse(
-        generate_video_stream(request, pipeline_manager, status_info, logger),
+        batch_video_stream(request, pipeline_manager, status_info, logger),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1160,17 +1159,17 @@ async def generate_video(
     )
 
 
-@app.post("/api/v1/generate/cancel")
-async def cancel_generate():
+@app.post("/api/v1/batch/cancel")
+async def cancel_batch():
     """Cancel the current video generation after the current chunk completes."""
-    from .generate import cancel_generation
+    from .batch import cancel_batch as _cancel_batch
 
-    cancel_generation()
+    _cancel_batch()
     return {"status": "cancelling"}
 
 
-@app.post("/api/v1/generate/upload")
-async def upload_video_for_generate(request: Request):
+@app.post("/api/v1/batch/upload")
+async def upload_video_for_batch(request: Request):
     """Upload a video for batch generation (file-based transfer for large videos).
 
     Accepts raw binary video data with metadata headers:
@@ -1181,7 +1180,7 @@ async def upload_video_for_generate(request: Request):
 
     Video data should be raw uint8 bytes in THWC order.
 
-    Returns input_path to use in the generate request.
+    Returns input_path to use in the batch request.
     """
     from .recording import TEMP_FILE_PREFIXES, RecordingManager
     from .schema import VideoUploadResponse
@@ -1204,7 +1203,7 @@ async def upload_video_for_generate(request: Request):
 
         # Create temp file (reuse recording pattern)
         file_path = RecordingManager._create_temp_file(
-            ".bin", TEMP_FILE_PREFIXES["generate_input"]
+            ".bin", TEMP_FILE_PREFIXES["batch_input"]
         )
 
         # Stream body to file
@@ -1242,14 +1241,14 @@ async def upload_video_for_generate(request: Request):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.post("/api/v1/generate/upload-data")
+@app.post("/api/v1/batch/upload-data")
 async def upload_data_blob(request: Request):
     """Upload binary data blob for batch generation.
 
     Accepts raw binary data containing VACE frames/masks, input video, or other
     array data referenced by ChunkSpec offsets in the generate request.
 
-    Returns data_blob_path to use in the generate request.
+    Returns data_blob_path to use in the batch request.
     """
 
     from .recording import TEMP_FILE_PREFIXES, RecordingManager
@@ -1258,10 +1257,10 @@ async def upload_data_blob(request: Request):
     try:
         # Create temp file
         file_path = RecordingManager._create_temp_file(
-            ".bin", TEMP_FILE_PREFIXES["generate_data"]
+            ".bin", TEMP_FILE_PREFIXES["batch_data"]
         )
 
-        from .generate import MAX_DATA_BLOB_BYTES
+        from .batch import MAX_DATA_BLOB_BYTES
 
         # Stream body to file with size limit
         bytes_written = 0
@@ -1295,7 +1294,7 @@ async def upload_data_blob(request: Request):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/api/v1/generate/download")
+@app.get("/api/v1/batch/download")
 async def download_generated_video(
     path: str = Query(..., description="Path to output video file"),
     background_tasks: BackgroundTasks = None,
@@ -1321,7 +1320,7 @@ async def download_generated_video(
         temp_dir = Path(tempfile.gettempdir())
         if not file_path.is_relative_to(temp_dir):
             raise HTTPException(status_code=403, detail="Invalid file path")
-        if not file_path.name.startswith(TEMP_FILE_PREFIXES["generate_output"]):
+        if not file_path.name.startswith(TEMP_FILE_PREFIXES["batch_output"]):
             raise HTTPException(status_code=403, detail="Invalid file path")
 
         if not file_path.exists():
