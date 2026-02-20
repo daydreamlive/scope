@@ -221,7 +221,6 @@ class PluginManager:
             "pip",
             "compile",
             str(pyproject),
-            *_get_torch_backend_args(),
             "-o",
             str(resolved_file),
         ]
