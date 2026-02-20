@@ -169,7 +169,7 @@ export function DenoisingStepsSlider({
       <div className="space-y-3">
         {localValue.map((stepValue, index) => (
           <SliderWithInput
-            key={index}
+            key={`step-${index}-${localValue.length}`}
             label={`Step ${index + 1}`}
             labelClassName="text-xs text-muted-foreground w-12"
             value={stepValue}
