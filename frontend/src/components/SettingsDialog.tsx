@@ -18,6 +18,7 @@ import {
   waitForServer,
   getServerInfo,
   installLoRAFile,
+  deleteLoRAFile,
   type FailedPluginInfo,
 } from "@/lib/api";
 import { toast } from "sonner";
@@ -86,6 +87,7 @@ export function SettingsDialog({
   // LoRA install state (files come from context)
   const [loraInstallUrl, setLoraInstallUrl] = useState("");
   const [isInstallingLoRA, setIsInstallingLoRA] = useState(false);
+  const [deletingLoRAs, setDeletingLoRAs] = useState<Set<string>>(new Set());
   const [version, setVersion] = useState<string>("");
   const [gitCommit, setGitCommit] = useState<string>("");
   // Track install/update/uninstall operations to suppress spurious error toasts
@@ -356,6 +358,28 @@ export function SettingsDialog({
     }
   };
 
+  const handleDeleteLoRA = async (name: string) => {
+    setDeletingLoRAs(prev => new Set(prev).add(name));
+    try {
+      const response = await deleteLoRAFile(name);
+      if (response.success) {
+        toast.success(response.message);
+        await refreshLoRAs();
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to delete LoRA"
+      );
+      console.error("Failed to delete LoRA:", error);
+    } finally {
+      setDeletingLoRAs(prev => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[600px] p-0 gap-0">
@@ -443,9 +467,11 @@ export function SettingsDialog({
                 installUrl={loraInstallUrl}
                 onInstallUrlChange={setLoraInstallUrl}
                 onInstall={handleInstallLoRA}
+                onDelete={handleDeleteLoRA}
                 onRefresh={refreshLoRAs}
                 isLoading={isLoadingLoRAs}
                 isInstalling={isInstallingLoRA}
+                deletingLoRAs={deletingLoRAs}
               />
             </TabsContent>
           </div>

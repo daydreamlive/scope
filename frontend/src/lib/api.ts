@@ -396,6 +396,26 @@ export const installLoRAFile = async (
   return result;
 };
 
+export interface LoRADeleteResponse {
+  success: boolean;
+  message: string;
+}
+
+export const deleteLoRAFile = async (
+  name: string
+): Promise<LoRADeleteResponse> => {
+  const response = await fetch(`/api/v1/loras/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+
+  return response.json();
+};
+
 export interface AssetFileInfo {
   name: string;
   path: string;

@@ -1012,6 +1012,64 @@ async def install_lora_file(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+class LoRADeleteResponse(BaseModel):
+    success: bool
+    message: str
+
+
+@app.delete("/api/v1/loras/{name}")
+@cloud_proxy()
+async def delete_lora_file(
+    name: str,
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Delete a LoRA file by name."""
+    try:
+        lora_dir = get_lora_dir()
+
+        # Search for the file with any supported extension
+        found_path = None
+        for ext in LORA_EXTENSIONS:
+            candidate = lora_dir / f"{name}{ext}"
+            if candidate.exists():
+                found_path = candidate
+                break
+
+        # Also check subdirectories
+        if not found_path:
+            for subdir in lora_dir.iterdir():
+                if subdir.is_dir():
+                    for ext in LORA_EXTENSIONS:
+                        candidate = subdir / f"{name}{ext}"
+                        if candidate.exists():
+                            found_path = candidate
+                            break
+                    if found_path:
+                        break
+
+        if not found_path:
+            raise HTTPException(
+                status_code=404,
+                detail=f"LoRA file '{name}' not found",
+            )
+
+        # Delete the file
+        found_path.unlink()
+        logger.info(f"Deleted LoRA file: {found_path}")
+
+        return LoRADeleteResponse(
+            success=True,
+            message=f"Successfully deleted '{name}'",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"delete_lora_file: Error deleting LoRA: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/assets", response_model=AssetsResponse)
 @cloud_proxy()
 async def list_assets(

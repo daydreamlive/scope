@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import type { LoRAFileInfo } from "@/lib/api";
@@ -8,9 +8,11 @@ interface LoRAsTabProps {
   installUrl: string;
   onInstallUrlChange: (url: string) => void;
   onInstall: (url: string) => void;
+  onDelete: (name: string) => void;
   onRefresh: () => void;
   isLoading?: boolean;
   isInstalling?: boolean;
+  deletingLoRAs?: Set<string>;
 }
 
 export function LoRAsTab({
@@ -18,9 +20,11 @@ export function LoRAsTab({
   installUrl,
   onInstallUrlChange,
   onInstall,
+  onDelete,
   onRefresh,
   isLoading = false,
   isInstalling = false,
+  deletingLoRAs = new Set(),
 }: LoRAsTabProps) {
   const handleInstall = () => {
     if (installUrl.trim()) {
@@ -119,21 +123,33 @@ export function LoRAsTab({
                     {folder}
                   </h4>
                 )}
-                {groupedLoRAs[folder].map(lora => (
-                  <div
-                    key={lora.path}
-                    className="flex items-center justify-between p-3 rounded-md border bg-card"
-                  >
-                    <div className="space-y-0.5 min-w-0 flex-1">
-                      <span className="text-sm font-medium text-foreground block truncate">
-                        {lora.name}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {lora.size_mb.toFixed(1)} MB
-                      </span>
+                {groupedLoRAs[folder].map(lora => {
+                  const isDeleting = deletingLoRAs.has(lora.name);
+                  return (
+                    <div
+                      key={lora.path}
+                      className="flex items-center justify-between p-3 rounded-md border bg-card"
+                    >
+                      <div className="space-y-0.5 min-w-0 flex-1">
+                        <span className="text-sm font-medium text-foreground block truncate">
+                          {lora.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {lora.size_mb.toFixed(1)} MB
+                        </span>
+                      </div>
+                      <Button
+                        onClick={() => onDelete(lora.name)}
+                        variant="ghost"
+                        size="icon"
+                        disabled={isDeleting}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
           </div>
