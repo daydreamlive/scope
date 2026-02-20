@@ -113,12 +113,15 @@ class CachePlan:
 
 
 @torch.compiler.disable
-def _cache_write(kv_cache, roped_key, v, plan):
-    """Write new key/value entries to the KV cache.
+def _kv_cache_attention(q, k, v, kv_cache, plan):
+    """Complete KV-cache attention path in eager mode."""
+    roped_query = causal_rope_apply_precomputed(
+        q, plan.rope_freqs, plan.rope_seq_len
+    ).type_as(v)
+    roped_key = causal_rope_apply_precomputed(
+        k, plan.rope_freqs, plan.rope_seq_len
+    ).type_as(v)
 
-    Reads plan fields inside this eager-mode function so that dynamic slice
-    bounds never appear in the compiled graph (avoiding guard specialization).
-    """
     if plan.write_len > 0:
         kv_cache["k"][:, plan.write_start : plan.write_end] = roped_key[
             :, plan.roped_offset : plan.roped_offset + plan.write_len
@@ -127,25 +130,18 @@ def _cache_write(kv_cache, roped_key, v, plan):
             :, plan.roped_offset : plan.roped_offset + plan.write_len
         ]
 
-
-@torch.compiler.disable
-def _cache_read(kv_cache, plan):
-    """Read key/value from the KV cache for attention.
-
-    Returns contiguous k, v tensors. All plan field access happens inside
-    this eager-mode function so dynamic indices don't cause recompilation.
-    """
     if plan.attn_use_sink:
         k_sink = kv_cache["k"][:, : plan.sink_tokens]
         v_sink = kv_cache["v"][:, : plan.sink_tokens]
         k_local = kv_cache["k"][:, plan.attn_local_start : plan.local_end_index]
         v_local = kv_cache["v"][:, plan.attn_local_start : plan.local_end_index]
-        return torch.cat([k_sink, k_local], dim=1), torch.cat([v_sink, v_local], dim=1)
+        k_attn = torch.cat([k_sink, k_local], dim=1)
+        v_attn = torch.cat([v_sink, v_local], dim=1)
     else:
-        return (
-            kv_cache["k"][:, plan.attn_local_start : plan.local_end_index],
-            kv_cache["v"][:, plan.attn_local_start : plan.local_end_index],
-        )
+        k_attn = kv_cache["k"][:, plan.attn_local_start : plan.local_end_index]
+        v_attn = kv_cache["v"][:, plan.attn_local_start : plan.local_end_index]
+
+    return attention(roped_query, k_attn, v_attn)
 
 
 class CausalWanSelfAttention(nn.Module):
@@ -330,17 +326,7 @@ class CausalWanSelfAttention(nn.Module):
                     attn_out = attn_out[:, :, :-padded_length]
                 x = attn_out.transpose(2, 1)
         else:
-            plan = cache_plan
-            roped_query = causal_rope_apply_precomputed(
-                q, plan.rope_freqs, plan.rope_seq_len
-            ).type_as(v)
-            roped_key = causal_rope_apply_precomputed(
-                k, plan.rope_freqs, plan.rope_seq_len
-            ).type_as(v)
-
-            _cache_write(kv_cache, roped_key, v, plan)
-            k_attn, v_attn = _cache_read(kv_cache, plan)
-            x = attention(roped_query, k_attn, v_attn)
+            x = _kv_cache_attention(q, k, v, kv_cache, cache_plan)
 
         # output
         x = x.flatten(2)
