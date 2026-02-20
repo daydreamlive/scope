@@ -112,6 +112,45 @@ class CachePlan:
     rope_seq_len: int = 0
 
 
+@torch.compiler.disable
+def _cache_write(
+    kv_cache, roped_key, v, write_start, write_end, roped_offset, write_len
+):
+    """Write new key/value entries to the KV cache.
+
+    Runs outside compiled regions so dynamic slice bounds don't cause recompilation.
+    """
+    if write_len > 0:
+        kv_cache["k"][:, write_start:write_end] = roped_key[
+            :, roped_offset : roped_offset + write_len
+        ]
+        kv_cache["v"][:, write_start:write_end] = v[
+            :, roped_offset : roped_offset + write_len
+        ]
+
+
+@torch.compiler.disable
+def _cache_read(
+    kv_cache, attn_use_sink, sink_tokens, attn_local_start, local_end_index
+):
+    """Read key/value from the KV cache for attention.
+
+    Returns contiguous k, v tensors for attention computation.
+    Runs outside compiled regions so dynamic slice bounds don't cause recompilation.
+    """
+    if attn_use_sink:
+        k_sink = kv_cache["k"][:, :sink_tokens]
+        v_sink = kv_cache["v"][:, :sink_tokens]
+        k_local = kv_cache["k"][:, attn_local_start:local_end_index]
+        v_local = kv_cache["v"][:, attn_local_start:local_end_index]
+        return torch.cat([k_sink, k_local], dim=1), torch.cat([v_sink, v_local], dim=1)
+    else:
+        return (
+            kv_cache["k"][:, attn_local_start:local_end_index],
+            kv_cache["v"][:, attn_local_start:local_end_index],
+        )
+
+
 class CausalWanSelfAttention(nn.Module):
     def __init__(
         self, dim, num_heads, local_attn_size=-1, sink_size=0, qk_norm=True, eps=1e-6
@@ -302,29 +341,23 @@ class CausalWanSelfAttention(nn.Module):
                 k, plan.rope_freqs, plan.rope_seq_len
             ).type_as(v)
 
-            if plan.write_len > 0:
-                kv_cache["k"][:, plan.write_start : plan.write_end] = roped_key[
-                    :, plan.roped_offset : plan.roped_offset + plan.write_len
-                ]
-                kv_cache["v"][:, plan.write_start : plan.write_end] = v[
-                    :, plan.roped_offset : plan.roped_offset + plan.write_len
-                ]
-
-            # Attention
-            if plan.attn_use_sink:
-                k_sink = kv_cache["k"][:, : plan.sink_tokens]
-                v_sink = kv_cache["v"][:, : plan.sink_tokens]
-                k_local = kv_cache["k"][:, plan.attn_local_start : plan.local_end_index]
-                v_local = kv_cache["v"][:, plan.attn_local_start : plan.local_end_index]
-                k_cat = torch.cat([k_sink, k_local], dim=1)
-                v_cat = torch.cat([v_sink, v_local], dim=1)
-                x = attention(roped_query, k_cat, v_cat)
-            else:
-                x = attention(
-                    roped_query,
-                    kv_cache["k"][:, plan.attn_local_start : plan.local_end_index],
-                    kv_cache["v"][:, plan.attn_local_start : plan.local_end_index],
-                )
+            _cache_write(
+                kv_cache,
+                roped_key,
+                v,
+                plan.write_start,
+                plan.write_end,
+                plan.roped_offset,
+                plan.write_len,
+            )
+            k_attn, v_attn = _cache_read(
+                kv_cache,
+                plan.attn_use_sink,
+                plan.sink_tokens,
+                plan.attn_local_start,
+                plan.local_end_index,
+            )
+            x = attention(roped_query, k_attn, v_attn)
 
         # output
         x = x.flatten(2)
@@ -1090,6 +1123,14 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 + plan.num_rolled_tokens,
             ].clone()
 
+    @torch.compiler.disable
+    def _update_cache_indices(self, kv_cache, cache_plan):
+        """Update cache index tensors outside the compiled region."""
+        if cache_plan is not None and not cache_plan.is_recompute:
+            for cache in kv_cache:
+                cache["global_end_index"].fill_(cache_plan.current_end)
+                cache["local_end_index"].fill_(cache_plan.local_end_index)
+
     def _forward_inference(
         self,
         x,
@@ -1246,14 +1287,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 )
                 x = block(x, **kwargs)
 
-        if (
-            kv_cache is not None
-            and cache_plan is not None
-            and not cache_plan.is_recompute
-        ):
-            for cache in kv_cache:
-                cache["global_end_index"].fill_(cache_plan.current_end)
-                cache["local_end_index"].fill_(cache_plan.local_end_index)
+        if kv_cache is not None:
+            self._update_cache_indices(kv_cache, cache_plan)
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))

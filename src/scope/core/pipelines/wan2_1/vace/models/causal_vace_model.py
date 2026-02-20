@@ -525,14 +525,8 @@ class CausalVaceWanModel(nn.Module):
                 else:
                     x = result
 
-        if (
-            kv_cache is not None
-            and cache_plan is not None
-            and not cache_plan.is_recompute
-        ):
-            for cache in kv_cache:
-                cache["global_end_index"].fill_(cache_plan.current_end)
-                cache["local_end_index"].fill_(cache_plan.local_end_index)
+        if kv_cache is not None:
+            self.causal_wan_model._update_cache_indices(kv_cache, cache_plan)
 
         if kv_cache is not None and cache_update_infos:
             self.causal_wan_model._apply_cache_updates(
