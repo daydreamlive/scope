@@ -659,6 +659,7 @@ class PipelineManager:
             "scribble",
             "gray",
             "optical-flow",
+            "turbodiffusion",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -1121,6 +1122,53 @@ class PipelineManager:
             )
             logger.info("OpticalFlow pipeline initialized")
             return pipeline
+
+        elif pipeline_id == "turbodiffusion":
+            from scope.core.pipelines import TurboDiffusionPipeline
+
+            from .models_config import get_model_file_path, get_models_dir
+
+            models_dir = get_models_dir()
+            config = OmegaConf.create(
+                {
+                    "model_dir": str(models_dir),
+                    "generator_path": str(
+                        get_model_file_path(
+                            "TurboWan2.1-T2V-1.3B-480P/TurboWan2.1-T2V-1.3B-480P.pth"
+                        )
+                    ),
+                    "text_encoder_path": str(
+                        get_model_file_path(
+                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
+                        )
+                    ),
+                    "tokenizer_path": str(
+                        get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
+                    ),
+                }
+            )
+
+            self._apply_load_params(
+                config,
+                load_params,
+                default_height=480,
+                default_width=832,
+                default_seed=42,
+            )
+
+            quantization = None
+            if load_params:
+                quantization = load_params.get("quantization", None)
+
+            pipeline = TurboDiffusionPipeline(
+                config,
+                quantization=quantization,
+                device=torch.device("cuda"),
+                dtype=torch.bfloat16,
+            )
+            logger.info("TurboDiffusion pipeline initialized")
+            return pipeline
+
         else:
             raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
 
