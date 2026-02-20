@@ -286,6 +286,13 @@ class BasePipelineConfig(BaseModel):
     ref_images: list[str] | None = ref_images_field()
     vace_context_scale: float = vace_context_scale_field()
 
+    # Test mode: return synthetic RGB frames without running inference
+    test_mode: bool = Field(
+        default=False,
+        description="Return synthetic Red/Green/Blue frames at preset resolution without running inference",
+        json_schema_extra=ui_field_config(label="Test Mode", category="configuration"),
+    )
+
     @classmethod
     def get_pipeline_metadata(cls) -> dict[str, str]:
         """Return pipeline identification metadata.

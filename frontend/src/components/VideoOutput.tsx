@@ -56,16 +56,9 @@ export function VideoOutput({
   // Use external ref if provided, otherwise use internal
   const containerRef = videoContainerRef || internalContainerRef;
 
-  // Set to a local video path to test CSS layout without a WebRTC stream.
-  // e.g. "/assets/test.mp4"  Set to "" to use the normal WebRTC stream.
-  const DEBUG_VIDEO_SRC = "";
-
   useEffect(() => {
     if (!videoRef.current) return;
-    if (DEBUG_VIDEO_SRC) {
-      videoRef.current.srcObject = null;
-      videoRef.current.src = DEBUG_VIDEO_SRC;
-    } else if (remoteStream) {
+    if (remoteStream) {
       videoRef.current.src = "";
       videoRef.current.srcObject = remoteStream;
     }
@@ -76,7 +69,7 @@ export function VideoOutput({
   // Call immediately in case dimensions are already known, then listen for changes.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || (!remoteStream && !DEBUG_VIDEO_SRC)) return;
+    if (!video || !remoteStream) return;
     const updateAspect = () => {
       // videoWidth/videoHeight may be 0 for WebRTC streams even when playing;
       // fall back to the MediaStreamTrack settings which are more reliable.
@@ -203,7 +196,7 @@ export function VideoOutput({
         <CardTitle className="text-base font-medium">Video Output</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
-        {(remoteStream || DEBUG_VIDEO_SRC) ? (
+        {remoteStream ? (
           <div
             ref={containerRef}
             className="relative cursor-pointer"
@@ -220,7 +213,6 @@ export function VideoOutput({
               autoPlay
               muted
               playsInline
-              loop={!!DEBUG_VIDEO_SRC}
             />
             {/* Play/Pause Overlay */}
             {showOverlay && (

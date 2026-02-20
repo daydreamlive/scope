@@ -108,6 +108,9 @@ class PipelineProcessor:
         # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
 
+        # Test mode frame index (cycles R→G→B)
+        self._test_frame_idx = 0
+
         # Throttler for controlling processing rate in chained pipelines
         # Throttling is applied when this pipeline produces frames faster than
         # the next pipeline in the chain can consume them
@@ -445,7 +448,16 @@ class PipelineProcessor:
                     call_params["video"] = video_input
 
             processing_start = time.time()
-            output_dict = self.pipeline(**call_params)
+            if call_params.get("test_mode"):
+                h = getattr(self.pipeline, "height", call_params.get("height", 512))
+                w = getattr(self.pipeline, "width", call_params.get("width", 512))
+                colors = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=torch.float32)
+                color = colors[self._test_frame_idx % 3]
+                frame = color.view(1, 1, 1, 3).expand(1, h, w, 3).clone()
+                self._test_frame_idx += 1
+                output_dict = {"video": frame}
+            else:
+                output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
 
             # Extract video from the returned dictionary
