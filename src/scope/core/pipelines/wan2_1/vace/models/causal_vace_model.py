@@ -7,6 +7,8 @@ import math
 import torch
 import torch.nn as nn
 
+from scope.core.pipelines.wan2_1.utils import safe_unflatten
+
 from .attention_blocks import (
     create_base_attention_block_class,
     create_vace_attention_block_class,
@@ -403,10 +405,10 @@ class CausalVaceWanModel(nn.Module):
                 self.causal_wan_model.freq_dim, t.flatten()
             ).type_as(x)
         )
-        e0 = (
-            self.causal_wan_model.time_projection(e)
-            .unflatten(1, (6, self.dim))
-            .unflatten(dim=0, sizes=t.shape)
+        e0 = safe_unflatten(
+            safe_unflatten(self.causal_wan_model.time_projection(e), 1, (6, self.dim)),
+            0,
+            t.shape,
         )
 
         # Context
@@ -510,7 +512,7 @@ class CausalVaceWanModel(nn.Module):
             )
 
         x = self.causal_wan_model.head(
-            x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2)
+            x, safe_unflatten(e, 0, t.shape).unsqueeze(2)
         )
         x = self.causal_wan_model.unpatchify(x, grid_sizes)
         return torch.stack(x)
