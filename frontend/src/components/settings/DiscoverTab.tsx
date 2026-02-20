@@ -27,6 +27,7 @@ function GitHubIcon({ className }: { className?: string }) {
 interface DaydreamPlugin {
   id: string;
   creatorId: string;
+  creatorUsername: string;
   name: string;
   slug: string;
   description: string | null;
@@ -46,15 +47,23 @@ interface DiscoverResponse {
   hasMore: boolean;
 }
 
+function normalizeRepoUrl(url: string): string {
+  return url
+    .replace(/^git\+/, "")
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+}
+
 interface DiscoverTabProps {
   onInstall: (packageSpec: string) => void;
-  installedPluginNames: string[];
+  installedRepoUrls: string[];
   isInstalling?: boolean;
 }
 
 export function DiscoverTab({
   onInstall,
-  installedPluginNames,
+  installedRepoUrls,
   isInstalling = false,
 }: DiscoverTabProps) {
   const [plugins, setPlugins] = useState<DaydreamPlugin[]>([]);
@@ -99,7 +108,7 @@ export function DiscoverTab({
     fetchDiscoverPlugins();
   }, [fetchDiscoverPlugins]);
 
-  const installedSet = new Set(installedPluginNames.map(n => n.toLowerCase()));
+  const installedSet = new Set(installedRepoUrls.map(normalizeRepoUrl));
 
   return (
     <div className="space-y-4">
@@ -138,10 +147,14 @@ export function DiscoverTab({
       ) : (
         <div className="space-y-3">
           {plugins.map(plugin => {
-            const isInstalled = installedSet.has(plugin.name.toLowerCase());
+            const isInstalled = plugin.repositoryUrl
+              ? installedSet.has(normalizeRepoUrl(plugin.repositoryUrl))
+              : false;
             const daydreamUrl =
-              plugin.learnMoreUrl ||
-              `${DAYDREAM_APP_BASE}/plugins?search=${encodeURIComponent(plugin.name)}`;
+              plugin.creatorUsername && plugin.slug
+                ? `${DAYDREAM_APP_BASE}/plugins/${plugin.creatorUsername}/${plugin.slug}`
+                : plugin.learnMoreUrl ||
+                  `${DAYDREAM_APP_BASE}/plugins?search=${encodeURIComponent(plugin.name)}`;
             return (
               <div
                 key={plugin.id}

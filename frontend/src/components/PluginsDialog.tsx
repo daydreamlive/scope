@@ -293,7 +293,9 @@ export function PluginsDialog({
             <TabsContent value="discover" className="mt-0">
               <DiscoverTab
                 onInstall={handleInstallPlugin}
-                installedPluginNames={plugins.map(p => p.name)}
+                installedRepoUrls={plugins
+                  .map(p => p.package_spec)
+                  .filter((s): s is string => !!s)}
                 isInstalling={isInstalling}
               />
             </TabsContent>
