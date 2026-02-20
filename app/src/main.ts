@@ -34,7 +34,7 @@ autoUpdater.autoInstallOnAppQuit = true; // Install updates when app quits
 autoUpdater.disableDifferentialDownload = true; // Disable differential downloads (no blockmaps)
 
 // Auto-updater event handlers
-let updateDownloaded = false;
+let userInitiatedDownload = false;
 
 autoUpdater.on('checking-for-update', () => {
   logger.info('Checking for updates...');
@@ -54,7 +54,14 @@ autoUpdater.on('update-available', (info) => {
     cancelId: 1
   }).then(result => {
     if (result.response === 0) {
-      autoUpdater.downloadUpdate();
+      userInitiatedDownload = true;
+      autoUpdater.downloadUpdate().catch(err => {
+        logger.error('Failed to download update:', err);
+        dialog.showErrorBox(
+          'Update Download Failed',
+          `Failed to download the update: ${err.message}\n\nPlease try again later or download the update manually.`
+        );
+      });
     }
   });
 });
@@ -65,6 +72,14 @@ autoUpdater.on('update-not-available', (info) => {
 
 autoUpdater.on('error', (err) => {
   logger.error('Auto-updater error:', err);
+  // Only show error dialog if the user actively initiated the download,
+  // to avoid noisy popups from background update checks on flaky networks.
+  if (userInitiatedDownload) {
+    dialog.showErrorBox(
+      'Update Error',
+      `An error occurred during the update process: ${err.message}`
+    );
+  }
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
@@ -73,7 +88,6 @@ autoUpdater.on('download-progress', (progressObj) => {
 
 autoUpdater.on('update-downloaded', (info) => {
   logger.info('Update downloaded:', info);
-  updateDownloaded = true;
 
   // Notify user that update is ready
   dialog.showMessageBox({
