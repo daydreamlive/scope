@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { PluginsTab } from "./settings/PluginsTab";
 import { DiscoverTab } from "./settings/DiscoverTab";
@@ -253,9 +253,6 @@ export function PluginsDialog({
   return (
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[600px] p-0 gap-0">
-        <DialogHeader className="sr-only">
-          <DialogTitle>Plugins</DialogTitle>
-        </DialogHeader>
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}

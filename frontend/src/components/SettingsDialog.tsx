@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { AccountTab } from "./settings/AccountTab";
 import { ApiKeysTab } from "./settings/ApiKeysTab";
@@ -63,9 +63,6 @@ export function SettingsDialog({
   return (
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[600px] p-0 gap-0">
-        <DialogHeader className="sr-only">
-          <DialogTitle>Settings</DialogTitle>
-        </DialogHeader>
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
