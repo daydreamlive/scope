@@ -4,8 +4,12 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 
-const DAYDREAM_API = "https://api.daydream.live";
-const DAYDREAM_APP = "https://app.daydream.live";
+const DAYDREAM_API_BASE =
+  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
+  "https://api.daydream.live";
+const DAYDREAM_APP_BASE =
+  (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
+  "https://app.daydream.live";
 
 function GitHubIcon({ className }: { className?: string }) {
   return (
@@ -76,7 +80,7 @@ export function DiscoverTab({
         params.set("search", debouncedSearch);
       }
       const response = await fetch(
-        `${DAYDREAM_API}/v1/plugins?${params.toString()}`
+        `${DAYDREAM_API_BASE}/v1/plugins?${params.toString()}`
       );
       if (!response.ok) {
         throw new Error(`Failed to fetch plugins (${response.status})`);
@@ -137,7 +141,7 @@ export function DiscoverTab({
             const isInstalled = installedSet.has(plugin.name.toLowerCase());
             const daydreamUrl =
               plugin.learnMoreUrl ||
-              `${DAYDREAM_APP}/plugins?search=${encodeURIComponent(plugin.name)}`;
+              `${DAYDREAM_APP_BASE}/plugins?search=${encodeURIComponent(plugin.name)}`;
             return (
               <div
                 key={plugin.id}
