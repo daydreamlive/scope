@@ -232,23 +232,18 @@ export function DiscoverTab({
                     <Badge variant="outline" className="text-xs">
                       Installed
                     </Badge>
-                  ) : (
+                  ) : plugin.repositoryUrl ? (
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8"
                       title={`Install ${plugin.name}`}
                       disabled={isInstalling}
-                      onClick={() => {
-                        const spec = plugin.repositoryUrl
-                          ? `git+${plugin.repositoryUrl}`
-                          : plugin.name;
-                        onInstall(spec);
-                      }}
+                      onClick={() => onInstall(`git+${plugin.repositoryUrl}`)}
                     >
                       <Download className="h-4 w-4" />
                     </Button>
-                  )}
+                  ) : null}
                 </div>
               </div>
             );
