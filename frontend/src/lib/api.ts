@@ -351,7 +351,7 @@ export interface LoRAFilesResponse {
 }
 
 export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
-  const response = await fetch("/api/v1/lora/list", {
+  const response = await fetch("/api/v1/loras", {
     method: "GET",
   });
 
@@ -364,6 +364,56 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
 
   const result = await response.json();
   return result;
+};
+
+export interface LoRAInstallRequest {
+  url: string;
+  filename?: string;
+}
+
+export interface LoRAInstallResponse {
+  message: string;
+  file: LoRAFileInfo;
+}
+
+export const installLoRAFile = async (
+  data: LoRAInstallRequest
+): Promise<LoRAInstallResponse> => {
+  const response = await fetch("/api/v1/loras", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Install LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  const result = await response.json();
+  return result;
+};
+
+export interface LoRADeleteResponse {
+  success: boolean;
+  message: string;
+}
+
+export const deleteLoRAFile = async (
+  name: string
+): Promise<LoRADeleteResponse> => {
+  const response = await fetch(`/api/v1/loras/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+
+  return response.json();
 };
 
 export interface AssetFileInfo {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ExternalLink, Save, Trash2 } from "lucide-react";
+import { ExternalLink, Info, Save, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { toast } from "sonner";
@@ -131,6 +131,14 @@ export function ApiKeysTab({ isActive }: ApiKeysTabProps) {
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
+              )}
+              {keyInfo.id === "civitai" && (
+                <span
+                  className="text-muted-foreground shrink-0"
+                  title="Saved to disk to persist across restarts"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </span>
               )}
               {isEnvVar ? (
                 <Input

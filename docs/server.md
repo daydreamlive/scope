@@ -247,11 +247,12 @@ Options:
 
 ### Environment Variables
 
-| Variable          | Description                                                   |
-| ----------------- | ------------------------------------------------------------- |
-| `PIPELINE`        | Default pipeline to pre-warm on startup                       |
-| `HF_TOKEN`        | Hugging Face token for downloading models and Cloudflare TURN |
-| `VERBOSE_LOGGING` | Enable verbose logging for debugging                          |
+| Variable             | Description                                                   |
+| -------------------- | ------------------------------------------------------------- |
+| `PIPELINE`           | Default pipeline to pre-warm on startup                       |
+| `HF_TOKEN`           | Hugging Face token for downloading models and Cloudflare TURN |
+| `CIVITAI_API_TOKEN`  | CivitAI API token for downloading LoRAs from CivitAI          |
+| `VERBOSE_LOGGING`    | Enable verbose logging for debugging                          |
 
 ### Available Pipelines
 
