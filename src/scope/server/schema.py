@@ -1034,22 +1034,11 @@ class DataUploadResponse(BaseModel):
 
 
 class GenerateResponse(BaseModel):
-    """Response from batch video generation.
+    """Response from batch video generation."""
 
-    Supports two modes:
-    - Legacy: video_base64 contains the full video (for small videos)
-    - File-based: output_path references a downloadable file (for large videos)
-    """
-
-    # File-based output (preferred for large videos)
-    output_path: str | None = Field(
-        default=None,
-        description="Path to output video file for download via /generate/download. Preferred for large videos.",
-    )
-    # Legacy base64 output (kept for backwards compatibility)
-    video_base64: str | None = Field(
-        default=None,
-        description="Base64-encoded output video frames (THWC, uint8). Deprecated for large videos, use output_path.",
+    output_path: str = Field(
+        ...,
+        description="Path to output video file for download via /generate/download.",
     )
     video_shape: list[int] = Field(
         ...,

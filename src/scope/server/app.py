@@ -1134,6 +1134,14 @@ async def generate_video(
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
 ):
     """Generate video frames in batch mode with SSE progress streaming."""
+    from .generate import is_generation_active
+
+    if is_generation_active():
+        raise HTTPException(
+            status_code=409,
+            detail="A generation is already in progress. Cancel it first or wait for completion.",
+        )
+
     status_info = await pipeline_manager.get_status_info_async()
     if status_info["status"] != "loaded":
         raise HTTPException(
@@ -1253,12 +1261,21 @@ async def upload_data_blob(request: Request):
             ".bin", TEMP_FILE_PREFIXES["generate_data"]
         )
 
-        # Stream body to file
+        from .generate import MAX_DATA_BLOB_BYTES
+
+        # Stream body to file with size limit
         bytes_written = 0
         with open(file_path, "wb") as f:
             async for chunk in request.stream():
-                f.write(chunk)
                 bytes_written += len(chunk)
+                if bytes_written > MAX_DATA_BLOB_BYTES:
+                    f.close()
+                    Path(file_path).unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Data blob exceeds maximum size of {MAX_DATA_BLOB_BYTES} bytes",
+                    )
+                f.write(chunk)
 
         if bytes_written == 0:
             Path(file_path).unlink(missing_ok=True)
