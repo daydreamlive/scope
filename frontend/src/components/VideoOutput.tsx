@@ -163,8 +163,17 @@ export function VideoOutput({
         {remoteStream ? (
           <div
             ref={containerRef}
+            role="button"
+            tabIndex={0}
+            aria-label="Video output - click to toggle play/pause"
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
+            onKeyDown={e => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleVideoClick();
+              }
+            }}
           >
             <video
               ref={videoRef}

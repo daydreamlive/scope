@@ -205,13 +205,17 @@ export function PromptTimeline({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
   const [visibleStartTime, setVisibleStartTime] = useState(0);
-  const [visibleEndTime, setVisibleEndTime] = useState(
-    DEFAULT_VISIBLE_END_TIME
-  );
   const [zoomLevel, setZoomLevel] = useState(1);
 
   // Check if live mode is active
   const isLive = useMemo(() => prompts.some(p => p.isLive), [prompts]);
+
+  // Calculate timeline metrics - simple derivations, no memoization needed
+  const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoomLevel;
+  const visibleTimeRange = timelineWidth / pixelsPerSecond;
+
+  // Derive visible end time from start time and time range (no state needed)
+  const visibleEndTime = visibleStartTime + visibleTimeRange;
 
   // Memoized filtered prompts for better performance
   const visiblePrompts = useMemo(() => {
@@ -222,16 +226,6 @@ export function PromptTimeline({
         prompt.startTime <= visibleEndTime
     );
   }, [prompts, visibleStartTime, visibleEndTime]);
-
-  // Calculate timeline metrics
-  const pixelsPerSecond = useMemo(
-    () => BASE_PIXELS_PER_SECOND * zoomLevel,
-    [zoomLevel]
-  );
-  const visibleTimeRange = useMemo(
-    () => timelineWidth / pixelsPerSecond,
-    [timelineWidth, pixelsPerSecond]
-  );
 
   // Scroll timeline to show a specific time
   const scrollToTime = useCallback(
@@ -254,14 +248,8 @@ export function PromptTimeline({
     // Reset UI state
     setTimelineWidth(TIMELINE_RESET_STATE.timelineWidth);
     setVisibleStartTime(TIMELINE_RESET_STATE.visibleStartTime);
-    setVisibleEndTime(TIMELINE_RESET_STATE.visibleEndTime);
     setZoomLevel(TIMELINE_RESET_STATE.zoomLevel);
   }, []);
-
-  // Update visible end time when zoom level or timeline width changes
-  useEffect(() => {
-    setVisibleEndTime(visibleStartTime + visibleTimeRange);
-  }, [visibleStartTime, visibleTimeRange]);
 
   // Auto-scroll timeline during playback to follow the red line
   useEffect(() => {
@@ -509,13 +497,25 @@ export function PromptTimeline({
               const maxEndTime = Math.max(
                 ...importedPrompts.map((p: TimelinePrompt) => p.endTime || 0)
               );
-              // Set visible end time to show all prompts, with minimum of default visible range
-              const newVisibleEndTime = Math.max(
+              // Calculate the target visible end time to show all prompts
+              const targetVisibleEndTime = Math.max(
                 maxEndTime + 2, // Add 2 seconds buffer
                 DEFAULT_VISIBLE_END_TIME
               );
+              // Adjust zoom level to fit the range (visibleEndTime = visibleStartTime + timelineWidth / pixelsPerSecond)
+              // pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoomLevel
+              // targetVisibleEndTime = 0 + timelineWidth / (BASE_PIXELS_PER_SECOND * newZoom)
+              // newZoom = timelineWidth / (BASE_PIXELS_PER_SECOND * targetVisibleEndTime)
+              const newZoom = Math.max(
+                MIN_ZOOM_LEVEL,
+                Math.min(
+                  MAX_ZOOM_LEVEL,
+                  timelineWidth /
+                    (BASE_PIXELS_PER_SECOND * targetVisibleEndTime)
+                )
+              );
               setVisibleStartTime(0);
-              setVisibleEndTime(newVisibleEndTime);
+              setZoomLevel(newZoom);
             }
 
             // Import settings if available and callback is provided
@@ -550,6 +550,7 @@ export function PromptTimeline({
       resetTimelineUI,
       onTimeChange,
       _onPromptSubmit,
+      timelineWidth,
     ]
   );
 
@@ -820,6 +821,8 @@ export function PromptTimeline({
 
             {/* Timeline track */}
             <div
+              role="application"
+              aria-label="Timeline track"
               className="relative bg-muted rounded-lg border overflow-hidden cursor-grab w-full"
               style={{ height: "80px" }} // Compact height for timeline display
               onClick={handleTimelineClick}
@@ -908,6 +911,10 @@ export function PromptTimeline({
                 return (
                   <div
                     key={prompt.id}
+                    role="button"
+                    tabIndex={isEditable ? 0 : -1}
+                    aria-label={`Prompt: ${prompt.text || "blend"}`}
+                    aria-pressed={isSelected}
                     className={`absolute border rounded px-2 py-1 transition-colors ${
                       isEditable ? "cursor-pointer" : "cursor-default"
                     } ${
@@ -929,11 +936,23 @@ export function PromptTimeline({
                       boxColor
                     )}
                     onClick={e => handlePromptClick(e, prompt)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handlePromptClick(
+                          e as unknown as React.MouseEvent,
+                          prompt
+                        );
+                      }
+                    }}
                   >
                     {/* Resize handles */}
                     {!isPlaying && !isLivePrompt && (
                       <>
                         <div
+                          role="separator"
+                          aria-orientation="vertical"
+                          aria-label="Resize left edge"
                           className="absolute top-0 bottom-0 w-2 -left-1 z-40"
                           style={{ cursor: "col-resize" }}
                           onMouseDown={e =>
@@ -947,6 +966,9 @@ export function PromptTimeline({
                           }
                         />
                         <div
+                          role="separator"
+                          aria-orientation="vertical"
+                          aria-label="Resize right edge"
                           className="absolute top-0 bottom-0 w-2 -right-1 z-40"
                           style={{ cursor: "col-resize" }}
                           onMouseDown={e =>
@@ -967,7 +989,7 @@ export function PromptTimeline({
                           // Display blend prompts vertically
                           prompt.prompts.map((promptItem, idx) => (
                             <div
-                              key={idx}
+                              key={`${prompt.id}-blend-${idx}`}
                               className="text-xs text-white font-medium truncate"
                             >
                               {promptItem.text} ({promptItem.weight}%)

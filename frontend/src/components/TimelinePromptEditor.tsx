@@ -248,7 +248,10 @@ export function TimelinePromptEditor({
       <div className={`space-y-3 ${className}`}>
         {prompts.map((promptItem, index) => {
           return (
-            <div key={index} className="space-y-2">
+            <div
+              key={`timeline-prompt-${index}-${prompts.length}`}
+              className="space-y-2"
+            >
               <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
                 <PromptField
                   prompt={promptItem}
