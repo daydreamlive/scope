@@ -1,6 +1,6 @@
 """Video generation service for batch mode with chunked processing."""
 
-import gc
+import concurrent.futures
 import json
 import queue
 import threading
@@ -126,8 +126,19 @@ class GenerationState:
     latencies: list[float] = field(default_factory=list)
     fps_measures: list[float] = field(default_factory=list)
 
-    def write_chunk(self, result: dict, chunk_idx: int, chunk_latency: float) -> str:
-        """Write chunk output to file and return SSE progress event."""
+    def build_chunk_sse(self, chunk_idx: int, chunk_latency: float) -> str:
+        """Build SSE progress event (call from main thread before write)."""
+        return sse_event(
+            "progress",
+            {
+                "chunk": chunk_idx + 1,
+                "total_chunks": self.num_chunks,
+                "latency": round(chunk_latency, 3),
+            },
+        )
+
+    def write_chunk(self, result: dict, chunk_idx: int, chunk_latency: float) -> None:
+        """Write chunk output to file (safe to call from background thread)."""
         chunk_output = result["video"]
         num_output_frames = chunk_output.shape[0]
         chunk_fps = num_output_frames / chunk_latency
@@ -149,17 +160,6 @@ class GenerationState:
             self.height = chunk_np.shape[1]
             self.width = chunk_np.shape[2]
             self.channels = chunk_np.shape[3]
-
-        return sse_event(
-            "progress",
-            {
-                "chunk": chunk_idx + 1,
-                "total_chunks": self.num_chunks,
-                "frames": num_output_frames,
-                "latency": round(chunk_latency, 3),
-                "fps": round(chunk_fps, 2),
-            },
-        )
 
     @property
     def output_shape(self) -> list[int]:
@@ -582,6 +582,10 @@ def _generate_chunks(
     first_proc = processors[0]
     last_proc = processors[-1]
 
+    write_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    write_future: concurrent.futures.Future | None = None
+    pending_sse: str | None = None
+
     try:
         for chunk_idx in range(num_chunks):
             if _cancel_event.is_set():
@@ -598,10 +602,6 @@ def _generate_chunks(
 
             start_frame = chunk_idx * chunk_size
             end_frame = min(start_frame + chunk_size, request.num_frames)
-
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
             kwargs = build_chunk_kwargs(
                 request,
@@ -632,12 +632,30 @@ def _generate_chunks(
                     continue
 
             chunk_latency = time.time() - chunk_start
-            yield state.write_chunk(result, chunk_idx, chunk_latency)
+
+            # Wait for previous async write before starting a new one
+            if write_future is not None:
+                write_future.result()
+            if pending_sse is not None:
+                yield pending_sse
+
+            # Offload CPU transfer + disk I/O to background thread
+            pending_sse = state.build_chunk_sse(chunk_idx, chunk_latency)
+            write_future = write_executor.submit(
+                state.write_chunk, result, chunk_idx, chunk_latency
+            )
+
+        # Wait for final write
+        if write_future is not None:
+            write_future.result()
+        if pending_sse is not None:
+            yield pending_sse
 
         # Signal end of input
         first_proc.input_queue.put(_SENTINEL)
 
     finally:
+        write_executor.shutdown(wait=True)
         for proc in processors:
             proc.stop()
 
