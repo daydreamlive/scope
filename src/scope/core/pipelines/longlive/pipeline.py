@@ -134,6 +134,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         else:
             generator = generator.to(device=device, dtype=dtype)
 
+        torch._dynamo.config.capture_scalar_outputs = True
         generator.model = torch.compile(
             generator.model,
             backend="inductor",
