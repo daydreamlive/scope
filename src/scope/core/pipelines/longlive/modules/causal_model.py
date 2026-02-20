@@ -976,7 +976,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         kv_cache,
         grid_sizes,
         current_start,
-        num_new_tokens,
         sink_recache_after_switch,
         cache_start=None,
     ):
@@ -991,6 +990,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         """
         cache = kv_cache[0]
 
+        num_new_tokens = grid_sizes[0].prod().item()
         frame_seqlen = math.prod(grid_sizes[0][1:]).item()
         current_start_frame = current_start // frame_seqlen
         current_end = current_start + num_new_tokens
@@ -1187,12 +1187,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         cache_plan = None
         if kv_cache is not None:
-            num_new_tokens = grid_sizes[0].prod().item()
             cache_plan = self._compute_cache_plan(
                 kv_cache,
                 grid_sizes,
                 current_start,
-                num_new_tokens,
                 sink_recache_after_switch,
                 cache_start,
             )

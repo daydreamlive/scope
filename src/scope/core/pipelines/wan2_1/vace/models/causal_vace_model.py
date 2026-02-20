@@ -450,14 +450,12 @@ class CausalVaceWanModel(nn.Module):
 
         cache_plan = None
         if kv_cache is not None:
-            num_new_tokens = grid_sizes[0].prod().item()
             sink_recache = block_kwargs.get("sink_recache_after_switch", False)
             cache_start_val = block_kwargs.get("cache_start", None)
             cache_plan = self.causal_wan_model._compute_cache_plan(
                 kv_cache,
                 grid_sizes,
                 current_start,
-                num_new_tokens,
                 sink_recache,
                 cache_start_val,
             )
