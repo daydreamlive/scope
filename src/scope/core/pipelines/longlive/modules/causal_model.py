@@ -1,6 +1,7 @@
 # Modified from https://github.com/NVlabs/LongLive
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 import math
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
@@ -68,6 +69,49 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
     return torch.stack(output).type_as(x)
 
 
+def causal_rope_apply_precomputed(x, rope_freqs, rope_seq_len):
+    """Apply rope with pre-computed frequencies. B=1 inference only."""
+    n = x.size(2)
+    x_i = torch.view_as_complex(
+        x[0, :rope_seq_len].to(torch.float64).reshape(rope_seq_len, n, -1, 2)
+    )
+    x_i = torch.view_as_real(x_i * rope_freqs).flatten(2)
+    x_i = torch.cat([x_i, x[0, rope_seq_len:]])
+    return x_i.unsqueeze(0).type_as(x)
+
+
+@dataclass
+class CachePlan:
+    """Pre-computed cache indices for torch.compile-friendly inference.
+
+    All int/bool fields are Python scalars (not tensors), so they become
+    compile-time constants that torch.compile can specialize on without
+    graph breaks inside the transformer block loop.
+    """
+
+    frame_seqlen: int
+    current_start_frame: int
+    current_end: int
+    is_recompute: bool
+    needs_rolling: bool
+    # Write indices
+    write_start: int
+    write_end: int  # = local_end_index
+    roped_offset: int
+    write_len: int  # = write_end - write_start
+    # Rolling params
+    sink_tokens: int
+    num_evicted_tokens: int
+    num_rolled_tokens: int
+    # Attention window
+    attn_use_sink: bool
+    attn_local_start: int
+    local_end_index: int
+    # Pre-computed rope frequencies (tensor, set after construction)
+    rope_freqs: torch.Tensor | None = None
+    rope_seq_len: int = 0
+
+
 class CausalWanSelfAttention(nn.Module):
     def __init__(
         self, dim, num_heads, local_attn_size=-1, sink_size=0, qk_norm=True, eps=1e-6
@@ -110,6 +154,7 @@ class CausalWanSelfAttention(nn.Module):
         current_start=0,
         cache_start=None,
         sink_recache_after_switch=False,
+        cache_plan=None,
     ):
         r"""
         Args:
@@ -118,6 +163,7 @@ class CausalWanSelfAttention(nn.Module):
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
             block_mask (BlockMask)
+            cache_plan (CachePlan, optional): Pre-computed cache plan for compile-friendly inference
         """
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
         if cache_start is None:
@@ -248,134 +294,36 @@ class CausalWanSelfAttention(nn.Module):
                     attn_out = attn_out[:, :, :-padded_length]
                 x = attn_out.transpose(2, 1)
         else:
-            frame_seqlen = math.prod(grid_sizes[0][1:]).item()
-            current_start_frame = current_start // frame_seqlen
-            roped_query = causal_rope_apply(
-                q, grid_sizes, freqs, start_frame=current_start_frame
+            plan = cache_plan
+            roped_query = causal_rope_apply_precomputed(
+                q, plan.rope_freqs, plan.rope_seq_len
             ).type_as(v)
-            roped_key = causal_rope_apply(
-                k, grid_sizes, freqs, start_frame=current_start_frame
+            roped_key = causal_rope_apply_precomputed(
+                k, plan.rope_freqs, plan.rope_seq_len
             ).type_as(v)
 
-            current_end = current_start + roped_query.shape[1]
-            sink_tokens = self.sink_size * frame_seqlen
-            # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
-            kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
+            if plan.write_len > 0:
+                kv_cache["k"][:, plan.write_start : plan.write_end] = roped_key[
+                    :, plan.roped_offset : plan.roped_offset + plan.write_len
+                ]
+                kv_cache["v"][:, plan.write_start : plan.write_end] = v[
+                    :, plan.roped_offset : plan.roped_offset + plan.write_len
+                ]
 
-            cache_global_end = kv_cache["global_end_index"].item()
-            cache_local_end = kv_cache["local_end_index"].item()
-
-            is_recompute = current_end <= cache_global_end and current_start > 0
-            if (
-                self.local_attn_size != -1
-                and (current_end > cache_global_end)
-                and (num_new_tokens + cache_local_end > kv_cache_size)
-            ):
-                # Calculate the number of new tokens added in this step
-                # Shift existing cache content left to discard oldest tokens
-                num_evicted_tokens = num_new_tokens + cache_local_end - kv_cache_size
-                num_rolled_tokens = cache_local_end - num_evicted_tokens - sink_tokens
-
-                # Compute updated local indices
-                local_end_index = (
-                    cache_local_end
-                    + current_end
-                    - cache_global_end
-                    - num_evicted_tokens
-                )
-                local_start_index = local_end_index - num_new_tokens
-
-                kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-                    kv_cache["k"][
-                        :,
-                        sink_tokens + num_evicted_tokens : sink_tokens
-                        + num_evicted_tokens
-                        + num_rolled_tokens,
-                    ].clone()
-                )
-                kv_cache["v"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-                    kv_cache["v"][
-                        :,
-                        sink_tokens + num_evicted_tokens : sink_tokens
-                        + num_evicted_tokens
-                        + num_rolled_tokens,
-                    ].clone()
-                )
-
-                # Protect sink_tokens only during recomputation; regular forward generation allows writing into the initial sink region
-                write_start_index = (
-                    max(local_start_index, sink_tokens)
-                    if is_recompute
-                    else local_start_index
-                )
-                if sink_recache_after_switch:
-                    write_start_index = local_start_index
-                roped_offset = max(0, write_start_index - local_start_index)
-                write_len = max(0, local_end_index - write_start_index)
-                if write_len > 0:
-                    kv_cache["k"][:, write_start_index:local_end_index] = roped_key[
-                        :, roped_offset : roped_offset + write_len
-                    ]
-                    kv_cache["v"][:, write_start_index:local_end_index] = v[
-                        :, roped_offset : roped_offset + write_len
-                    ]
-
-                if not is_recompute:
-                    kv_cache["global_end_index"].fill_(current_end)
-                    kv_cache["local_end_index"].fill_(local_end_index)
-
-            else:
-                # Assign new keys/values directly up to current_end
-                local_end_index = cache_local_end + current_end - cache_global_end
-                local_start_index = local_end_index - num_new_tokens
-
-                # Protect sink_tokens only during recomputation; regular forward generation allows writing into the initial sink region
-                write_start_index = (
-                    max(local_start_index, sink_tokens)
-                    if is_recompute
-                    else local_start_index
-                )
-                if sink_recache_after_switch:
-                    write_start_index = local_start_index
-                roped_offset = max(0, write_start_index - local_start_index)
-                write_len = max(0, local_end_index - write_start_index)
-                if write_len > 0:
-                    kv_cache["k"][:, write_start_index:local_end_index] = roped_key[
-                        :, roped_offset : roped_offset + write_len
-                    ]
-                    kv_cache["v"][:, write_start_index:local_end_index] = v[
-                        :, roped_offset : roped_offset + write_len
-                    ]
-
-                if not is_recompute:
-                    kv_cache["global_end_index"].fill_(current_end)
-                    kv_cache["local_end_index"].fill_(local_end_index)
-
-            if sink_tokens > 0:
-                # Concatenate sink tokens and local window tokens, keeping total length strictly below max_attention_size
-                local_budget = self.max_attention_size - sink_tokens
-                k_sink = kv_cache["k"][:, :sink_tokens]
-                v_sink = kv_cache["v"][:, :sink_tokens]
-
-                if local_budget > 0:
-                    local_start_for_window = max(
-                        sink_tokens, local_end_index - local_budget
-                    )
-                    k_local = kv_cache["k"][:, local_start_for_window:local_end_index]
-                    v_local = kv_cache["v"][:, local_start_for_window:local_end_index]
-                    k_cat = torch.cat([k_sink, k_local], dim=1)
-                    v_cat = torch.cat([v_sink, v_local], dim=1)
-                else:
-                    k_cat = k_sink
-                    v_cat = v_sink
+            # Attention
+            if plan.attn_use_sink:
+                k_sink = kv_cache["k"][:, : plan.sink_tokens]
+                v_sink = kv_cache["v"][:, : plan.sink_tokens]
+                k_local = kv_cache["k"][:, plan.attn_local_start : plan.local_end_index]
+                v_local = kv_cache["v"][:, plan.attn_local_start : plan.local_end_index]
+                k_cat = torch.cat([k_sink, k_local], dim=1)
+                v_cat = torch.cat([v_sink, v_local], dim=1)
                 x = attention(roped_query, k_cat, v_cat)
             else:
-                window_start = max(0, local_end_index - self.max_attention_size)
                 x = attention(
                     roped_query,
-                    kv_cache["k"][:, window_start:local_end_index],
-                    kv_cache["v"][:, window_start:local_end_index],
+                    kv_cache["k"][:, plan.attn_local_start : plan.local_end_index],
+                    kv_cache["v"][:, plan.attn_local_start : plan.local_end_index],
                 )
 
         # output
@@ -444,6 +392,7 @@ class CausalWanAttentionBlock(nn.Module):
         current_start=0,
         cache_start=None,
         sink_recache_after_switch=False,
+        cache_plan=None,
     ):
         r"""
         Args:
@@ -474,6 +423,7 @@ class CausalWanAttentionBlock(nn.Module):
             current_start,
             cache_start,
             sink_recache_after_switch,
+            cache_plan=cache_plan,
         )
 
         # with amp.autocast(dtype=torch.float32):
@@ -994,6 +944,152 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 kv_cache[block_index]["global_end_index"].fill_(current_end)
                 kv_cache[block_index]["local_end_index"].fill_(local_end_index)
 
+    @torch.compiler.disable
+    def _precompute_rope_freqs(self, grid_sizes, freqs, start_frame):
+        """Pre-compute RoPE frequencies outside the compiled region.
+
+        Extracts grid dimensions via .tolist() (which would cause a graph break
+        inside compiled code) and builds the frequency tensor for B=1 inference.
+
+        Returns:
+            Tuple of (freqs_i tensor [seq_len, 1, rope_dim], seq_len int)
+        """
+        f, h, w = grid_sizes[0].tolist()
+        seq_len = f * h * w
+        c = freqs.shape[1]
+        freqs_split = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
+        freqs_i = torch.cat(
+            [
+                freqs_split[0][start_frame : start_frame + f]
+                .view(f, 1, 1, -1)
+                .expand(f, h, w, -1),
+                freqs_split[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
+                freqs_split[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
+            ],
+            dim=-1,
+        ).reshape(seq_len, 1, -1)
+        return freqs_i, seq_len
+
+    @torch.compiler.disable
+    def _compute_cache_plan(
+        self,
+        kv_cache,
+        grid_sizes,
+        current_start,
+        num_new_tokens,
+        sink_recache_after_switch,
+        cache_start=None,
+    ):
+        """Compute all cache indices outside the compiled region.
+
+        Reads .item() from cache tensors and performs Python branching that
+        would otherwise cause graph breaks inside compiled transformer blocks.
+        All blocks share the same cache geometry, so we read from kv_cache[0].
+
+        Returns:
+            CachePlan with all indices as plain Python int/bool values.
+        """
+        cache = kv_cache[0]
+
+        frame_seqlen = math.prod(grid_sizes[0][1:]).item()
+        current_start_frame = current_start // frame_seqlen
+        current_end = current_start + num_new_tokens
+
+        kv_cache_size = cache["k"].shape[1]
+        cache_global_end = cache["global_end_index"].item()
+        cache_local_end = cache["local_end_index"].item()
+
+        self_attn = self.blocks[0].self_attn
+        local_attn_size = self_attn.local_attn_size
+        max_attention_size = self_attn.max_attention_size
+        sink_size = self_attn.sink_size
+
+        sink_tokens = sink_size * frame_seqlen
+        is_recompute = current_end <= cache_global_end and current_start > 0
+
+        needs_rolling = (
+            local_attn_size != -1
+            and (current_end > cache_global_end)
+            and (num_new_tokens + cache_local_end > kv_cache_size)
+        )
+
+        if needs_rolling:
+            num_evicted_tokens = num_new_tokens + cache_local_end - kv_cache_size
+            num_rolled_tokens = cache_local_end - num_evicted_tokens - sink_tokens
+            local_end_index = (
+                cache_local_end + current_end - cache_global_end - num_evicted_tokens
+            )
+            local_start_index = local_end_index - num_new_tokens
+        else:
+            num_evicted_tokens = 0
+            num_rolled_tokens = 0
+            local_end_index = cache_local_end + current_end - cache_global_end
+            local_start_index = local_end_index - num_new_tokens
+
+        write_start = (
+            max(local_start_index, sink_tokens) if is_recompute else local_start_index
+        )
+        if sink_recache_after_switch:
+            write_start = local_start_index
+        roped_offset = max(0, write_start - local_start_index)
+        write_len = max(0, local_end_index - write_start)
+
+        attn_use_sink = sink_tokens > 0
+        if attn_use_sink:
+            local_budget = max_attention_size - sink_tokens
+            if local_budget > 0:
+                attn_local_start = max(sink_tokens, local_end_index - local_budget)
+            else:
+                attn_local_start = local_end_index
+        else:
+            attn_local_start = max(0, local_end_index - max_attention_size)
+
+        return CachePlan(
+            frame_seqlen=frame_seqlen,
+            current_start_frame=current_start_frame,
+            current_end=current_end,
+            is_recompute=is_recompute,
+            needs_rolling=needs_rolling,
+            write_start=write_start,
+            write_end=local_end_index,
+            roped_offset=roped_offset,
+            write_len=write_len,
+            sink_tokens=sink_tokens,
+            num_evicted_tokens=num_evicted_tokens,
+            num_rolled_tokens=num_rolled_tokens,
+            attn_use_sink=attn_use_sink,
+            attn_local_start=attn_local_start,
+            local_end_index=local_end_index,
+        )
+
+    @torch.compiler.disable
+    def _roll_caches(self, kv_cache, plan):
+        """Roll all block caches at once, outside the compiled region.
+
+        In the original code, each block rolled its own cache independently inside
+        compiled forward(). Moving this here eliminates per-block graph breaks from
+        in-place rolling operations.
+        """
+        if not plan.needs_rolling:
+            return
+        for cache in kv_cache:
+            cache["k"][
+                :, plan.sink_tokens : plan.sink_tokens + plan.num_rolled_tokens
+            ] = cache["k"][
+                :,
+                plan.sink_tokens + plan.num_evicted_tokens : plan.sink_tokens
+                + plan.num_evicted_tokens
+                + plan.num_rolled_tokens,
+            ].clone()
+            cache["v"][
+                :, plan.sink_tokens : plan.sink_tokens + plan.num_rolled_tokens
+            ] = cache["v"][
+                :,
+                plan.sink_tokens + plan.num_evicted_tokens : plan.sink_tokens
+                + plan.num_evicted_tokens
+                + plan.num_rolled_tokens,
+            ].clone()
+
     def _forward_inference(
         self,
         x,
@@ -1089,6 +1185,24 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
+        cache_plan = None
+        if kv_cache is not None:
+            num_new_tokens = grid_sizes[0].prod().item()
+            cache_plan = self._compute_cache_plan(
+                kv_cache,
+                grid_sizes,
+                current_start,
+                num_new_tokens,
+                sink_recache_after_switch,
+                cache_start,
+            )
+            cache_plan.rope_freqs, cache_plan.rope_seq_len = (
+                self._precompute_rope_freqs(
+                    grid_sizes, self.freqs, cache_plan.current_start_frame
+                )
+            )
+            self._roll_caches(kv_cache, cache_plan)
+
         # arguments
         kwargs = dict(
             e=e0,
@@ -1099,9 +1213,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_lens=context_lens,
             block_mask=self.block_mask,
             sink_recache_after_switch=sink_recache_after_switch,
+            cache_plan=cache_plan,
         )
 
-        # print("kwargs done")
         def create_custom_forward(module):
             def custom_forward(*inputs, **kwargs):
                 return module(*inputs, **kwargs)
@@ -1133,6 +1247,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                     }
                 )
                 x = block(x, **kwargs)
+
+        if (
+            kv_cache is not None
+            and cache_plan is not None
+            and not cache_plan.is_recompute
+        ):
+            for cache in kv_cache:
+                cache["global_end_index"].fill_(cache_plan.current_end)
+                cache["local_end_index"].fill_(cache_plan.local_end_index)
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))

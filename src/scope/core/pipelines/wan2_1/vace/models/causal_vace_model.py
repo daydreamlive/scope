@@ -448,6 +448,28 @@ class CausalVaceWanModel(nn.Module):
                 crossattn_cache,
             )
 
+        cache_plan = None
+        if kv_cache is not None:
+            num_new_tokens = grid_sizes[0].prod().item()
+            sink_recache = block_kwargs.get("sink_recache_after_switch", False)
+            cache_start_val = block_kwargs.get("cache_start", None)
+            cache_plan = self.causal_wan_model._compute_cache_plan(
+                kv_cache,
+                grid_sizes,
+                current_start,
+                num_new_tokens,
+                sink_recache,
+                cache_start_val,
+            )
+            cache_plan.rope_freqs, cache_plan.rope_seq_len = (
+                self.causal_wan_model._precompute_rope_freqs(
+                    grid_sizes,
+                    self.causal_wan_model.freqs,
+                    cache_plan.current_start_frame,
+                )
+            )
+            self.causal_wan_model._roll_caches(kv_cache, cache_plan)
+
         # Base arguments for transformer blocks (shared across all blocks)
         base_kwargs = {
             "e": e0,
@@ -459,6 +481,7 @@ class CausalVaceWanModel(nn.Module):
             "block_mask": self.causal_wan_model.block_mask,
             "hints": hints,
             "context_scale": vace_context_scale,
+            "cache_plan": cache_plan,
         }
 
         def create_custom_forward(module):
@@ -503,6 +526,15 @@ class CausalVaceWanModel(nn.Module):
                     cache_update_infos.append((block_index, block_cache_update_info))
                 else:
                     x = result
+
+        if (
+            kv_cache is not None
+            and cache_plan is not None
+            and not cache_plan.is_recompute
+        ):
+            for cache in kv_cache:
+                cache["global_end_index"].fill_(cache_plan.current_end)
+                cache["local_end_index"].fill_(cache_plan.local_end_index)
 
         if kv_cache is not None and cache_update_infos:
             self.causal_wan_model._apply_cache_updates(
