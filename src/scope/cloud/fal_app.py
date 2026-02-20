@@ -307,12 +307,15 @@ class ScopeApp(fal.App, keep_alive=300):
             raise
 
         # Environment for scope
+        # TODO don't copy env, minimise the scope env vars for security
+        # TODO some way to hide kafka creds
         scope_env = os.environ.copy()
         # Add any scope-specific environment variables here
         # scope_env["PIPELINE"] = "some-default-pipeline"
         # Use fal's /data directory for persistent storage
         scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
-        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
+        # TODO dont do this, delete all old logs
+        # scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
 
