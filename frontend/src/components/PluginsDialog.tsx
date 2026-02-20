@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { PluginsTab } from "./settings/PluginsTab";
+import { DiscoverTab } from "./settings/DiscoverTab";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
 import type { InstalledPlugin } from "@/types/settings";
 import {
@@ -44,7 +45,7 @@ export function PluginsDialog({
   const [failedPlugins, setFailedPlugins] = useState<FailedPluginInfo[]>([]);
   const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
-  const [activeTab, setActiveTab] = useState("plugins");
+  const [activeTab, setActiveTab] = useState("installed");
   const isModifyingPluginsRef = useRef(false);
 
   useEffect(() => {
@@ -82,10 +83,10 @@ export function PluginsDialog({
   }, []);
 
   useEffect(() => {
-    if (open && activeTab === "plugins") {
+    if (open) {
       fetchPlugins();
     }
-  }, [open, activeTab, fetchPlugins]);
+  }, [open, fetchPlugins]);
 
   const handleBrowseLocalPlugin = async () => {
     if (window.scope?.browseDirectory) {
@@ -263,15 +264,21 @@ export function PluginsDialog({
         >
           <TabsList className="flex flex-col items-start justify-start bg-transparent gap-1 w-32 p-4">
             <TabsTrigger
-              value="plugins"
+              value="installed"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
-              Plugins
+              Installed
+            </TabsTrigger>
+            <TabsTrigger
+              value="discover"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              Discover
             </TabsTrigger>
           </TabsList>
           <div className="w-px bg-border self-stretch" />
           <div className="flex-1 min-w-0 p-4 pt-10 h-[40vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
-            <TabsContent value="plugins" className="mt-0">
+            <TabsContent value="installed" className="mt-0">
               <PluginsTab
                 plugins={plugins}
                 failedPlugins={failedPlugins}
@@ -283,6 +290,13 @@ export function PluginsDialog({
                 onDelete={handleDeletePlugin}
                 onReload={handleReloadPlugin}
                 isLoading={isLoadingPlugins}
+                isInstalling={isInstalling}
+              />
+            </TabsContent>
+            <TabsContent value="discover" className="mt-0">
+              <DiscoverTab
+                onInstall={handleInstallPlugin}
+                installedPluginNames={plugins.map(p => p.name)}
                 isInstalling={isInstalling}
               />
             </TabsContent>
