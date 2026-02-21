@@ -45,7 +45,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "accelerate>=1.1.1",
     "flash-attn==2.8.3; sys_platform == 'linux' or sys_platform == 'win32'",
-    "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
+    "sageattention>=3.0.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
     "pluggy>=1.5.0",
@@ -102,10 +102,9 @@ flash-attn = [
     { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.9.0cxx11abiFALSE-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
 sageattention = [
-    # Prebuilt Linux wheels from https://huggingface.co/Kijai/PrecompiledWheels
-    { url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
-    # Prebuilt Windows wheels from https://github.com/woct0rdho/SageAttention/releases
-    { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
+    # SA3 (SageAttention 3.0) — no prebuilt wheels yet; source install from
+    # the sageattention3_blackwell subdirectory of the main repo.
+    { git = "https://github.com/thu-ml/SageAttention", subdirectory = "sageattention3_blackwell", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [[tool.uv.index]]

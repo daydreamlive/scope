@@ -8,7 +8,7 @@ try:
     if os.getenv("DISABLE_SAGEATTENTION", "0") != "0":
         raise Exception("DISABLE_SAGEATTENTION is set")
 
-    from sageattention import sageattn
+    from sageattention import sageattn, sageattn_varlen
 
     @torch.library.custom_op(
         "mylib::sageattn", mutates_args={"q", "k", "v"}, device_types="cuda"
@@ -17,16 +17,45 @@ try:
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        attn_mask: torch.Tensor | None = None,
-        dropout_p: float = 0,
         is_causal: bool = False,
+        sm_scale: float | None = None,
     ) -> torch.Tensor:
         return sageattn(
-            q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal
+            q,
+            k,
+            v,
+            tensor_layout="HND",
+            is_causal=is_causal,
+            sm_scale=sm_scale,
+            return_lse=False,
         )
 
     @sageattn_func.register_fake
-    def _sageattn_fake(q, k, v, attn_mask=None, dropout_p=0, is_causal=False):
+    def _sageattn_fake(q, k, v, is_causal=False, sm_scale=None):
+        return torch.empty(*q.shape, device=q.device, dtype=q.dtype)
+
+    @torch.library.custom_op(
+        "mylib::sageattn_varlen",
+        mutates_args={"q", "k", "v"},
+        device_types="cuda",
+    )
+    def sageattn_varlen_func(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        cu_seqlens_kv: torch.Tensor,
+        max_seqlen_q: int,
+        max_seqlen_kv: int,
+    ) -> torch.Tensor:
+        return sageattn_varlen(
+            q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
+        )
+
+    @sageattn_varlen_func.register_fake
+    def _sageattn_varlen_fake(
+        q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
+    ):
         return torch.empty(*q.shape, device=q.device, dtype=q.dtype)
 
     # Runtime kernel probe: verify the AOT-compiled CUDA kernels support this GPU.
@@ -64,7 +93,7 @@ try:
         finally:
             del _a, _b
 
-    print("SageAttention loaded successfully")
+    print("SageAttention 3 loaded successfully")
 
     SAGEATTN_AVAILABLE = True
 except Exception as e:
@@ -76,3 +105,4 @@ except Exception as e:
     elif "kernel probe failed" in str(e) or "health check failed" in str(e):
         print("sageattention kernels are not compatible with this GPU.")
     sageattn_func = None
+    sageattn_varlen_func = None

@@ -1,9 +1,13 @@
 # Modified from https://github.com/guandeh17/Self-Forcing
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
+import logging
 import platform
+import time
 
 import torch
 from flash_attn import flash_attn_func
+
+logger = logging.getLogger(__name__)
 
 
 def is_hopper_gpu():
@@ -12,11 +16,13 @@ def is_hopper_gpu():
     device_name = torch.cuda.get_device_name(0).lower()
     return "h100" in device_name or "hopper" in device_name
 
+
 def is_b200_gpu():
     if not torch.cuda.is_available():
         return False
     device_name = torch.cuda.get_device_name(0).lower()
     return "b200" in device_name
+
 
 FLASH_ATTN_3_AVAILABLE = False
 
@@ -46,27 +52,24 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
-sageattn_func = None
-SAGEATTN_AVAILABLE = False
-# Do not try to load SageAttention on Hopper GPUs because at the moment
-# loading SageAttention 2.2.0 in the sage module causes static on a H100
-# Do not try to load SageAttention on B200 GPUs because at the moment
-# SageAttention 2.2.0 is not supported on B200 GPUs
-if not is_hopper_gpu() and not is_b200_gpu():
-    from .sage import SAGEATTN_AVAILABLE, sageattn_func
-
 import warnings
+
+sageattn_func = None
+sageattn_varlen_func = None
+SAGEATTN_AVAILABLE = False
+from .sage import SAGEATTN_AVAILABLE, sageattn_func, sageattn_varlen_func
 
 __all__ = [
     "flash_attention",
     "attention",
     "sageattn_func",
+    "sageattn_varlen_func",
     "SAGEATTN_AVAILABLE",
 ]
 
-print("flash attn 2 available", FLASH_ATTN_2_AVAILABLE)
-print("flash attn 3 available", FLASH_ATTN_3_AVAILABLE)
-print("sage attn available", SAGEATTN_AVAILABLE)
+logger.info("flash attn 2 available: %s", FLASH_ATTN_2_AVAILABLE)
+logger.info("flash attn 3 available: %s", FLASH_ATTN_3_AVAILABLE)
+logger.info("sage attn 3 available: %s", SAGEATTN_AVAILABLE)
 
 
 def flash_attention(
@@ -97,12 +100,11 @@ def flash_attention(
     deterministic:  bool. If True, slightly slower and uses more memory.
     dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
     """
-    if not FLASH_ATTN_3_AVAILABLE:
-        return flash_attn_func(
-            q,
-            k,
-            v,
-        )
+    if not FLASH_ATTN_3_AVAILABLE and not SAGEATTN_AVAILABLE:
+        t0 = time.perf_counter()
+        out = flash_attn_func(q, k, v)
+        logger.debug("flash_attention: backend=FA2-simple elapsed=%.4fs", time.perf_counter() - t0)
+        return out
     half_dtypes = (torch.float16, torch.bfloat16)
     assert dtype in half_dtypes
     assert q.device.type == "cuda" and q.size(-1) <= 256
@@ -144,8 +146,26 @@ def flash_attention(
             "Flash attention 3 is not available, use flash attention 2 instead."
         )
 
-    # apply attention
-    if (version is None or version == 3) and FLASH_ATTN_3_AVAILABLE:
+    # apply attention — priority: SA3 varlen → FA3 → FA2
+    _use_sageattn_varlen = SAGEATTN_AVAILABLE and not causal and window_size == (-1, -1)
+    t0 = time.perf_counter()
+    if _use_sageattn_varlen:
+        _backend = "SA3-varlen"
+        cu_seqlens_q = (
+            torch.cat([q_lens.new_zeros([1]), q_lens])
+            .cumsum(0, dtype=torch.int32)
+            .to(q.device, non_blocking=True)
+        )
+        cu_seqlens_kv = (
+            torch.cat([k_lens.new_zeros([1]), k_lens])
+            .cumsum(0, dtype=torch.int32)
+            .to(q.device, non_blocking=True)
+        )
+        x = sageattn_varlen_func(
+            q, k, v, cu_seqlens_q, cu_seqlens_kv, lq, lk
+        ).unflatten(0, (b, lq))
+    elif (version is None or version == 3) and FLASH_ATTN_3_AVAILABLE:
+        _backend = "FA3-varlen"
         # Note: dropout_p, window_size are not supported in FA3 now.
         x = flash_attn_interface.flash_attn_varlen_func(
             q=q,
@@ -164,6 +184,7 @@ def flash_attention(
             deterministic=deterministic,
         ).unflatten(0, (b, lq))
     else:
+        _backend = "FA2-varlen"
         assert FLASH_ATTN_2_AVAILABLE
         x = flash_attn.flash_attn_varlen_func(
             q=q,
@@ -183,6 +204,8 @@ def flash_attention(
             window_size=window_size,
             deterministic=deterministic,
         ).unflatten(0, (b, lq))
+
+    logger.debug("flash_attention: backend=%s elapsed=%.4fs", _backend, time.perf_counter() - t0)
 
     # output
     return x.type(out_dtype)
@@ -204,24 +227,20 @@ def attention(
     fa_version=None,
     # og_dtype=torch.bfloat16,
 ):
+    t0 = time.perf_counter()
     if SAGEATTN_AVAILABLE:
-        # print("Using sageattention")
-        attn_mask = None
-
+        _backend = "SA3"
         og_dtype = q.dtype
         q = q.transpose(1, 2).to(dtype)
         k = k.transpose(1, 2).to(dtype)
         v = v.transpose(1, 2).to(dtype)
 
-        out = sageattn_func(
-            q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p
-        )
+        out = sageattn_func(q, k, v, is_causal=causal)
 
         out = out.transpose(1, 2).contiguous().to(og_dtype)
-        return out
-
     elif FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
-        return flash_attention(
+        _backend = "flash_attention"
+        out = flash_attention(
             q=q,
             k=k,
             v=v,
@@ -237,6 +256,7 @@ def attention(
             version=fa_version,
         )
     else:
+        _backend = "SDPA"
         if q_lens is not None or k_lens is not None:
             warnings.warn(
                 "Padding mask is disabled when using scaled_dot_product_attention. It can have a significant impact on performance."
@@ -252,4 +272,6 @@ def attention(
         )
 
         out = out.transpose(1, 2).contiguous()
-        return out
+
+    logger.debug("attention: backend=%s elapsed=%.4fs", _backend, time.perf_counter() - t0)
+    return out
