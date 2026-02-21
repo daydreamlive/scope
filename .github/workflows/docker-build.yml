@@ -53,6 +53,8 @@ jobs:
     outputs:
       fal_app_id: ${{ steps.deploy.outputs.fal_app_id }}
       fal_ws_url: ${{ steps.deploy.outputs.fal_ws_url }}
+      livepeer_fal_app_id: ${{ steps.deploy_livepeer.outputs.livepeer_fal_app_id }}
+      livepeer_fal_ws_url: ${{ steps.deploy_livepeer.outputs.livepeer_fal_ws_url }}
 
     steps:
       - name: Checkout code
@@ -96,6 +98,34 @@ jobs:
           echo "Deployed to: ${FAL_APP_ID}"
           echo "WebSocket URL: ${FAL_WS_URL}"
 
+      - name: Deploy Livepeer runner to fal (PR environment)
+        id: deploy_livepeer
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ needs.build-cloud.outputs.pr_number }}"
+
+          APP_NAME="scope-livepeer-pr-${PR_NUMBER}"
+
+          echo "Deploying Livepeer runner for PR #${PR_NUMBER} to fal as ${APP_NAME}"
+
+          fal deploy \
+            --app-name "$APP_NAME" \
+            --env preview \
+            --auth private \
+            src/scope/cloud/livepeer_fal_app.py 2>&1 | tee deploy_livepeer_output.txt
+
+          LIVEPEER_FAL_APP_ID="daydream/${APP_NAME}--preview"
+          LIVEPEER_FAL_WS_URL="wss://fal.run/${LIVEPEER_FAL_APP_ID}/ws"
+
+          echo "livepeer_fal_app_id=${LIVEPEER_FAL_APP_ID}" >> $GITHUB_OUTPUT
+          echo "livepeer_fal_ws_url=${LIVEPEER_FAL_WS_URL}" >> $GITHUB_OUTPUT
+
+          echo "Deployed Livepeer runner to: ${LIVEPEER_FAL_APP_ID}"
+          echo "Livepeer WebSocket URL: ${LIVEPEER_FAL_WS_URL}"
+
       - name: Comment on PR with deployment info
         uses: actions/github-script@v7
         with:
@@ -103,6 +133,8 @@ jobs:
             const prNumber = ${{ github.event.pull_request.number }};
             const falAppId = '${{ steps.deploy.outputs.fal_app_id }}';
             const falWsUrl = '${{ steps.deploy.outputs.fal_ws_url }}';
+            const livepeerFalAppId = '${{ steps.deploy_livepeer.outputs.livepeer_fal_app_id }}';
+            const livepeerFalWsUrl = '${{ steps.deploy_livepeer.outputs.livepeer_fal_ws_url }}';
             const shortSha = '${{ needs.build-cloud.outputs.short_sha }}';
 
             const body = `## 🚀 fal.ai Preview Deployment
@@ -113,10 +145,23 @@ jobs:
             | **WebSocket** | \`${falWsUrl}\` |
             | **Commit** | \`${shortSha}\` |
 
+            ### Livepeer Runner
+
+            | | |
+            |---|---|
+            | **App ID** | \`${livepeerFalAppId}\` |
+            | **WebSocket** | \`${livepeerFalWsUrl}\` |
+            | **Auth** | \`private\` |
+
             ### Testing
             Connect to this preview deployment by running this on your branch:
             \`\`\`
             uv run build && SCOPE_CLOUD_APP_ID="${falAppId}/ws" uv run daydream-scope
+            \`\`\`
+
+            Livepeer mode:
+            \`\`\`
+            SCOPE_CLOUD_MODE=livepeer SCOPE_CLOUD_APP_ID="${livepeerFalAppId}/ws" uv run daydream-scope
             \`\`\`
 
             🧪 E2E tests will run automatically against this deployment.

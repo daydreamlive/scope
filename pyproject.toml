@@ -60,11 +60,16 @@ dependencies = [
     "syphon-python>=0.1.1; sys_platform == 'darwin'",
     "python-osc>=1.9.0",
     "mcp>=1.0.0",
+    "livepeer-gateway",
+    "protobuf>=5.27.0",
 ]
 
 [project.optional-dependencies]
 kafka = [
     "aiokafka>=0.10.0",
+]
+livepeer = [
+    "uvicorn[standard]>=0.35.0",
 ]
 link = [
     "aalink>=0.1.1",
@@ -78,6 +83,7 @@ midi = [
 daydream-scope = "scope.server.app:main"
 build = "scope.server.build:main"
 download_models = "scope.server.download_models:main"
+livepeer-runner = "scope.cloud.livepeer_app:main"
 
 [project.urls]
 Homepage = "https://github.com/daydreamlive/scope"
@@ -99,6 +105,7 @@ flash-attn = [{ requirement = "torch", match-runtime = true, marker = "sys_platf
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 [tool.uv.sources]
+livepeer-gateway = { git = "https://github.com/livepeer/livepeer-python-gateway" }
 torch = [
     { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]

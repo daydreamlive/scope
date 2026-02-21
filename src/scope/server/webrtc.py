@@ -33,7 +33,7 @@ from .schema import WebRTCOfferRequest
 from .tracks import VideoProcessingTrack
 
 if TYPE_CHECKING:
-    from .cloud_connection import CloudConnectionManager
+    from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
 
@@ -525,7 +525,7 @@ class WebRTCManager:
             raise
 
     async def handle_offer_with_relay(
-        self, request: WebRTCOfferRequest, cloud_manager: "CloudConnectionManager"
+        self, request: WebRTCOfferRequest, cloud_manager: "ScopeCloudBackend"
     ) -> dict[str, Any]:
         """
         Handle WebRTC offer and relay video through cloud for processing.
@@ -537,7 +537,7 @@ class WebRTCManager:
 
         Args:
             request: WebRTC offer request
-            cloud_manager: The CloudConnectionManager for cloud connection
+            cloud_manager: The active remote backend for relay connection
 
         Returns:
             Dictionary containing SDP answer

@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
+    from .livepeer import LivepeerConnection
     from .pipeline_manager import PipelineManager
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
@@ -66,6 +67,7 @@ from .kafka_publisher import (
     is_kafka_enabled,
     set_kafka_publisher,
 )
+from .livepeer import is_livepeer_enabled
 from .logs_config import (
     LOG_FORMAT,
     FalConnectionFilter,
@@ -112,6 +114,7 @@ from .schema import (
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
+from .scope_cloud_types import ScopeCloudBackend
 from .tempo_router import router as tempo_router
 
 # Cached responses for pipeline schemas and plugin list.
@@ -189,6 +192,16 @@ def _configure_logging():
         logging.getLogger("uvicorn.access").setLevel(logging.INFO)
         logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
+
+    if os.getenv("LIVEPEER_DEBUG"):
+        logging.getLogger("livepeer_gateway").setLevel(logging.DEBUG)
+        logging.getLogger("scope.server.livepeer").setLevel(logging.DEBUG)
+        logging.getLogger("scope.server.livepeer_client").setLevel(logging.DEBUG)
+        for handler in logging.getLogger().handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(
+                handler, RotatingFileHandler
+            ):
+                handler.setLevel(logging.DEBUG)
 
 
 # Set INFO for the cloud log re-emitter so cloud lines reach console and file
@@ -290,6 +303,8 @@ pipeline_manager = None
 server_start_time = time.time()
 # Global cloud connection manager instance
 cloud_connection_manager = None
+# Global Livepeer manager instance
+livepeer = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
 # Global tempo sync manager instance
@@ -318,6 +333,7 @@ async def lifespan(app: FastAPI):
     import torch
 
     from .cloud_connection import CloudConnectionManager
+    from .livepeer import LivepeerConnection
     from .pipeline_manager import PipelineManager
     from .tempo_sync import TempoSync
     from .webrtc import WebRTCManager
@@ -328,6 +344,7 @@ async def lifespan(app: FastAPI):
         pipeline_manager, \
         cloud_connection_manager, \
         kafka_publisher, \
+        livepeer, \
         tempo_sync, \
         osc_server, \
         dmx_server
@@ -373,6 +390,11 @@ async def lifespan(app: FastAPI):
 
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
+
+    livepeer = LivepeerConnection()
+    if is_livepeer_enabled():
+        livepeer.configure()
+        logger.info("Livepeer configured")
 
     # Initialize Kafka publisher if credentials are configured
     if is_kafka_enabled():
@@ -457,6 +479,11 @@ async def lifespan(app: FastAPI):
         await tempo_sync.stop()
         logger.info("Tempo sync shutdown complete")
 
+    if livepeer and livepeer.is_connected:
+        logger.info("Shutting down Livepeer connection...")
+        await livepeer.disconnect()
+        logger.info("Livepeer connection shutdown complete")
+
     if kafka_publisher:
         logger.info("Shutting down Kafka publisher...")
         await kafka_publisher.stop()
@@ -483,6 +510,23 @@ def get_osc_server():
     """Dependency to get OSC server instance."""
 
     return osc_server
+
+
+def get_livepeer() -> "LivepeerConnection":
+    """Dependency to get Livepeer manager instance."""
+    return livepeer
+
+
+def get_scope_cloud() -> ScopeCloudBackend:
+    """Dependency to get the selected remote backend.
+
+    Returns the backend object regardless of connection state so callers can
+    inspect status, including connecting/error states.  Callers that need an
+    *active* connection must check cloud_manager.is_connected themselves.
+    """
+    if is_livepeer_enabled():
+        return livepeer
+    return cloud_connection_manager
 
 
 def get_dmx_server():
@@ -517,7 +561,7 @@ app.add_middleware(
 @cloud_proxy()
 async def health_check(
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Health check endpoint."""
     return HealthResponse(
@@ -560,7 +604,7 @@ async def delete_fal_connection_id():
 @cloud_proxy(timeout=30.0)
 async def restart_server(
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Restart the server process.
 
@@ -666,7 +710,7 @@ async def load_pipeline(
     request: PipelineLoadRequest,
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Load one or more pipelines.
 
@@ -718,7 +762,7 @@ async def load_pipeline(
 async def get_pipeline_status(
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Get current pipeline status.
 
@@ -739,7 +783,7 @@ async def get_pipeline_status(
 @cloud_proxy()
 async def get_pipeline_schemas(
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Get configuration schemas and defaults for all available pipelines.
 
@@ -1101,7 +1145,7 @@ async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Handle WebRTC offer and return answer.
 
@@ -1210,7 +1254,7 @@ async def download_recording(
     session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Download the recording file for the specified session.
     This will finalize the current recording and create a copy for download,
@@ -1357,7 +1401,7 @@ class LoRAFilesResponse(BaseModel):
 @cloud_proxy()
 async def list_lora_files(
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """List available LoRA files in the models/lora directory and its subdirectories.
 
@@ -1417,7 +1461,7 @@ ALLOWED_LORA_HOSTS = {"civitai.com", "huggingface.co"}
 async def install_lora_file(
     request: LoRAInstallRequest,
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Install a LoRA file from a URL (e.g. HuggingFace, CivitAI).
 
@@ -1654,7 +1698,7 @@ class LoRADeleteResponse(BaseModel):
 async def delete_lora_file(
     name: str,
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Delete a LoRA file by name."""
     try:
@@ -1773,7 +1817,7 @@ async def tag_lora_provenance(
 async def resolve_workflow_endpoint(
     workflow: WorkflowRequest,
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Resolve workflow dependencies and return a resolution plan.
 
@@ -1801,7 +1845,7 @@ async def resolve_workflow_endpoint(
 async def list_assets(
     http_request: Request,
     type: str | None = Query(None, description="Filter by asset type (image, video)"),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """List available asset files in the assets directory and its subdirectories.
 
@@ -1856,7 +1900,7 @@ async def list_assets(
 async def upload_asset(
     request: Request,
     filename: str = Query(...),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Upload an asset file (image or video) to the assets directory.
 
@@ -2018,7 +2062,7 @@ async def serve_asset(asset_path: str):
 async def get_model_status(
     http_request: Request,
     pipeline_id: str,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Check if models for a pipeline are downloaded and get download progress."""
     try:
@@ -2049,7 +2093,7 @@ async def get_model_status(
 async def download_pipeline_models(
     request: DownloadModelsRequest,
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Download models for a specific pipeline."""
     try:
@@ -2313,7 +2357,7 @@ async def stream_input_source_preview(
 
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Get hardware information including available VRAM and Spout availability.
 
@@ -2321,7 +2365,7 @@ async def get_hardware_info(
     cloud-hosted scope backend to get the cloud GPU's hardware info.
     """
     try:
-        # If connected to cloud, proxy the request to get cloud's hardware info
+        #  If connected to cloud, proxy the request to get cloud's hardware info
         if cloud_manager.is_connected:
             return await get_hardware_info_from_cloud(
                 cloud_manager,
@@ -2569,7 +2613,7 @@ def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
 @cloud_proxy()
 async def list_plugins(
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """List all installed plugins with metadata.
 
@@ -2615,7 +2659,7 @@ async def list_plugins(
 async def install_plugin(
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Install a plugin from PyPI, git URL, or local path.
 
@@ -2710,7 +2754,7 @@ async def uninstall_plugin(
     name: str,
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Uninstall a plugin, cleaning up loaded pipelines.
 
@@ -2772,7 +2816,7 @@ async def reload_plugin(
     name: str,
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Reload an editable plugin for development (without server restart).
 
@@ -2852,7 +2896,7 @@ async def reload_plugin(
 @app.post("/api/v1/cloud/connect", response_model=CloudStatusResponse)
 async def connect_to_cloud(
     request: CloudConnectRequest,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Connect to cloud for remote GPU inference.
 
@@ -2876,7 +2920,6 @@ async def connect_to_cloud(
         # Use request body credentials if provided, otherwise fall back to CLI/env
         app_id = request.app_id or os.environ.get("SCOPE_CLOUD_APP_ID")
         api_key = request.api_key or os.environ.get("SCOPE_CLOUD_API_KEY")
-
         if not app_id:
             raise HTTPException(
                 status_code=400,
@@ -2904,7 +2947,7 @@ async def connect_to_cloud(
 
 @app.post("/api/v1/cloud/disconnect", response_model=CloudStatusResponse)
 async def disconnect_from_cloud(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Disconnect from cloud.
 
@@ -2927,7 +2970,7 @@ async def disconnect_from_cloud(
 
 @app.get("/api/v1/cloud/status", response_model=CloudStatusResponse)
 async def get_cloud_status(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Get current cloud connection status."""
     status = cloud_manager.get_status()

@@ -28,12 +28,13 @@ from fastapi.responses import Response
 from .cloud_connection import CloudConnectionManager
 from .models_config import get_assets_dir
 from .schema import AssetFileInfo, HardwareInfoResponse
+from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
 
 
 async def _proxy_to_cloud(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     http_request: Request,
     path: str,
     method: str,
@@ -100,7 +101,7 @@ CLOUD_REQUEST_FAILED = "Cloud request failed"
 
 
 async def proxy_with_body(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     method: str,
     path: str,
     body: dict | None = None,
@@ -139,7 +140,7 @@ async def proxy_with_body(
 
 
 async def get_hardware_info_from_cloud(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     spout_available: bool,
     ndi_available: bool = False,
     syphon_available: bool = False,
@@ -350,7 +351,7 @@ def cloud_proxy(
     """Decorator: when cloud is connected, proxy the request to cloud; else run the handler.
 
     The wrapped handler must accept `http_request: Request` and
-    `cloud_manager: CloudConnectionManager` (e.g. via Depends) so the
+    `cloud_manager: ScopeCloudBackend` (e.g. via Depends) so the
     decorator can forward the request and check connection. Do not consume
     the request body before the decorator runs (the decorator only reads
     body when proxying).
@@ -370,7 +371,13 @@ def cloud_proxy(
             cloud_manager = kwargs.get("cloud_manager")
             http_request = kwargs.get("http_request")
 
-            if not isinstance(cloud_manager, CloudConnectionManager):
+            if not (
+                cloud_manager is not None
+                and hasattr(cloud_manager, "is_connected")
+                and hasattr(cloud_manager, "api_request")
+            ):
+                cloud_manager = None
+            if cloud_manager is None:
                 return await f(*args, **kwargs)
             if not cloud_manager.is_connected:
                 return await f(*args, **kwargs)
@@ -383,6 +390,12 @@ def cloud_proxy(
             if path is None:
                 actual_path = http_request.url.path
             elif callable(path):
+                if not isinstance(cloud_manager, CloudConnectionManager):
+                    # TODO support Livepeer cloud mode
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This cloud proxy path is only supported in relay mode",
+                    )
                 actual_path = path(http_request, cloud_manager)
             else:
                 actual_path = path
