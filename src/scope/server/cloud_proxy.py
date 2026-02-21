@@ -28,12 +28,13 @@ from fastapi.responses import Response
 from .cloud_connection import CloudConnectionManager
 from .models_config import get_assets_dir
 from .schema import AssetFileInfo, HardwareInfoResponse
+from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
 
 
 async def _proxy_to_cloud(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     http_request: Request,
     path: str,
     method: str,
@@ -100,7 +101,7 @@ CLOUD_REQUEST_FAILED = "Cloud request failed"
 
 
 async def proxy_with_body(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     method: str,
     path: str,
     body: dict | None = None,
@@ -368,9 +369,20 @@ def cloud_proxy(
         @wraps(f)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             cloud_manager = kwargs.get("cloud_manager")
+            scope_cloud = kwargs.get("scope_cloud")
             http_request = kwargs.get("http_request")
 
             if not isinstance(cloud_manager, CloudConnectionManager):
+                cloud_manager = None
+            if (
+                cloud_manager is None
+                and scope_cloud is not None
+                and hasattr(scope_cloud, "is_connected")
+                and scope_cloud.is_connected
+                and hasattr(scope_cloud, "api_request")
+            ):
+                cloud_manager = scope_cloud
+            if cloud_manager is None:
                 return await f(*args, **kwargs)
             if not cloud_manager.is_connected:
                 return await f(*args, **kwargs)
@@ -383,6 +395,11 @@ def cloud_proxy(
             if path is None:
                 actual_path = http_request.url.path
             elif callable(path):
+                if not isinstance(cloud_manager, CloudConnectionManager):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This cloud proxy path is only supported in relay mode",
+                    )
                 actual_path = path(http_request, cloud_manager)
             else:
                 actual_path = path

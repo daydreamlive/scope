@@ -100,7 +100,7 @@ class FrameProcessor:
 
         # Cloud mode: send frames to cloud instead of local processing
         self._cloud_mode = cloud_manager is not None
-        self._cloud_output_queue: queue.Queue = queue.Queue(maxsize=2)
+        self._cloud_output_queue: queue.Queue = queue.Queue(maxsize=8)
         self._cloud_audio_queue: queue.Queue = queue.Queue(maxsize=50)
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
