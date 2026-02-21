@@ -45,7 +45,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "accelerate>=1.1.1",
     "flash-attn==2.8.3; sys_platform == 'linux' or sys_platform == 'win32'",
-    "sageattention>=3.0.0; sys_platform == 'linux' or sys_platform == 'win32'",
+    "sageattn3>=1.0.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
     "pluggy>=1.5.0",
@@ -84,11 +84,12 @@ override-dependencies = [
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true, marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
-sageattention = ["torch"]
+sageattn3 = ["torch"]
 
 [[tool.uv.dependency-metadata]]
 # Static metadata so uv can resolve without building from source (requires CUDA toolkit)
-name = "sageattention"
+name = "sageattn3"
+version = "1.0.0"
 requires-dist = ["torch"]
 
 [tool.uv.extra-build-variables]
@@ -107,7 +108,7 @@ flash-attn = [
     # Prebuilt Windows wheels from https://github.com/kingbri1/flash-attention
     { url = "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.9.0cxx11abiFALSE-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
-sageattention = [
+sageattn3 = [
     # SA3 (SageAttention 3.0) — no prebuilt wheels yet; source install from
     # the sageattention3_blackwell subdirectory of the main repo.
     { git = "https://github.com/thu-ml/SageAttention", subdirectory = "sageattention3_blackwell", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },

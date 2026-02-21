@@ -55,15 +55,13 @@ except ModuleNotFoundError:
 import warnings
 
 sageattn_func = None
-sageattn_varlen_func = None
 SAGEATTN_AVAILABLE = False
-from .sage import SAGEATTN_AVAILABLE, sageattn_func, sageattn_varlen_func
+from .sage import SAGEATTN_AVAILABLE, sageattn_func
 
 __all__ = [
     "flash_attention",
     "attention",
     "sageattn_func",
-    "sageattn_varlen_func",
     "SAGEATTN_AVAILABLE",
 ]
 
@@ -100,7 +98,7 @@ def flash_attention(
     deterministic:  bool. If True, slightly slower and uses more memory.
     dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
     """
-    if not FLASH_ATTN_3_AVAILABLE and not SAGEATTN_AVAILABLE:
+    if not FLASH_ATTN_3_AVAILABLE:
         t0 = time.perf_counter()
         out = flash_attn_func(q, k, v)
         logger.debug("flash_attention: backend=FA2-simple elapsed=%.4fs", time.perf_counter() - t0)
@@ -146,25 +144,9 @@ def flash_attention(
             "Flash attention 3 is not available, use flash attention 2 instead."
         )
 
-    # apply attention — priority: SA3 varlen → FA3 → FA2
-    _use_sageattn_varlen = SAGEATTN_AVAILABLE and not causal and window_size == (-1, -1)
+    # apply attention — priority: FA3 → FA2
     t0 = time.perf_counter()
-    if _use_sageattn_varlen:
-        _backend = "SA3-varlen"
-        cu_seqlens_q = (
-            torch.cat([q_lens.new_zeros([1]), q_lens])
-            .cumsum(0, dtype=torch.int32)
-            .to(q.device, non_blocking=True)
-        )
-        cu_seqlens_kv = (
-            torch.cat([k_lens.new_zeros([1]), k_lens])
-            .cumsum(0, dtype=torch.int32)
-            .to(q.device, non_blocking=True)
-        )
-        x = sageattn_varlen_func(
-            q, k, v, cu_seqlens_q, cu_seqlens_kv, lq, lk
-        ).unflatten(0, (b, lq))
-    elif (version is None or version == 3) and FLASH_ATTN_3_AVAILABLE:
+    if (version is None or version == 3) and FLASH_ATTN_3_AVAILABLE:
         _backend = "FA3-varlen"
         # Note: dropout_p, window_size are not supported in FA3 now.
         x = flash_attn_interface.flash_attn_varlen_func(

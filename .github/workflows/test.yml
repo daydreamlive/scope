@@ -29,7 +29,7 @@ jobs:
           version: "0.9.11"
 
       - name: Install dependencies
-        run: uv sync --group dev --no-build-package sageattention
+        run: uv sync --group dev --no-build-package sageattn3
 
       - name: Run pytest tests
         run: uv run pytest -v --tb=short
@@ -62,7 +62,7 @@ jobs:
           version: "0.9.11"
 
       - name: Install dependencies
-        run: uv sync --group dev --no-build-package sageattention
+        run: uv sync --group dev --no-build-package sageattn3
 
       - name: Run pytest tests
         run: uv run pytest -v --tb=short

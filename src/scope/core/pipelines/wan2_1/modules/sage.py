@@ -8,7 +8,7 @@ try:
     if os.getenv("DISABLE_SAGEATTENTION", "0") != "0":
         raise Exception("DISABLE_SAGEATTENTION is set")
 
-    from sageattention import sageattn, sageattn_varlen
+    from sageattn3 import sageattn3_blackwell
 
     @torch.library.custom_op(
         "mylib::sageattn", mutates_args={"q", "k", "v"}, device_types="cuda"
@@ -20,42 +20,15 @@ try:
         is_causal: bool = False,
         sm_scale: float | None = None,
     ) -> torch.Tensor:
-        return sageattn(
+        return sageattn3_blackwell(
             q,
             k,
             v,
-            tensor_layout="HND",
             is_causal=is_causal,
-            sm_scale=sm_scale,
-            return_lse=False,
         )
 
     @sageattn_func.register_fake
     def _sageattn_fake(q, k, v, is_causal=False, sm_scale=None):
-        return torch.empty(*q.shape, device=q.device, dtype=q.dtype)
-
-    @torch.library.custom_op(
-        "mylib::sageattn_varlen",
-        mutates_args={"q", "k", "v"},
-        device_types="cuda",
-    )
-    def sageattn_varlen_func(
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        cu_seqlens_q: torch.Tensor,
-        cu_seqlens_kv: torch.Tensor,
-        max_seqlen_q: int,
-        max_seqlen_kv: int,
-    ) -> torch.Tensor:
-        return sageattn_varlen(
-            q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
-        )
-
-    @sageattn_varlen_func.register_fake
-    def _sageattn_varlen_fake(
-        q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
-    ):
         return torch.empty(*q.shape, device=q.device, dtype=q.dtype)
 
     # Runtime kernel probe: verify the AOT-compiled CUDA kernels support this GPU.
@@ -99,10 +72,9 @@ try:
 except Exception as e:
     print(f"Warning: Could not load sageattention: {str(e)}")
     if isinstance(e, ModuleNotFoundError):
-        print("sageattention package is not installed")
+        print("sageattn3 package is not installed")
     elif isinstance(e, ImportError) and "DLL" in str(e):
-        print("sageattention DLL loading error")
+        print("sageattn3 DLL loading error")
     elif "kernel probe failed" in str(e) or "health check failed" in str(e):
-        print("sageattention kernels are not compatible with this GPU.")
+        print("sageattn3 kernels are not compatible with this GPU.")
     sageattn_func = None
-    sageattn_varlen_func = None

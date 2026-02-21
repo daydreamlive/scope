@@ -11,6 +11,11 @@ resolution-markers = [
 [manifest]
 overrides = [{ name = "nvidia-cudnn-cu12", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=9.15" }]
 
+[[manifest.dependency-metadata]]
+name = "sageattn3"
+version = "1.0.0"
+requires-dist = ["torch"]
+
 [[package]]
 name = "accelerate"
 version = "1.12.0"
@@ -543,8 +548,7 @@ dependencies = [
     { name = "pluggy" },
     { name = "pyopengl", marker = "sys_platform == 'win32'" },
     { name = "safetensors" },
-    { name = "sageattention", version = "2.2.0", source = { url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
-    { name = "sageattention", version = "2.2.0+cu128torch2.9.0andhigher.post4", source = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
+    { name = "sageattn3", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "spoutgl", marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -598,8 +602,7 @@ requires-dist = [
     { name = "pluggy", specifier = ">=1.5.0" },
     { name = "pyopengl", marker = "sys_platform == 'win32'", specifier = ">=3.1.10" },
     { name = "safetensors", specifier = ">=0.6.2" },
-    { name = "sageattention", marker = "sys_platform == 'linux'", url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" },
-    { name = "sageattention", marker = "sys_platform == 'win32'", url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" },
+    { name = "sageattn3", marker = "sys_platform == 'linux' or sys_platform == 'win32'", git = "https://github.com/thu-ml/SageAttention?subdirectory=sageattention3_blackwell" },
     { name = "spoutgl", marker = "sys_platform == 'win32'", specifier = ">=0.1.1" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==2.9.1" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.9.1", index = "https://download.pytorch.org/whl/cu128" },
@@ -2357,26 +2360,11 @@ wheels = [
 ]
 
 [[package]]
-name = "sageattention"
-version = "2.2.0"
-source = { url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" }
-resolution-markers = [
-    "(python_full_version >= '3.15' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')",
-    "python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
-]
-wheels = [
-    { url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl", hash = "sha256:78bd9b58b948e53b358160c65c265f9f9c1788b81f9a3b771c810aca9bf77bf5" },
-]
-
-[[package]]
-name = "sageattention"
-version = "2.2.0+cu128torch2.9.0andhigher.post4"
-source = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" }
-resolution-markers = [
-    "sys_platform == 'win32'",
-]
-wheels = [
-    { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl", hash = "sha256:b8b3134d00dfbdae5c10cc34cc8508891d9420adaa182502fa30a496428531ed" },
+name = "sageattn3"
+version = "1.0.0"
+source = { git = "https://github.com/thu-ml/SageAttention?subdirectory=sageattention3_blackwell#d1a57a546c3d395b1ffcbeecc66d81db76f3b4b5" }
+dependencies = [
+    { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [[package]]
