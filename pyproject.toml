@@ -86,8 +86,9 @@ override-dependencies = [
 flash-attn = [{ requirement = "torch", match-runtime = true, marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
 sageattention = ["torch"]
 
-[tool.uv.dependency-metadata.sageattention]
+[[tool.uv.dependency-metadata]]
 # Static metadata so uv can resolve without building from source (requires CUDA toolkit)
+name = "sageattention"
 requires-dist = ["torch"]
 
 [tool.uv.extra-build-variables]
