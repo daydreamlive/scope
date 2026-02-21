@@ -10,6 +10,8 @@ jobs:
   test-linux:
     runs-on: ubuntu-latest
     name: Testing (Linux)
+    env:
+      UV_NO_SYNC: "1"
 
     steps:
       - name: Checkout code
@@ -43,6 +45,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
+      UV_NO_SYNC: "1"
 
     steps:
       - name: Checkout code

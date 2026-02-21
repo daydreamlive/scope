@@ -10,6 +10,8 @@ jobs:
   python-lint:
     runs-on: ubuntu-latest
     name: Python Linting (Ruff)
+    env:
+      UV_NO_SYNC: "1"
 
     steps:
       - name: Checkout code
