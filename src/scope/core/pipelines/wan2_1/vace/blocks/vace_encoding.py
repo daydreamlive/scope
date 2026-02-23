@@ -144,6 +144,22 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 type_hint=int,
                 description="Current starting frame index",
             ),
+            # Beat sync params (forwarded from beat-sync preprocessor plugin)
+            InputParam("beat_sync_enabled", default=False, type_hint=bool),
+            InputParam("bpm", default=120.0, type_hint=float),
+            InputParam("beat_curve", default="pulse", type_hint=str),
+            InputParam("beat_phase_offset", default=0.0, type_hint=float),
+            InputParam("timing_mode", default="clock", type_hint=str),
+            InputParam("target_fps", default=15.0, type_hint=float),
+            InputParam("reset_phase", default=False, type_hint=bool),
+            InputParam("intensity_enabled", default=True, type_hint=bool),
+            InputParam("intensity_amount", default=0.5, type_hint=float),
+            InputParam("blur_enabled", default=False, type_hint=bool),
+            InputParam("blur_amount", default=0.5, type_hint=float),
+            InputParam("invert_enabled", default=False, type_hint=bool),
+            InputParam("invert_amount", default=0.3, type_hint=float),
+            InputParam("contrast_enabled", default=False, type_hint=bool),
+            InputParam("contrast_amount", default=0.5, type_hint=float),
         ]
 
     @property
