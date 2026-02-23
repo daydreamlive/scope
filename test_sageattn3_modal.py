@@ -2,46 +2,51 @@
 
 import modal
 
-# Point this to your pushed Docker image
 IMAGE_TAG = "zmiccer/scope_persona:latest"
 
-image = modal.Image.from_registry(
-    IMAGE_TAG,
-    add_python="3.12",
-).env({
-    # Let Modal's Python find packages from the image's uv venv
-    "PYTHONPATH": "/app/.venv/lib/python3.12/site-packages",
-    "PATH": "/root/.local/bin:/app/.venv/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
-})
+image = (
+    modal.Image.from_registry(IMAGE_TAG)
+    # Modal needs `python` and `pip` on PATH to detect the Python version.
+    # Symlink from the uv-managed venv so we don't need add_python (which
+    # clobbers the CUDA devel toolkit from the nvidia/cuda base image).
+    .run_commands(
+        "ln -sf /app/.venv/bin/python3.12 /usr/local/bin/python",
+        "ln -sf /app/.venv/bin/pip /usr/local/bin/pip",
+    )
+    # Modal strips /usr/local/cuda/bin (no nvcc). Reinstall the CUDA 12.8
+    # compiler toolkit so sageattn3 can compile its CUDA extensions.
+    .run_commands(
+        "apt-get update",
+        "apt-get install -y --no-install-recommends wget",
+        "wget -qO /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb",
+        "dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb",
+        "apt-get update",
+        "apt-get install -y --no-install-recommends cuda-nvcc-12-8",
+        "rm -rf /var/lib/apt/lists/*",
+        # Verify nvcc is available
+        "/usr/local/cuda-12.8/bin/nvcc --version",
+        # Symlink so it's found at the standard path
+        "ln -sf /usr/local/cuda-12.8 /usr/local/cuda || true",
+    )
+    # Re-add entrypoint.sh since Modal's overlays clobber Docker COPY paths
+    .add_local_file("entrypoint.sh", "/opt/entrypoint.sh", copy=True)
+    .run_commands("chmod +x /opt/entrypoint.sh")
+)
 
 app = modal.App("test-sageattn3")
 
 
 @app.function(image=image, gpu="H100", timeout=600)
 def test_sageattn3():
-    import os
     import subprocess
     import sys
 
-    # Debug: check what's at /app
-    print("=== Files in /app/ ===")
-    for f in sorted(os.listdir("/app")):
-        print(f"  {f}")
-    print(f"entrypoint.sh exists: {os.path.exists('/app/entrypoint.sh')}")
-    print()
-
-    # Run the entrypoint logic to compile sageattn3
+    # Run entrypoint.sh exactly as RunPod would
     result = subprocess.run(
-        ["bash", "/app/entrypoint.sh", "echo", "entrypoint done"],
+        ["bash", "/opt/entrypoint.sh", "echo", "entrypoint done"],
         capture_output=True,
         text=True,
         cwd="/app",
-        env={
-            "PATH": "/root/.local/bin:/app/.venv/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
-            "VIRTUAL_ENV": "/app/.venv",
-            "HOME": "/root",
-            "CUDA_HOME": "/usr/local/cuda",
-        },
     )
     print(result.stdout)
     if result.stderr:

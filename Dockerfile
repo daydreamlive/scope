@@ -1,5 +1,5 @@
 # ---------- build stage (has nvcc for compiling CUDA extensions) ----------
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -25,7 +25,7 @@ COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
 RUN uv sync --frozen --no-install-package sageattn3
 
 # ---------- runtime stage (needs devel for sageattn3 compilation) ----------
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y \
   build-essential \
   python3-dev \
   # Dependencies required for OpenCV
-  libgl1-mesa-glx \
+  libgl1 \
   libglib2.0-0 \
   libsm6 \
   libxext6 \

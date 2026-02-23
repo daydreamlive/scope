@@ -38,6 +38,18 @@
 - [ ] Display real-time video stream next to chat panel
 - [ ] Add action shortcut buttons (quick-fire common actions like wave, smile, nod)
 
+## Performance: SpargeAttn (Sparse SA3) for Autoregressive DiT
+
+- [ ] Add SpargeAttn support — sparse block-masking on top of SageAttention3 FP4 for inference speedup on Blackwell GPUs
+  - New wrapper module (`wan2_1/modules/sparge.py`) following `sage.py` pattern
+  - Extend `attention()` routing with `use_sparge`/`sparge_topk` params
+  - Hybrid precision: first 2 + last 2 layers use standard SA3, middle layers use SpargeAttn+SA3
+  - Timestep-conditional: only active for t < 800 (configurable)
+  - Config fields on LongLiveConfig (`sparge_attention`, `sparge_topk`, `sparge_timestep_threshold`)
+  - Dependencies: `sparge-attn` (thu-ml/SpargeAttn), compile at runtime like sageattn3
+  - Extend Modal test to validate sparge kernel compilation
+  - See plan: `.claude/plans/recursive-sauteeing-castle.md`
+
 ## Phase 5: Polish & Future
 
 - [ ] Audio/TTS integration — persona speaks responses, lip-sync with generated video
