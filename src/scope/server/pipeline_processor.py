@@ -42,6 +42,7 @@ class PipelineProcessor:
         user_id: str | None = None,
         connection_id: str | None = None,
         connection_info: dict | None = None,
+        node_id: str | None = None,
     ):
         """Initialize a pipeline processor.
 
@@ -53,9 +54,11 @@ class PipelineProcessor:
             user_id: User ID for event tracking
             connection_id: Connection ID from fal.ai WebSocket for event correlation
             connection_info: Connection metadata (gpu_type, region, etc.)
+            node_id: Graph node ID (used for per-node parameter routing in graph mode)
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
+        self.node_id = node_id or pipeline_id
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -454,6 +457,12 @@ class PipelineProcessor:
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
+            if not self.is_prepared:
+                logger.info(
+                    f"[DEBUG] First call for {self.pipeline_id}: "
+                    f"params keys={sorted(self.parameters.keys())}, "
+                    f"has_prompts={'prompts' in self.parameters}"
+                )
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init
