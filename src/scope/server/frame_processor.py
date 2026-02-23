@@ -1016,9 +1016,9 @@ class FrameProcessor:
         self.pipeline_processors = graph_run.processors
         self.pipeline_ids = graph_run.pipeline_ids
 
-        # Index processors by node_id (pipeline_id in processor is the node_id)
+        # Index processors by node_id for per-node parameter routing
         for proc in self.pipeline_processors:
-            self._processors_by_node_id[proc.pipeline_id] = proc
+            self._processors_by_node_id[proc.node_id] = proc
 
         # Start all processors
         for processor in self.pipeline_processors:

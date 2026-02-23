@@ -90,12 +90,13 @@ def build_graph(
         pipeline = pipeline_manager.get_pipeline_by_id(node.pipeline_id)
         processor = PipelineProcessor(
             pipeline=pipeline,
-            pipeline_id=node.id,
+            pipeline_id=node.pipeline_id,
             initial_parameters=initial_parameters.copy(),
             session_id=session_id,
             user_id=user_id,
             connection_id=connection_id,
             connection_info=connection_info,
+            node_id=node.id,
         )
         node_processors[node.id] = processor
         pipeline_ids.append(node.pipeline_id)
