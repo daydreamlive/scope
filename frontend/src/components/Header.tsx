@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { Settings, Cloud, CloudOff, Plug } from "lucide-react";
+import {
+  Settings,
+  Cloud,
+  CloudOff,
+  Plug,
+  Workflow,
+  Monitor,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
@@ -13,6 +20,9 @@ interface HeaderProps {
   // External settings tab control
   openSettingsTab?: string | null;
   onSettingsTabOpened?: () => void;
+  // Graph mode toggle
+  graphMode?: boolean;
+  onGraphModeToggle?: () => void;
 }
 
 export function Header({
@@ -21,6 +31,8 @@ export function Header({
   cloudDisabled,
   openSettingsTab,
   onSettingsTabOpened,
+  graphMode = false,
+  onGraphModeToggle,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -119,7 +131,36 @@ export function Header({
   return (
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-medium text-foreground">Daydream Scope</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-medium text-foreground">
+            Daydream Scope
+          </h1>
+          {onGraphModeToggle && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onGraphModeToggle}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors gap-1.5"
+              title={
+                graphMode
+                  ? "Switch to Perform Mode"
+                  : "Switch to Workflow Builder"
+              }
+            >
+              {graphMode ? (
+                <>
+                  <Monitor className="h-4 w-4" />
+                  Perform Mode
+                </>
+              ) : (
+                <>
+                  <Workflow className="h-4 w-4" />
+                  Workflow Builder
+                </>
+              )}
+            </Button>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"

@@ -498,6 +498,22 @@ async def load_pipeline(
     try:
         # Get pipeline IDs to load
         pipeline_ids = request.pipeline_ids
+
+        # If an API graph is saved, extract pipeline_ids from it to ensure
+        # all graph pipelines are loaded (frontend saves graph before calling load)
+        from .graph_state import get_api_graph
+
+        api_graph = get_api_graph()
+        if api_graph is not None:
+            graph_pipeline_ids = [
+                n.pipeline_id
+                for n in api_graph.nodes
+                if n.type == "pipeline" and n.pipeline_id
+            ]
+            if graph_pipeline_ids:
+                # Use graph pipeline IDs, ensuring all are loaded
+                pipeline_ids = list(dict.fromkeys(graph_pipeline_ids))
+
         if not pipeline_ids:
             raise HTTPException(
                 status_code=400,
@@ -1711,6 +1727,85 @@ async def reload_plugin(
             status_code=500,
             detail=f"Failed to reload {name}. Check server logs for details.",
         ) from e
+
+
+# =============================================================================
+# Graph Configuration Endpoints
+# =============================================================================
+
+
+@app.post("/api/v1/graph")
+async def set_graph_config(request: Request):
+    """Accept and store a graph configuration.
+
+    Validates the structure and checks that pipeline_ids exist in the registry.
+    """
+    from scope.core.pipelines.registry import PipelineRegistry
+
+    from .graph_schema import GraphConfig
+    from .graph_state import set_api_graph
+
+    try:
+        body = await request.json()
+        graph = GraphConfig.model_validate(body)
+
+        # Structural validation
+        errors = graph.validate_structure()
+        if errors:
+            raise HTTPException(status_code=422, detail={"errors": errors})
+
+        # Validate that pipeline_ids exist in the registry
+        available = set(PipelineRegistry.list_pipelines())
+        for node in graph.nodes:
+            if node.type == "pipeline" and node.pipeline_id not in available:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "errors": [
+                            f"Pipeline '{node.pipeline_id}' not found in registry. "
+                            f"Available: {sorted(available)}"
+                        ]
+                    },
+                )
+
+        set_api_graph(graph)
+        return {
+            "message": "Graph configuration saved",
+            "nodes": len(graph.nodes),
+            "edges": len(graph.edges),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting graph config: {e}")
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/v1/graph")
+async def get_graph_config():
+    """Return the current graph configuration.
+
+    Priority: API-set graph > none.
+    """
+    from .graph_state import get_api_graph
+
+    api_graph = get_api_graph()
+    if api_graph is not None:
+        return {
+            "source": "api",
+            "graph": api_graph.model_dump(by_alias=True),
+        }
+
+    return {"source": None, "graph": None}
+
+
+@app.delete("/api/v1/graph")
+async def clear_graph_config():
+    """Clear the API-set graph, reverting to fallback behavior."""
+    from .graph_state import clear_api_graph
+
+    clear_api_graph()
+    return {"message": "Graph configuration cleared"}
 
 
 # =============================================================================
