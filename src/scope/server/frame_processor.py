@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import queue
 import threading
@@ -76,8 +77,10 @@ class FrameProcessor:
 
         self.paused = False
 
-        # Pinned memory buffer cache for faster GPU transfers (local mode only)
-        self._pinned_buffer_cache = {}
+        # Pinned memory double-buffer cache for faster GPU transfers (local mode only)
+        # Maps shape → (buffer_a, buffer_b) to avoid DA race conditions
+        self._pinned_buffer_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+        self._pinned_buffer_index: dict[tuple, int] = {}
         self._pinned_buffer_lock = threading.Lock()
 
         # Cloud mode: send frames to cloud instead of local processing
@@ -96,6 +99,10 @@ class FrameProcessor:
 
         # Input mode: video waits for frames, text generates immediately
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
+
+        # Event-based output signaling (replaces 10ms polling sleep)
+        self._output_event: asyncio.Event | None = None
+        self._event_loop: asyncio.AbstractEventLoop | None = None
 
         # Pipeline chaining support
         self.pipeline_processors: list[PipelineProcessor] = []
@@ -330,17 +337,23 @@ class FrameProcessor:
         )
 
     def _get_or_create_pinned_buffer(self, shape):
-        """Get or create a reusable pinned memory buffer for the given shape.
+        """Get the next available pinned memory buffer for the given shape.
 
-        This avoids repeated pinned memory allocations, which are expensive.
-        Pinned memory enables faster DMA transfers to GPU.
+        Uses double-buffering to prevent data corruption: while one buffer's
+        DMA transfer is in flight (via cuda(non_blocking=True)), the other
+        buffer is available for the next frame's copy_() call.
         """
         with self._pinned_buffer_lock:
             if shape not in self._pinned_buffer_cache:
-                self._pinned_buffer_cache[shape] = torch.empty(
-                    shape, dtype=torch.uint8, pin_memory=True
-                )
-            return self._pinned_buffer_cache[shape]
+                buffer_a = torch.empty(shape, dtype=torch.uint8, pin_memory=True)
+                buffer_b = torch.empty(shape, dtype=torch.uint8, pin_memory=True)
+                self._pinned_buffer_cache[shape] = (buffer_a, buffer_b)
+                self._pinned_buffer_index[shape] = 0
+
+            idx = self._pinned_buffer_index[shape]
+            buffer = self._pinned_buffer_cache[shape][idx]
+            self._pinned_buffer_index[shape] = 1 - idx
+            return buffer
 
     def put(self, frame: VideoFrame) -> bool:
         if not self.running:
@@ -377,10 +390,9 @@ class FrameProcessor:
 
             if torch.cuda.is_available():
                 shape = frame_array.shape
+                # Double-buffered: alternates between two pinned buffers so the
+                # prior DMA (non_blocking=True) can finish while we write into the other.
                 pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                # Note: We reuse pinned buffers for performance. This assumes the copy_()
-                # operation completes before the next frame arrives.
-                # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
                 pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
                 frame_tensor = pinned_buffer.cuda(non_blocking=True)
             else:
@@ -424,9 +436,12 @@ class FrameProcessor:
             try:
                 frame = last_processor.output_queue.get_nowait()
                 # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
-                # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
+                # Frames are already on CPU (moved by the last PipelineProcessor).
                 frame = frame.squeeze(0)
                 if frame.is_cuda:
+                    logger.warning(
+                        "Frame from last processor is still on GPU, moving to CPU"
+                    )
                     frame = frame.cpu()
             except queue.Empty:
                 return None
@@ -490,6 +505,7 @@ class FrameProcessor:
                     self._cloud_output_queue.put_nowait(frame_np)
                 except queue.Empty:
                     pass
+            self._signal_output_ready()
         except Exception as e:
             logger.error(f"[FRAME-PROCESSOR] Error processing frame from cloud: {e}")
 
@@ -949,6 +965,11 @@ class FrameProcessor:
             curr_processor = self.pipeline_processors[i]
             prev_processor.set_next_processor(curr_processor)
 
+        if self.pipeline_processors:
+            self.pipeline_processors[-1].set_output_ready_callback(
+                self._signal_output_ready
+            )
+
         # Start all processors
         for processor in self.pipeline_processors:
             processor.start()
@@ -956,6 +977,39 @@ class FrameProcessor:
         logger.info(
             f"Created pipeline chain with {len(self.pipeline_processors)} processors"
         )
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop):
+        """Register the asyncio event loop for thread-safe event signaling.
+
+        Must be called from the asyncio thread before recv() polling begins.
+        """
+        self._event_loop = loop
+        self._output_event = asyncio.Event()
+
+    def _signal_output_ready(self):
+        """Signal that a new output frame is available.
+
+        Thread-safe: can be called from any thread.
+        """
+        if self._event_loop is not None and self._output_event is not None:
+            try:
+                self._event_loop.call_soon_threadsafe(self._output_event.set)
+            except RuntimeError:
+                pass
+
+    async def wait_for_output(self, timeout: float = 0.1) -> None:
+        """Wait until a new output frame is available or timeout expires.
+
+        Returns immediately if a frame is already available.
+        """
+        if self._output_event is None:
+            await asyncio.sleep(0.01)
+            return
+        try:
+            await asyncio.wait_for(self._output_event.wait(), timeout=timeout)
+        except TimeoutError:
+            pass
+        self._output_event.clear()
 
     def __enter__(self):
         self.start()
