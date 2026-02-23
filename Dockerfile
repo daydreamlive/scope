@@ -1,3 +1,27 @@
+# ---------- build stage (has nvcc for compiling CUDA extensions) ----------
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+  curl \
+  git \
+  build-essential \
+  python3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install uv (Python package manager)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Install Python dependencies (sageattn3 compiles CUDA extensions here)
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
+RUN uv sync --frozen
+
+# ---------- runtime stage (smaller, no compiler toolchain) ----------
 FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -7,14 +31,13 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV DAYDREAM_SCOPE_LOGS_DIR=/workspace/logs
 ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
+ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
-  # System dependencies
   curl \
   git \
-  build-essential \
   software-properties-common \
   # Dependencies required for OpenCV
   libgl1-mesa-glx \
@@ -23,7 +46,6 @@ RUN apt-get update && apt-get install -y \
   libxext6 \
   libxrender-dev \
   libgomp1 \
-  python3-dev \
   # Cleanup
   && rm -rf /var/lib/apt/lists/*
 
@@ -31,13 +53,10 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
   && apt-get install -y nodejs
 
-# Install uv (Python package manager)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
-
-# Install Python dependencies
-COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
-RUN uv sync --frozen
+# Copy uv and the pre-built virtual environment from builder
+COPY --from=builder /root/.local/bin/uv /root/.local/bin/uv
+COPY --from=builder /root/.local/bin/uvx /root/.local/bin/uvx
+COPY --from=builder /app /app
 
 # Build frontend
 COPY frontend/ ./frontend/
@@ -50,4 +69,4 @@ COPY src/ /app/src/
 EXPOSE 8000
 
 # Default command to run the application
-CMD ["uv", "run", "daydream-scope", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "--no-sync", "daydream-scope", "--host", "0.0.0.0", "--port", "8000"]
