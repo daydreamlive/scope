@@ -359,6 +359,8 @@ interface SettingsPanelProps {
     isRuntimeParam?: boolean
   ) => void;
   isCloudMode?: boolean;
+  /** When true, the graph is non-linear so pipeline controls should be disabled */
+  nonLinearGraph?: boolean;
 }
 
 export function SettingsPanel({
@@ -410,6 +412,7 @@ export function SettingsPanel({
   onPreprocessorSchemaFieldOverrideChange,
   onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
+  nonLinearGraph = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -501,12 +504,17 @@ export function SettingsPanel({
         <CardTitle className="text-base font-medium">Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+        {nonLinearGraph && (
+          <p className="text-xs text-amber-400/80 italic">
+            Pipeline configuration is managed in Graph Editor
+          </p>
+        )}
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Pipeline ID</h3>
           <Select
             value={pipelineId}
             onValueChange={handlePipelineIdChange}
-            disabled={isStreaming || isLoading}
+            disabled={isStreaming || isLoading || nonLinearGraph}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select a pipeline" />
@@ -656,7 +664,7 @@ export function SettingsPanel({
           onOverrideChange={onPreprocessorSchemaFieldOverrideChange}
           inputMode={inputMode}
           isStreaming={isStreaming}
-          isLoading={isLoading}
+          isLoading={isLoading || nonLinearGraph}
         />
 
         {/* Postprocessor List */}
@@ -678,7 +686,7 @@ export function SettingsPanel({
           onOverrideChange={onPostprocessorSchemaFieldOverrideChange}
           inputMode={inputMode}
           isStreaming={isStreaming}
-          isLoading={isLoading}
+          isLoading={isLoading || nonLinearGraph}
         />
 
         {/* Schema-driven configuration (when configSchema has ui.category===configuration) or legacy */}

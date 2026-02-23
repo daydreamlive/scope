@@ -39,6 +39,9 @@ class LongLiveConfig(BasePipelineConfig):
         ),
     ]
 
+    stream_inputs = ["video", "vace_input_frames", "vace_input_masks"]
+    stream_outputs = ["video"]
+
     supports_cache_management = True
     supports_quantization = True
     min_dimension = 16
