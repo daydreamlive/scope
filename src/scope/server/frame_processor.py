@@ -114,6 +114,9 @@ class FrameProcessor:
         if pipeline_ids is not None:
             self.pipeline_ids = pipeline_ids
 
+        # Beat-sync jitter buffer: repeat last frame when output queue is empty
+        self._beat_last_frame: torch.Tensor | None = None
+
     def start(self):
         if self.running:
             return
@@ -428,8 +431,16 @@ class FrameProcessor:
                 frame = frame.squeeze(0)
                 if frame.is_cuda:
                     frame = frame.cpu()
+                # Store for beat-sync frame repeat on underrun
+                if self._is_beat_sync_active():
+                    self._beat_last_frame = frame
             except queue.Empty:
-                return None
+                # Beat-sync jitter buffer: repeat last frame during inference gaps
+                # to maintain steady output rate instead of stalling
+                if self._is_beat_sync_active() and self._beat_last_frame is not None:
+                    frame = self._beat_last_frame
+                else:
+                    return None
 
         # Common processing for both modes
         self._frames_out += 1
@@ -493,12 +504,30 @@ class FrameProcessor:
         except Exception as e:
             logger.error(f"[FRAME-PROCESSOR] Error processing frame from cloud: {e}")
 
+    def _is_beat_sync_active(self) -> bool:
+        """Check if beat-sync plugin is active on the last pipeline processor."""
+        if not self.pipeline_processors:
+            return False
+        return self.pipeline_processors[-1].parameters.get("beat_sync_enabled", False)
+
+    def _get_beat_target_fps(self) -> float:
+        """Get the target FPS from beat-sync plugin parameters."""
+        if not self.pipeline_processors:
+            return DEFAULT_FPS
+        return float(self.pipeline_processors[-1].parameters.get("target_fps", 15.0))
+
     def get_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS.
 
         Returns the FPS based on how fast frames are produced into the last processor's output queue,
         adjusted for queue fill level to prevent buildup.
+
+        When beat-sync is active, returns a fixed target_fps to prevent tempo
+        fluctuations caused by bursty inference output.
         """
+        if self._is_beat_sync_active():
+            return self._get_beat_target_fps()
+
         if not self.pipeline_processors:
             return DEFAULT_FPS
 
