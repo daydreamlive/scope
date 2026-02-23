@@ -8,11 +8,7 @@ import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
 import { useLoRAsContext } from "@/contexts/LoRAsContext";
 import { LoRAsTab } from "./settings/LoRAsTab";
-import {
-  installLoRAFile,
-  deleteLoRAFile,
-  getServerInfo,
-} from "@/lib/api";
+import { installLoRAFile, deleteLoRAFile, getServerInfo } from "@/lib/api";
 import { toast } from "sonner";
 
 interface SettingsDialogProps {
@@ -66,7 +62,6 @@ export function SettingsDialog({
     }
   }, [open]);
 
-
   // Refresh LoRAs when switching to LoRAs tab
   useEffect(() => {
     if (open && activeTab === "loras") {
@@ -83,8 +78,6 @@ export function SettingsDialog({
     console.log("Logs directory changed:", value);
     setLogsDirectory(value);
   };
-
- 
 
   const handleInstallLoRA = async (url: string) => {
     setIsInstallingLoRA(true);

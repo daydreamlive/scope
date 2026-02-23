@@ -87,7 +87,9 @@ export function Header({
       if (openSettingsTab === "plugins") {
         setPluginsOpen(true);
       } else {
-        setInitialTab(openSettingsTab as "general" | "account" | "api-keys" | "loras");
+        setInitialTab(
+          openSettingsTab as "general" | "account" | "api-keys" | "loras"
+        );
         setSettingsOpen(true);
       }
       onSettingsTabOpened?.();
