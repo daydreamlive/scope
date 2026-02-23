@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
-LORA_EXTENSIONS = {".safetensors", ".bin", ".pt"}
+LORA_EXTENSIONS = {".safetensors"}
 
 
 def iter_files(
