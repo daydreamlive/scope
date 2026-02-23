@@ -18,6 +18,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 # Install Python dependencies (sageattn3 compiles CUDA extensions here)
+# TORCH_CUDA_ARCH_LIST tells setup.py which GPU architectures to compile for
+# without needing a physical GPU present during docker build.
+# 8.0=A100, 8.9=L40/L4/RTX4090, 9.0=H100/H200, 10.0=B200, 12.0=RTX5090
+ENV TORCH_CUDA_ARCH_LIST="8.0;8.9;9.0;10.0;12.0"
 COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
 RUN uv sync --frozen
 
