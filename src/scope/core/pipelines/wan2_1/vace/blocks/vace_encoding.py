@@ -806,6 +806,19 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             self._reactive_cache = vae.create_encoder_cache()
             self._caches_initialized = True
 
+        # --- Beat modulation (optional) ---
+        # Applied right before encoding so latency to display is minimal and consistent.
+        # beat_sync_enabled is set by the beat-sync preprocessor plugin via kwargs -> PipelineState.
+        beat_sync_enabled = getattr(block_state, "beat_sync_enabled", False)
+        if beat_sync_enabled:
+            from ..beat_modulation import modulate_conditioning_frames
+
+            if not hasattr(self, "_beat_state"):
+                self._beat_state = {}  # persists across chunks for phase tracking
+            input_frames_list = modulate_conditioning_frames(
+                input_frames_list, block_state, self._beat_state
+            )
+
         # Standard VACE encoding path (matching wan_vace.py lines 339-341)
         # z0 = vace_encode_frames(vace_input_frames, vace_ref_images, masks=vace_input_masks)
         # When masks are provided, set pad_to_96=False because mask encoding (64 channels) will be added later
