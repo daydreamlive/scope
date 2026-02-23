@@ -1181,6 +1181,44 @@ async def tag_lora_provenance(
     return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
 
 
+# ---------------------------------------------------------------------------
+# Workflow export
+# ---------------------------------------------------------------------------
+
+
+class WorkflowExportRequest(BaseModel):
+    name: str
+    description: str = ""
+    author: str = ""
+    frontend_params: dict[str, dict] | None = None
+    """Per-pipeline frontend params, keyed by pipeline_id."""
+
+
+@app.post("/api/v1/workflow/export")
+async def export_workflow(
+    request: WorkflowExportRequest,
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Export the current session as a shareable .scope-workflow.json."""
+    from scope.core.plugins import get_plugin_manager
+    from scope.core.workflows.export import build_workflow
+    from scope.server.models_config import get_models_dir
+
+    lora_dir = get_models_dir() / "lora"
+    plugin_manager = get_plugin_manager()
+
+    workflow = build_workflow(
+        name=request.name,
+        description=request.description,
+        author=request.author,
+        pipeline_manager=pm,
+        plugin_manager=plugin_manager,
+        lora_dir=lora_dir,
+        frontend_params=request.frontend_params,
+    )
+    return workflow
+
+
 @app.get("/api/v1/assets", response_model=AssetsResponse)
 @cloud_proxy()
 async def list_assets(
