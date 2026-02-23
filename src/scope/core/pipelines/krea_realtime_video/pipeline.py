@@ -37,6 +37,16 @@ WARMUP_PROMPT = [{"text": "a majestic sunset", "weight": 1.0}]
 
 
 class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
+    events = frozenset({
+        "video",
+        "vace_ref_images",
+        "vace_input_frames",
+        "vace_input_masks",
+        "first_frame_image",
+        "last_frame_image",
+        "lora_scales",
+    })
+
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return KreaRealtimeVideoConfig
@@ -234,21 +244,12 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         for k, v in kwargs.items():
             self.state.set(k, v)
 
+        # Clear transient event keys not provided in this call
+        self._clear_events(self.state, kwargs)
+
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
             self.state.set("transition", None)
-
-        # Clear video from state if not provided to prevent stale video data
-        if "video" not in kwargs:
-            self.state.set("video", None)
-
-        # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
-        if "vace_ref_images" not in kwargs:
-            self.state.set("vace_ref_images", None)
-        if "vace_input_frames" not in kwargs:
-            self.state.set("vace_input_frames", None)
-        if "vace_input_masks" not in kwargs:
-            self.state.set("vace_input_masks", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)

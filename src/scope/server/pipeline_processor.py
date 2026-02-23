@@ -459,17 +459,12 @@ class PipelineProcessor:
             if extra_params and self.next_processor is not None:
                 self.next_processor.update_parameters(extra_params)
 
-            # Clear one-shot parameters after use to prevent sending them on subsequent chunks
+            # Clear one-shot event parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates
-            one_shot_params = [
-                "vace_ref_images",
-                "images",
-                "first_frame_image",
-                "last_frame_image",
-            ]
-            for param in one_shot_params:
-                if param in call_params and param in self.parameters:
-                    self.parameters.pop(param, None)
+            # Uses the pipeline's declared events set rather than a hardcoded list
+            pipeline_events = getattr(self.pipeline, "events", frozenset())
+            for key in pipeline_events:
+                self.parameters.pop(key, None)
 
             # Clear transition when complete
             if "transition" in call_params and "transition" in self.parameters:
