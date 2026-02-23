@@ -1,3 +1,17 @@
+// Electron preload exposes scope API on window
+interface ScopeAPI {
+  browseDirectory?: (title: string) => Promise<string | null>;
+  onDeepLinkAction?: (
+    callback: (data: { action: string; package: string }) => void
+  ) => () => void;
+}
+
+declare global {
+  interface Window {
+    scope?: ScopeAPI;
+  }
+}
+
 // Pipeline IDs are dynamic - any string returned from backend is valid
 export type PipelineId = string;
 
@@ -86,8 +100,9 @@ export interface SettingsState {
   // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
   schemaFieldOverrides?: Record<string, unknown>;
   // Schema-driven overrides for preprocessor/postprocessor plugin configs
-  preprocessorSchemaFieldOverrides?: Record<string, unknown>;
-  postprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  // Outer key = pipeline ID, inner = field overrides for that processor
+  preprocessorSchemaFieldOverrides?: Record<string, Record<string, unknown>>;
+  postprocessorSchemaFieldOverrides?: Record<string, Record<string, unknown>>;
 }
 
 export interface PipelineInfo {

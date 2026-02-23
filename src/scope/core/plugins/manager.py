@@ -16,7 +16,12 @@ import pluggy
 
 from .dependency_validator import DependencyValidator
 from .hookspecs import ScopeHookSpec
-from .plugins_config import ensure_plugins_dir, get_plugins_file, get_resolved_file
+from .plugins_config import (
+    ensure_plugins_dir,
+    get_plugins_dir,
+    get_plugins_file,
+    get_resolved_file,
+)
 
 if TYPE_CHECKING:
     from scope.core.pipelines.registry import PipelineRegistry
@@ -120,6 +125,75 @@ class PluginManager:
         ensure_plugins_dir()
         get_plugins_file().write_text("\n".join(plugins) + "\n" if plugins else "")
 
+    def _generate_constraints(self) -> Path | None:
+        """Generate a pip constraints file from uv.lock.
+
+        Finds the root project package in uv.lock (identified by
+        ``source.editable``), reads its direct dependency names, then looks up
+        each dependency's locked version to produce constraints of the form
+        ``name>=locked_version,<next_major`` (e.g. ``transformers>=4.57.5,<5``).
+        """
+        import tomllib
+
+        lock_file = Path.cwd() / "uv.lock"
+
+        if not lock_file.exists():
+            return None
+
+        try:
+            lock_text = lock_file.read_text(encoding="utf-8")
+            lock_data = tomllib.loads(lock_text)
+
+            packages = lock_data.get("package", [])
+
+            # Find the root project (editable source) and collect all versions
+            direct_dep_names: set[str] = set()
+            locked_versions: dict[str, str] = {}
+
+            for pkg in packages:
+                name = pkg.get("name", "")
+                version = pkg.get("version", "")
+                source = pkg.get("source", {})
+
+                if name and version:
+                    locked_versions[name.lower().replace("-", "_")] = version
+
+                # Root project has source = { editable = "." }
+                if isinstance(source, dict) and "editable" in source:
+                    for dep in pkg.get("dependencies", []):
+                        dep_name = dep.get("name", "")
+                        if dep_name:
+                            direct_dep_names.add(dep_name.lower().replace("-", "_"))
+
+            if not direct_dep_names:
+                return None
+
+            constraints = []
+            for norm_name in sorted(direct_dep_names):
+                version = locked_versions.get(norm_name)
+                if not version:
+                    continue
+
+                # Skip platform-specific builds (e.g. 2.9.1+cu128)
+                if "+" in version:
+                    continue
+
+                major = version.split(".")[0]
+                next_major = int(major) + 1
+                constraints.append(
+                    f"{norm_name.replace('_', '-')}>={version},<{next_major}"
+                )
+
+            if not constraints:
+                return None
+
+            constraints_file = get_plugins_dir() / "constraints.txt"
+            constraints_file.write_text("\n".join(constraints) + "\n")
+            return constraints_file
+        except Exception:
+            logger.warning("Failed to generate constraints", exc_info=True)
+            return None
+
     def _compile_plugins(
         self, upgrade_package: str | None = None
     ) -> tuple[bool, str, str | None]:
@@ -155,6 +229,10 @@ class PluginManager:
         # Add plugins file if it exists and has content
         if plugins_file.exists() and plugins_file.read_text().strip():
             args.append(str(plugins_file))
+
+        constraints_file = self._generate_constraints()
+        if constraints_file:
+            args.extend(["--constraint", str(constraints_file)])
 
         if upgrade_package:
             args.extend(["--upgrade-package", upgrade_package])
@@ -212,18 +290,26 @@ class PluginManager:
         """Extract package name from a specifier.
 
         Handles various formats:
-        - git+https://github.com/user/repo.git -> repo
-        - git+https://github.com/user/repo.git@branch -> repo
+        - git+https://github.com/user/repo.git -> package name from resolved.txt or repo
+        - git+https://github.com/user/repo.git@branch -> package name from resolved.txt or repo
+        - /path/to/local/dir -> package name from pyproject.toml or dir basename
         - package==1.0 -> package
         - package>=1.0,<2.0 -> package
         - package[extra] -> package
         """
-        # Handle git URLs: git+https://github.com/user/repo.git -> repo
         if spec.startswith("git+"):
-            # Extract repo name from URL
+            # Try resolved.txt for the authoritative name
+            resolved_name = self._get_name_from_resolved(spec)
+            if resolved_name:
+                return resolved_name
+            # Fallback to repo name
             url_part = spec.split("@")[0]  # Remove @branch or @commit
-            repo_name = url_part.split("/")[-1].replace(".git", "")
-            return repo_name
+            return url_part.split("/")[-1].replace(".git", "")
+
+        # Handle local directory paths (reuse existing helper)
+        path = Path(spec)
+        if path.is_dir():
+            return self._get_package_name_from_path(path)
 
         # Handle version specifiers and extras
         # Split on any version specifier chars and take first part
@@ -310,6 +396,74 @@ class PluginManager:
                     self._pm.set_blocked(ep.name)
             except Exception as e:
                 logger.debug(f"Error checking distribution {dist}: {e}")
+
+    def _is_package_installed(self, package_name: str) -> bool:
+        """Check if a package is installed in the current environment.
+
+        Args:
+            package_name: Package name (handles hyphen/underscore normalization)
+
+        Returns:
+            True if the package is installed, False otherwise
+        """
+        from importlib.metadata import PackageNotFoundError, distribution
+
+        normalized = self._normalize_package_name(package_name)
+        # Try both hyphen and underscore variants
+        for name in (normalized, normalized.replace("_", "-")):
+            try:
+                distribution(name)
+                return True
+            except PackageNotFoundError:
+                continue
+        return False
+
+    def ensure_plugins_installed(self) -> None:
+        """Re-install plugins from resolved.txt if any are missing.
+
+        This handles venv recreation (e.g., uv upgrade wiping .venv) by
+        detecting missing plugin packages and reinstalling them from the
+        persisted resolved.txt before plugin discovery runs.
+        """
+        plugins = self._read_plugins_file()
+        if not plugins:
+            return
+
+        missing = []
+        for spec in plugins:
+            name = self._extract_package_name(spec)
+            if not self._is_package_installed(name):
+                missing.append(name)
+
+        if not missing:
+            return
+
+        logger.warning(
+            f"Plugins missing from environment (venv may have been recreated): "
+            f"{missing}. Re-installing from plugin manifest..."
+        )
+
+        # Always recompile to ensure resolved.txt respects current lock constraints
+        logger.info("Compiling plugins against current lock constraints...")
+        ok, resolved_path, compile_error = self._compile_plugins()
+        if not ok:
+            # Fall back to existing resolved.txt if compile fails
+            resolved_file = get_resolved_file()
+            if resolved_file.exists():
+                logger.warning(
+                    f"Compile failed ({compile_error}), "
+                    "falling back to existing resolved.txt"
+                )
+                resolved_path = str(resolved_file)
+            else:
+                logger.error(f"Failed to compile plugins: {compile_error}")
+                return
+        success, error = self._sync_plugins(resolved_path)
+
+        if success:
+            logger.info("Successfully re-installed missing plugins")
+        else:
+            logger.error(f"Failed to re-install plugins: {error}")
 
     def load_plugins(self) -> None:
         """Discover and load all plugins via entry points."""
@@ -680,6 +834,28 @@ class PluginManager:
         if match:
             return match.group(1)
 
+        return None
+
+    def _get_name_from_resolved(self, git_url: str) -> str | None:
+        """Look up the package name for a git URL from resolved.txt."""
+        resolved_file = get_resolved_file()
+        if not resolved_file.exists():
+            return None
+        content = resolved_file.read_text(encoding="utf-8")
+        # Normalize: strip git+ prefix and .git suffix for comparison
+        normalized_url = git_url.removeprefix("git+").removesuffix(".git").lower()
+        # Also strip @branch/@commit from the input URL
+        normalized_url = normalized_url.split("@")[0].removesuffix(".git")
+        for line in content.splitlines():
+            if " @ git+" not in line:
+                continue
+            # "flashvsr @ git+https://...@commit"
+            name_part, _, url_part = line.partition(" @ ")
+            url_base = (
+                url_part.removeprefix("git+").split("@")[0].removesuffix(".git").lower()
+            )
+            if url_base == normalized_url:
+                return name_part.strip()
         return None
 
     async def get_plugin_info_async(self, name: str) -> dict[str, Any] | None:
@@ -1364,6 +1540,11 @@ class _PMProxy:
 
 
 pm = _PMProxy()
+
+
+def ensure_plugins_installed() -> None:
+    """Re-install plugins if any are missing from the environment."""
+    get_plugin_manager().ensure_plugins_installed()
 
 
 def load_plugins() -> None:
