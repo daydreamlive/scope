@@ -94,6 +94,14 @@ jobs:
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate cloud plugins list
+        run: python scripts/generate_cloud_plugins.py
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -101,6 +109,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
+          build-args: |
+            INSTALL_CLOUD_PLUGINS=true
           labels: |
             org.opencontainers.image.source=https://github.com/daydreamlive/scope
             org.opencontainers.image.description=Daydream Scope
