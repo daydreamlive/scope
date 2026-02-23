@@ -25,7 +25,7 @@ export function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "account" | "api-keys"
+    "general" | "account" | "api-keys" | "loras"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
@@ -87,7 +87,9 @@ export function Header({
       if (openSettingsTab === "plugins") {
         setPluginsOpen(true);
       } else {
-        setInitialTab(openSettingsTab as "general" | "account" | "api-keys");
+        setInitialTab(
+          openSettingsTab as "general" | "account" | "api-keys" | "loras"
+        );
         setSettingsOpen(true);
       }
       onSettingsTabOpened?.();

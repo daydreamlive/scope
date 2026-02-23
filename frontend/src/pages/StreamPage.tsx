@@ -1763,6 +1763,7 @@ export function StreamPage() {
               }
             }}
             isCloudMode={isCloudMode}
+            onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
           />
         </div>
       </div>

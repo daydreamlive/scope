@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
+import { LoRAsProvider } from "./contexts/LoRAsContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
 import { handleOAuthCallback, initElectronAuthListener } from "./lib/auth";
@@ -95,10 +96,12 @@ function App() {
   return (
     <CloudStatusProvider>
       <PipelinesProvider>
-        <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
-          <StreamPage />
-        </CloudProvider>
-        <Toaster />
+        <LoRAsProvider>
+          <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
+            <StreamPage />
+          </CloudProvider>
+          <Toaster />
+        </LoRAsProvider>
       </PipelinesProvider>
     </CloudStatusProvider>
   );
