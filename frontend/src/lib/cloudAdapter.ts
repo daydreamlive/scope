@@ -31,6 +31,8 @@ import type {
   PipelineSchemasResponse,
   HardwareInfoResponse,
   LoRAFilesResponse,
+  LoRAInstallRequest,
+  LoRAInstallResponse,
   AssetsResponse,
   AssetFileInfo,
 } from "./api";
@@ -350,14 +352,18 @@ export class CloudAdapter {
   private async apiRequest<T>(
     method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
-    body?: unknown
+    body?: unknown,
+    timeoutMs?: number
   ): Promise<T> {
-    const response = await this.sendAndWait<ApiResponse>({
-      type: "api",
-      method,
-      path,
-      body,
-    });
+    const response = await this.sendAndWait<ApiResponse>(
+      {
+        type: "api",
+        method,
+        path,
+        body,
+      },
+      timeoutMs
+    );
 
     if (response.status && response.status >= 400) {
       throw new Error(
@@ -393,7 +399,10 @@ export class CloudAdapter {
       this.apiRequest("GET", "/api/v1/hardware/info"),
 
     listLoRAFiles: (): Promise<LoRAFilesResponse> =>
-      this.apiRequest("GET", "/api/v1/lora/list"),
+      this.apiRequest("GET", "/api/v1/loras"),
+
+    installLoRAFile: (data: LoRAInstallRequest): Promise<LoRAInstallResponse> =>
+      this.apiRequest("POST", "/api/v1/loras", data, 300000),
 
     listAssets: (type?: "image" | "video"): Promise<AssetsResponse> =>
       this.apiRequest(

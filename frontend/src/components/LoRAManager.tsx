@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import { SliderWithInput } from "./ui/slider-with-input";
 import {
@@ -8,11 +8,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Plus, X, RefreshCw } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { LoRAConfig, LoraMergeStrategy } from "../types";
-import { listLoRAFiles, type LoRAFileInfo } from "../lib/api";
+import { useLoRAsContext } from "../contexts/LoRAsContext";
+import { useCloudStatus } from "../hooks/useCloudStatus";
 import { FilePicker } from "./ui/file-picker";
 
 interface LoRAManagerProps {
@@ -21,6 +22,7 @@ interface LoRAManagerProps {
   disabled?: boolean;
   isStreaming?: boolean;
   loraMergeStrategy?: LoraMergeStrategy;
+  onOpenLoRAsSettings?: () => void;
 }
 
 export function LoRAManager({
@@ -29,26 +31,11 @@ export function LoRAManager({
   disabled,
   isStreaming = false,
   loraMergeStrategy = "permanent_merge",
+  onOpenLoRAsSettings,
 }: LoRAManagerProps) {
-  const [availableLoRAs, setAvailableLoRAs] = useState<LoRAFileInfo[]>([]);
-  const [isLoadingLoRAs, setIsLoadingLoRAs] = useState(false);
+  const { loraFiles: availableLoRAs } = useLoRAsContext();
+  const { isConnected: isCloudConnected } = useCloudStatus();
   const [localScales, setLocalScales] = useState<Record<string, number>>({});
-
-  const loadAvailableLoRAs = async () => {
-    setIsLoadingLoRAs(true);
-    try {
-      const response = await listLoRAFiles();
-      setAvailableLoRAs(response.lora_files);
-    } catch (error) {
-      console.error("loadAvailableLoRAs: Failed to load LoRA files:", error);
-    } finally {
-      setIsLoadingLoRAs(false);
-    }
-  };
-
-  useEffect(() => {
-    loadAvailableLoRAs();
-  }, []);
 
   // Sync localScales from loras prop when it changes from outside
   useEffect(() => {
@@ -58,6 +45,24 @@ export function LoRAManager({
     });
     setLocalScales(newLocalScales);
   }, [loras]);
+
+  // Track cloud connection state and clear configured LoRAs when it changes
+  // (switching between local/cloud means different LoRA file lists)
+  const prevCloudConnectedRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    if (prevCloudConnectedRef.current === null) {
+      prevCloudConnectedRef.current = isCloudConnected;
+      return;
+    }
+
+    // Clear configured LoRAs when cloud connection state changes
+    if (prevCloudConnectedRef.current !== isCloudConnected) {
+      onLorasChange([]);
+    }
+
+    prevCloudConnectedRef.current = isCloudConnected;
+  }, [isCloudConnected, onLorasChange]);
 
   const handleAddLora = () => {
     const newLora: LoRAConfig = {
@@ -103,46 +108,44 @@ export function LoRAManager({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">LoRA Adapters</h3>
-        <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={loadAvailableLoRAs}
-            disabled={disabled || isLoadingLoRAs}
-            className="h-6 px-2"
-            title="Refresh LoRA list"
-          >
-            <RefreshCw
-              className={`h-3 w-3 ${isLoadingLoRAs ? "animate-spin" : ""}`}
-            />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAddLora}
-            disabled={disabled || isStreaming}
-            className="h-6 px-2"
-            title={
-              isStreaming ? "Cannot add LoRAs while streaming" : "Add LoRA"
-            }
-          >
-            <Plus className="h-3 w-3" />
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleAddLora}
+          disabled={disabled || isStreaming}
+          className="h-6 px-2"
+          title={isStreaming ? "Cannot add LoRAs while streaming" : "Add LoRA"}
+        >
+          <Plus className="h-3 w-3" />
+        </Button>
       </div>
 
       {loras.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          No LoRA adapters configured. Follow the{" "}
+          No LoRA adapters configured.{" "}
+          {onOpenLoRAsSettings ? (
+            <>
+              <button
+                type="button"
+                onClick={onOpenLoRAsSettings}
+                className="underline hover:text-foreground"
+              >
+                Click here
+              </button>{" "}
+              to install LoRAs or follow the{" "}
+            </>
+          ) : (
+            "Follow the "
+          )}
           <a
-            href="https://github.com/daydreamlive/scope/blob/main/docs/lora.md"
+            href="https://docs.daydream.live/scope/guides/loras"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline"
+            className="underline hover:text-foreground"
           >
             docs
           </a>{" "}
-          to add LoRA files.
+          for manual installation.
         </p>
       )}
 

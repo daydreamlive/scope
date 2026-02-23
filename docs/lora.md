@@ -10,7 +10,7 @@ The pipelines in Scope support using one or multiple LoRAs to customize concepts
 - The `memflow` pipeline is compatible with Wan2.1-T2V-1.3B LoRAs.
 - The `krea-realtime-video` pipeline is compatible with Wan2.1-T2V-14B LoRAs.
 
-## Downloading LoRAs
+## Installing LoRAs
 
 Scope supports using LoRAs that can be downloaded from popular hubs such as [HuggingFace](https://huggingface.co/) or [CivitAI](https://civitai.com/).
 
@@ -25,7 +25,42 @@ A few LoRAs that you can start with for `krea-realtime-video`:
 - [Film Noir](https://huggingface.co/Remade-AI/Film-Noir)
 - [Pixar](https://huggingface.co/Remade-AI/Pixar)
 
-### Local
+### Using the Settings Dialog
+
+The easiest way to install LoRAs is through the Settings dialog:
+
+1. Click the **Settings** icon (gear) in the header
+2. Select the **LoRAs** tab
+3. Paste a LoRA URL from HuggingFace or CivitAI into the input field
+4. Click **Install**
+
+The LoRA will be downloaded and saved to your LoRA directory automatically. Once installed, you can select it from the LoRA Adapters section in the Settings panel.
+
+#### CivitAI API Token
+
+CivitAI requires an API token for programmatic downloads. You can configure this in one of two ways:
+
+**Option 1: Settings Dialog**
+
+1. Click the **Settings** icon (gear) in the header
+2. Select the **API Keys** tab
+3. Enter your CivitAI API token and click **Save**
+
+**Option 2: Environment Variable**
+
+```bash
+export CIVITAI_API_TOKEN=your_civitai_token_here
+```
+
+> **Note:** The environment variable takes precedence over a token stored through the UI.
+
+Get your API key at [civitai.com/user/account](https://civitai.com/user/account).
+
+### Manual Installation
+
+For manual installation, follow the steps below.
+
+#### Local
 
 If you are running Scope locally you can simply download the LoRA files to your computer and move them to the proper directory.
 
@@ -41,9 +76,9 @@ Click the download button and move the file to the `~/.daydream-scope/models/lor
 
 Click the download button and move the file to the `~/.daydream-scope/models/lora` folder.
 
-### Cloud
+#### Cloud
 
-If you are running the Scope server on a remote machine in the cloud, then we recommend you progamatically download the LoRA files to the remote machine.
+If you are running the Scope server on a remote machine in the cloud, then we recommend you programmatically download the LoRA files to the remote machine.
 
 **HuggingFace**
 

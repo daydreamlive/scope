@@ -22,9 +22,6 @@ import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
 
-# Daydream API configuration
-DAYDREAM_API_BASE = os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
-
 
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
     """
@@ -39,7 +36,7 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
     if not user_id:
         return False, "No user ID provided"
 
-    url = f"{DAYDREAM_API_BASE}/v1/users/{user_id}"
+    url = f"{os.getenv('DAYDREAM_API_BASE', 'https://api.daydream.live')}/v1/users/{user_id}"
     print(f"Validating user access for {user_id} via {url}")
 
     def fetch_user():
@@ -315,6 +312,7 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
+        scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
 
         # Install kafka extra dependencies
         print("Installing daydream-scope[kafka]...")
@@ -614,6 +612,15 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
+            # Block plugin installation in cloud mode (security: prevent arbitrary code execution)
+            if method == "POST" and path == "/api/v1/plugins":
+                return {
+                    "type": "api_response",
+                    "request_id": request_id,
+                    "status": 403,
+                    "error": "Plugin installation is not available in cloud mode",
+                }
+
             # Inject connection_id into pipeline load requests for event correlation
             if (
                 method == "POST"
@@ -651,8 +658,12 @@ class ScopeApp(fal.App, keep_alive=300):
                                 timeout=60.0,  # Longer timeout for uploads
                             )
                         else:
+                            # Use longer timeout for LoRA installs
+                            post_timeout = 300.0 if path == "/api/v1/loras" else 30.0
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}", json=body, timeout=30.0
+                                f"{SCOPE_BASE_URL}{path}",
+                                json=body,
+                                timeout=post_timeout,
                             )
                     elif method == "PATCH":
                         response = await client.patch(

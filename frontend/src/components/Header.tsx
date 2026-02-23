@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { Settings, Cloud, CloudOff } from "lucide-react";
+import { Settings, Cloud, CloudOff, Plug } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
+import { PluginsDialog } from "./PluginsDialog";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 
@@ -22,8 +23,9 @@ export function Header({
   onSettingsTabOpened,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "account" | "api-keys" | "plugins"
+    "general" | "account" | "api-keys" | "loras"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
@@ -79,13 +81,17 @@ export function Header({
     setSettingsOpen(true);
   };
 
-  // React to external requests to open a specific settings tab
+  // React to external requests to open a specific settings/plugins tab
   useEffect(() => {
     if (openSettingsTab) {
-      setInitialTab(
-        openSettingsTab as "general" | "account" | "api-keys" | "plugins"
-      );
-      setSettingsOpen(true);
+      if (openSettingsTab === "plugins") {
+        setPluginsOpen(true);
+      } else {
+        setInitialTab(
+          openSettingsTab as "general" | "account" | "api-keys" | "loras"
+        );
+        setSettingsOpen(true);
+      }
       onSettingsTabOpened?.();
     }
   }, [openSettingsTab, onSettingsTabOpened]);
@@ -95,17 +101,20 @@ export function Header({
     if (window.scope?.onDeepLinkAction) {
       return window.scope.onDeepLinkAction(data => {
         if (data.action === "install-plugin" && data.package) {
-          setInitialTab("plugins");
           setInitialPluginPath(data.package);
-          setSettingsOpen(true);
+          setPluginsOpen(true);
         }
       });
     }
   }, []);
 
-  const handleClose = () => {
+  const handleSettingsClose = () => {
     setSettingsOpen(false);
     setInitialTab("general");
+  };
+
+  const handlePluginsClose = () => {
+    setPluginsOpen(false);
     setInitialPluginPath("");
   };
 
@@ -144,6 +153,15 @@ export function Header({
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => setPluginsOpen(true)}
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
+            title="Plugins"
+          >
+            <Plug className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setSettingsOpen(true)}
             className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
             title="Settings"
@@ -153,11 +171,16 @@ export function Header({
         </div>
       </div>
 
+      <PluginsDialog
+        open={pluginsOpen}
+        onClose={handlePluginsClose}
+        initialPluginPath={initialPluginPath}
+      />
+
       <SettingsDialog
         open={settingsOpen}
-        onClose={handleClose}
+        onClose={handleSettingsClose}
         initialTab={initialTab}
-        initialPluginPath={initialPluginPath}
         onPipelinesRefresh={onPipelinesRefresh}
         cloudDisabled={cloudDisabled}
       />
