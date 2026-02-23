@@ -1,0 +1,102 @@
+# =============================================================================
+# Ultra-Minimal Scope Docker Image
+# No CUDA base - PyTorch brings its own CUDA libs via pip
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Frontend Builder
+# -----------------------------------------------------------------------------
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /build
+COPY frontend/package*.json ./
+RUN npm ci --omit=dev
+COPY frontend/ ./
+RUN npm run build
+
+
+# -----------------------------------------------------------------------------
+# Stage 2: Python Dependencies Builder
+# Use full Debian to build, copy only runtime to final
+# -----------------------------------------------------------------------------
+FROM python:3.12-slim-bookworm AS python-builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Copy dependency files
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth ./
+
+# Install dependencies
+RUN uv sync --frozen --no-dev
+
+
+# -----------------------------------------------------------------------------
+# Stage 3: Ultra-Minimal Runtime
+# Debian slim + only runtime libs, no CUDA base needed
+# -----------------------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV DAYDREAM_SCOPE_LOGS_DIR=/workspace/logs
+ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
+
+WORKDIR /app
+
+# Install absolute minimum runtime dependencies
+# Note: NVIDIA driver libs are injected by nvidia-container-runtime at docker run --gpus
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python runtime
+    python3.12 \
+    python3.12-venv \
+    # OpenCV/graphics minimal runtime
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache
+
+# Copy uv binary
+COPY --from=python-builder /root/.local/bin/uv /usr/local/bin/uv
+
+# Copy virtual environment
+COPY --from=python-builder /build/.venv /app/.venv
+
+# Copy project files
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth ./
+COPY src/ ./src/
+COPY --from=frontend-builder /build/dist ./frontend/dist/
+
+# Configure Python environment
+ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/.venv"
+
+# Aggressive cleanup of venv
+RUN find /app/.venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
+    && find /app/.venv -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true \
+    && find /app/.venv -type d -name "test" -exec rm -rf {} + 2>/dev/null || true \
+    && find /app/.venv -name "*.pyc" -delete 2>/dev/null || true \
+    && find /app/.venv -name "*.pyo" -delete 2>/dev/null || true \
+    && find /app/.venv -name "*.a" -delete 2>/dev/null || true \
+    && rm -rf /app/.venv/share
+
+EXPOSE 8000
+
+CMD ["python", "-m", "scope.server.app", "--host", "0.0.0.0", "--port", "8000"]

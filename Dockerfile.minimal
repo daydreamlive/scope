@@ -1,0 +1,147 @@
+# =============================================================================
+# Minimal Scope Docker Image
+# Uses multi-stage build to minimize final image size
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Frontend Builder
+# Build the frontend in a Node.js image, only copy dist to final
+# -----------------------------------------------------------------------------
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /build
+COPY frontend/package*.json ./
+RUN npm ci --omit=dev
+COPY frontend/ ./
+RUN npm run build
+
+
+# -----------------------------------------------------------------------------
+# Stage 2: Python Dependencies Builder  
+# Install Python packages in a full build environment
+# -----------------------------------------------------------------------------
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 AS python-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /build
+
+# Install only what's needed to build Python packages
+# Add deadsnakes PPA for Python 3.12 (not in Ubuntu 22.04 default repos)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Copy dependency files
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth ./
+
+# Install dependencies into a virtual environment
+# Using --no-dev to skip dev dependencies
+RUN uv sync --frozen --no-dev
+
+# Clean up venv to reduce size (do this in builder where we have tools)
+RUN find /build/.venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
+    && find /build/.venv -type d -name "*.dist-info" -exec sh -c 'rm -rf "$1"/RECORD "$1"/INSTALLER "$1"/REQUESTED 2>/dev/null' _ {} \; || true \
+    && find /build/.venv -name "*.pyc" -delete 2>/dev/null || true \
+    && find /build/.venv -name "*.pyo" -delete 2>/dev/null || true \
+    && rm -rf /build/.venv/share/man /build/.venv/share/doc \
+    # Remove PyTorch test files (~200MB)
+    && rm -rf /build/.venv/lib/python*/site-packages/torch/test \
+    && rm -rf /build/.venv/lib/python*/site-packages/torch/_inductor/autoheuristic/artifacts \
+    # Remove triton AMD/HIP backends not needed for NVIDIA (~100MB)
+    && rm -rf /build/.venv/lib/python*/site-packages/triton/backends/amd \
+    && rm -rf /build/.venv/lib/python*/site-packages/triton/backends/hip \
+    # Remove bundled NVIDIA libs that duplicate base image (~1GB)
+    # Keep cudnn - it's specifically overridden in pyproject.toml for PyTorch fix
+    && rm -rf /build/.venv/lib/python*/site-packages/nvidia/cublas \
+    && rm -rf /build/.venv/lib/python*/site-packages/nvidia/cuda_runtime \
+    && rm -rf /build/.venv/lib/python*/site-packages/nvidia/cufft \
+    && rm -rf /build/.venv/lib/python*/site-packages/nvidia/curand \
+    && rm -rf /build/.venv/lib/python*/site-packages/nvidia/cusolver \
+    && rm -rf /build/.venv/lib/python*/site-packages/nvidia/cusparse \
+    && rm -rf /build/.venv/lib/python*/site-packages/nvidia/nvtx \
+    # Strip debug symbols from shared libraries (~500MB)
+    && find /build/.venv -name "*.so" -exec strip --strip-unneeded {} \; 2>/dev/null || true \
+    && find /build/.venv -name "*.so.*" -exec strip --strip-unneeded {} \; 2>/dev/null || true
+
+
+# -----------------------------------------------------------------------------
+# Stage 3: Minimal Runtime Image
+# Only includes runtime dependencies, no build tools
+# -----------------------------------------------------------------------------
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV CUDA_VISIBLE_DEVICES=0
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV DAYDREAM_SCOPE_LOGS_DIR=/workspace/logs
+ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
+# Use system CUDA libraries instead of PyTorch bundled ones (we removed them to save space)
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+
+WORKDIR /app
+
+# Install ONLY runtime dependencies (no build tools, no dev packages)
+# Add deadsnakes PPA for Python 3.12 (not in Ubuntu 22.04 default repos)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    # Python runtime only
+    python3.12 \
+    python3.12-venv \
+    # OpenCV runtime deps (minimal)
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    # Cleanup everything (including software-properties-common no longer needed)
+    && apt-get purge -y software-properties-common \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/cache/apt/archives/* \
+    && rm -rf /tmp/* \
+    && rm -rf /root/.cache
+
+# Install uv (small binary, needed for runtime)
+COPY --from=python-builder /root/.local/bin/uv /usr/local/bin/uv
+
+# Copy virtual environment from builder
+COPY --from=python-builder /build/.venv /app/.venv
+
+# Copy project metadata for uv to recognize the project
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth ./
+
+# Copy source code
+COPY src/ ./src/
+
+# Copy pre-built frontend
+COPY --from=frontend-builder /build/dist ./frontend/dist/
+
+# Set up PATH to use venv
+ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/.venv"
+
+EXPOSE 8000
+
+# Use python directly (faster startup than uv run)
+CMD ["python", "-m", "scope.server.app", "--host", "0.0.0.0", "--port", "8000"]
