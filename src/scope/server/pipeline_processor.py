@@ -301,27 +301,56 @@ class PipelineProcessor:
         chunk_size: int,
     ) -> dict[str, list[torch.Tensor]]:
         """
-        Sample frames uniformly from the primary queue, then the same indices from other ports.
+        Sample chunk_size frames from the primary queue, then sample each
+        secondary queue.
 
-        Returns dict mapping port name to list of tensors (each 1,H,W,C). All ports
-        must have at least as many frames as we consume from the primary.
+        Only the primary port is required to have >= chunk_size frames.
+        Secondary ports with enough frames are sampled with the same indices
+        as the primary (synchronized). Ports with fewer frames are sampled
+        independently, and empty ports return an empty list so the pipeline
+        can handle missing inputs (e.g. text-mode with no camera).
         """
         primary = input_queues_ref.get(primary_port)
         if primary is None or primary.qsize() < chunk_size:
             return {}
+
+        out: dict[str, list[torch.Tensor]] = {port: [] for port in input_queues_ref}
+
+        # Sample primary queue
         step = primary.qsize() / chunk_size
         indices = [round(i * step) for i in range(chunk_size)]
         last_idx = indices[-1]
-        out: dict[str, list[torch.Tensor]] = {port: [] for port in input_queues_ref}
+        for i in range(last_idx + 1):
+            frame = primary.get_nowait()
+            if i in indices:
+                out[primary_port].append(frame)
+
+        # Sample each secondary queue
         for port, q in input_queues_ref.items():
-            if q.qsize() <= last_idx:
-                return {}
-        for port in input_queues_ref:
-            q = input_queues_ref[port]
-            for i in range(last_idx + 1):
-                frame = q.get_nowait()
-                if i in indices:
-                    out[port].append(frame)
+            if port == primary_port:
+                continue
+            avail = q.qsize()
+            if avail == 0:
+                # No frames — pass empty list (pipeline handles gracefully)
+                continue
+            if avail > last_idx:
+                # Enough frames: use same indices as primary (synchronized)
+                for i in range(last_idx + 1):
+                    frame = q.get_nowait()
+                    if i in indices:
+                        out[port].append(frame)
+            else:
+                # Fewer frames: sample independently at this port's own rate
+                sec_step = max(avail / chunk_size, 1.0)
+                sec_indices = [
+                    round(i * sec_step) for i in range(min(chunk_size, avail))
+                ]
+                sec_last = sec_indices[-1]
+                for i in range(sec_last + 1):
+                    frame = q.get_nowait()
+                    if i in sec_indices:
+                        out[port].append(frame)
+
         return out
 
     def process_chunk(self):
