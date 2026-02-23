@@ -611,6 +611,15 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
+            # Block plugin installation in cloud mode (security: prevent arbitrary code execution)
+            if method == "POST" and path == "/api/v1/plugins":
+                return {
+                    "type": "api_response",
+                    "request_id": request_id,
+                    "status": 403,
+                    "error": "Plugin installation is not available in cloud mode",
+                }
+
             # Inject connection_id into pipeline load requests for event correlation
             if (
                 method == "POST"
