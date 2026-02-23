@@ -1,3 +1,17 @@
+// Electron preload exposes scope API on window
+interface ScopeAPI {
+  browseDirectory?: (title: string) => Promise<string | null>;
+  onDeepLinkAction?: (
+    callback: (data: { action: string; package: string }) => void
+  ) => () => void;
+}
+
+declare global {
+  interface Window {
+    scope?: ScopeAPI;
+  }
+}
+
 // Pipeline IDs are dynamic - any string returned from backend is valid
 export type PipelineId = string;
 
