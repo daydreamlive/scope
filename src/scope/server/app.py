@@ -31,6 +31,15 @@ if TYPE_CHECKING:
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
+from scope.core.lora.manifest import (
+    LoRAManifestEntry,
+    LoRAProvenance,
+    add_manifest_entry,
+    compute_sha256,
+    load_manifest,
+    save_manifest,
+)
+
 from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
@@ -57,6 +66,7 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
+from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -784,6 +794,8 @@ class LoRAFileInfo(BaseModel):
     path: str
     size_mb: float
     folder: str | None = None
+    sha256: str | None = None
+    provenance: LoRAProvenance | None = None
 
 
 class LoRAFilesResponse(BaseModel):
@@ -803,26 +815,33 @@ async def list_lora_files(
     When cloud mode is active, lists LoRA files from the cloud server instead.
     """
 
-    def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
+    def process_lora_file(
+        file_path: Path, lora_dir: Path, manifest_entries: dict
+    ) -> LoRAFileInfo:
         """Extract LoRA file metadata."""
         size_mb = file_path.stat().st_size / (1024 * 1024)
         relative_path = file_path.relative_to(lora_dir)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
+        rel_key = relative_path.as_posix()
+        entry = manifest_entries.get(rel_key)
         return LoRAFileInfo(
             name=file_path.stem,
             path=str(file_path),
             size_mb=round(size_mb, 2),
             folder=folder,
+            sha256=entry.sha256 if entry else None,
+            provenance=entry.provenance if entry else None,
         )
 
     try:
         lora_dir = get_lora_dir()
+        manifest = load_manifest(lora_dir)
         lora_files: list[LoRAFileInfo] = []
 
         for file_path in iter_files(lora_dir, LORA_EXTENSIONS):
-            lora_files.append(process_lora_file(file_path, lora_dir))
+            lora_files.append(process_lora_file(file_path, lora_dir, manifest.entries))
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)
@@ -989,15 +1008,35 @@ async def install_lora_file(
             )
 
         # Install in a thread to avoid blocking the event loop
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, http_get, url, dest_path)
 
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        # Update manifest with provenance
+        sha256 = await loop.run_in_executor(None, compute_sha256, dest_path)
+        size_bytes = dest_path.stat().st_size
+        relative_key = dest_path.relative_to(lora_dir).as_posix()
+
+        source: str
+        if is_civitai:
+            source = "civitai"
+        elif hostname == "huggingface.co" or hostname.endswith(".huggingface.co"):
+            source = "huggingface"
+        else:
+            source = "url"
+
+        provenance = LoRAProvenance(source=source, url=url)
+        entry = add_manifest_entry(
+            lora_dir, relative_key, provenance, sha256, size_bytes
+        )
+
+        size_mb = size_bytes / (1024 * 1024)
         file_info = LoRAFileInfo(
             name=dest_path.stem,
             path=str(dest_path),
             size_mb=round(size_mb, 2),
             folder=None,
+            sha256=sha256,
+            provenance=entry.provenance,
         )
 
         return LoRAInstallResponse(
@@ -1058,6 +1097,13 @@ async def delete_lora_file(
         found_path.unlink()
         logger.info(f"Deleted LoRA file: {found_path}")
 
+        # Remove from manifest if present
+        manifest = load_manifest(lora_dir)
+        relative_key = found_path.relative_to(lora_dir).as_posix()
+        if relative_key in manifest.entries:
+            del manifest.entries[relative_key]
+            save_manifest(lora_dir, manifest)
+
         return LoRADeleteResponse(
             success=True,
             message=f"Successfully deleted '{name}'",
@@ -1068,6 +1114,40 @@ async def delete_lora_file(
     except Exception as e:
         logger.error(f"delete_lora_file: Error deleting LoRA: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/lora/download")
+async def download_lora_endpoint(
+    request: LoRADownloadRequest,
+) -> LoRADownloadResult:
+    """Download a LoRA from HuggingFace, CivitAI, or a direct URL."""
+    from .lora_downloader import download_lora
+
+    lora_dir = get_lora_dir()
+    try:
+        return await download_lora(request, lora_dir)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"download_lora: Error downloading LoRA: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.put("/api/v1/lora/{filename:path}/provenance")
+async def tag_lora_provenance(
+    filename: str,
+    provenance: LoRAProvenance,
+) -> LoRAManifestEntry:
+    """Retroactively tag a local LoRA with provenance info."""
+    lora_dir = get_lora_dir()
+    file_path = lora_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"LoRA file '{filename}' not found")
+
+    sha256 = compute_sha256(file_path)
+    size_bytes = file_path.stat().st_size
+
+    return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
