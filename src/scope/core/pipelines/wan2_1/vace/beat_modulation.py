@@ -70,10 +70,17 @@ def _get_curve_value(curve_name: str, phase: float) -> float:
 def _apply_intensity(
     frames: torch.Tensor, amount: float, beat_vals: torch.Tensor
 ) -> torch.Tensor:
-    """Scale brightness by beat.  Works in [-1, 1] — scaling preserves sign."""
+    """Fade conditioning toward zero on off-beat.
+
+    Lerps toward zero rather than just scaling brightness — this disrupts
+    the conditioning signal structurally, which the diffusion model can't
+    ignore the way it can ignore simple brightness shifts.
+    """
     # beat_vals shape: [T, 1, 1] → broadcasts over C, H, W
-    scale = 1.0 - amount * (1.0 - beat_vals)
-    return frames * scale
+    # On-beat (beat_val=1): mix=0 → full conditioning
+    # Off-beat (beat_val=0): mix=amount → faded toward zero
+    mix = amount * (1.0 - beat_vals)
+    return frames * (1.0 - mix)
 
 
 def _apply_invert(
@@ -87,8 +94,13 @@ def _apply_invert(
 def _apply_contrast(
     frames: torch.Tensor, amount: float, beat_vals: torch.Tensor
 ) -> torch.Tensor:
-    """Boost contrast on-beat.  [-1, 1] is already zero-centered."""
-    gain = 1.0 + 2.0 * amount * beat_vals
+    """Boost contrast on-beat.  [-1, 1] is already zero-centered.
+
+    Uses a higher multiplier (5x) so the effect is visible through the
+    VACE encode → denoise → decode chain. Conditioning contrast needs to
+    be extreme to produce noticeable output changes.
+    """
+    gain = 1.0 + 5.0 * amount * beat_vals
     return (frames * gain).clamp(-1, 1)
 
 
@@ -109,7 +121,8 @@ def _apply_blur(
         if blur_strength < 0.01:
             continue
 
-        scale = max(1.0 - blur_strength * 0.75, 0.25)
+        # More aggressive downscale — up to 10% of original size at full amount
+        scale = max(1.0 - blur_strength * 0.9, 0.1)
         small_h = max(int(H * scale), 1)
         small_w = max(int(W * scale), 1)
 
@@ -227,13 +240,13 @@ def modulate_conditioning_frames(
     reset_phase = getattr(block_state, "reset_phase", False)
 
     intensity_on = getattr(block_state, "intensity_enabled", True)
-    intensity_amt = getattr(block_state, "intensity_amount", 0.5)
+    intensity_amt = getattr(block_state, "intensity_amount", 0.8)
     blur_on = getattr(block_state, "blur_enabled", False)
-    blur_amt = getattr(block_state, "blur_amount", 0.5)
+    blur_amt = getattr(block_state, "blur_amount", 0.7)
     invert_on = getattr(block_state, "invert_enabled", False)
-    invert_amt = getattr(block_state, "invert_amount", 0.3)
+    invert_amt = getattr(block_state, "invert_amount", 0.5)
     contrast_on = getattr(block_state, "contrast_enabled", False)
-    contrast_amt = getattr(block_state, "contrast_amount", 0.5)
+    contrast_amt = getattr(block_state, "contrast_amount", 0.7)
 
     # Phase reset
     if reset_phase:

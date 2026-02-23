@@ -153,13 +153,13 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             InputParam("target_fps", default=15.0, type_hint=float),
             InputParam("reset_phase", default=False, type_hint=bool),
             InputParam("intensity_enabled", default=True, type_hint=bool),
-            InputParam("intensity_amount", default=0.5, type_hint=float),
+            InputParam("intensity_amount", default=0.8, type_hint=float),
             InputParam("blur_enabled", default=False, type_hint=bool),
-            InputParam("blur_amount", default=0.5, type_hint=float),
+            InputParam("blur_amount", default=0.7, type_hint=float),
             InputParam("invert_enabled", default=False, type_hint=bool),
-            InputParam("invert_amount", default=0.3, type_hint=float),
+            InputParam("invert_amount", default=0.5, type_hint=float),
             InputParam("contrast_enabled", default=False, type_hint=bool),
-            InputParam("contrast_amount", default=0.5, type_hint=float),
+            InputParam("contrast_amount", default=0.7, type_hint=float),
         ]
 
     @property
