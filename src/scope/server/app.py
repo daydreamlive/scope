@@ -90,12 +90,13 @@ from .schema import (
     WebRTCOfferResponse,
 )
 
-
-# Resolve frontend dist directory: works both in dev (source tree) and when
-# installed as a wheel (frontend/dist is force-included into scope/ package).
-_pkg_dist = Path(__file__).parent.parent / "frontend" / "dist"
+# Resolve frontend dist directory.
+# Dev/editable: __file__ is src/scope/server/app.py, 4 parents up = project root.
+# Docker wheel install: app.py is in site-packages, so the relative path won't
+# reach /app/frontend/dist — fall back to the absolute Docker build path.
 _dev_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
-FRONTEND_DIST = _pkg_dist if _pkg_dist.exists() else _dev_dist
+_docker_dist = Path("/app/frontend/dist")
+FRONTEND_DIST = _dev_dist if _dev_dist.exists() else _docker_dist
 
 
 class STUNErrorFilter(logging.Filter):
