@@ -107,8 +107,6 @@ def build_graph(
             q = stream_queues.get((node.id, e.to_port))
             if q is not None:
                 processor.input_queues[e.to_port] = q
-        with processor.input_queue_lock:
-            processor.input_queue = processor.input_queues.get("video")
 
     # 4) Set each producer's output_queues per port and wire consumer input to same queue
     for node in graph.nodes:
@@ -126,8 +124,6 @@ def build_graph(
                 consumer = node_processors.get(e.to_node)
                 if consumer is not None:
                     consumer.input_queues[e.to_port] = q
-                    with consumer.input_queue_lock:
-                        consumer.input_queue = consumer.input_queues.get("video")
         for port, qlist in out_by_port.items():
             proc.output_queues[port] = qlist
 
