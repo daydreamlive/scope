@@ -127,6 +127,15 @@ class FrameProcessor:
         self._audio_drain_thread: threading.Thread | None = None
         self._audio_chunks_out = 0
 
+        # Video-gated audio release: audio is held in _audio_pending until
+        # video frames are consumed via get(). Each get() call releases
+        # audio proportional to one video frame's worth of time, keeping
+        # audio and video perfectly in lockstep.
+        self._audio_pending: np.ndarray | None = None  # full batch audio (mono, 48kHz)
+        self._audio_pending_offset = 0  # how many samples already released
+        self._audio_pending_frames_total = 0  # video frames in current batch
+        self._audio_pending_frames_consumed = 0  # video frames consumed so far
+
         # Native frame rate for batch playback sync.
         # When a pipeline produces audio+video, this is set to the content's
         # native fps (e.g. 24fps). VideoProcessingTrack uses this to play
@@ -269,10 +278,14 @@ class FrameProcessor:
         if self._audio_drain_thread and self._audio_drain_thread.is_alive():
             self._audio_drain_thread.join(timeout=2.0)
 
-        # Clear audio buffer
+        # Clear audio buffer and pending audio
         with self._audio_buffer_lock:
             self._audio_buffer.clear()
             self._audio_buffer_samples = 0
+            self._audio_pending = None
+            self._audio_pending_offset = 0
+            self._audio_pending_frames_total = 0
+            self._audio_pending_frames_consumed = 0
 
         # Clean up all output sinks
         for sink_type, entry in list(self.output_sinks.items()):
@@ -474,6 +487,9 @@ class FrameProcessor:
         # Common processing for both modes
         self._frames_out += 1
 
+        # Release audio proportional to this video frame so A/V stays in lockstep
+        self._release_audio_for_video_frame()
+
         # Emit playback_ready event on first frame output
         if not self._playback_ready_emitted:
             self._playback_ready_emitted = True
@@ -514,12 +530,46 @@ class FrameProcessor:
 
         return frame
 
+    def _release_audio_for_video_frame(self):
+        """Release audio samples proportional to one video frame.
+
+        Called each time get() returns a video frame. Slices the pending
+        audio so that by the time all video frames in the batch are consumed,
+        all corresponding audio has been moved into the playable buffer.
+        """
+        with self._audio_buffer_lock:
+            if self._audio_pending is None:
+                return
+
+            self._audio_pending_frames_consumed += 1
+            total = self._audio_pending_frames_total
+            consumed = self._audio_pending_frames_consumed
+            pending_len = len(self._audio_pending)
+
+            if consumed >= total:
+                # Last frame: release everything remaining
+                remaining = self._audio_pending[self._audio_pending_offset :]
+                if len(remaining) > 0:
+                    self._audio_buffer.append(remaining)
+                    self._audio_buffer_samples += len(remaining)
+                self._audio_pending = None
+                self._audio_pending_offset = 0
+            else:
+                # Release proportional slice
+                target_offset = int(pending_len * consumed / total)
+                chunk = self._audio_pending[self._audio_pending_offset : target_offset]
+                if len(chunk) > 0:
+                    self._audio_buffer.append(chunk)
+                    self._audio_buffer_samples += len(chunk)
+                self._audio_pending_offset = target_offset
+
     def _audio_drain_loop(self):
         """Background thread that drains audio from the last pipeline processor's
-        audio_output_queue, resamples to 48kHz, and appends to the audio buffer.
+        audio_output_queue, resamples to 48kHz, and stages it for video-gated release.
 
-        Also extracts native_fps from the pipeline so VideoProcessingTrack can
-        play each batch at the content's native frame rate (keeping A/V in sync).
+        Audio is placed into _audio_pending rather than directly into the playable
+        buffer. The get() method (video frame consumption) then releases proportional
+        slices into the buffer, keeping audio and video in lockstep.
         """
         logger.info("[FRAME-PROCESSOR] Audio drain thread started")
 
@@ -530,7 +580,7 @@ class FrameProcessor:
 
             last_processor = self.pipeline_processors[-1]
             try:
-                audio_tensor, sample_rate, _video_frame_count, native_fps = (
+                audio_tensor, sample_rate, video_frame_count, native_fps = (
                     last_processor.audio_output_queue.get(timeout=0.1)
                 )
             except queue.Empty:
@@ -563,15 +613,27 @@ class FrameProcessor:
                         audio_mono, sample_rate, WEBRTC_AUDIO_SAMPLE_RATE
                     )
 
-                # Append to buffer immediately — video track plays at native_fps
-                # so audio and video drain at matching rates
+                # Stage audio for video-gated release.
+                # Wait until any previous batch's audio is fully consumed before
+                # installing the new batch, so we don't overwrite in-progress data.
                 with self._audio_buffer_lock:
-                    self._audio_buffer.append(audio_mono)
-                    self._audio_buffer_samples += len(audio_mono)
-                    logger.debug(
-                        f"[FRAME-PROCESSOR] Audio buffered: {len(audio_mono)} samples "
-                        f"(total: {self._audio_buffer_samples}, sr={sample_rate})"
-                    )
+                    if self._audio_pending is not None:
+                        # Flush leftover from previous batch into the buffer
+                        leftover = self._audio_pending[self._audio_pending_offset :]
+                        if len(leftover) > 0:
+                            self._audio_buffer.append(leftover)
+                            self._audio_buffer_samples += len(leftover)
+
+                    self._audio_pending = audio_mono
+                    self._audio_pending_offset = 0
+                    self._audio_pending_frames_total = max(video_frame_count, 1)
+                    self._audio_pending_frames_consumed = 0
+
+                logger.debug(
+                    f"[FRAME-PROCESSOR] Audio staged: {len(audio_mono)} samples "
+                    f"for {video_frame_count} video frames "
+                    f"(sr={sample_rate}, native_fps={native_fps})"
+                )
 
                 # Fan out to output sinks that support audio
                 if self.output_sinks:
@@ -594,17 +656,51 @@ class FrameProcessor:
 
     @staticmethod
     def _resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
-        """Simple linear interpolation resampling.
+        """Resample audio using polyphase FIR filtering (windowed-sinc).
 
-        For production quality, a proper resampler (e.g. libsamplerate) would be
-        better, but linear interpolation is sufficient for initial audio support.
+        Uses numpy-only polyphase resampling: upsample by L, low-pass FIR filter,
+        downsample by M where L/M = dst_rate/src_rate after GCD reduction.
+        Much higher quality than linear interpolation — no aliasing artifacts.
         """
         if src_rate == dst_rate:
             return audio
-        duration = len(audio) / src_rate
-        num_output_samples = int(duration * dst_rate)
-        indices = np.linspace(0, len(audio) - 1, num_output_samples)
-        return np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
+        from math import gcd
+
+        g = gcd(dst_rate, src_rate)
+        up = dst_rate // g
+        down = src_rate // g
+
+        # Design low-pass FIR filter (windowed sinc)
+        # Cutoff at the lower of the two Nyquist frequencies
+        cutoff = min(1.0 / up, 1.0 / down)
+        # Filter length: longer = better stopband, 64 taps per phase is good quality
+        half_len = 64 * up
+        n = np.arange(-half_len, half_len + 1, dtype=np.float64)
+        # Sinc * Blackman window
+        h = np.sinc(n * cutoff) * np.blackman(len(n)) * cutoff * up
+        h = h.astype(np.float32)
+
+        # Pad input for filter delay
+        pad = len(h) // (2 * up)
+        audio_padded = np.pad(audio, (pad, pad), mode="edge")
+
+        # Upsample by zero-stuffing
+        upsampled = np.zeros(len(audio_padded) * up, dtype=np.float32)
+        upsampled[::up] = audio_padded
+
+        # Apply FIR filter via convolution
+        filtered = np.convolve(upsampled, h, mode="same")
+
+        # Downsample
+        resampled = filtered[::down]
+
+        # Trim to expected output length
+        expected_len = int(np.ceil(len(audio) * up / down))
+        # Account for padding offset
+        offset = pad * up // down
+        resampled = resampled[offset : offset + expected_len]
+
+        return resampled.astype(np.float32)
 
     def get_audio(
         self, num_samples: int = AUDIO_SAMPLES_PER_FRAME
