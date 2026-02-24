@@ -412,6 +412,14 @@ class FrameProcessor:
 
         return True
 
+    def last_processor(self) -> PipelineProcessor | None:
+        """Return the sink processor (graph mode) or the last processor in the chain."""
+        if not self.pipeline_processors:
+            return None
+        if self._graph_mode and self._sink_processor:
+            return self._sink_processor
+        return self.pipeline_processors[-1]
+
     def get(self) -> torch.Tensor | None:
         if not self.running:
             return None
@@ -431,12 +439,8 @@ class FrameProcessor:
             if not self.pipeline_processors:
                 return None
 
-            last_processor = (
-                self._sink_processor
-                if self._graph_mode and self._sink_processor
-                else self.pipeline_processors[-1]
-            )
-            if not last_processor.output_queue:
+            last_processor = self.last_processor()
+            if last_processor is None or not last_processor.output_queue:
                 return None
 
             try:
@@ -521,11 +525,9 @@ class FrameProcessor:
             return DEFAULT_FPS
 
         # Get FPS from the sink processor (graph mode) or last processor (chain mode)
-        last_processor = (
-            self._sink_processor
-            if self._graph_mode and self._sink_processor
-            else self.pipeline_processors[-1]
-        )
+        last_processor = self.last_processor()
+        if last_processor is None:
+            return DEFAULT_FPS
         return last_processor.get_fps()
 
     def _log_frame_stats(self):
@@ -632,14 +634,10 @@ class FrameProcessor:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
 
-        # Per-node routing: if node_id is specified, route to that processor only
-        node_id = parameters.pop("node_id", None)
-        if node_id and self._graph_mode and node_id in self._processors_by_node_id:
-            self._processors_by_node_id[node_id].update_parameters(parameters)
-        else:
-            # Broadcast to all pipeline processors (backward compat)
-            for processor in self.pipeline_processors:
-                processor.update_parameters(parameters)
+        # Broadcast to all pipeline processors
+        parameters.pop("node_id", None)  # strip so not passed to processors
+        for processor in self.pipeline_processors:
+            processor.update_parameters(parameters)
 
         # Update local parameters
         self.parameters = {**self.parameters, **parameters}
