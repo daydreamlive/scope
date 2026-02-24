@@ -75,6 +75,12 @@ def build_workflow(
         return None
 
     snapshot = pipeline_manager.get_load_snapshot()
+
+    # If no pipelines are loaded, seed from frontend_params keys so
+    # the export still captures the user's selected pipeline/settings.
+    if not snapshot and frontend_params:
+        snapshot = {pid: {} for pid in frontend_params}
+
     pipelines: list[WorkflowPipeline] = []
 
     for pipeline_id, load_params in snapshot.items():
@@ -98,9 +104,14 @@ def build_workflow(
                 package_spec=info.get("package_spec") if info else None,
             )
 
-        # --- LoRAs ---
-        raw_loras: list[dict[str, Any]] = load_params.pop("loras", None) or []
-        lora_merge_mode: str = load_params.pop("lora_merge_mode", "permanent_merge")
+        # --- params (merge frontend_params first so LoRAs are available) ---
+        params = dict(load_params)
+        if frontend_params and pipeline_id in frontend_params:
+            params.update(frontend_params[pipeline_id])
+
+        # --- LoRAs (extract from merged params) ---
+        raw_loras: list[dict[str, Any]] = params.pop("loras", None) or []
+        lora_merge_mode: str = params.pop("lora_merge_mode", "permanent_merge")
         workflow_loras: list[WorkflowLoRA] = []
 
         for lora in raw_loras:
@@ -127,13 +138,6 @@ def build_workflow(
                 expected_sha256=entry.sha256 if entry else None,
             )
             workflow_loras.append(wl)
-
-        # --- params ---
-        params = dict(load_params)
-        if frontend_params and pipeline_id in frontend_params:
-            params.update(frontend_params[pipeline_id])
-        params.pop("loras", None)
-        params.pop("lora_merge_mode", None)
 
         pipelines.append(
             WorkflowPipeline(
