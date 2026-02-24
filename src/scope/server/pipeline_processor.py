@@ -38,6 +38,7 @@ class PipelineProcessor:
         pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
+        audio_callback: callable = None,
         session_id: str | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
@@ -49,6 +50,7 @@ class PipelineProcessor:
             pipeline: Pipeline instance to process frames with
             pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
+            audio_callback: Optional callback for audio output (audio_tensor, sample_rate)
             session_id: Session ID for event tracking
             user_id: User ID for event tracking
             connection_id: Connection ID from fal.ai WebSocket for event correlation
@@ -56,6 +58,7 @@ class PipelineProcessor:
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
+        self.audio_callback = audio_callback
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -66,14 +69,6 @@ class PipelineProcessor:
         self.output_queue = queue.Queue(maxsize=8)
         # Lock to protect input_queue assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
-
-        # Audio output queue: (audio_tensor, sample_rate, video_frame_count, native_fps).
-        # Pipelines that produce audio return {"video": ..., "audio": ..., "audio_sample_rate": ...}.
-        # native_fps is the content frame rate (e.g. 24fps) for native-speed batch playback.
-        # Only the last processor in a chain is read by FrameProcessor for audio output.
-        self.audio_output_queue: queue.Queue[
-            tuple[torch.Tensor, int, int, float | None]
-        ] = queue.Queue(maxsize=8)
 
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
@@ -222,13 +217,6 @@ class PipelineProcessor:
                     self.output_queue.get_nowait()
                 except queue.Empty:
                     break
-
-        # Clear audio output queue
-        while not self.audio_output_queue.empty():
-            try:
-                self.audio_output_queue.get_nowait()
-            except queue.Empty:
-                break
 
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
@@ -402,12 +390,6 @@ class PipelineProcessor:
                         self.output_queue.get_nowait()
                     except queue.Empty:
                         break
-            # Clear audio output queue
-            while not self.audio_output_queue.empty():
-                try:
-                    self.audio_output_queue.get_nowait()
-                except queue.Empty:
-                    break
 
             self._pending_cache_init = True
 
@@ -482,7 +464,7 @@ class PipelineProcessor:
 
             # Forward extra params to downstream pipeline (dual-output pattern)
             # Preprocessors return {"video": frames, "vace_input_frames": ..., "vace_input_masks": ...}
-            # Audio keys are handled separately via audio_output_queue, not as pipeline params.
+            # Audio keys are handled separately via audio_callback, not as pipeline params.
             _non_param_keys = {"video", "audio", "audio_sample_rate", "frame_rate"}
             extra_params = {
                 k: v for k, v in output_dict.items() if k not in _non_param_keys
@@ -552,34 +534,27 @@ class PipelineProcessor:
                     )
                     continue
 
-            # Extract audio from pipeline output and queue it.
-            # Includes video frame count and native frame rate so downstream
-            # can play each batch at native speed for proper A/V sync.
+            # Pass audio to callback if available
             audio_output = output_dict.get("audio")
             audio_sample_rate = output_dict.get("audio_sample_rate")
-            native_fps = output_dict.get("frame_rate")
-
-            # Latch native_fps so get_fps() returns a stable value immediately,
-            # rather than the wildly oscillating measured production rate.
-            if native_fps is not None and native_fps > 0:
-                self.native_fps = native_fps
-
-            if audio_output is not None and audio_sample_rate is not None:
-                # Detach and move to CPU for downstream consumption
-                audio_output = audio_output.detach().cpu()
-                logger.debug(
-                    f"[PIPELINE-PROC] Audio from {self.pipeline_id}: "
-                    f"shape={audio_output.shape}, sr={audio_sample_rate}, "
-                    f"video_frames={num_frames}, native_fps={native_fps}"
-                )
+            if (
+                audio_output is not None
+                and audio_sample_rate is not None
+                and self.audio_callback
+            ):
                 try:
-                    self.audio_output_queue.put_nowait(
-                        (audio_output, audio_sample_rate, num_frames, native_fps)
-                    )
-                except queue.Full:
-                    logger.debug(
-                        f"Audio output queue full for {self.pipeline_id}, dropping audio chunk"
-                    )
+                    audio_cpu = audio_output.detach().cpu()
+                    self.audio_callback(audio_cpu, audio_sample_rate)
+                except Exception as e:
+                    logger.error(f"Error in audio callback: {e}")
+
+            # Latch native frame rate for stable playback speed.
+            # Check output dict first, then pipeline config as fallback.
+            frame_rate = output_dict.get("frame_rate")
+            if frame_rate is None and hasattr(self.pipeline, "config"):
+                frame_rate = getattr(self.pipeline.config, "frame_rate", None)
+            if frame_rate is not None and float(frame_rate) > 0:
+                self.native_fps = float(frame_rate)
 
             # Apply throttling if this pipeline is producing faster than next can consume
             # Only throttle if: (1) has video input, (2) has next processor

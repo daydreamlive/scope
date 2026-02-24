@@ -3,10 +3,8 @@ import queue
 import threading
 import time
 import uuid
-from collections import deque
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import torch
 from aiortc.mediastreams import VideoFrame
 
@@ -19,13 +17,6 @@ if TYPE_CHECKING:
     from scope.core.outputs import OutputSink
 
     from .cloud_connection import CloudConnectionManager
-
-# Audio constants
-WEBRTC_AUDIO_SAMPLE_RATE = 48000  # WebRTC standard output sample rate
-AUDIO_FRAME_DURATION_MS = 20  # Standard WebRTC audio frame duration
-AUDIO_SAMPLES_PER_FRAME = int(
-    WEBRTC_AUDIO_SAMPLE_RATE * AUDIO_FRAME_DURATION_MS / 1000
-)  # 960 samples
 
 logger = logging.getLogger(__name__)
 
@@ -118,26 +109,12 @@ class FrameProcessor:
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
 
-        # Audio buffer: accumulates resampled audio samples ready for WebRTC output.
-        # Stores interleaved float32 samples at WEBRTC_AUDIO_SAMPLE_RATE (48kHz).
-        # AudioProcessingTrack calls get_audio() to drain 20ms chunks.
-        self._audio_buffer = deque()  # deque of np.ndarray chunks (mono, float32)
-        self._audio_buffer_lock = threading.Lock()
-        self._audio_buffer_samples = 0  # total samples buffered
-        self._audio_drain_thread: threading.Thread | None = None
-        self._audio_chunks_out = 0
-
-        # Video-gated audio release: audio is held in _audio_pending until
-        # video frames are consumed via get(). Each get() call releases
-        # audio proportional to one video frame's worth of time, keeping
-        # audio and video perfectly in lockstep.
-        self._audio_pending: np.ndarray | None = None  # full batch audio (mono, 48kHz)
-        self._audio_pending_offset = 0  # how many samples already released
-        self._audio_pending_frames_total = 0  # video frames in current batch
-        self._audio_pending_frames_consumed = 0  # video frames consumed so far
-
-        # Native frame rate is now tracked by PipelineProcessor.native_fps
-        # and returned via PipelineProcessor.get_fps() for stable playback speed.
+        # Audio output: raw (audio_tensor, sample_rate) tuples from the pipeline.
+        # AudioProcessingTrack consumes these, handles resampling and buffering.
+        self.audio_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
+            maxsize=30
+        )
+        self.audio_sample_rate: int | None = None
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -236,12 +213,6 @@ class FrameProcessor:
             )
             return
 
-        # Start audio drain thread to move audio from pipeline processor queue to buffer
-        self._audio_drain_thread = threading.Thread(
-            target=self._audio_drain_loop, daemon=True
-        )
-        self._audio_drain_thread.start()
-
         logger.info(
             f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
         )
@@ -270,18 +241,12 @@ class FrameProcessor:
         # Clear pipeline processors
         self.pipeline_processors.clear()
 
-        # Wait for audio drain thread to finish
-        if self._audio_drain_thread and self._audio_drain_thread.is_alive():
-            self._audio_drain_thread.join(timeout=2.0)
-
-        # Clear audio buffer and pending audio
-        with self._audio_buffer_lock:
-            self._audio_buffer.clear()
-            self._audio_buffer_samples = 0
-            self._audio_pending = None
-            self._audio_pending_offset = 0
-            self._audio_pending_frames_total = 0
-            self._audio_pending_frames_consumed = 0
+        # Clear audio queue
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
 
         # Clean up all output sinks
         for sink_type, entry in list(self.output_sinks.items()):
@@ -483,9 +448,6 @@ class FrameProcessor:
         # Common processing for both modes
         self._frames_out += 1
 
-        # Release audio proportional to this video frame so A/V stays in lockstep
-        self._release_audio_for_video_frame()
-
         # Emit playback_ready event on first frame output
         if not self._playback_ready_emitted:
             self._playback_ready_emitted = True
@@ -526,204 +488,33 @@ class FrameProcessor:
 
         return frame
 
-    def _release_audio_for_video_frame(self):
-        """Release audio samples proportional to one video frame.
+    def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
+        """Get the next audio chunk and its sample rate.
 
-        Called each time get() returns a video frame. Slices the pending
-        audio so that by the time all video frames in the batch are consumed,
-        all corresponding audio has been moved into the playable buffer.
-        """
-        with self._audio_buffer_lock:
-            if self._audio_pending is None:
-                return
-
-            self._audio_pending_frames_consumed += 1
-            total = self._audio_pending_frames_total
-            consumed = self._audio_pending_frames_consumed
-            pending_len = len(self._audio_pending)
-
-            if consumed >= total:
-                # Last frame: release everything remaining
-                remaining = self._audio_pending[self._audio_pending_offset :]
-                if len(remaining) > 0:
-                    self._audio_buffer.append(remaining)
-                    self._audio_buffer_samples += len(remaining)
-                self._audio_pending = None
-                self._audio_pending_offset = 0
-            else:
-                # Release proportional slice
-                target_offset = int(pending_len * consumed / total)
-                chunk = self._audio_pending[self._audio_pending_offset : target_offset]
-                if len(chunk) > 0:
-                    self._audio_buffer.append(chunk)
-                    self._audio_buffer_samples += len(chunk)
-                self._audio_pending_offset = target_offset
-
-    def _audio_drain_loop(self):
-        """Background thread that drains audio from the last pipeline processor's
-        audio_output_queue, resamples to 48kHz, and stages it for video-gated release.
-
-        Audio is placed into _audio_pending rather than directly into the playable
-        buffer. The get() method (video frame consumption) then releases proportional
-        slices into the buffer, keeping audio and video in lockstep.
-        """
-        logger.info("[FRAME-PROCESSOR] Audio drain thread started")
-
-        while self.running:
-            if not self.pipeline_processors:
-                time.sleep(0.01)
-                continue
-
-            last_processor = self.pipeline_processors[-1]
-            try:
-                audio_tensor, sample_rate, video_frame_count, native_fps = (
-                    last_processor.audio_output_queue.get(timeout=0.1)
-                )
-            except queue.Empty:
-                continue
-
-            try:
-                # Convert torch tensor to numpy float32
-                if isinstance(audio_tensor, torch.Tensor):
-                    audio_np = audio_tensor.float().numpy()
-                else:
-                    audio_np = np.asarray(audio_tensor, dtype=np.float32)
-
-                # Ensure shape is [C, S] (channels, samples)
-                if audio_np.ndim == 1:
-                    audio_np = audio_np[np.newaxis, :]  # mono -> [1, S]
-
-                # Mix down to mono for WebRTC (average channels)
-                if audio_np.shape[0] > 1:
-                    audio_mono = audio_np.mean(axis=0)
-                else:
-                    audio_mono = audio_np[0]
-
-                # Resample to 48kHz if necessary
-                if sample_rate != WEBRTC_AUDIO_SAMPLE_RATE:
-                    audio_mono = self._resample_audio(
-                        audio_mono, sample_rate, WEBRTC_AUDIO_SAMPLE_RATE
-                    )
-
-                # Stage audio for video-gated release.
-                # Wait until any previous batch's audio is fully consumed before
-                # installing the new batch, so we don't overwrite in-progress data.
-                with self._audio_buffer_lock:
-                    if self._audio_pending is not None:
-                        # Flush leftover from previous batch into the buffer
-                        leftover = self._audio_pending[self._audio_pending_offset :]
-                        if len(leftover) > 0:
-                            self._audio_buffer.append(leftover)
-                            self._audio_buffer_samples += len(leftover)
-
-                    self._audio_pending = audio_mono
-                    self._audio_pending_offset = 0
-                    self._audio_pending_frames_total = max(video_frame_count, 1)
-                    self._audio_pending_frames_consumed = 0
-
-                logger.debug(
-                    f"[FRAME-PROCESSOR] Audio staged: {len(audio_mono)} samples "
-                    f"for {video_frame_count} video frames "
-                    f"(sr={sample_rate}, native_fps={native_fps})"
-                )
-
-                # Fan out to output sinks that support audio
-                if self.output_sinks:
-                    for _sink_type, entry in self.output_sinks.items():
-                        sink = entry["sink"]
-                        if hasattr(sink, "send_audio"):
-                            try:
-                                sink.send_audio(audio_mono, WEBRTC_AUDIO_SAMPLE_RATE, 1)
-                            except Exception as e:
-                                logger.debug(
-                                    f"Error sending audio to sink '{_sink_type}': {e}"
-                                )
-
-            except Exception as e:
-                logger.error(f"[FRAME-PROCESSOR] Error processing audio chunk: {e}")
-
-        logger.info(
-            f"[FRAME-PROCESSOR] Audio drain thread stopped ({self._audio_chunks_out} chunks served)"
-        )
-
-    @staticmethod
-    def _resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
-        """Resample audio via FFT (frequency-domain zero-pad/truncate).
-
-        Equivalent to scipy.signal.resample but using only numpy.
-        Exact for integer rate ratios (e.g. 24kHz → 48kHz) and high quality
-        for non-integer ratios. No aliasing artifacts.
-        """
-        if src_rate == dst_rate:
-            return audio
-
-        n_in = len(audio)
-        n_out = int(round(n_in * dst_rate / src_rate))
-        if n_out == n_in:
-            return audio
-
-        # FFT-based resampling: transform, zero-pad or truncate in frequency
-        # domain, then inverse transform. This is mathematically equivalent
-        # to ideal band-limited interpolation.
-        spectrum = np.fft.rfft(audio)
-        n_freq_out = n_out // 2 + 1
-
-        if n_freq_out > len(spectrum):
-            # Upsample: zero-pad high frequencies
-            padded = np.zeros(n_freq_out, dtype=spectrum.dtype)
-            padded[: len(spectrum)] = spectrum
-            resampled = np.fft.irfft(padded, n=n_out)
-        else:
-            # Downsample: truncate high frequencies
-            resampled = np.fft.irfft(spectrum[:n_freq_out], n=n_out)
-
-        # Scale to preserve amplitude
-        resampled *= n_out / n_in
-
-        return resampled.astype(np.float32)
-
-    def get_audio(
-        self, num_samples: int = AUDIO_SAMPLES_PER_FRAME
-    ) -> np.ndarray | None:
-        """Get the next chunk of audio samples for WebRTC output.
-
-        Returns a mono float32 numpy array of length num_samples (default 960 = 20ms at 48kHz),
-        or None if no audio is available.
-
-        Called by AudioProcessingTrack.recv().
+        Returns:
+            Tuple of (audio_tensor, sample_rate) or (None, None) if no audio available.
+            audio_tensor shape: (channels, samples) - typically (2, N) for stereo
         """
         if not self.running:
-            return None
+            return None, None
 
-        with self._audio_buffer_lock:
-            if self._audio_buffer_samples < num_samples:
-                return None
+        try:
+            audio, sample_rate = self.audio_queue.get_nowait()
+            return audio, sample_rate
+        except queue.Empty:
+            return None, None
 
-            # Collect enough samples from the buffer
-            collected = []
-            remaining = num_samples
-            while remaining > 0 and self._audio_buffer:
-                chunk = self._audio_buffer[0]
-                if len(chunk) <= remaining:
-                    collected.append(self._audio_buffer.popleft())
-                    self._audio_buffer_samples -= len(chunk)
-                    remaining -= len(chunk)
-                else:
-                    # Split chunk: take what we need, put the rest back
-                    collected.append(chunk[:remaining])
-                    self._audio_buffer[0] = chunk[remaining:]
-                    self._audio_buffer_samples -= remaining
-                    remaining = 0
-
-            self._audio_chunks_out += 1
-
-        return np.concatenate(collected) if collected else None
-
-    @property
-    def has_audio(self) -> bool:
-        """Check if any audio data is buffered."""
-        with self._audio_buffer_lock:
-            return self._audio_buffer_samples > 0
+    def _handle_audio_output(self, audio_tensor: torch.Tensor, sample_rate: int):
+        """Callback invoked by the last PipelineProcessor when audio is produced."""
+        try:
+            self.audio_queue.put_nowait((audio_tensor, sample_rate))
+            if self.audio_sample_rate is None:
+                self.audio_sample_rate = sample_rate
+            logger.debug(
+                f"Queued audio: shape={audio_tensor.shape}, sample_rate={sample_rate}"
+            )
+        except queue.Full:
+            logger.warning("Audio queue full, dropping audio chunk")
 
     def _on_frame_from_cloud(self, frame: "VideoFrame") -> None:
         """Callback when a processed frame is received from cloud (cloud mode)."""
@@ -1177,15 +968,20 @@ class FrameProcessor:
             return
 
         # Create pipeline processors (each creates its own queues)
-        for pipeline_id in self.pipeline_ids:
+        for i, pipeline_id in enumerate(self.pipeline_ids):
             # Get pipeline instance from manager
             pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+
+            # Only the last processor gets the audio callback
+            is_last = i == len(self.pipeline_ids) - 1
+            audio_cb = self._handle_audio_output if is_last else None
 
             # Create processor with its own queues
             processor = PipelineProcessor(
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
+                audio_callback=audio_cb,
                 session_id=self.session_id,
                 user_id=self.user_id,
                 connection_id=self.connection_id,

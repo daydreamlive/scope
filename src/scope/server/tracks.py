@@ -3,6 +3,7 @@ import fractions
 import logging
 import threading
 import time
+from collections import deque
 
 import numpy as np
 from aiortc import MediaStreamTrack
@@ -19,7 +20,6 @@ logger = logging.getLogger(__name__)
 AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
 AUDIO_CLOCK_RATE = 48000  # WebRTC typically uses 48kHz for Opus codec
 AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
-AUDIO_SAMPLES_PER_FRAME = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960 samples
 
 
 class VideoProcessingTrack(MediaStreamTrack):
@@ -213,68 +213,140 @@ class VideoProcessingTrack(MediaStreamTrack):
 
 
 class AudioProcessingTrack(MediaStreamTrack):
-    """WebRTC audio track that reads from FrameProcessor's audio buffer.
+    """WebRTC audio track that streams generated audio from the pipeline.
 
-    Produces 20ms audio frames (960 samples at 48kHz) synchronized with
-    the video track via a shared MediaClock. When no audio data is available,
-    silence frames are returned to keep the track alive.
+    Receives raw audio chunks from FrameProcessor, resamples to 48kHz,
+    buffers samples, and delivers 20ms stereo frames for WebRTC/Opus.
+
+    Timing follows aiortc's AudioStreamTrack pattern (monotonic _timestamp
+    counter) to ensure proper frame pacing without wall-clock drift.
     """
 
     kind = "audio"
 
-    AUDIO_PTIME_S = AUDIO_SAMPLES_PER_FRAME / AUDIO_CLOCK_RATE  # 0.02s (20ms)
+    _start: float
+    _timestamp: int
 
     def __init__(
         self,
         frame_processor: FrameProcessor,
         media_clock: MediaClock,
+        channels: int = 2,
     ):
         super().__init__()
         self.frame_processor = frame_processor
         self.media_clock = media_clock
-        self._timestamp = 0
-        self._started = False
-        self._last_frame_time: float | None = None
+        self.channels = channels
+
+        self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
+        self._audio_buffer: deque[float] = deque()
+        self._first_audio_logged = False
+
+    @staticmethod
+    def _resample_audio(
+        audio: np.ndarray, source_rate: int, target_rate: int
+    ) -> np.ndarray:
+        """Resample audio (channels, samples) via FFT for clean upsampling."""
+        if source_rate == target_rate:
+            return audio
+
+        n_in = audio.shape[1]
+        n_out = int(round(n_in * target_rate / source_rate))
+        if n_out == n_in:
+            return audio
+
+        resampled = np.zeros((audio.shape[0], n_out), dtype=np.float32)
+        for ch in range(audio.shape[0]):
+            spectrum = np.fft.rfft(audio[ch])
+            n_freq_out = n_out // 2 + 1
+            if n_freq_out > len(spectrum):
+                padded = np.zeros(n_freq_out, dtype=spectrum.dtype)
+                padded[: len(spectrum)] = spectrum
+                resampled[ch] = np.fft.irfft(padded, n=n_out) * (n_out / n_in)
+            else:
+                resampled[ch] = np.fft.irfft(spectrum[:n_freq_out], n=n_out) * (
+                    n_out / n_in
+                )
+        return resampled
 
     async def recv(self) -> AudioFrame:
         if self.readyState != "live":
             raise MediaStreamError
 
-        # Pace audio output at 20ms intervals
-        if self._last_frame_time is not None:
-            elapsed = time.time() - self._last_frame_time
-            wait = self.AUDIO_PTIME_S - elapsed
+        # aiortc timing pattern: monotonic timestamp counter with wall-clock pacing
+        if hasattr(self, "_timestamp"):
+            self._timestamp += self._samples_per_frame
+            wait = self._start + (self._timestamp / AUDIO_CLOCK_RATE) - time.time()
             if wait > 0:
                 await asyncio.sleep(wait)
-
-        self._last_frame_time = time.time()
-
-        # Start the shared media clock on first audio frame
-        if not self._started:
-            self.media_clock.start()
-            self._started = True
-
-        # When paused, return silence instead of draining the audio buffer.
-        # This keeps the audio track alive while preventing desync on resume.
-        audio_data = None
-        if not self.frame_processor.paused:
-            audio_data = self.frame_processor.get_audio(AUDIO_SAMPLES_PER_FRAME)
-
-        if audio_data is not None:
-            # Convert float32 [-1, 1] to int16 for WebRTC
-            audio_int16 = (np.clip(audio_data, -1.0, 1.0) * 32767.0).astype(np.int16)
         else:
-            # Return silence when no audio is available or when paused
-            audio_int16 = np.zeros(AUDIO_SAMPLES_PER_FRAME, dtype=np.int16)
+            self._start = time.time()
+            self._timestamp = 0
 
-        # Create AudioFrame: shape must be (1, num_samples) for mono s16 layout
-        frame = AudioFrame.from_ndarray(
-            audio_int16.reshape(1, -1), format="s16", layout="mono"
-        )
+        if self.frame_processor.paused:
+            return self._create_silence_frame()
+
+        # Pull audio from the pipeline (non-blocking)
+        audio_tensor, sample_rate = self.frame_processor.get_audio()
+
+        if audio_tensor is not None and sample_rate is not None:
+            if not self._first_audio_logged:
+                logger.info(
+                    f"AudioTrack received first audio: shape={audio_tensor.shape}, "
+                    f"sample_rate={sample_rate}Hz"
+                )
+                self._first_audio_logged = True
+
+            audio_np = audio_tensor.numpy()
+            if audio_np.ndim == 1:
+                audio_np = audio_np.reshape(1, -1)
+
+            # Resample to 48kHz
+            if sample_rate != AUDIO_CLOCK_RATE:
+                audio_np = self._resample_audio(audio_np, sample_rate, AUDIO_CLOCK_RATE)
+
+            # Channel conversion
+            if audio_np.shape[0] != self.channels:
+                if audio_np.shape[0] == 1 and self.channels == 2:
+                    audio_np = np.vstack([audio_np, audio_np])
+                elif audio_np.shape[0] == 2 and self.channels == 1:
+                    audio_np = audio_np.mean(axis=0, keepdims=True)
+
+            # Interleave into buffer: [L0, R0, L1, R1, ...]
+            for i in range(audio_np.shape[1]):
+                for ch in range(self.channels):
+                    self._audio_buffer.append(audio_np[ch, i])
+
+        # Serve a 20ms frame from the buffer
+        samples_needed = self._samples_per_frame * self.channels
+        if len(self._audio_buffer) >= samples_needed:
+            samples = [self._audio_buffer.popleft() for _ in range(samples_needed)]
+            return self._create_audio_frame(samples)
+
+        return self._create_silence_frame()
+
+    def _create_audio_frame(self, samples: list[float]) -> AudioFrame:
+        samples_array = np.array(samples, dtype=np.float32)
+        samples_int16 = (samples_array * 32767).clip(-32768, 32767).astype(np.int16)
+
+        layout = "stereo" if self.channels == 2 else "mono"
+        frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
         frame.sample_rate = AUDIO_CLOCK_RATE
-
-        # Set PTS from shared media clock for A/V sync
-        frame.pts = self.media_clock.to_pts(AUDIO_CLOCK_RATE)
+        frame.pts = self._timestamp
         frame.time_base = AUDIO_TIME_BASE
-
+        frame.planes[0].update(samples_int16.tobytes())
         return frame
+
+    def _create_silence_frame(self) -> AudioFrame:
+        layout = "stereo" if self.channels == 2 else "mono"
+        frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
+        frame.sample_rate = AUDIO_CLOCK_RATE
+        frame.pts = getattr(self, "_timestamp", 0)
+        frame.time_base = AUDIO_TIME_BASE
+        for p in frame.planes:
+            p.update(bytes(p.buffer_size))
+        return frame
+
+    def stop(self):
+        self._audio_buffer.clear()
+        super().stop()
