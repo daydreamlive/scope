@@ -179,6 +179,8 @@ packages = ["src/scope"]
 [tool.hatch.build.targets.wheel.force-include]
 # Include .pth file for automatic cuDNN patching at Python startup
 "patches.pth" = "patches.pth"
+# Bundle frontend build into the scope package so it's co-located after wheel install
+"frontend/dist" = "scope/frontend/dist"
 
 [tool.hatch.build]
 include = [

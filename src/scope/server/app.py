@@ -91,6 +91,13 @@ from .schema import (
 )
 
 
+# Resolve frontend dist directory: works both in dev (source tree) and when
+# installed as a wheel (frontend/dist is force-included into scope/ package).
+_pkg_dist = Path(__file__).parent.parent / "frontend" / "dist"
+_dev_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+FRONTEND_DIST = _pkg_dist if _pkg_dist.exists() else _dev_dist
+
+
 class STUNErrorFilter(logging.Filter):
     """Filter to suppress STUN/TURN connection errors that are not critical."""
 
@@ -218,7 +225,7 @@ def print_version_info():
 
 def configure_static_files():
     """Configure static file serving for production."""
-    frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+    frontend_dist = FRONTEND_DIST
     if frontend_dist.exists():
         app.mount(
             "/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets"
@@ -460,7 +467,7 @@ async def restart_server():
 @app.get("/")
 async def root():
     """Serve the frontend at the root URL."""
-    frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+    frontend_dist = FRONTEND_DIST
 
     # Only serve SPA if frontend dist exists (production mode)
     if not frontend_dist.exists():
@@ -1817,7 +1824,7 @@ async def get_cloud_stats(
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
-    frontend_dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+    frontend_dist = FRONTEND_DIST
 
     # Only serve SPA if frontend dist exists (production mode)
     if not frontend_dist.exists():
@@ -1900,8 +1907,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     configure_static_files()
 
     # Check if we're in production mode (frontend dist exists)
-    frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
-    is_production = frontend_dist.exists()
+    is_production = FRONTEND_DIST.exists()
 
     if is_production:
         # Create server instance for production mode
