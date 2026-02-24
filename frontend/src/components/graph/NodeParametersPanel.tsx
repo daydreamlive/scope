@@ -2,7 +2,10 @@ import { useMemo } from "react";
 import type { PipelineSchemaInfo } from "../../lib/api";
 import {
   parseConfigurationFields,
+  inferPrimitiveFieldType,
+  COMPLEX_COMPONENTS,
   type ParsedFieldConfig,
+  type ComplexComponentName,
 } from "../../lib/schemaSettings";
 import { SchemaPrimitiveField } from "../PrimitiveFields";
 
@@ -20,6 +23,9 @@ interface NodeParametersPanelProps {
   /** Whether the stream is currently active */
   isStreaming: boolean;
 }
+
+/** Load params in this set remain editable during streaming (they are runtime-safe). */
+const RUNTIME_EDITABLE_LOAD_PARAMS = new Set(["vace_context_scale"]);
 
 export function NodeParametersPanel({
   pipelineId,
@@ -67,10 +73,21 @@ export function NodeParametersPanel({
     field: ParsedFieldConfig,
     disabled: boolean
   ) => {
-    // Only render primitive fields (skip complex components for now)
+    let resolvedType = field.fieldType;
+
+    // For complex component fields, try to infer a primitive type as fallback
     if (
-      typeof field.fieldType === "string" &&
-      ["text", "number", "slider", "toggle", "enum"].includes(field.fieldType)
+      typeof resolvedType === "string" &&
+      COMPLEX_COMPONENTS.includes(resolvedType as ComplexComponentName)
+    ) {
+      const inferred = inferPrimitiveFieldType(field.prop);
+      if (!inferred) return null;
+      resolvedType = inferred;
+    }
+
+    if (
+      typeof resolvedType === "string" &&
+      ["text", "number", "slider", "toggle", "enum"].includes(resolvedType)
     ) {
       return (
         <SchemaPrimitiveField
@@ -82,7 +99,7 @@ export function NodeParametersPanel({
           disabled={disabled}
           label={field.ui.label}
           fieldType={
-            field.fieldType as "text" | "number" | "slider" | "toggle" | "enum"
+            resolvedType as "text" | "number" | "slider" | "toggle" | "enum"
           }
         />
       );
@@ -118,7 +135,12 @@ export function NodeParametersPanel({
             Model Parameters
           </h4>
           <div className="flex flex-col gap-3">
-            {loadFields.map(field => renderPrimitiveField(field, isStreaming))}
+            {loadFields.map(field =>
+              renderPrimitiveField(
+                field,
+                isStreaming && !RUNTIME_EDITABLE_LOAD_PARAMS.has(field.key)
+              )
+            )}
           </div>
         </div>
       )}
