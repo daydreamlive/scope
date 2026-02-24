@@ -602,8 +602,8 @@ export interface PipelineSchemaInfo {
   modified: boolean;
   plugin_name: string | null;
   // Graph port declarations
-  stream_inputs?: string[];
-  stream_outputs?: string[];
+  inputs?: string[];
+  outputs?: string[];
 }
 
 export interface PipelineSchemasResponse {

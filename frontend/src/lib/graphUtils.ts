@@ -41,8 +41,8 @@ export function buildPipelinePortsMap(
   const map: Record<string, { inputs: string[]; outputs: string[] }> = {};
   for (const [id, schema] of Object.entries(schemas)) {
     map[id] = {
-      inputs: schema.stream_inputs ?? ["video"],
-      outputs: schema.stream_outputs ?? ["video"],
+      inputs: schema.inputs ?? ["video"],
+      outputs: schema.outputs ?? ["video"],
     };
   }
   return map;

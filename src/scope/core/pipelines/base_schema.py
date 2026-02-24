@@ -246,8 +246,8 @@ class BasePipelineConfig(BaseModel):
     usage: ClassVar[list[UsageType]] = []
 
     # Graph port declaration: which stream ports this pipeline exposes
-    stream_inputs: ClassVar[list[str]] = ["video"]
-    stream_outputs: ClassVar[list[str]] = ["video"]
+    inputs: ClassVar[list[str]] = ["video"]
+    outputs: ClassVar[list[str]] = ["video"]
 
     # Mode configuration - keys are mode names, values are ModeDefaults with field overrides
     # Use default=True to mark the default mode. Only include fields that differ from base.
@@ -386,8 +386,8 @@ class BasePipelineConfig(BaseModel):
         metadata["modified"] = cls.modified
         # Convert UsageType enum values to strings for JSON serialization
         metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
-        metadata["stream_inputs"] = list(cls.stream_inputs)
-        metadata["stream_outputs"] = list(cls.stream_outputs)
+        metadata["inputs"] = list(cls.inputs)
+        metadata["outputs"] = list(cls.outputs)
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults (excluding None values and the "default" flag)
