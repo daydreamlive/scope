@@ -114,7 +114,6 @@ class FrameProcessor:
         self.audio_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
             maxsize=30
         )
-        self.audio_sample_rate: int | None = None
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -508,11 +507,6 @@ class FrameProcessor:
         """Callback invoked by the last PipelineProcessor when audio is produced."""
         try:
             self.audio_queue.put_nowait((audio_tensor, sample_rate))
-            if self.audio_sample_rate is None:
-                self.audio_sample_rate = sample_rate
-            logger.debug(
-                f"Queued audio: shape={audio_tensor.shape}, sample_rate={sample_rate}"
-            )
         except queue.Full:
             logger.warning("Audio queue full, dropping audio chunk")
 

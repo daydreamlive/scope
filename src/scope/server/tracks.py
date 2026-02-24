@@ -230,12 +230,10 @@ class AudioProcessingTrack(MediaStreamTrack):
     def __init__(
         self,
         frame_processor: FrameProcessor,
-        media_clock: MediaClock,
         channels: int = 2,
     ):
         super().__init__()
         self.frame_processor = frame_processor
-        self.media_clock = media_clock
         self.channels = channels
 
         self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960

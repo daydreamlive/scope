@@ -252,10 +252,8 @@ class WebRTCManager:
             # but we need the reference now to wire audio.
             video_track.initialize_output_processing()
 
-            # Create AudioProcessingTrack sharing the same FrameProcessor and MediaClock
             audio_track = AudioProcessingTrack(
                 frame_processor=video_track.frame_processor,
-                media_clock=media_clock,
             )
             session.audio_track = audio_track
 
