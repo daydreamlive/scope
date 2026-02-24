@@ -51,7 +51,9 @@ class PipelineManager:
         self._pipelines: dict[str, Any] = {}  # pipeline_id -> pipeline instance
         self._pipeline_statuses: dict[str, PipelineStatus] = {}  # pipeline_id -> status
         self._pipeline_load_params: dict[str, dict] = {}  # pipeline_id -> load_params
-        self._load_events: dict[str, threading.Event] = {}  # pipeline_id -> load completion event
+        self._load_events: dict[
+            str, threading.Event
+        ] = {}  # pipeline_id -> load completion event
 
     @property
     def status(self) -> PipelineStatus:
@@ -180,7 +182,9 @@ class PipelineManager:
 
             # If already loading, wait for it to complete
             if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADING:
-                logger.info(f"Pipeline {pipeline_id} already loading by another thread, waiting...")
+                logger.info(
+                    f"Pipeline {pipeline_id} already loading by another thread, waiting..."
+                )
                 load_event = self._load_events.get(pipeline_id)
                 if load_event:
                     # Release lock while waiting
@@ -192,7 +196,10 @@ class PipelineManager:
                         self._lock.acquire()
 
                     # Check if pipeline is now loaded
-                    if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADED:
+                    if (
+                        self._pipeline_statuses.get(pipeline_id)
+                        == PipelineStatus.LOADED
+                    ):
                         logger.info(f"Pipeline {pipeline_id} loaded by another thread")
                         return True
                     else:
@@ -203,7 +210,9 @@ class PipelineManager:
                         return False
                 else:
                     # No event found (shouldn't happen), fall through to load
-                    logger.warning(f"Pipeline {pipeline_id} marked as LOADING but no event found")
+                    logger.warning(
+                        f"Pipeline {pipeline_id} marked as LOADING but no event found"
+                    )
 
             # Mark as loading and create event for waiters
             self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
