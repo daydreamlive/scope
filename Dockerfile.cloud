@@ -1,0 +1,29 @@
+# Cloud image with pre-installed plugins
+# Builds on top of the base scope image
+#
+# Build (after base is built):
+#   docker build -f Dockerfile.cloud --build-arg BASE_IMAGE=daydreamlive/scope:main -t scope:cloud .
+#
+# Run:
+#   docker run --gpus all -p 8000:8000 scope:cloud
+
+ARG BASE_IMAGE=daydreamlive/scope:latest
+FROM ${BASE_IMAGE}
+
+# Install cloud plugins
+COPY cloud-plugins.txt ./
+RUN echo "Installing cloud plugins..." && \
+    mkdir -p /app/.cloud-plugins && \
+    grep -v '^#' cloud-plugins.txt | grep -v '^$' | cut -d'#' -f1 | sed 's/[[:space:]]*$//' | while read -r plugin; do \
+      if [ -n "$plugin" ]; then \
+        echo "Installing: $plugin" && \
+        if uv pip install --torch-backend cu128 "$plugin" 2>&1; then \
+          echo "$plugin" >> /app/.cloud-plugins/installed.txt; \
+        else \
+          echo "Warning: Failed to install $plugin" && \
+          echo "$plugin" >> /app/.cloud-plugins/failed.txt; \
+        fi; \
+      fi; \
+    done && \
+    rm -rf /root/.cache/uv /root/.cache/pip && \
+    echo "Cloud plugins installation complete"

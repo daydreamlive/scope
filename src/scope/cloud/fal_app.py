@@ -239,8 +239,8 @@ def _get_git_sha() -> str:
 
 GIT_SHA = _get_git_sha()
 
-# Configuration - uses git SHA from current checkout
-DOCKER_IMAGE = f"daydreamlive/scope:{GIT_SHA}"
+# Configuration - uses git SHA from current checkout with cloud suffix (includes plugins)
+DOCKER_IMAGE = f"daydreamlive/scope:{GIT_SHA}-cloud"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""

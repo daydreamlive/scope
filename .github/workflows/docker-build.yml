@@ -17,7 +17,7 @@ on:
       - 'v*'
 
 jobs:
-  build-and-push:
+  build-base:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,16 +34,9 @@ jobs:
 
       - name: Clean up before build
         run: |
-          # Clean up unused packages to avoid disk space issues
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-
-          # Show disk usage before build
-          echo "Disk usage before build:"
+          sudo rm -rf /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/lib/android/sdk/ndk /usr/share/dotnet
+          sudo rm -rf /opt/ghc /usr/local/share/boost
           df -h
 
       - name: Log in to Docker Hub
@@ -66,33 +59,78 @@ jobs:
           GHCR="ghcr.io/daydreamlive/scope"
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manual dispatch: use provided version + latest
             VERSION="${{ github.event.inputs.version }}"
             TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
             TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
             VERSION_TAG="${{ github.ref_name }}"
-            VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
+            VERSION="${VERSION_TAG#v}"
             TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
             TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            # Main branch
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
             TAGS="$DOCKERHUB:main,$DOCKERHUB:$SHORT_SHA"
             TAGS="$TAGS,$GHCR:main,$GHCR:$SHORT_SHA"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
-            # Runpod serverless branch
-            TAGS="$DOCKERHUB:runpod-serverless"
-            TAGS="$TAGS,$GHCR:runpod-serverless"
+            TAGS="$DOCKERHUB:runpod-serverless,$GHCR:runpod-serverless"
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            # Pull request: use sanitized branch name + short SHA
             BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
             TAGS="$DOCKERHUB:$BRANCH_TAG,$DOCKERHUB:$SHORT_SHA"
             TAGS="$TAGS,$GHCR:$BRANCH_TAG,$GHCR:$SHORT_SHA"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Build and push base image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tag.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/daydreamlive/scope
+            org.opencontainers.image.description=Daydream Scope
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-cloud:
+    runs-on: ubuntu-latest
+    needs: build-base
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Clean up before build
+        run: |
+          sudo rm -rf /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/lib/android/sdk/ndk /usr/share/dotnet
+          sudo rm -rf /opt/ghc /usr/local/share/boost
+          df -h
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: daydreamlive
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -102,18 +140,54 @@ jobs:
       - name: Generate cloud plugins list
         run: python scripts/generate_cloud_plugins.py
 
-      - name: Build and push Docker image
+      - name: Set cloud image tag
+        id: tag
+        run: |
+          DOCKERHUB="daydreamlive/scope"
+          GHCR="ghcr.io/daydreamlive/scope"
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            BASE="$DOCKERHUB:$VERSION"
+            TAGS="$DOCKERHUB:$VERSION-cloud,$DOCKERHUB:cloud"
+            TAGS="$TAGS,$GHCR:$VERSION-cloud,$GHCR:cloud"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION_TAG="${{ github.ref_name }}"
+            VERSION="${VERSION_TAG#v}"
+            BASE="$DOCKERHUB:$VERSION"
+            TAGS="$DOCKERHUB:$VERSION-cloud,$DOCKERHUB:cloud"
+            TAGS="$TAGS,$GHCR:$VERSION-cloud,$GHCR:cloud"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            BASE="$DOCKERHUB:$SHORT_SHA"
+            TAGS="$DOCKERHUB:main-cloud,$DOCKERHUB:$SHORT_SHA-cloud"
+            TAGS="$TAGS,$GHCR:main-cloud,$GHCR:$SHORT_SHA-cloud"
+          elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
+            BASE="$DOCKERHUB:runpod-serverless"
+            TAGS="$DOCKERHUB:runpod-serverless-cloud,$GHCR:runpod-serverless-cloud"
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
+            SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
+            BASE="$DOCKERHUB:$SHORT_SHA"
+            TAGS="$DOCKERHUB:$BRANCH_TAG-cloud,$DOCKERHUB:$SHORT_SHA-cloud"
+            TAGS="$TAGS,$GHCR:$BRANCH_TAG-cloud,$GHCR:$SHORT_SHA-cloud"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          echo "base=$BASE" >> $GITHUB_OUTPUT
+
+      - name: Build and push cloud image
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: Dockerfile.cloud
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
           build-args: |
-            INSTALL_CLOUD_PLUGINS=true
+            BASE_IMAGE=${{ steps.tag.outputs.base }}
           labels: |
             org.opencontainers.image.source=https://github.com/daydreamlive/scope
-            org.opencontainers.image.description=Daydream Scope
+            org.opencontainers.image.description=Daydream Scope (Cloud with plugins)
             org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max

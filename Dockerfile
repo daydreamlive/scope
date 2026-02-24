@@ -46,31 +46,6 @@ RUN cd frontend && npm install && npm run build
 # Copy project files
 COPY src/ /app/src/
 
-# Install cloud plugins (for fal.ai deployment)
-# This bakes popular plugins into the image for zero-latency startup
-# Plugins are installed individually so one failure doesn't break the build
-ARG INSTALL_CLOUD_PLUGINS=false
-COPY cloud-plugins.txt* ./
-RUN if [ "$INSTALL_CLOUD_PLUGINS" = "true" ] && [ -f cloud-plugins.txt ]; then \
-      echo "Installing cloud plugins..." && \
-      mkdir -p /app/.cloud-plugins && \
-      # Filter comments and install each plugin individually
-      grep -v '^#' cloud-plugins.txt | grep -v '^$' | cut -d'#' -f1 | sed 's/[[:space:]]*$//' | while read -r plugin; do \
-        if [ -n "$plugin" ]; then \
-          echo "Installing: $plugin" && \
-          if uv pip install --torch-backend cu128 "$plugin" 2>&1; then \
-            echo "$plugin" >> /app/.cloud-plugins/installed.txt; \
-          else \
-            echo "Warning: Failed to install $plugin" && \
-            echo "$plugin" >> /app/.cloud-plugins/failed.txt; \
-          fi; \
-        fi; \
-      done && \
-      echo "Cloud plugins installation complete"; \
-    else \
-      echo "Skipping cloud plugins (INSTALL_CLOUD_PLUGINS=$INSTALL_CLOUD_PLUGINS)"; \
-    fi
-
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
 
