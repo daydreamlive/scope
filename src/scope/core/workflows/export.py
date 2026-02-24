@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ._utils import find_plugin_info, get_plugin_list
 from .schema import (
     ScopeWorkflow,
     WorkflowLoRA,
@@ -62,17 +63,7 @@ def build_workflow(
 
     manifest = load_manifest(lora_dir)
 
-    # Resolve plugin info once
-    plugin_list: list[dict[str, Any]] | None = None
-
-    def _plugin_info(package_name: str) -> dict[str, Any] | None:
-        nonlocal plugin_list
-        if plugin_list is None:
-            plugin_list = plugin_manager.list_plugins_sync()
-        for info in plugin_list:
-            if info.get("name") == package_name:
-                return info
-        return None
+    plugins = get_plugin_list(plugin_manager)
 
     snapshot = pipeline_manager.get_load_snapshot()
 
@@ -95,7 +86,7 @@ def build_workflow(
         if package_name is None:
             source = WorkflowPipelineSource(type="builtin")
         else:
-            info = _plugin_info(package_name)
+            info = find_plugin_info(plugins, package_name)
             plugin_source = info.get("source", "") if info else ""
             source = WorkflowPipelineSource(
                 type=_SOURCE_TYPE_MAP.get(plugin_source, "pypi"),
