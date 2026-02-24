@@ -17,12 +17,13 @@ RUN apt-get update && apt-get install -y \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# Install Python dependencies, skipping sageattn3 which requires a GPU
-# to compile (its setup.py calls torch.cuda.get_device_capability()).
-# sageattn3 is compiled at container startup via entrypoint.sh instead.
+# Install only dependencies (not the project itself) into the venv.
+# sageattn3 is skipped because it requires a GPU to compile.
+# The project is installed as a proper wheel in the runtime stage
+# after the source is copied, avoiding broken editable install links.
 ENV TORCH_CUDA_ARCH_LIST="8.0;8.9;9.0;10.0;12.0"
 COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
-RUN uv sync --frozen --no-install-package sageattn3
+RUN uv sync --frozen --no-install-project --no-install-package sageattn3
 
 # ---------- runtime stage (needs devel for sageattn3 compilation) ----------
 FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04
@@ -68,8 +69,11 @@ COPY --from=builder /app /app
 COPY frontend/ ./frontend/
 RUN cd frontend && npm install && npm run build
 
-# Copy project files
+# Copy project source and install as a proper wheel (not editable).
+# This goes into site-packages so scope is always importable.
 COPY src/ /app/src/
+RUN uv pip install --no-deps --no-build-isolation .
+
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
