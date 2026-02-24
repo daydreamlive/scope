@@ -131,6 +131,22 @@ def build_graph(
         for port, qlist in out_by_port.items():
             proc.output_queues[port] = qlist
 
+    # 4b) Set primary input port for processors with no incoming "video" edge
+    for node in graph.nodes:
+        if node.type != "pipeline" or node.id not in node_processors:
+            continue
+        proc = node_processors[node.id]
+        incoming_stream_ports = {
+            e.to_port for e in graph.edges_to(node.id) if e.kind == "stream"
+        }
+        if incoming_stream_ports and "video" not in incoming_stream_ports:
+            proc._primary_input_port = next(iter(incoming_stream_ports))
+            logger.info(
+                "Node %s: primary input port set to '%s' (no video edge)",
+                node.id,
+                proc._primary_input_port,
+            )
+
     # 5) Identify sink: node that has an edge to "output" (or type sink)
     sink_node_id: str | None = None
     for e in graph.edges:
