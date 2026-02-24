@@ -121,6 +121,11 @@ class PipelineProcessor:
         # the next pipeline in the chain can consume them
         self.throttler = PipelineThrottler()
 
+        # Native frame rate reported by the pipeline (e.g. 24fps for LTX-2).
+        # When set, get_fps() returns this instead of the measured production rate,
+        # giving the video track a stable playback speed for A/V sync.
+        self.native_fps: float | None = None
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -553,6 +558,12 @@ class PipelineProcessor:
             audio_output = output_dict.get("audio")
             audio_sample_rate = output_dict.get("audio_sample_rate")
             native_fps = output_dict.get("frame_rate")
+
+            # Latch native_fps so get_fps() returns a stable value immediately,
+            # rather than the wildly oscillating measured production rate.
+            if native_fps is not None and native_fps > 0:
+                self.native_fps = native_fps
+
             if audio_output is not None and audio_sample_rate is not None:
                 # Detach and move to CPU for downstream consumption
                 audio_output = audio_output.detach().cpu()
@@ -616,11 +627,14 @@ class PipelineProcessor:
                     self.current_output_fps = estimated_fps
 
     def get_fps(self) -> float:
-        """Get the current dynamically calculated pipeline FPS.
+        """Get the playback FPS for this pipeline's output.
 
-        Returns the FPS based on how fast frames are produced into the output queue,
-        adjusted for queue fill level to prevent buildup.
+        If the pipeline reports a native frame rate (e.g. 24fps for LTX-2),
+        that value is returned for stable playback. Otherwise falls back to
+        the measured production rate.
         """
+        if self.native_fps is not None:
+            return self.native_fps
         with self.output_fps_lock:
             output_fps = self.current_output_fps
         return min(MAX_FPS, output_fps)

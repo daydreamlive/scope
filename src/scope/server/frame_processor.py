@@ -136,12 +136,8 @@ class FrameProcessor:
         self._audio_pending_frames_total = 0  # video frames in current batch
         self._audio_pending_frames_consumed = 0  # video frames consumed so far
 
-        # Native frame rate for batch playback sync.
-        # When a pipeline produces audio+video, this is set to the content's
-        # native fps (e.g. 24fps). VideoProcessingTrack uses this to play
-        # each batch at native speed so audio and video stay in sync.
-        # None means no audio pipeline — use measured pipeline production rate.
-        self.native_fps: float | None = None
+        # Native frame rate is now tracked by PipelineProcessor.native_fps
+        # and returned via PipelineProcessor.get_fps() for stable playback speed.
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -586,10 +582,6 @@ class FrameProcessor:
             except queue.Empty:
                 continue
 
-            # Update native_fps for VideoProcessingTrack to use
-            if native_fps is not None and native_fps > 0:
-                self.native_fps = native_fps
-
             try:
                 # Convert torch tensor to numpy float32
                 if isinstance(audio_tensor, torch.Tensor):
@@ -656,49 +648,37 @@ class FrameProcessor:
 
     @staticmethod
     def _resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
-        """Resample audio using polyphase FIR filtering (windowed-sinc).
+        """Resample audio via FFT (frequency-domain zero-pad/truncate).
 
-        Uses numpy-only polyphase resampling: upsample by L, low-pass FIR filter,
-        downsample by M where L/M = dst_rate/src_rate after GCD reduction.
-        Much higher quality than linear interpolation — no aliasing artifacts.
+        Equivalent to scipy.signal.resample but using only numpy.
+        Exact for integer rate ratios (e.g. 24kHz → 48kHz) and high quality
+        for non-integer ratios. No aliasing artifacts.
         """
         if src_rate == dst_rate:
             return audio
-        from math import gcd
 
-        g = gcd(dst_rate, src_rate)
-        up = dst_rate // g
-        down = src_rate // g
+        n_in = len(audio)
+        n_out = int(round(n_in * dst_rate / src_rate))
+        if n_out == n_in:
+            return audio
 
-        # Design low-pass FIR filter (windowed sinc)
-        # Cutoff at the lower of the two Nyquist frequencies
-        cutoff = min(1.0 / up, 1.0 / down)
-        # Filter length: longer = better stopband, 64 taps per phase is good quality
-        half_len = 64 * up
-        n = np.arange(-half_len, half_len + 1, dtype=np.float64)
-        # Sinc * Blackman window
-        h = np.sinc(n * cutoff) * np.blackman(len(n)) * cutoff * up
-        h = h.astype(np.float32)
+        # FFT-based resampling: transform, zero-pad or truncate in frequency
+        # domain, then inverse transform. This is mathematically equivalent
+        # to ideal band-limited interpolation.
+        spectrum = np.fft.rfft(audio)
+        n_freq_out = n_out // 2 + 1
 
-        # Pad input for filter delay
-        pad = len(h) // (2 * up)
-        audio_padded = np.pad(audio, (pad, pad), mode="edge")
+        if n_freq_out > len(spectrum):
+            # Upsample: zero-pad high frequencies
+            padded = np.zeros(n_freq_out, dtype=spectrum.dtype)
+            padded[: len(spectrum)] = spectrum
+            resampled = np.fft.irfft(padded, n=n_out)
+        else:
+            # Downsample: truncate high frequencies
+            resampled = np.fft.irfft(spectrum[:n_freq_out], n=n_out)
 
-        # Upsample by zero-stuffing
-        upsampled = np.zeros(len(audio_padded) * up, dtype=np.float32)
-        upsampled[::up] = audio_padded
-
-        # Apply FIR filter via convolution
-        filtered = np.convolve(upsampled, h, mode="same")
-
-        # Downsample
-        resampled = filtered[::down]
-
-        # Trim to expected output length
-        expected_len = int(np.ceil(len(audio) * up / down))
-        # Account for padding offset
-        offset = pad * up // down
-        resampled = resampled[offset : offset + expected_len]
+        # Scale to preserve amplitude
+        resampled *= n_out / n_in
 
         return resampled.astype(np.float32)
 
@@ -767,20 +747,14 @@ class FrameProcessor:
     def get_fps(self) -> float:
         """Get the playback FPS for the video track.
 
-        When a pipeline produces synchronized audio+video (native_fps is set),
-        returns the content's native frame rate so each batch plays at full
-        speed with audio in sync. Otherwise falls back to the measured
-        pipeline production rate.
+        Delegates to the last pipeline processor which returns native_fps
+        (e.g. 24fps) when the pipeline reports it, or the measured production
+        rate otherwise.
         """
-        if self.native_fps is not None:
-            return self.native_fps
-
         if not self.pipeline_processors:
             return DEFAULT_FPS
 
-        # Get FPS from the last processor in the chain
-        last_processor = self.pipeline_processors[-1]
-        return last_processor.get_fps()
+        return self.pipeline_processors[-1].get_fps()
 
     def _log_frame_stats(self):
         """Log frame processing statistics and emit heartbeat event."""
