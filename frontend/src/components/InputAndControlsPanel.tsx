@@ -34,6 +34,7 @@ import {
 } from "../lib/schemaSettings";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { QuickPromptsDialog } from "./QuickPromptsDialog";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -662,10 +663,31 @@ export function InputAndControlsPanel({
               return null;
             }
 
+            const handleQuickPromptApply = (text: string) => {
+              // Replace only the first prompt, keep the rest intact
+              const newPrompts =
+                prompts.length > 0
+                  ? [{ ...prompts[0], text }, ...prompts.slice(1)]
+                  : [{ text, weight: 100 }];
+              onPromptsChange(newPrompts);
+              // Use live prompt submit when streaming (adds to timeline + sends to backend)
+              // Otherwise use normal submit
+              if (onLivePromptSubmit) {
+                onLivePromptSubmit(newPrompts);
+              } else {
+                onPromptsSubmit(newPrompts);
+              }
+            };
+
             return (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium">Prompts</h3>
+                  <div className="flex items-center gap-1">
+                    <h3 className="text-sm font-medium">Prompts</h3>
+                    <QuickPromptsDialog
+                      onApplyPrompt={handleQuickPromptApply}
+                    />
+                  </div>
                   {isEditMode && (
                     <Badge variant="secondary" className="text-xs">
                       Editing
