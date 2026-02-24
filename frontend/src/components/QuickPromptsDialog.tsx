@@ -18,7 +18,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Plus, BookOpen } from "lucide-react";
+import { GripVertical, Plus, BookOpen, X } from "lucide-react";
 
 import {
   Dialog,
@@ -73,7 +73,9 @@ interface SortableRowProps {
   index: number;
   onTextChange: (id: string, text: string) => void;
   onApply: (text: string) => void;
+  onDelete: (id: string) => void;
   isMac: boolean;
+  canDelete: boolean;
 }
 
 function SortableRow({
@@ -81,7 +83,9 @@ function SortableRow({
   index,
   onTextChange,
   onApply,
+  onDelete,
   isMac,
+  canDelete,
 }: SortableRowProps) {
   const { setNodeRef, transform, transition, isDragging } = useSortable({
     id: prompt.id,
@@ -124,6 +128,20 @@ function SortableRow({
       >
         Apply
       </Button>
+
+      {canDelete ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={() => onDelete(prompt.id)}
+          title="Delete prompt"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      ) : (
+        <div className="w-8 shrink-0" />
+      )}
     </div>
   );
 }
@@ -208,6 +226,10 @@ export function QuickPromptsDialog({
     setPrompts(currentPrompts => [...currentPrompts, { id: newId, text: "" }]);
   }, [prompts.length]);
 
+  const handleDeletePrompt = useCallback((id: string) => {
+    setPrompts(currentPrompts => currentPrompts.filter(p => p.id !== id));
+  }, []);
+
   const handleApply = useCallback(
     (text: string) => {
       if (text.trim()) {
@@ -278,7 +300,9 @@ export function QuickPromptsDialog({
                   index={index}
                   onTextChange={handleTextChange}
                   onApply={handleApply}
+                  onDelete={handleDeletePrompt}
                   isMac={isMac}
+                  canDelete={index > 0}
                 />
               ))}
             </SortableContext>
@@ -286,7 +310,7 @@ export function QuickPromptsDialog({
         </div>
 
         {prompts.length < MAX_PROMPTS && (
-          <div className="pt-2 border-t">
+          <div className="pt-2">
             <Button
               variant="outline"
               size="sm"
