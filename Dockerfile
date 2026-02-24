@@ -72,7 +72,7 @@ RUN cd frontend && npm install && npm run build
 # Copy project source and install as a proper wheel (not editable).
 # This goes into site-packages so scope is always importable.
 COPY src/ /app/src/
-RUN uv pip install --no-deps --no-build-isolation .
+RUN uv pip install --no-deps .
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
