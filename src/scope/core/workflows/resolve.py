@@ -58,11 +58,14 @@ def _check_settings(
     config_class: type,
     params: dict[str, Any],
 ) -> list[str]:
-    """Validate *params* against *config_class* fields, return warnings."""
+    """Validate *params* against *config_class* fields, return warnings.
+
+    Parameters not present in the pipeline config schema are silently
+    ignored — they are frontend runtime params that get returned via
+    ``runtime_params`` on apply.
+    """
     warnings: list[str] = []
-    for key in params:
-        if key not in config_class.model_fields:
-            warnings.append(f"Unknown parameter '{key}' (may be from a newer version)")
+    # Future: validate known fields have compatible types, etc.
     return warnings
 
 
