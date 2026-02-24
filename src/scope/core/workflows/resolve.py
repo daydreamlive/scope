@@ -88,17 +88,13 @@ def resolve_workflow(
         Root models directory (LoRAs live under ``models_dir / "lora"``).
     """
 
+    from ._utils import find_plugin_info, get_plugin_list
+
     items: list[ResolutionItem] = []
     settings_warnings: list[str] = []
     all_pipelines_ok = True
 
-    plugin_list: list[dict[str, Any]] | None = None
-
-    def _get_plugin_list() -> list[dict[str, Any]]:
-        nonlocal plugin_list
-        if plugin_list is None:
-            plugin_list = plugin_manager.list_plugins_sync()
-        return plugin_list
+    plugins = get_plugin_list(plugin_manager)
 
     lora_dir = models_dir / "lora"
 
@@ -139,11 +135,7 @@ def resolve_workflow(
                 continue
 
             # Find the plugin in installed list
-            installed_info: dict[str, Any] | None = None
-            for info in _get_plugin_list():
-                if info.get("name") == plugin_name:
-                    installed_info = info
-                    break
+            installed_info = find_plugin_info(plugins, plugin_name)
 
             if installed_info is None:
                 # Build install action
@@ -218,21 +210,6 @@ def resolve_workflow(
         for lora in wp.loras:
             lora_path = lora_dir / lora.filename
             if lora_path.exists():
-                # Optionally verify SHA256
-                if lora.expected_sha256:
-                    from scope.core.lora.manifest import compute_sha256
-
-                    actual = compute_sha256(lora_path)
-                    if actual != lora.expected_sha256:
-                        items.append(
-                            ResolutionItem(
-                                kind="lora",
-                                name=lora.filename,
-                                status="version_mismatch",
-                                detail=f"SHA256 mismatch (expected {lora.expected_sha256[:12]}..., got {actual[:12]}...)",
-                            )
-                        )
-                        continue
                 items.append(
                     ResolutionItem(
                         kind="lora",

@@ -135,6 +135,19 @@ async def apply_workflow(
         for lora in wp.loras:
             lora_path = lora_dir / lora.filename
             if lora_path.exists():
+                # Verify SHA256 if the workflow specifies an expected hash
+                if lora.expected_sha256:
+                    from scope.core.lora.manifest import compute_sha256
+
+                    actual = compute_sha256(lora_path)
+                    if actual != lora.expected_sha256:
+                        logger.warning(
+                            "SHA256 mismatch for LoRA '%s' (expected %s..., got %s...)",
+                            lora.filename,
+                            lora.expected_sha256[:12],
+                            actual[:12],
+                        )
+
                 loras_for_load.append(
                     {
                         "path": str(lora_path),
