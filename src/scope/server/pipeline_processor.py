@@ -71,9 +71,7 @@ class PipelineProcessor:
         self.output_queues: dict[str, list[queue.Queue]] = {
             "video": [queue.Queue(maxsize=8)],
         }
-        # Primary queue refs for backward compat (chain mode, get_fps, resize)
-        self.input_queue = self.input_queues["video"]
-        # Lock to protect input_queue assignment for thread-safe reference swapping
+        # Lock to protect input_queues["video"] assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
         # Current parameters used by processing thread
@@ -100,7 +98,7 @@ class PipelineProcessor:
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
         # Reference to next processor in chain (if chained)
-        # Used to update next processor's input_queue when output_queue is reassigned
+        # Used to update next processor's input_queues["video"] when output_queue is reassigned
         self.next_processor: PipelineProcessor | None = None
 
         # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
@@ -151,7 +149,6 @@ class PipelineProcessor:
             if self.next_processor is not None:
                 with self.next_processor.input_queue_lock:
                     self.next_processor.input_queues["video"] = new_queue
-                    self.next_processor.input_queue = new_queue
 
     def set_next_processor(self, next_processor: "PipelineProcessor"):
         """Set the next processor in the chain and update output queue size accordingly.
@@ -176,7 +173,11 @@ class PipelineProcessor:
         # Use lock to ensure thread-safe reference swapping
         with next_processor.input_queue_lock:
             next_processor.input_queues["video"] = self.output_queues["video"][0]
-            next_processor.input_queue = next_processor.input_queues["video"]
+
+    @property
+    def input_queue(self) -> queue.Queue | None:
+        """Primary video input queue (chain mode, get_fps, resize)."""
+        return self.input_queues.get("video")
 
     @property
     def output_queue(self) -> queue.Queue | None:
@@ -212,7 +213,7 @@ class PipelineProcessor:
 
         # Clear queues
         with self.input_queue_lock:
-            input_queue_ref = self.input_queue
+            input_queue_ref = self.input_queues.get("video")
         if input_queue_ref:
             while not input_queue_ref.empty():
                 try:
