@@ -113,6 +113,10 @@ class PipelineProcessor:
         # Cache VACE support check to avoid isinstance on every chunk
         self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
 
+        # Primary input port for chunk accumulation (default "video", overridden
+        # by graph executor when the node has no incoming "video" edge)
+        self._primary_input_port: str = "video"
+
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
@@ -434,7 +438,8 @@ class PipelineProcessor:
             current_chunk_size = requirements.input_size
             with self.input_queue_lock:
                 input_queues_ref = dict(self.input_queues)
-            primary = input_queues_ref.get("video")
+            primary_port = self._primary_input_port
+            primary = input_queues_ref.get(primary_port)
             if primary is None or primary.qsize() < current_chunk_size:
                 # Preserve popped one-shot parameters so they are applied once frames arrive
                 if lora_scales is not None:
@@ -442,17 +447,17 @@ class PipelineProcessor:
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
             if len(input_queues_ref) == 1:
-                chunks["video"] = self.prepare_chunk(primary, current_chunk_size)
+                chunks[primary_port] = self.prepare_chunk(primary, current_chunk_size)
             else:
                 chunks = self.prepare_multi_chunk(
-                    input_queues_ref, "video", current_chunk_size
+                    input_queues_ref, primary_port, current_chunk_size
                 )
                 if not chunks:
                     if lora_scales is not None:
                         self.parameters["lora_scales"] = lora_scales
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
-            input_frame_count = len(chunks.get("video") or [])
+            input_frame_count = len(chunks.get(primary_port) or [])
 
         try:
             # Pass parameters (excluding prepare-only parameters)
@@ -482,10 +487,12 @@ class PipelineProcessor:
 
             # Fill call_params from stream chunks
             if chunks:
-                if "vace_input_frames" in chunks and "vace_input_masks" in chunks:
+                # Handle VACE inputs from graph edges (each port independently)
+                if chunks.get("vace_input_frames"):
                     call_params["vace_input_frames"] = chunks["vace_input_frames"]
+                if chunks.get("vace_input_masks"):
                     call_params["vace_input_masks"] = chunks["vace_input_masks"]
-                if "video" in chunks:
+                if chunks.get("video"):
                     if (
                         self._pipeline_supports_vace
                         and self.vace_enabled
