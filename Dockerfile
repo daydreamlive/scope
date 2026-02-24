@@ -22,7 +22,7 @@ ENV PATH="/root/.local/bin:$PATH"
 # The project is installed as a proper wheel in the runtime stage
 # after the source is copied, avoiding broken editable install links.
 ENV TORCH_CUDA_ARCH_LIST="8.0;8.9;9.0;10.0;12.0"
-COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth ./
 RUN uv sync --frozen --no-install-project --no-install-package sageattn3
 
 # ---------- runtime stage (needs devel for sageattn3 compilation) ----------
@@ -65,9 +65,11 @@ COPY --from=builder /root/.local/bin/uvx /root/.local/bin/uvx
 COPY --from=builder /root/.local/share/uv /root/.local/share/uv
 COPY --from=builder /app /app
 
-# Build frontend
+# Build frontend — install deps first (cached unless package.json changes)
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN cd frontend && npm ci
 COPY frontend/ ./frontend/
-RUN cd frontend && npm install && npm run build
+RUN cd frontend && npm run build
 
 # Copy project source and install as a proper wheel (not editable).
 # This goes into site-packages so scope is always importable.
