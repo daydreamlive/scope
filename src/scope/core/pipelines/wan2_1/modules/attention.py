@@ -1,6 +1,7 @@
 # Modified from https://github.com/guandeh17/Self-Forcing
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import logging
+import os
 import platform
 import time
 
@@ -56,7 +57,14 @@ import warnings
 
 sageattn_func = None
 SAGEATTN_AVAILABLE = False
-from .sage import SAGEATTN_AVAILABLE, sageattn_func
+from .sage import (  # noqa: F811, F401
+    SAGEATTN2_AVAILABLE,
+    SAGEATTN_AVAILABLE,
+    sageattn2_func,
+    sageattn_func,
+)
+
+ATTENTION_BACKEND = os.getenv("ATTENTION_BACKEND")  # sa3, sa2, flash, sdpa, or None
 
 __all__ = [
     "flash_attention",
@@ -68,6 +76,9 @@ __all__ = [
 logger.info("flash attn 2 available: %s", FLASH_ATTN_2_AVAILABLE)
 logger.info("flash attn 3 available: %s", FLASH_ATTN_3_AVAILABLE)
 logger.info("sage attn 3 available: %s", SAGEATTN_AVAILABLE)
+logger.info("sage attn 2++ available: %s", SAGEATTN2_AVAILABLE)
+if ATTENTION_BACKEND:
+    logger.info("attention backend override: %s", ATTENTION_BACKEND)
 
 
 def flash_attention(
@@ -101,7 +112,10 @@ def flash_attention(
     if not FLASH_ATTN_3_AVAILABLE:
         t0 = time.perf_counter()
         out = flash_attn_func(q, k, v)
-        logger.debug("flash_attention: backend=FA2-simple elapsed=%.4fs", time.perf_counter() - t0)
+        logger.debug(
+            "flash_attention: backend=FA2-simple elapsed=%.4fs",
+            time.perf_counter() - t0,
+        )
         return out
     half_dtypes = (torch.float16, torch.bfloat16)
     assert dtype in half_dtypes
@@ -187,10 +201,76 @@ def flash_attention(
             deterministic=deterministic,
         ).unflatten(0, (b, lq))
 
-    logger.debug("flash_attention: backend=%s elapsed=%.4fs", _backend, time.perf_counter() - t0)
+    logger.debug(
+        "flash_attention: backend=%s elapsed=%.4fs", _backend, time.perf_counter() - t0
+    )
 
     # output
     return x.type(out_dtype)
+
+
+def _run_sa3(q, k, v, causal, dtype):
+    og_dtype = q.dtype
+    q = q.transpose(1, 2).to(dtype)
+    k = k.transpose(1, 2).to(dtype)
+    v = v.transpose(1, 2).to(dtype)
+    out = sageattn_func(q, k, v, is_causal=causal)
+    return out.transpose(1, 2).contiguous().to(og_dtype)
+
+
+def _run_sa2(q, k, v, causal, dtype):
+    og_dtype = q.dtype
+    q = q.transpose(1, 2).to(dtype)
+    k = k.transpose(1, 2).to(dtype)
+    v = v.transpose(1, 2).to(dtype)
+    out = sageattn2_func(q, k, v, tensor_layout="HND", is_causal=causal)
+    return out.transpose(1, 2).contiguous().to(og_dtype)
+
+
+def _run_flash(
+    q,
+    k,
+    v,
+    q_lens,
+    k_lens,
+    dropout_p,
+    softmax_scale,
+    q_scale,
+    causal,
+    window_size,
+    deterministic,
+    dtype,
+    fa_version,
+):
+    return flash_attention(
+        q=q,
+        k=k,
+        v=v,
+        q_lens=q_lens,
+        k_lens=k_lens,
+        dropout_p=dropout_p,
+        softmax_scale=softmax_scale,
+        q_scale=q_scale,
+        causal=causal,
+        window_size=window_size,
+        deterministic=deterministic,
+        dtype=dtype,
+        version=fa_version,
+    )
+
+
+def _run_sdpa(q, k, v, q_lens, k_lens, causal, dropout_p, dtype):
+    if q_lens is not None or k_lens is not None:
+        warnings.warn(
+            "Padding mask is disabled when using scaled_dot_product_attention. It can have a significant impact on performance."
+        )
+    q = q.transpose(1, 2).to(dtype)
+    k = k.transpose(1, 2).to(dtype)
+    v = v.transpose(1, 2).to(dtype)
+    out = torch.nn.functional.scaled_dot_product_attention(
+        q, k, v, attn_mask=None, is_causal=causal, dropout_p=dropout_p
+    )
+    return out.transpose(1, 2).contiguous()
 
 
 def attention(
@@ -210,50 +290,60 @@ def attention(
     # og_dtype=torch.bfloat16,
 ):
     t0 = time.perf_counter()
-    if SAGEATTN_AVAILABLE:
+
+    # ATTENTION_BACKEND env var overrides auto-detection
+    if ATTENTION_BACKEND == "sa3":
         _backend = "SA3"
-        og_dtype = q.dtype
-        q = q.transpose(1, 2).to(dtype)
-        k = k.transpose(1, 2).to(dtype)
-        v = v.transpose(1, 2).to(dtype)
-
-        out = sageattn_func(q, k, v, is_causal=causal)
-
-        out = out.transpose(1, 2).contiguous().to(og_dtype)
+        out = _run_sa3(q, k, v, causal, dtype)
+    elif ATTENTION_BACKEND == "sa2":
+        _backend = "SA2++"
+        out = _run_sa2(q, k, v, causal, dtype)
+    elif ATTENTION_BACKEND == "flash":
+        _backend = "flash_attention"
+        out = _run_flash(
+            q,
+            k,
+            v,
+            q_lens,
+            k_lens,
+            dropout_p,
+            softmax_scale,
+            q_scale,
+            causal,
+            window_size,
+            deterministic,
+            dtype,
+            fa_version,
+        )
+    elif ATTENTION_BACKEND == "sdpa":
+        _backend = "SDPA"
+        out = _run_sdpa(q, k, v, q_lens, k_lens, causal, dropout_p, dtype)
+    # Auto-detection (original behavior)
+    elif SAGEATTN_AVAILABLE:
+        _backend = "SA3"
+        out = _run_sa3(q, k, v, causal, dtype)
     elif FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
         _backend = "flash_attention"
-        out = flash_attention(
-            q=q,
-            k=k,
-            v=v,
-            q_lens=q_lens,
-            k_lens=k_lens,
-            dropout_p=dropout_p,
-            softmax_scale=softmax_scale,
-            q_scale=q_scale,
-            causal=causal,
-            window_size=window_size,
-            deterministic=deterministic,
-            dtype=dtype,
-            version=fa_version,
+        out = _run_flash(
+            q,
+            k,
+            v,
+            q_lens,
+            k_lens,
+            dropout_p,
+            softmax_scale,
+            q_scale,
+            causal,
+            window_size,
+            deterministic,
+            dtype,
+            fa_version,
         )
     else:
         _backend = "SDPA"
-        if q_lens is not None or k_lens is not None:
-            warnings.warn(
-                "Padding mask is disabled when using scaled_dot_product_attention. It can have a significant impact on performance."
-            )
-        attn_mask = None
+        out = _run_sdpa(q, k, v, q_lens, k_lens, causal, dropout_p, dtype)
 
-        q = q.transpose(1, 2).to(dtype)
-        k = k.transpose(1, 2).to(dtype)
-        v = v.transpose(1, 2).to(dtype)
-
-        out = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p
-        )
-
-        out = out.transpose(1, 2).contiguous()
-
-    logger.debug("attention: backend=%s elapsed=%.4fs", _backend, time.perf_counter() - t0)
+    logger.debug(
+        "attention: backend=%s elapsed=%.4fs", _backend, time.perf_counter() - t0
+    )
     return out

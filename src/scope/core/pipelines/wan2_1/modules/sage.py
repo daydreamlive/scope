@@ -78,3 +78,14 @@ except Exception as e:
     elif "kernel probe failed" in str(e) or "health check failed" in str(e):
         print("sageattn3 kernels are not compatible with this GPU.")
     sageattn_func = None
+
+SAGEATTN2_AVAILABLE = False
+sageattn2_func = None
+try:
+    from sageattention import sageattn as sageattn2_func
+
+    SAGEATTN2_AVAILABLE = True
+    print("SageAttention 2++ loaded successfully")
+except Exception as e:
+    print(f"SageAttention 2++ not available: {e}")
+    sageattn2_func = None
