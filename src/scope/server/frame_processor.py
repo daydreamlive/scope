@@ -127,6 +127,15 @@ class FrameProcessor:
         self._audio_drain_thread: threading.Thread | None = None
         self._audio_chunks_out = 0
 
+        # Video-gated audio release: audio is held in a pending queue and only
+        # released into _audio_buffer as corresponding video frames are consumed.
+        # Each entry is (audio_samples: np.ndarray, video_frame_count: int).
+        self._pending_audio: deque[tuple[np.ndarray, int]] = deque()
+        self._pending_audio_lock = threading.Lock()
+        # Tracks how many video frames have been consumed since last audio release
+        self._video_frames_consumed = 0
+        self._video_frames_consumed_lock = threading.Lock()
+
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
         if pipeline_ids is not None:
@@ -262,10 +271,14 @@ class FrameProcessor:
         if self._audio_drain_thread and self._audio_drain_thread.is_alive():
             self._audio_drain_thread.join(timeout=2.0)
 
-        # Clear audio buffer
+        # Clear audio buffer and pending audio queue
         with self._audio_buffer_lock:
             self._audio_buffer.clear()
             self._audio_buffer_samples = 0
+        with self._pending_audio_lock:
+            self._pending_audio.clear()
+        with self._video_frames_consumed_lock:
+            self._video_frames_consumed = 0
 
         # Clean up all output sinks
         for sink_type, entry in list(self.output_sinks.items()):
@@ -467,6 +480,11 @@ class FrameProcessor:
         # Common processing for both modes
         self._frames_out += 1
 
+        # Track video frame consumption for audio gating
+        with self._video_frames_consumed_lock:
+            self._video_frames_consumed += 1
+        self._release_gated_audio()
+
         # Emit playback_ready event on first frame output
         if not self._playback_ready_emitted:
             self._playback_ready_emitted = True
@@ -509,7 +527,12 @@ class FrameProcessor:
 
     def _audio_drain_loop(self):
         """Background thread that drains audio from the last pipeline processor's
-        audio_output_queue, resamples to 48kHz, and appends to the audio buffer.
+        audio_output_queue, resamples to 48kHz, and stages it for video-gated release.
+
+        Audio is NOT immediately placed into the playable buffer. Instead it goes
+        into _pending_audio along with the number of video frames it corresponds to.
+        As video frames are consumed by get(), _release_gated_audio() moves the
+        proportional amount of audio into the playable buffer.
         """
         logger.info("[FRAME-PROCESSOR] Audio drain thread started")
 
@@ -520,8 +543,8 @@ class FrameProcessor:
 
             last_processor = self.pipeline_processors[-1]
             try:
-                audio_tensor, sample_rate = last_processor.audio_output_queue.get(
-                    timeout=0.1
+                audio_tensor, sample_rate, video_frame_count = (
+                    last_processor.audio_output_queue.get(timeout=0.1)
                 )
             except queue.Empty:
                 continue
@@ -549,16 +572,7 @@ class FrameProcessor:
                         audio_mono, sample_rate, WEBRTC_AUDIO_SAMPLE_RATE
                     )
 
-                # Append to buffer
-                with self._audio_buffer_lock:
-                    self._audio_buffer.append(audio_mono)
-                    self._audio_buffer_samples += len(audio_mono)
-                    logger.debug(
-                        f"[FRAME-PROCESSOR] Audio buffered: {len(audio_mono)} samples "
-                        f"(total: {self._audio_buffer_samples}, sr={sample_rate})"
-                    )
-
-                # Also fan out to output sinks that support audio
+                # Fan out to output sinks that support audio (sinks handle their own timing)
                 if self.output_sinks:
                     for _sink_type, entry in self.output_sinks.items():
                         sink = entry["sink"]
@@ -570,12 +584,74 @@ class FrameProcessor:
                                     f"Error sending audio to sink '{_sink_type}': {e}"
                                 )
 
+                # Stage audio for gated release (video_frame_count from pipeline)
+                with self._pending_audio_lock:
+                    self._pending_audio.append((audio_mono, video_frame_count))
+                    logger.debug(
+                        f"[FRAME-PROCESSOR] Audio staged: {len(audio_mono)} samples "
+                        f"for {video_frame_count} video frames "
+                        f"(pending batches: {len(self._pending_audio)})"
+                    )
+
             except Exception as e:
                 logger.error(f"[FRAME-PROCESSOR] Error processing audio chunk: {e}")
 
         logger.info(
             f"[FRAME-PROCESSOR] Audio drain thread stopped ({self._audio_chunks_out} chunks served)"
         )
+
+    def _release_gated_audio(self):
+        """Release audio from the pending queue proportional to video frames consumed.
+
+        Called from get() each time a video frame is consumed. For each pending
+        audio batch, we track how many of its video frames have been consumed and
+        release a proportional slice of audio into the playable buffer.
+        """
+        with self._pending_audio_lock:
+            if not self._pending_audio:
+                return
+
+            with self._video_frames_consumed_lock:
+                frames_consumed = self._video_frames_consumed
+
+            if frames_consumed < 1:
+                return
+
+            # Process pending audio batches front-to-back
+            frames_to_spend = frames_consumed
+            while self._pending_audio and frames_to_spend > 0:
+                audio_samples, total_video_frames = self._pending_audio[0]
+                total_audio_samples = len(audio_samples)
+
+                if frames_to_spend >= total_video_frames:
+                    # Release entire batch
+                    self._pending_audio.popleft()
+                    frames_to_spend -= total_video_frames
+
+                    with self._audio_buffer_lock:
+                        self._audio_buffer.append(audio_samples)
+                        self._audio_buffer_samples += total_audio_samples
+                else:
+                    # Partial release: release proportional audio
+                    fraction = frames_to_spend / total_video_frames
+                    split_point = int(fraction * total_audio_samples)
+                    if split_point > 0:
+                        released = audio_samples[:split_point]
+                        remaining_audio = audio_samples[split_point:]
+                        remaining_frames = total_video_frames - frames_to_spend
+
+                        self._pending_audio[0] = (remaining_audio, remaining_frames)
+
+                        with self._audio_buffer_lock:
+                            self._audio_buffer.append(released)
+                            self._audio_buffer_samples += len(released)
+
+                    frames_to_spend = 0
+
+            # Deduct the frames we actually spent
+            spent = frames_consumed - frames_to_spend
+            with self._video_frames_consumed_lock:
+                self._video_frames_consumed -= spent
 
     @staticmethod
     def _resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:

@@ -67,11 +67,12 @@ class PipelineProcessor:
         # Lock to protect input_queue assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
-        # Audio output queue: stores (audio_tensor, sample_rate) tuples from pipeline output.
+        # Audio output queue: stores (audio_tensor, sample_rate, video_frame_count) tuples.
         # Pipelines that produce audio return {"video": ..., "audio": ..., "audio_sample_rate": ...}.
+        # The video_frame_count is included so downstream can gate audio release on video consumption.
         # Only the last processor in a chain is read by FrameProcessor for audio output.
-        self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
-            maxsize=8
+        self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int, int]] = (
+            queue.Queue(maxsize=8)
         )
 
         # Current parameters used by processing thread
@@ -546,7 +547,9 @@ class PipelineProcessor:
                     )
                     continue
 
-            # Extract audio from pipeline output and queue it
+            # Extract audio from pipeline output and queue it alongside the
+            # video frame count so downstream can gate audio release on video
+            # consumption (prevents audio racing ahead of slow video playback).
             audio_output = output_dict.get("audio")
             audio_sample_rate = output_dict.get("audio_sample_rate")
             if audio_output is not None and audio_sample_rate is not None:
@@ -554,11 +557,12 @@ class PipelineProcessor:
                 audio_output = audio_output.detach().cpu()
                 logger.debug(
                     f"[PIPELINE-PROC] Audio from {self.pipeline_id}: "
-                    f"shape={audio_output.shape}, sr={audio_sample_rate}"
+                    f"shape={audio_output.shape}, sr={audio_sample_rate}, "
+                    f"video_frames={num_frames}"
                 )
                 try:
                     self.audio_output_queue.put_nowait(
-                        (audio_output, audio_sample_rate)
+                        (audio_output, audio_sample_rate, num_frames)
                     )
                 except queue.Full:
                     logger.debug(

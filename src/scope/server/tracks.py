@@ -189,6 +189,10 @@ class VideoProcessingTrack(MediaStreamTrack):
         with self._paused_lock:
             self._paused = paused
 
+        # Propagate to frame_processor so AudioProcessingTrack can check it
+        if self.frame_processor:
+            self.frame_processor.paused = paused
+
         logger.info(f"Video track {'paused' if paused else 'resumed'}")
 
     async def stop(self):
@@ -250,14 +254,17 @@ class AudioProcessingTrack(MediaStreamTrack):
             self.media_clock.start()
             self._started = True
 
-        # Try to get audio data from the frame processor
-        audio_data = self.frame_processor.get_audio(AUDIO_SAMPLES_PER_FRAME)
+        # When paused, return silence instead of draining the audio buffer.
+        # This keeps the audio track alive while preventing desync on resume.
+        audio_data = None
+        if not self.frame_processor.paused:
+            audio_data = self.frame_processor.get_audio(AUDIO_SAMPLES_PER_FRAME)
 
         if audio_data is not None:
             # Convert float32 [-1, 1] to int16 for WebRTC
             audio_int16 = (np.clip(audio_data, -1.0, 1.0) * 32767.0).astype(np.int16)
         else:
-            # Return silence when no audio is available
+            # Return silence when no audio is available or when paused
             audio_int16 = np.zeros(AUDIO_SAMPLES_PER_FRAME, dtype=np.int16)
 
         # Create AudioFrame: shape must be (1, num_samples) for mono s16 layout
