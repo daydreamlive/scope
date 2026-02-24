@@ -28,38 +28,10 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
     Validate that a user has access to cloud mode.
 
     Returns (is_valid, reason) tuple.
-    Access is granted if user is a cohort participant OR has @livepeer.org email.
     """
-    import urllib.error
-    import urllib.request
-
     if not user_id:
         return False, "No user ID provided"
-
-    url = f"{os.getenv('DAYDREAM_API_BASE', 'https://api.daydream.live')}/v1/users/{user_id}"
-    print(f"Validating user access for {user_id} via {url}")
-
-    def fetch_user():
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read().decode())
-
-    try:
-        # Run synchronous urllib in thread pool to not block event loop
-        user = await asyncio.get_event_loop().run_in_executor(None, fetch_user)
-        email = user.get("email", "")
-        is_cohort = user.get("cohortParticipant", False)
-        is_livepeer = email.endswith("@livepeer.org")
-
-        if is_cohort or is_livepeer:
-            return True, "Access granted"
-        return False, "User is not a cohort participant"
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return False, "User not found"
-        return False, f"Failed to fetch user: {e.code}"
-    except Exception as e:
-        return False, f"Error validating user: {e}"
+    return True, "Access granted"
 
 
 class KafkaPublisher:
@@ -394,7 +366,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
         This keeps a persistent connection to prevent fal from spawning new runners.
         """
-        import asyncio
         import json
         import uuid
 
