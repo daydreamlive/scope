@@ -66,6 +66,29 @@ class WorkflowPipeline(BaseModel, extra="ignore"):
     params: dict[str, Any] = {}
 
 
+class WorkflowPrompt(BaseModel, extra="ignore"):
+    """A single prompt with an optional weight."""
+
+    text: str
+    weight: float = 1.0
+
+
+class WorkflowTimelineEntry(BaseModel, extra="ignore"):
+    """A segment of the prompt timeline."""
+
+    start_time: float
+    end_time: float
+    prompts: list[WorkflowPrompt] = []
+    transition_steps: int | None = None
+    temporal_interpolation_method: Literal["linear", "slerp"] | None = None
+
+
+class WorkflowTimeline(BaseModel, extra="ignore"):
+    """Prompt timeline for the workflow."""
+
+    entries: list[WorkflowTimelineEntry] = []
+
+
 class ScopeWorkflow(BaseModel, extra="ignore"):
     """Root schema for a ``.scope-workflow.json`` file."""
 
@@ -73,3 +96,5 @@ class ScopeWorkflow(BaseModel, extra="ignore"):
     format_version: str = WORKFLOW_FORMAT_VERSION
     metadata: WorkflowMetadata
     pipelines: list[WorkflowPipeline]
+    timeline: WorkflowTimeline | None = None
+    min_scope_version: str | None = None
