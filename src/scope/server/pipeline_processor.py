@@ -476,7 +476,11 @@ class PipelineProcessor:
 
             # Forward extra params to downstream pipeline (dual-output pattern)
             # Preprocessors return {"video": frames, "vace_input_frames": ..., "vace_input_masks": ...}
-            extra_params = {k: v for k, v in output_dict.items() if k != "video"}
+            # Audio keys are handled separately via audio_output_queue, not as pipeline params.
+            _non_param_keys = {"video", "audio", "audio_sample_rate"}
+            extra_params = {
+                k: v for k, v in output_dict.items() if k not in _non_param_keys
+            }
             if extra_params and self.next_processor is not None:
                 self.next_processor.update_parameters(extra_params)
 
@@ -548,7 +552,7 @@ class PipelineProcessor:
             if audio_output is not None and audio_sample_rate is not None:
                 # Detach and move to CPU for downstream consumption
                 audio_output = audio_output.detach().cpu()
-                logger.info(
+                logger.debug(
                     f"[PIPELINE-PROC] Audio from {self.pipeline_id}: "
                     f"shape={audio_output.shape}, sr={audio_sample_rate}"
                 )

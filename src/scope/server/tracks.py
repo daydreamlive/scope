@@ -31,6 +31,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         fps: int = 30,
         initial_parameters: dict = None,
         notification_callback: callable = None,
+        media_clock: MediaClock | None = None,
         session_id: str | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
@@ -40,6 +41,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.pipeline_manager = pipeline_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
+        self.media_clock = media_clock
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -54,6 +56,8 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused = False
         self._paused_lock = threading.Lock()
         self._last_frame = None
+        self._last_send_time: float | None = None
+        self._clock_started = False
 
         # Server-side input mode - when enabled, frames come from the backend
         # instead of WebRTC (no browser video track needed)
@@ -83,33 +87,38 @@ class VideoProcessingTrack(MediaStreamTrack):
                 self.input_task_running = False
                 break
 
-    # Copied from https://github.com/livepeer/fastworld/blob/e649ef788cd33d78af6d8e1da915cd933761535e/backend/track.py#L267
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
-        """Override to control frame rate"""
+        """Pace output at the target frame rate and return a PTS from the shared MediaClock.
+
+        Using the shared clock ensures the video PTS is correlated with the
+        audio PTS so the WebRTC receiver can synchronize playback.
+        """
         if self.readyState != "live":
             raise MediaStreamError
 
-        if hasattr(self, "timestamp"):
-            # Calculate wait time based on current frame rate
-            current_time = time.time()
-            time_since_last_frame = current_time - self.last_frame_time
+        # Pace frames at the target interval
+        if self._last_send_time is not None:
+            elapsed = time.time() - self._last_send_time
+            wait = self.frame_ptime - elapsed
+            if wait > 0:
+                await asyncio.sleep(wait)
 
-            # Wait for the appropriate interval based on current FPS
-            target_interval = self.frame_ptime  # Current frame period
-            wait_time = target_interval - time_since_last_frame
+        self._last_send_time = time.time()
 
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
+        # Start the shared clock on the first frame (idempotent)
+        if self.media_clock and not self._clock_started:
+            self.media_clock.start()
+            self._clock_started = True
 
-            # Update timestamp and last frame time
-            self.timestamp += int(self.frame_ptime * VIDEO_CLOCK_RATE)
-            self.last_frame_time = time.time()
+        if self.media_clock:
+            return self.media_clock.to_pts(VIDEO_CLOCK_RATE), VIDEO_TIME_BASE
+
+        # Fallback for cases without a media clock (shouldn't happen in normal flow)
+        if not hasattr(self, "_fallback_pts"):
+            self._fallback_pts = 0
         else:
-            self.start = time.time()
-            self.last_frame_time = time.time()
-            self.timestamp = 0
-
-        return self.timestamp, VIDEO_TIME_BASE
+            self._fallback_pts += int(self.frame_ptime * VIDEO_CLOCK_RATE)
+        return self._fallback_pts, VIDEO_TIME_BASE
 
     def initialize_output_processing(self):
         if not self.frame_processor:
@@ -258,8 +267,7 @@ class AudioProcessingTrack(MediaStreamTrack):
         frame.sample_rate = AUDIO_CLOCK_RATE
 
         # Set PTS from shared media clock for A/V sync
-        media_time = self.media_clock.get_media_time()
-        frame.pts = self.media_clock.media_time_to_audio_pts(media_time)
+        frame.pts = self.media_clock.to_pts(AUDIO_CLOCK_RATE)
         frame.time_base = AUDIO_TIME_BASE
 
         return frame

@@ -238,6 +238,7 @@ class WebRTCManager:
                 pipeline_manager,
                 initial_parameters=initial_parameters,
                 notification_callback=notification_sender.call,
+                media_clock=media_clock,
                 session_id=session.id,
                 user_id=request.user_id,
                 connection_id=request.connection_id,

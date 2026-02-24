@@ -52,10 +52,10 @@ class MediaClock:
                 return 0.0
             return time.time() - self._start_time
 
-    def media_time_to_video_pts(self, media_time: float) -> int:
-        """Convert media time (seconds) to video PTS in 90 kHz clock units."""
-        return int(media_time * VIDEO_CLOCK_RATE)
+    def to_pts(self, clock_rate: int) -> int:
+        """Get current media time as PTS in the given clock rate.
 
-    def media_time_to_audio_pts(self, media_time: float) -> int:
-        """Convert media time (seconds) to audio PTS in 48 kHz sample units."""
-        return int(media_time * AUDIO_CLOCK_RATE)
+        Combines get_media_time() and conversion in a single call to minimize
+        drift between the time read and the PTS calculation.
+        """
+        return int(self.get_media_time() * clock_rate)
