@@ -58,9 +58,10 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
   && apt-get install -y nodejs
 
-# Copy uv and the pre-built virtual environment from builder
+# Copy uv, its managed Python, and the pre-built virtual environment from builder
 COPY --from=builder /root/.local/bin/uv /root/.local/bin/uv
 COPY --from=builder /root/.local/bin/uvx /root/.local/bin/uvx
+COPY --from=builder /root/.local/share/uv /root/.local/share/uv
 COPY --from=builder /app /app
 
 # Build frontend

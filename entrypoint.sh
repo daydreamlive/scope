@@ -2,7 +2,7 @@
 set -e
 
 # Detect GPU compute capability (major.minor)
-GPU_CC=$(python -c "import torch; cc = torch.cuda.get_device_capability(0); print(f'{cc[0]}{cc[1]}')" 2>/dev/null || echo "0")
+GPU_CC=$(/app/.venv/bin/python -c "import torch; cc = torch.cuda.get_device_capability(0); print(f'{cc[0]}{cc[1]}')" 2>/dev/null || echo "0")
 
 if [ "$GPU_CC" -ge 100 ]; then
   # Blackwell (SM 100+): use sageattn3, remove SA2 if present
