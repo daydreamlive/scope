@@ -51,6 +51,7 @@ class PipelineManager:
         self._pipelines: dict[str, Any] = {}  # pipeline_id -> pipeline instance
         self._pipeline_statuses: dict[str, PipelineStatus] = {}  # pipeline_id -> status
         self._pipeline_load_params: dict[str, dict] = {}  # pipeline_id -> load_params
+        self._load_events: dict[str, threading.Event] = {}  # pipeline_id -> load completion event
 
     @property
     def status(self) -> PipelineStatus:
@@ -177,13 +178,37 @@ class PipelineManager:
                 )
                 return True
 
-            # If already loading, wait
+            # If already loading, wait for it to complete
             if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADING:
-                logger.info(f"Pipeline {pipeline_id} already loading by another thread")
-                return False
+                logger.info(f"Pipeline {pipeline_id} already loading by another thread, waiting...")
+                load_event = self._load_events.get(pipeline_id)
+                if load_event:
+                    # Release lock while waiting
+                    self._lock.release()
+                    try:
+                        # Wait up to 5 minutes for load to complete
+                        load_event.wait(timeout=300)
+                    finally:
+                        self._lock.acquire()
 
-            # Mark as loading
+                    # Check if pipeline is now loaded
+                    if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADED:
+                        logger.info(f"Pipeline {pipeline_id} loaded by another thread")
+                        return True
+                    else:
+                        logger.warning(
+                            f"Pipeline {pipeline_id} load by another thread did not succeed, "
+                            f"status: {self._pipeline_statuses.get(pipeline_id)}"
+                        )
+                        return False
+                else:
+                    # No event found (shouldn't happen), fall through to load
+                    logger.warning(f"Pipeline {pipeline_id} marked as LOADING but no event found")
+
+            # Mark as loading and create event for waiters
             self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
+            load_event = threading.Event()
+            self._load_events[pipeline_id] = load_event
 
         # Release lock during slow loading operation
         logger.info(f"Loading pipeline: {pipeline_id}")
@@ -209,6 +234,9 @@ class PipelineManager:
                 self._pipelines[pipeline_id] = pipeline
                 self._pipeline_load_params[pipeline_id] = load_params or {}
                 self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
+                # Signal waiters that load is complete
+                if pipeline_id in self._load_events:
+                    self._load_events[pipeline_id].set()
 
             logger.info(f"Pipeline {pipeline_id} loaded successfully")
 
@@ -247,6 +275,9 @@ class PipelineManager:
                     del self._pipelines[pipeline_id]
                 if pipeline_id in self._pipeline_load_params:
                     del self._pipeline_load_params[pipeline_id]
+                # Signal waiters that load is complete (even though it failed)
+                if pipeline_id in self._load_events:
+                    self._load_events[pipeline_id].set()
 
             # Publish error event for pipeline load failure
             publish_event(
