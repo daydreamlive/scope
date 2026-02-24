@@ -22,8 +22,6 @@ def make_workflow(**overrides) -> ScopeWorkflow:
     defaults = {
         "metadata": WorkflowMetadata(
             name="test",
-            description="desc",
-            author="me",
             created_at=datetime(2025, 1, 1, tzinfo=UTC),
             scope_version="0.1.0",
         ),

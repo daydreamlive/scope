@@ -230,7 +230,8 @@ class TestResolveLoRA:
 
 class TestSettingsValidation:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
-    def test_unknown_param_warns(self, mock_registry, tmp_path):
+    def test_unknown_param_no_warning(self, mock_registry, tmp_path):
+        """Unknown params are frontend runtime params — no warning expected."""
         mock_registry.is_registered.return_value = True
         mock_registry.get_config_class.return_value = FakeConfig
 
@@ -247,7 +248,7 @@ class TestSettingsValidation:
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
-        assert any("unknown_param" in w for w in plan.settings_warnings)
+        assert not any("unknown_param" in w for w in plan.settings_warnings)
 
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_known_params_no_warnings(self, mock_registry, tmp_path):
