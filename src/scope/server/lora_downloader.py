@@ -75,11 +75,33 @@ def _resolve_civitai_download_url(version_id: str) -> tuple[str, str | None]:
     return download_url, filename
 
 
-def _filename_from_url(url: str) -> str:
+def _filename_from_url(url: str) -> str | None:
+    """Try to extract a filename from the URL path. Returns None if not possible."""
     parsed = urlparse(url)
     path_part = unquote(parsed.path.split("/")[-1])
     if path_part and "." in path_part:
         return path_part
+    return None
+
+
+def _filename_from_response(url: str) -> str:
+    """Resolve filename by making a HEAD/streaming request and reading Content-Disposition."""
+    import re
+
+    import httpx
+
+    with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+        with client.stream("GET", url) as response:
+            response.raise_for_status()
+            # Try Content-Disposition header
+            content_disp = response.headers.get("content-disposition", "")
+            match = re.search(r'filename[*]?=["\']?([^"\';]+)["\']?', content_disp)
+            if match:
+                return unquote(match.group(1).strip())
+            # Try the final URL after redirects
+            name = _filename_from_url(str(response.url))
+            if name:
+                return name
     raise ValueError(f"Cannot determine filename from URL: {url}")
 
 
@@ -100,16 +122,20 @@ async def download_lora(
         url, civitai_filename = await loop.run_in_executor(
             None, _resolve_civitai_download_url, request.version_id
         )
-        filename = civitai_filename or f"civitai_{request.version_id}.safetensors"
+        filename = civitai_filename  # may be None, resolved below
 
     elif request.source == "url":
         if not request.url:
             raise ValueError("url required for URL source")
         url = request.url
-        filename = _filename_from_url(url)
+        filename = _filename_from_url(url)  # may be None, resolved below
 
     else:
         raise ValueError(f"Unknown source: {request.source}")
+
+    # Resolve filename from the actual download response if we don't have one yet
+    if not filename:
+        filename = await loop.run_in_executor(None, _filename_from_response, url)
 
     # Build destination path
     if request.subfolder:

@@ -892,13 +892,6 @@ async def install_lora_file(
             if stored_token:
                 separator = "&" if parsed.query else "?"
                 url = f"{url}{separator}token={stored_token}"
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="CivitAI requires an API token for programmatic downloads. "
-                    "Add your CivitAI API key in Settings > API Keys. "
-                    "Get your API key at https://civitai.com/user/account",
-                )
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
@@ -954,6 +947,46 @@ async def install_lora_file(
         filename = request.filename
         if not filename:
             filename = unquote(parsed.path.split("/")[-1])
+
+        # For CivitAI URLs, resolve filename via API if path doesn't have one
+        if is_civitai and (not filename or "." not in filename):
+            # Extract version ID: check query param first, then path
+            query_params = parse_qs(parsed.query)
+            version_id = None
+            if "modelVersionId" in query_params:
+                version_id = query_params["modelVersionId"][0]
+            else:
+                # Fall back to last path segment (e.g. /api/download/models/<version_id>)
+                path_parts = parsed.path.rstrip("/").split("/")
+                version_id = path_parts[-1] if path_parts else None
+            if version_id and version_id.isdigit():
+                try:
+                    api_url = f"https://civitai.com/api/v1/model-versions/{version_id}"
+                    api_headers = {}
+                    stored_token = get_civitai_token()
+                    if stored_token:
+                        api_headers["Authorization"] = f"Bearer {stored_token}"
+                    resp = httpx.get(
+                        api_url,
+                        headers=api_headers,
+                        timeout=30.0,
+                        follow_redirects=True,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        files = data.get("files", [])
+                        if files:
+                            filename = files[0].get("name", filename)
+                            # Also get the proper download URL
+                            dl_url = files[0].get("downloadUrl")
+                            if dl_url:
+                                if stored_token:
+                                    separator = "&" if "?" in dl_url else "?"
+                                    dl_url = f"{dl_url}{separator}token={stored_token}"
+                                url = dl_url
+                except Exception as e:
+                    logger.warning(f"Failed to resolve CivitAI metadata: {e}")
+
         # If still no filename (or it doesn't look like a file), try Content-Disposition
         if not filename or "." not in filename:
             # Use streaming GET instead of HEAD (some servers return 403 for HEAD)
