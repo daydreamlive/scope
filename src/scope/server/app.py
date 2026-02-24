@@ -1138,6 +1138,13 @@ def is_ndi_output_available() -> bool:
     return is_available()
 
 
+def is_virtualcam_available() -> bool:
+    """Check if pyvirtualcam is available for virtual camera output."""
+    from scope.core.outputs.virtualcam import is_available
+
+    return is_available()
+
+
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
 _SOURCE_DISCOVERY_TTL = 10  # seconds
 
@@ -1324,6 +1331,7 @@ async def get_hardware_info(
                 cloud_manager,
                 is_spout_available(),
                 is_ndi_output_available(),
+                is_virtualcam_available(),
             )
 
         # Local mode: get local hardware info
@@ -1340,6 +1348,7 @@ async def get_hardware_info(
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
             ndi_available=is_ndi_output_available(),
+            virtualcam_available=is_virtualcam_available(),
         )
     except HTTPException:
         raise

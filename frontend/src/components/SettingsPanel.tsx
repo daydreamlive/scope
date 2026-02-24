@@ -323,6 +323,7 @@ interface SettingsPanelProps {
   ) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
+  virtualcamAvailable?: boolean;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -393,6 +394,7 @@ export function SettingsPanel({
   onOutputSinkChange,
   spoutAvailable = false,
   ndiAvailable = false,
+  virtualcamAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -1290,6 +1292,39 @@ export function SettingsPanel({
                   className="h-8 text-sm flex-1"
                   placeholder="Scope"
                 />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Virtual Camera Output */}
+        {virtualcamAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label="Virtual Camera"
+                tooltip="Send video to a virtual camera device. Appears as a webcam in Zoom, OBS, Discord, Google Meet, and other applications."
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={outputSinks?.virtualcam?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onOutputSinkChange?.("virtualcam", {
+                    enabled,
+                    name: outputSinks?.virtualcam?.name ?? "Scope",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {outputSinks?.virtualcam?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {outputSinks?.virtualcam?.enabled && (
+              <div className="text-xs text-muted-foreground">
+                Device: OBS Virtual Camera
               </div>
             )}
           </div>

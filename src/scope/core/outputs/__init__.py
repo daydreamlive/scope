@@ -26,6 +26,13 @@ def get_output_sink_classes() -> dict[str, type[OutputSink]]:
     except Exception:
         pass
 
+    try:
+        from .virtualcam import VirtualCameraOutputSink
+
+        sinks[VirtualCameraOutputSink.source_id] = VirtualCameraOutputSink
+    except Exception:
+        pass
+
     return sinks
 
 

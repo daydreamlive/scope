@@ -63,6 +63,9 @@ dependencies = [
 kafka = [
     "aiokafka>=0.10.0",
 ]
+virtualcam = [
+    "pyvirtualcam>=0.12.1",
+]
 
 [project.scripts]
 daydream-scope = "scope.server.app:main"

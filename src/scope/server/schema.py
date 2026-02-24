@@ -251,6 +251,10 @@ class HardwareInfoResponse(BaseModel):
         default=False,
         description="Whether NDI SDK is available for output",
     )
+    virtualcam_available: bool = Field(
+        default=False,
+        description="Whether virtual camera output is available (pyvirtualcam)",
+    )
 
 
 class PipelineStatusEnum(str, Enum):
