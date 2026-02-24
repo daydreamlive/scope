@@ -37,6 +37,7 @@ class WorkflowResolutionPlan(BaseModel):
 
     can_apply: bool
     items: list[ResolutionItem]
+    warnings: list[str] = []
 
 
 def is_load_param(config_class: type, field_name: str) -> bool:
@@ -51,6 +52,40 @@ def is_load_param(config_class: type, field_name: str) -> bool:
         ui = extra.get("ui", {})
         return ui.get("is_load_param", False)
     return False
+
+
+def _check_settings(
+    config_class: type,
+    params: dict[str, Any],
+) -> list[str]:
+    """Validate *params* against *config_class* fields, return warnings.
+
+    Parameters not present in the pipeline config schema are silently
+    ignored — they are frontend runtime params that get returned via
+    ``runtime_params`` on apply.
+    """
+    warnings: list[str] = []
+    # Future: validate known fields have compatible types, etc.
+    return warnings
+
+
+def _check_min_scope_version(
+    min_version_str: str,
+    warnings: list[str],
+) -> None:
+    """Compare *min_version_str* against the installed Scope version."""
+    import importlib.metadata
+
+    try:
+        current_version = Version(importlib.metadata.version("daydream-scope"))
+        min_version = Version(min_version_str)
+        if current_version < min_version:
+            warnings.append(
+                f"This workflow requires Scope >= {min_version_str} "
+                f"(installed: {current_version})"
+            )
+    except (InvalidVersion, importlib.metadata.PackageNotFoundError):
+        warnings.append(f"Could not verify min_scope_version '{min_version_str}'")
 
 
 def resolve_workflow(
@@ -75,6 +110,7 @@ def resolve_workflow(
     from ._utils import find_plugin_info, get_plugin_list
 
     items: list[ResolutionItem] = []
+    settings_warnings: list[str] = []
     all_pipelines_ok = True
 
     plugins = get_plugin_list(plugin_manager)
@@ -230,7 +266,17 @@ def resolve_workflow(
                     )
                 )
 
+        # --- Settings validation ---
+        config_class = PipelineRegistry.get_config_class(wp.pipeline_id)
+        if config_class is not None:
+            settings_warnings.extend(_check_settings(config_class, wp.params))
+
+    # --- min_scope_version check ---
+    if workflow.min_scope_version:
+        _check_min_scope_version(workflow.min_scope_version, settings_warnings)
+
     return WorkflowResolutionPlan(
         can_apply=all_pipelines_ok,
         items=items,
+        warnings=settings_warnings,
     )

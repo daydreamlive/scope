@@ -39,7 +39,7 @@ from scope.core.lora.manifest import (
     load_manifest,
     save_manifest,
 )
-from scope.core.workflows.schema import ScopeWorkflow
+from scope.core.workflows.schema import ScopeWorkflow, WorkflowTimeline
 
 from .cloud_proxy import (
     cloud_proxy,
@@ -1203,6 +1203,8 @@ class WorkflowExportRequest(BaseModel):
     name: str = "Untitled Workflow"
     pipelines: list[ExportPipelineInput]
     lora_merge_mode: str = "permanent_merge"
+    timeline: WorkflowTimeline | None = None
+    """Optional timeline data to include in the exported workflow."""
 
 
 @app.post("/api/v1/workflow/export")
@@ -1221,6 +1223,7 @@ def export_workflow(request: WorkflowExportRequest):
         plugin_manager=plugin_manager,
         lora_dir=lora_dir,
         lora_merge_mode=request.lora_merge_mode,
+        timeline=request.timeline,
     )
     return workflow.model_dump(mode="json", exclude_none=True)
 
@@ -1242,66 +1245,17 @@ def validate_workflow(
 ):
     """Validate a workflow and return a dependency resolution plan.
 
-    This is side-effect-free: no installs, no downloads.
+    This is side-effect-free: no installs, no downloads.  The incoming
+    workflow is migrated to the current format version before validation.
     """
     from scope.core.plugins import get_plugin_manager
+    from scope.core.workflows.migrate import migrate_workflow
     from scope.core.workflows.resolve import resolve_workflow
     from scope.server.models_config import get_models_dir
 
-    plugin_manager = get_plugin_manager()
-    models_dir = get_models_dir()
-    return resolve_workflow(workflow, plugin_manager, models_dir)
-
-
-@app.post("/api/v1/workflow/apply")
-async def apply_workflow_endpoint(
-    request: WorkflowApplyRequest,
-    pm: "PipelineManager" = Depends(get_pipeline_manager),
-):
-    """Apply a workflow: resolve dependencies, load pipelines, return runtime params."""
-    from scope.core.plugins import get_plugin_manager
-    from scope.core.workflows.apply import apply_workflow
-    from scope.core.workflows.resolve import resolve_workflow
-    from scope.server.models_config import get_models_dir
-
-    plugin_manager = get_plugin_manager()
-    models_dir = get_models_dir()
-
-    plan = resolve_workflow(request.workflow, plugin_manager, models_dir)
-
-    return await apply_workflow(
-        request.workflow,
-        plan,
-        pm,
-        plugin_manager,
-        models_dir,
-        install_missing_plugins=request.install_missing_plugins,
-        skip_missing_loras=request.skip_missing_loras,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Workflow validate / apply
-# ---------------------------------------------------------------------------
-
-
-class WorkflowApplyRequest(BaseModel):
-    workflow: ScopeWorkflow
-    install_missing_plugins: bool = False
-    skip_missing_loras: bool = True
-
-
-@app.post("/api/v1/workflow/validate")
-async def validate_workflow(
-    workflow: ScopeWorkflow,
-):
-    """Validate a workflow and return a dependency resolution plan.
-
-    This is side-effect-free: no installs, no downloads.
-    """
-    from scope.core.plugins import get_plugin_manager
-    from scope.core.workflows.resolve import resolve_workflow
-    from scope.server.models_config import get_models_dir
+    # Re-validate after migration in case migration changed fields.
+    migrated = migrate_workflow(workflow.model_dump())
+    workflow = ScopeWorkflow.model_validate(migrated)
 
     plugin_manager = get_plugin_manager()
     models_dir = get_models_dir()

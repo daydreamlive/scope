@@ -1775,6 +1775,8 @@ class TestSerializationStability:
             "format_version",
             "metadata",
             "pipelines",
+            "timeline",
+            "min_scope_version",
         }
 
     def test_format_survives_round_trip(self):

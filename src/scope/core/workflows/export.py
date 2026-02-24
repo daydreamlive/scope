@@ -16,6 +16,7 @@ from .schema import (
     WorkflowMetadata,
     WorkflowPipeline,
     WorkflowPipelineSource,
+    WorkflowTimeline,  # noqa: F401 — used in type annotation
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ def build_workflow(
     plugin_manager: Any,
     lora_dir: Path,
     lora_merge_mode: str = "permanent_merge",
+    timeline: WorkflowTimeline | None = None,
 ) -> ScopeWorkflow:
     """Build a :class:`ScopeWorkflow` from frontend-supplied pipeline data.
 
@@ -144,4 +146,5 @@ def build_workflow(
             scope_version=scope_version,
         ),
         pipelines=pipelines,
+        timeline=timeline,
     )
