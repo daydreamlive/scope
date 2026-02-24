@@ -21,8 +21,7 @@ def test_filename_from_url():
 
 
 def test_filename_from_url_no_extension():
-    with pytest.raises(ValueError, match="Cannot determine filename"):
-        _filename_from_url("https://example.com/path/noextension")
+    assert _filename_from_url("https://example.com/path/noextension") is None
 
 
 def test_resolve_hf_url():

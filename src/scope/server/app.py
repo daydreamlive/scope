@@ -961,29 +961,13 @@ async def install_lora_file(
                 version_id = path_parts[-1] if path_parts else None
             if version_id and version_id.isdigit():
                 try:
-                    api_url = f"https://civitai.com/api/v1/model-versions/{version_id}"
-                    api_headers = {}
-                    stored_token = get_civitai_token()
-                    if stored_token:
-                        api_headers["Authorization"] = f"Bearer {stored_token}"
-                    resp = httpx.get(
-                        api_url,
-                        headers=api_headers,
-                        timeout=30.0,
-                        follow_redirects=True,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        files = data.get("files", [])
-                        if files:
-                            filename = files[0].get("name", filename)
-                            # Also get the proper download URL
-                            dl_url = files[0].get("downloadUrl")
-                            if dl_url:
-                                if stored_token:
-                                    separator = "&" if "?" in dl_url else "?"
-                                    dl_url = f"{dl_url}{separator}token={stored_token}"
-                                url = dl_url
+                    from .lora_downloader import resolve_civitai_metadata
+
+                    dl_url, civitai_filename = resolve_civitai_metadata(version_id)
+                    if civitai_filename:
+                        filename = civitai_filename
+                    if dl_url:
+                        url = dl_url
                 except Exception as e:
                     logger.warning(f"Failed to resolve CivitAI metadata: {e}")
 

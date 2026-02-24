@@ -41,37 +41,55 @@ def _resolve_hf_url(repo_id: str, hf_filename: str) -> str:
     return hf_hub_url(repo_id, hf_filename)
 
 
-def _resolve_civitai_download_url(version_id: str) -> tuple[str, str | None]:
-    """Resolve CivitAI version ID to download URL. Returns (url, filename)."""
+def resolve_civitai_metadata(
+    version_id: str,
+) -> tuple[str | None, str | None]:
+    """Resolve CivitAI version ID to (download_url, filename).
+
+    The token is attached to the download URL when available.
+    Returns (None, None) if the API call fails or returns no files.
+    Used by both :func:`download_lora` and the ``install_lora_file`` endpoint.
+    """
     import httpx
 
-    api_url = f"https://civitai.com/api/v1/model-versions/{version_id}"
-    headers = {}
     from .models_config import get_civitai_token
 
+    api_url = f"https://civitai.com/api/v1/model-versions/{version_id}"
     token = get_civitai_token()
+    headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
     response = httpx.get(api_url, headers=headers, timeout=30.0, follow_redirects=True)
-    response.raise_for_status()
-    data = response.json()
+    if response.status_code != 200:
+        return None, None
 
+    data = response.json()
     files = data.get("files", [])
     if not files:
-        raise ValueError(f"No files found for CivitAI version {version_id}")
+        return None, None
 
     primary = files[0]
     download_url = primary.get("downloadUrl")
-    if not download_url:
-        raise ValueError(f"No download URL for CivitAI version {version_id}")
+    filename = primary.get("name")
 
-    # Add token to download URL if available
-    if token:
+    if download_url and token:
         separator = "&" if "?" in download_url else "?"
         download_url = f"{download_url}{separator}token={token}"
 
-    filename = primary.get("name")
+    return download_url, filename
+
+
+def _resolve_civitai_download_url(version_id: str) -> tuple[str, str | None]:
+    """Resolve CivitAI version ID to download URL. Returns (url, filename).
+
+    Raises ValueError if resolution fails.
+    """
+    download_url, filename = resolve_civitai_metadata(version_id)
+    if not download_url:
+        raise ValueError(
+            f"Could not resolve download URL for CivitAI version {version_id}"
+        )
     return download_url, filename
 
 
