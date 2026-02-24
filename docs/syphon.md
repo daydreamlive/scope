@@ -12,9 +12,7 @@ Scope can receive video from any Syphon server running on the same Mac:
 1. Select "Video" for "Input Mode" under "Input & Controls".
 2. Select "Syphon" for "Video Source".
 3. Click the refresh button to discover available Syphon servers.
-4. Select the server you want to receive from in the dropdown.
-
-Optionally toggle "Show live preview" to see a low-rate MJPEG preview of the selected source before starting a stream.
+4. Select the server you want to receive from in the dropdown. A live preview is shown automatically.
 
 ## Compatible Applications
 
