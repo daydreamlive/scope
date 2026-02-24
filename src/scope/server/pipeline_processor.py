@@ -67,13 +67,13 @@ class PipelineProcessor:
         # Lock to protect input_queue assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
-        # Audio output queue: stores (audio_tensor, sample_rate, video_frame_count) tuples.
+        # Audio output queue: (audio_tensor, sample_rate, video_frame_count, native_fps).
         # Pipelines that produce audio return {"video": ..., "audio": ..., "audio_sample_rate": ...}.
-        # The video_frame_count is included so downstream can gate audio release on video consumption.
+        # native_fps is the content frame rate (e.g. 24fps) for native-speed batch playback.
         # Only the last processor in a chain is read by FrameProcessor for audio output.
-        self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int, int]] = (
-            queue.Queue(maxsize=8)
-        )
+        self.audio_output_queue: queue.Queue[
+            tuple[torch.Tensor, int, int, float | None]
+        ] = queue.Queue(maxsize=8)
 
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
@@ -478,7 +478,7 @@ class PipelineProcessor:
             # Forward extra params to downstream pipeline (dual-output pattern)
             # Preprocessors return {"video": frames, "vace_input_frames": ..., "vace_input_masks": ...}
             # Audio keys are handled separately via audio_output_queue, not as pipeline params.
-            _non_param_keys = {"video", "audio", "audio_sample_rate"}
+            _non_param_keys = {"video", "audio", "audio_sample_rate", "frame_rate"}
             extra_params = {
                 k: v for k, v in output_dict.items() if k not in _non_param_keys
             }
@@ -547,22 +547,23 @@ class PipelineProcessor:
                     )
                     continue
 
-            # Extract audio from pipeline output and queue it alongside the
-            # video frame count so downstream can gate audio release on video
-            # consumption (prevents audio racing ahead of slow video playback).
+            # Extract audio from pipeline output and queue it.
+            # Includes video frame count and native frame rate so downstream
+            # can play each batch at native speed for proper A/V sync.
             audio_output = output_dict.get("audio")
             audio_sample_rate = output_dict.get("audio_sample_rate")
+            native_fps = output_dict.get("frame_rate")
             if audio_output is not None and audio_sample_rate is not None:
                 # Detach and move to CPU for downstream consumption
                 audio_output = audio_output.detach().cpu()
                 logger.debug(
                     f"[PIPELINE-PROC] Audio from {self.pipeline_id}: "
                     f"shape={audio_output.shape}, sr={audio_sample_rate}, "
-                    f"video_frames={num_frames}"
+                    f"video_frames={num_frames}, native_fps={native_fps}"
                 )
                 try:
                     self.audio_output_queue.put_nowait(
-                        (audio_output, audio_sample_rate, num_frames)
+                        (audio_output, audio_sample_rate, num_frames, native_fps)
                     )
                 except queue.Full:
                     logger.debug(
