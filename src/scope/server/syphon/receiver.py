@@ -48,7 +48,7 @@ def ensure_directory_initialized():
         if _directory_initialized:
             return
         d = syphon.SyphonServerDirectory()
-        d.servers  # pumps NSRunLoop, populates the shared singleton
+        _ = d.servers  # pumps NSRunLoop, populates the shared singleton
         _directory_initialized = True
         logger.debug("Syphon shared directory initialized")
 
