@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
   build-essential \
   software-properties-common \
   # Dependencies required for OpenCV
-  libgl1-mesa-glx \
+  libgl1 \
   libglib2.0-0 \
   libsm6 \
   libxext6 \
