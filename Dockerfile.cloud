@@ -30,7 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install uv (Python package manager) to system-wide location
 ENV UV_INSTALL_DIR="/usr/local/bin"
-RUN curl -LsSf https://astral.sh/uv/0.9.11/install.sh | sh
+RUN curl -LsSf https://astral.sh/uv/0.9.11/install.sh | sh && \
+    # Create symlink for fal.ai deploy which hardcodes $HOME/.local/bin/uv
+    mkdir -p /root/.local/bin && \
+    ln -s /usr/local/bin/uv /root/.local/bin/uv
 
 # Install Python dependencies
 # UV_PYTHON_INSTALL_DIR ensures Python is installed to a shared location accessible by all users
