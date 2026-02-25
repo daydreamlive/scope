@@ -127,21 +127,20 @@ def build_graph(
         for port, qlist in out_by_port.items():
             proc.output_queues[port] = qlist
 
-    # 4b) Set primary input port for processors with no incoming "video" edge
+    # 4b) Remove unwired default input queues so processors only wait for
+    # ports that are actually connected via stream edges.
     for node in graph.nodes:
         if node.type != "pipeline" or node.id not in node_processors:
             continue
         proc = node_processors[node.id]
-        incoming_stream_ports = {
-            e.to_port for e in graph.edges_to(node.id) if e.kind == "stream"
-        }
-        if incoming_stream_ports and "video" not in incoming_stream_ports:
-            proc._primary_input_port = next(iter(incoming_stream_ports))
-            logger.info(
-                "Node %s: primary input port set to '%s' (no video edge)",
-                node.id,
-                proc._primary_input_port,
-            )
+        wired_ports = {e.to_port for e in graph.edges_to(node.id) if e.kind == "stream"}
+        if wired_ports:
+            proc.input_queues = {
+                port: q for port, q in proc.input_queues.items() if port in wired_ports
+            }
+
+    # 4c) Resize inter-pipeline queues based on downstream pipeline requirements
+    _resize_graph_queues(graph, node_processors)
 
     # 5) Identify sink: node that has an edge to "output" (or type sink)
     sink_node_id: str | None = None
@@ -173,6 +172,15 @@ def build_graph(
     elif sink_node_id:
         logger.info("Graph sink for playback: node_id=%s", sink_node_id)
 
+    # 5b) Resize sink's default output queues (initially 8) to match
+    # inter-pipeline queue size so output batches don't get dropped.
+    if sink_processor is not None:
+        for port, qlist in list(sink_processor.output_queues.items()):
+            if qlist and qlist[0].maxsize < DEFAULT_INPUT_QUEUE_MAXSIZE:
+                sink_processor.output_queues[port] = [
+                    queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                ]
+
     # Collect output/sink node IDs for preview mapping
     output_node_ids = [n.id for n in graph.nodes if n.type == "sink"]
 
@@ -184,3 +192,59 @@ def build_graph(
         sink_node_id=sink_node_id,
         output_node_ids=output_node_ids,
     )
+
+
+def _resize_graph_queues(
+    graph: GraphConfig,
+    node_processors: dict[str, PipelineProcessor],
+) -> None:
+    """Resize inter-pipeline queues based on downstream pipeline requirements.
+
+    For each pipeline node, calls prepare(video=True) to determine input_size,
+    then ensures its input queues are large enough to buffer
+    input_size * OUTPUT_QUEUE_MAX_SIZE_FACTOR frames.
+    """
+    from .pipeline_processor import OUTPUT_QUEUE_MAX_SIZE_FACTOR
+
+    for node in graph.nodes:
+        if node.type != "pipeline" or node.id not in node_processors:
+            continue
+        proc = node_processors[node.id]
+        pipeline = proc.pipeline
+        if not hasattr(pipeline, "prepare"):
+            continue
+        try:
+            requirements = pipeline.prepare(video=True)
+        except Exception:
+            continue
+        if requirements is None:
+            continue
+
+        target_size = max(
+            DEFAULT_INPUT_QUEUE_MAXSIZE,
+            requirements.input_size * OUTPUT_QUEUE_MAX_SIZE_FACTOR,
+        )
+
+        for port, old_q in list(proc.input_queues.items()):
+            if old_q.maxsize >= target_size:
+                continue
+            new_q = queue.Queue(maxsize=target_size)
+            proc.input_queues[port] = new_q
+            logger.info(
+                "Node %s port '%s': resized queue %d -> %d",
+                node.id,
+                port,
+                old_q.maxsize,
+                target_size,
+            )
+            # Update the producing processor's output_queues reference
+            for e in graph.edges_to(node.id):
+                if e.to_port != port or e.kind != "stream":
+                    continue
+                producer = node_processors.get(e.from_node)
+                if producer is None:
+                    continue
+                out_list = producer.output_queues.get(e.from_port, [])
+                for i, oq in enumerate(out_list):
+                    if oq is old_q:
+                        out_list[i] = new_q

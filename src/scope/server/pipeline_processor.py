@@ -71,7 +71,7 @@ class PipelineProcessor:
         self.output_queues: dict[str, list[queue.Queue]] = {
             "video": [queue.Queue(maxsize=8)],
         }
-        # Lock to protect input_queues["video"] assignment for thread-safe reference swapping
+        # Lock to protect input_queues assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
         # Current parameters used by processing thread
@@ -110,10 +110,6 @@ class PipelineProcessor:
 
         # Cache VACE support check to avoid isinstance on every chunk
         self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
-
-        # Primary input port for chunk accumulation (default "video", overridden
-        # by graph executor when the node has no incoming "video" edge)
-        self._primary_input_port: str = "video"
 
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call
@@ -211,13 +207,13 @@ class PipelineProcessor:
             if threading.current_thread() != self.worker_thread:
                 self.worker_thread.join(timeout=5.0)
 
-        # Clear queues
+        # Clear all input queues
         with self.input_queue_lock:
-            input_queue_ref = self.input_queues.get("video")
-        if input_queue_ref:
-            while not input_queue_ref.empty():
+            input_queues_copy = dict(self.input_queues)
+        for q in input_queues_copy.values():
+            while not q.empty():
                 try:
-                    input_queue_ref.get_nowait()
+                    q.get_nowait()
                 except queue.Empty:
                     break
 
@@ -305,61 +301,18 @@ class PipelineProcessor:
     def prepare_multi_chunk(
         self,
         input_queues_ref: dict[str, queue.Queue],
-        primary_port: str,
         chunk_size: int,
     ) -> dict[str, list[torch.Tensor]]:
         """
-        Sample chunk_size frames from the primary queue, then sample each
-        secondary queue.
+        Sample chunk_size frames uniformly from each wired queue.
 
-        Only the primary port is required to have >= chunk_size frames.
-        Secondary ports with enough frames are sampled with the same indices
-        as the primary (synchronized). Ports with fewer frames are sampled
-        independently, and empty ports return an empty list so the pipeline
-        can handle missing inputs (e.g. text-mode with no camera).
+        All queues must have >= chunk_size frames (caller checks readiness).
+        Each port is sampled independently using the same uniform strategy.
         """
-        primary = input_queues_ref.get(primary_port)
-        if primary is None or primary.qsize() < chunk_size:
-            return {}
-
-        out: dict[str, list[torch.Tensor]] = {port: [] for port in input_queues_ref}
-
-        # Sample primary queue
-        step = primary.qsize() / chunk_size
-        indices = [round(i * step) for i in range(chunk_size)]
-        last_idx = indices[-1]
-        for i in range(last_idx + 1):
-            frame = primary.get_nowait()
-            if i in indices:
-                out[primary_port].append(frame)
-
-        # Sample each secondary queue
-        for port, q in input_queues_ref.items():
-            if port == primary_port:
-                continue
-            avail = q.qsize()
-            if avail == 0:
-                # No frames — pass empty list (pipeline handles gracefully)
-                continue
-            if avail > last_idx:
-                # Enough frames: use same indices as primary (synchronized)
-                for i in range(last_idx + 1):
-                    frame = q.get_nowait()
-                    if i in indices:
-                        out[port].append(frame)
-            else:
-                # Fewer frames: sample independently at this port's own rate
-                sec_step = max(avail / chunk_size, 1.0)
-                sec_indices = [
-                    round(i * sec_step) for i in range(min(chunk_size, avail))
-                ]
-                sec_last = sec_indices[-1]
-                for i in range(sec_last + 1):
-                    frame = q.get_nowait()
-                    if i in sec_indices:
-                        out[port].append(frame)
-
-        return out
+        return {
+            port: self.prepare_chunk(q, chunk_size)
+            for port, q in input_queues_ref.items()
+        }
 
     def process_chunk(self):
         """Process a single chunk of frames."""
@@ -439,26 +392,23 @@ class PipelineProcessor:
             current_chunk_size = requirements.input_size
             with self.input_queue_lock:
                 input_queues_ref = dict(self.input_queues)
-            primary_port = self._primary_input_port
-            primary = input_queues_ref.get(primary_port)
-            if primary is None or primary.qsize() < current_chunk_size:
+            # Wait until ALL wired input queues have enough frames
+            if not input_queues_ref or not all(
+                q.qsize() >= current_chunk_size for q in input_queues_ref.values()
+            ):
                 # Preserve popped one-shot parameters so they are applied once frames arrive
                 if lora_scales is not None:
                     self.parameters["lora_scales"] = lora_scales
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
             if len(input_queues_ref) == 1:
-                chunks[primary_port] = self.prepare_chunk(primary, current_chunk_size)
+                port, q = next(iter(input_queues_ref.items()))
+                chunks[port] = self.prepare_chunk(q, current_chunk_size)
             else:
-                chunks = self.prepare_multi_chunk(
-                    input_queues_ref, primary_port, current_chunk_size
-                )
-                if not chunks:
-                    if lora_scales is not None:
-                        self.parameters["lora_scales"] = lora_scales
-                    self.shutdown_event.wait(SLEEP_TIME)
-                    return
-            input_frame_count = len(chunks.get(primary_port) or [])
+                chunks = self.prepare_multi_chunk(input_queues_ref, current_chunk_size)
+            input_frame_count = max(
+                (len(frames) for frames in chunks.values()), default=0
+            )
 
         try:
             # Pass parameters (excluding prepare-only parameters)
