@@ -33,13 +33,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
-# Install uv (Python package manager)
+# Install uv (Python package manager) to system-wide location
+ENV UV_INSTALL_DIR="/usr/local/bin"
 RUN curl -LsSf https://astral.sh/uv/0.9.11/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
 
 # Install Python dependencies
+# UV_PYTHON_INSTALL_DIR ensures Python is installed to a shared location accessible by all users
+ENV UV_PYTHON_INSTALL_DIR="/opt/uv/python"
 COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
-RUN uv sync --frozen
+RUN uv sync --frozen && chmod -R a+rX /opt/uv
 
 # Build frontend
 COPY frontend/ ./frontend/

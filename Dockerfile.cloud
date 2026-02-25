@@ -30,3 +30,8 @@ RUN echo "Installing cloud plugins..." && \
 
 # Remove frontend - not needed in cloud mode (served separately)
 RUN rm -rf /app/frontend
+
+# Create non-root user for running scope server (security)
+# The fal_app.py setup() will run the scope subprocess as this user
+RUN useradd -m -s /bin/bash scope \
+    && chown -R scope:scope /app

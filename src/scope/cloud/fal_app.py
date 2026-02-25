@@ -303,16 +303,69 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"GPU check failed: {e}")
             raise
 
-        # Environment for scope
-        scope_env = os.environ.copy()
-        # Add any scope-specific environment variables here
-        # scope_env["PIPELINE"] = "some-default-pipeline"
-        # Use fal's /data directory for persistent storage
+        # Environment for scope - whitelist only necessary variables (security)
+        ENV_WHITELIST = [
+            # Required for process execution
+            "PATH",
+            "HOME",
+            "USER",
+            "LANG",
+            "LC_ALL",
+            # CUDA/GPU
+            "CUDA_VISIBLE_DEVICES",
+            "NVIDIA_VISIBLE_DEVICES",
+            "NVIDIA_DRIVER_CAPABILITIES",
+            "LD_LIBRARY_PATH",
+            # Daydream API
+            "DAYDREAM_API_BASE",
+            # Kafka
+            "KAFKA_BOOTSTRAP_SERVERS",
+            "KAFKA_TOPIC",
+            "KAFKA_SASL_USERNAME",
+            "KAFKA_SASL_PASSWORD",
+            # HuggingFace (for model downloads)
+            "HF_TOKEN",
+            "HF_HOME",
+            "HUGGINGFACE_HUB_CACHE",
+        ]
+        scope_env = {k: os.environ[k] for k in ENV_WHITELIST if k in os.environ}
+
+        # Add scope-specific environment variables
         scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
-        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
+        # scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
         scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
+
+        # Set up non-root user for running scope server (security)
+        scope_user = None
+        try:
+            import grp
+            import pwd
+
+            scope_user = pwd.getpwnam("scope")
+            print(f"Will run scope server as user: scope (uid={scope_user.pw_uid})")
+
+            # Ensure directories are writable by scope user
+            from pathlib import Path
+
+            for dir_path in [
+                "/data/models",
+                "/data/logs",
+                Path(ASSETS_DIR_PATH).expanduser(),
+            ]:
+                Path(dir_path).mkdir(parents=True, exist_ok=True)
+                os.chown(dir_path, scope_user.pw_uid, scope_user.pw_gid)
+        except KeyError:
+            print("Warning: 'scope' user not found, will run as root")
+        except Exception as e:
+            print(f"Warning: Failed to set up scope user: {e}, will run as root")
+
+        # Function to drop privileges before exec
+        def demote_to_scope_user():
+            if scope_user:
+                os.setgid(scope_user.pw_gid)
+                os.setuid(scope_user.pw_uid)
 
         # Install kafka extra dependencies
         print("Installing daydream-scope[kafka]...")
@@ -321,6 +374,7 @@ class ScopeApp(fal.App, keep_alive=300):
                 ["uv", "pip", "install", "daydream-scope[kafka]"],
                 check=True,
                 env=scope_env,
+                preexec_fn=demote_to_scope_user if scope_user else None,
             )
             print("✅ daydream-scope[kafka] installed")
         except Exception as e:
@@ -342,6 +396,7 @@ class ScopeApp(fal.App, keep_alive=300):
                         "8000",
                     ],
                     env=scope_env,
+                    preexec_fn=demote_to_scope_user if scope_user else None,
                 )
                 # Log when process exits (regardless of exit code)
                 if result.returncode == 0:
