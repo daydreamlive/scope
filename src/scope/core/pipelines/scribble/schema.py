@@ -18,7 +18,7 @@ class ScribbleConfig(BasePipelineConfig):
     )
     artifacts = [
         HuggingfaceRepoArtifact(
-            repo_id="ali-vilab/VACE-Annotators",
+            repo_id="daydreamlive/VACE-Annotators",
             files=["scribble/anime_style/netG_A_latest.pth"],
         ),
     ]
