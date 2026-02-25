@@ -98,7 +98,6 @@ jobs:
 
   build-cloud:
     runs-on: ubuntu-latest
-    needs: build-base
     permissions:
       contents: read
       packages: write
@@ -148,32 +147,26 @@ jobs:
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
-            BASE="$DOCKERHUB:$VERSION"
             TAGS="$DOCKERHUB:$VERSION-cloud,$DOCKERHUB:cloud"
             TAGS="$TAGS,$GHCR:$VERSION-cloud,$GHCR:cloud"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION_TAG="${{ github.ref_name }}"
             VERSION="${VERSION_TAG#v}"
-            BASE="$DOCKERHUB:$VERSION"
             TAGS="$DOCKERHUB:$VERSION-cloud,$DOCKERHUB:cloud"
             TAGS="$TAGS,$GHCR:$VERSION-cloud,$GHCR:cloud"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            BASE="$DOCKERHUB:$SHORT_SHA"
             TAGS="$DOCKERHUB:main-cloud,$DOCKERHUB:$SHORT_SHA-cloud"
             TAGS="$TAGS,$GHCR:main-cloud,$GHCR:$SHORT_SHA-cloud"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
-            BASE="$DOCKERHUB:runpod-serverless"
             TAGS="$DOCKERHUB:runpod-serverless-cloud,$GHCR:runpod-serverless-cloud"
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
             BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            BASE="$DOCKERHUB:$SHORT_SHA"
             TAGS="$DOCKERHUB:$BRANCH_TAG-cloud,$DOCKERHUB:$SHORT_SHA-cloud"
             TAGS="$TAGS,$GHCR:$BRANCH_TAG-cloud,$GHCR:$SHORT_SHA-cloud"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
-          echo "base=$BASE" >> $GITHUB_OUTPUT
 
       - name: Build and push cloud image
         uses: docker/build-push-action@v5
@@ -183,8 +176,6 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
-          build-args: |
-            BASE_IMAGE=${{ steps.tag.outputs.base }}
           labels: |
             org.opencontainers.image.source=https://github.com/daydreamlive/scope
             org.opencontainers.image.description=Daydream Scope (Cloud with plugins)
