@@ -151,10 +151,21 @@ def build_graph(
                 (consumer, e.to_port)
             )
 
-    # 4d) Resize inter-pipeline queues based on downstream pipeline requirements
+    # 4d) Wire throttler: for each producer with a video consumer,
+    # set the throttler reference for downstream FPS-based throttling.
+    for e in graph.edges:
+        if e.kind != "stream" or e.from_port != "video":
+            continue
+        producer = node_processors.get(e.from_node)
+        consumer = node_processors.get(e.to_node)
+        if producer is not None and consumer is not None:
+            producer.throttler.set_next_processor(consumer)
+            break  # Only throttle based on first video consumer
+
+    # 4e) Resize inter-pipeline queues based on downstream pipeline requirements
     _resize_graph_queues(graph, node_processors)
 
-    # 4e) Re-derive source_queues from processor input_queues (post-resize).
+    # 4f) Re-derive source_queues from processor input_queues (post-resize).
     # _resize_graph_queues may have replaced queue objects, so the references
     # captured in step 2 can be stale.
     source_queues = []

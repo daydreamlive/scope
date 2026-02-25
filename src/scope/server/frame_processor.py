@@ -105,8 +105,6 @@ class FrameProcessor:
         self._processors_by_node_id: dict[str, PipelineProcessor] = {}
         # Graph source queues for fan-out from source nodes
         self._graph_source_queues: list[queue.Queue] = []
-        # Whether graph mode is active (vs linear chain)
-        self._graph_mode = False
         # The processor whose output we read in graph mode
         self._sink_processor: PipelineProcessor | None = None
 
@@ -394,29 +392,21 @@ class FrameProcessor:
 
         frame_tensor = frame_tensor.unsqueeze(0)
 
-        if self._graph_mode and self._graph_source_queues:
-            # Graph mode: fan-out to all source queues
+        if self._graph_source_queues:
+            # Fan-out to all source queues (graph always active)
             for sq in self._graph_source_queues:
                 try:
                     sq.put_nowait(frame_tensor)
                 except queue.Full:
                     logger.debug("Graph source queue full, dropping frame")
-        elif self.pipeline_processors:
-            # Linear chain mode: put into first processor's input queue
-            first_processor = self.pipeline_processors[0]
-            try:
-                first_processor.input_queue.put_nowait(frame_tensor)
-            except queue.Full:
-                logger.debug("First processor input queue full, dropping frame")
-                return False
 
         return True
 
     def last_processor(self) -> PipelineProcessor | None:
-        """Return the sink processor (graph mode) or the last processor in the chain."""
+        """Return the sink processor."""
         if not self.pipeline_processors:
             return None
-        if self._graph_mode and self._sink_processor:
+        if self._sink_processor:
             return self._sink_processor
         return self.pipeline_processors[-1]
 
@@ -943,56 +933,60 @@ class FrameProcessor:
         )
 
     def _setup_pipeline_chain_sync(self):
-        """Create pipeline processor chain or graph (synchronous).
+        """Create pipeline execution graph (synchronous).
 
         If a graph config is available from the API, uses build_graph() to create
-        the execution graph. Otherwise, falls back to linear chain mode.
-        Assumes all pipelines are already loaded by the pipeline manager.
+        the execution graph. Otherwise, builds an implicit linear graph from
+        pipeline_ids. Assumes all pipelines are already loaded by the pipeline
+        manager.
         """
         from .graph_state import get_api_graph
 
         api_graph = get_api_graph()
+        if api_graph is None:
+            # No explicit graph — build implicit linear graph from pipeline_ids
+            api_graph = self._build_linear_graph(self.pipeline_ids)
 
-        if api_graph is not None:
-            # Graph mode: use build_graph() to create the execution graph
-            self._setup_graph(api_graph)
-            return
+        self._setup_graph(api_graph)
 
-        # Linear chain mode (backward compat)
-        if not self.pipeline_ids:
-            logger.error("No pipeline IDs provided")
-            return
+    @staticmethod
+    def _build_linear_graph(pipeline_ids: list[str]):
+        """Build a linear GraphConfig: source → pipeline_a → pipeline_b → … → sink."""
+        from .graph_schema import GraphConfig, GraphEdge, GraphNode
 
-        # Create pipeline processors (each creates its own queues)
-        for pipeline_id in self.pipeline_ids:
-            # Get pipeline instance from manager
-            pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+        nodes = [GraphNode(id="input", type="source")]
+        edges = []
 
-            # Create processor with its own queues
-            processor = PipelineProcessor(
-                pipeline=pipeline,
-                pipeline_id=pipeline_id,
-                initial_parameters=self.parameters.copy(),
-                session_id=self.session_id,
-                user_id=self.user_id,
-                connection_id=self.connection_id,
-                connection_info=self.connection_info,
+        prev_node_id = "input"
+        for pid in pipeline_ids:
+            nodes.append(GraphNode(id=pid, type="pipeline", pipeline_id=pid))
+            edges.append(
+                GraphEdge(
+                    **{
+                        "from": prev_node_id,
+                        "from_port": "video",
+                        "to_node": pid,
+                        "to_port": "video",
+                        "kind": "stream",
+                    }
+                )
             )
+            prev_node_id = pid
 
-            self.pipeline_processors.append(processor)
-
-        for i in range(1, len(self.pipeline_processors)):
-            prev_processor = self.pipeline_processors[i - 1]
-            curr_processor = self.pipeline_processors[i]
-            prev_processor.set_next_processor(curr_processor)
-
-        # Start all processors
-        for processor in self.pipeline_processors:
-            processor.start()
-
-        logger.info(
-            f"Created pipeline chain with {len(self.pipeline_processors)} processors"
+        nodes.append(GraphNode(id="output", type="sink"))
+        edges.append(
+            GraphEdge(
+                **{
+                    "from": prev_node_id,
+                    "from_port": "video",
+                    "to_node": "output",
+                    "to_port": "video",
+                    "kind": "stream",
+                }
+            )
         )
+
+        return GraphConfig(nodes=nodes, edges=edges)
 
     def _setup_graph(self, graph):
         """Set up graph-based execution from a GraphConfig."""
@@ -1008,7 +1002,6 @@ class FrameProcessor:
             connection_info=self.connection_info,
         )
 
-        self._graph_mode = True
         self._graph_source_queues = graph_run.source_queues
         self._sink_processor = graph_run.sink_processor
         self.pipeline_processors = graph_run.processors

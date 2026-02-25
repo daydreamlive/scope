@@ -97,13 +97,9 @@ class PipelineProcessor:
         # Input mode is signaled by the frontend at stream start
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Reference to next processor in chain (if chained)
-        self.next_processor: PipelineProcessor | None = None
-
         # Maps output port -> list of (consumer_processor, consumer_input_port).
         # Used by _resize_output_queue to update all downstream consumers when
-        # a queue is replaced.  Populated by set_next_processor (chain mode) and
-        # by graph_executor.build_graph (graph mode, supports port remapping).
+        # a queue is replaced. Populated by graph_executor.build_graph.
         self.output_consumers: dict[str, list[tuple[PipelineProcessor, str]]] = {}
 
         # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
@@ -131,7 +127,7 @@ class PipelineProcessor:
         Handles fan-out (multiple queues per port) and port name remapping
         (output port name may differ from consumer's input port name).
         Consumer references are updated via output_consumers which is populated
-        by set_next_processor (chain mode) or graph_executor (graph mode).
+        by graph_executor.build_graph.
         """
         port_queues = self.output_queues.get(port)
         if not port_queues:
@@ -168,33 +164,6 @@ class PipelineProcessor:
 
         if resized:
             self.output_queues[port] = new_list
-
-    def set_next_processor(self, next_processor: "PipelineProcessor"):
-        """Set the next processor in the chain and update output queue size accordingly.
-
-        Args:
-            next_processor: The next pipeline processor in the chain
-        """
-        self.next_processor = next_processor
-
-        # Register as output consumer for queue resize updates
-        self.output_consumers.setdefault("video", []).append((next_processor, "video"))
-
-        # Set throttler's reference to next processor for throttling decisions
-        self.throttler.set_next_processor(next_processor)
-
-        # Calculate output queue size based on next processor's requirements
-        next_pipeline = next_processor.pipeline
-        if hasattr(next_pipeline, "prepare"):
-            requirements = next_pipeline.prepare(video=True)
-            input_size = requirements.input_size
-            target_size = max(8, input_size * OUTPUT_QUEUE_MAX_SIZE_FACTOR)
-            self._resize_output_queue("video", target_size)
-
-        # Update next processor's input_queue to point to this output_queue
-        # Use lock to ensure thread-safe reference swapping
-        with next_processor.input_queue_lock:
-            next_processor.input_queues["video"] = self.output_queues["video"][0]
 
     @property
     def input_queue(self) -> queue.Queue | None:
@@ -576,21 +545,16 @@ class PipelineProcessor:
             # "vace_input_frames": ..., "vace_input_masks": ...} and the extra
             # entries need to reach the consuming pipeline as parameters.
             extra_params = {k: v for k, v in output_dict.items() if k != "video"}
-            if extra_params:
-                if self.next_processor is not None:
-                    # Chain mode: forward to the next processor
-                    self.next_processor.update_parameters(extra_params)
-                elif self.output_consumers:
-                    # Graph mode: forward to all downstream consumers
-                    seen: set[int] = set()
-                    for consumers in self.output_consumers.values():
-                        for consumer_proc, _ in consumers:
-                            proc_id = id(consumer_proc)
-                            if proc_id not in seen:
-                                seen.add(proc_id)
-                                consumer_proc.update_parameters(extra_params)
+            if extra_params and self.output_consumers:
+                seen: set[int] = set()
+                for consumers in self.output_consumers.values():
+                    for consumer_proc, _ in consumers:
+                        proc_id = id(consumer_proc)
+                        if proc_id not in seen:
+                            seen.add(proc_id)
+                            consumer_proc.update_parameters(extra_params)
 
-            if chunks and self.next_processor is not None:
+            if chunks and self.output_consumers:
                 self.throttler.throttle()
 
         except Exception as e:
