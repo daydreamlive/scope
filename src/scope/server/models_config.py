@@ -8,6 +8,10 @@ Provides centralized configuration for model storage location with support for:
 And assets storage location with support for:
 - Default location: ~/.daydream-scope/assets (or sibling to models dir)
 - Environment variable override: DAYDREAM_SCOPE_ASSETS_DIR
+
+And LoRA storage location with support for:
+- Default location: ~/.daydream-scope/models/lora (or subdirectory of models dir)
+- Environment variable override: DAYDREAM_SCOPE_LORA_DIR
 """
 
 import logging
@@ -24,6 +28,12 @@ MODELS_DIR_ENV_VAR = "DAYDREAM_SCOPE_MODELS_DIR"
 
 # Environment variable for overriding assets directory
 ASSETS_DIR_ENV_VAR = "DAYDREAM_SCOPE_ASSETS_DIR"
+
+# Environment variable for overriding lora directory
+LORA_DIR_ENV_VAR = "DAYDREAM_SCOPE_LORA_DIR"
+
+# Environment variable for CivitAI API token
+CIVITAI_TOKEN_ENV_VAR = "CIVITAI_API_TOKEN"
 
 
 def get_models_dir() -> Path:
@@ -51,7 +61,7 @@ def get_models_dir() -> Path:
 def ensure_models_dir() -> Path:
     """
     Get the models directory path and ensure it exists.
-    Also ensures the models/lora subdirectory exists.
+    Also ensures the LoRA directory exists.
 
     Returns:
         Path: Absolute path to the models directory
@@ -59,9 +69,8 @@ def ensure_models_dir() -> Path:
     models_dir = get_models_dir()
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    # Ensure the lora subdirectory exists
-    lora_dir = models_dir / "lora"
-    lora_dir.mkdir(parents=True, exist_ok=True)
+    # Ensure the lora directory exists (uses DAYDREAM_SCOPE_LORA_DIR if set)
+    ensure_lora_dir()
 
     return models_dir
 
@@ -102,6 +111,41 @@ def get_assets_dir() -> Path:
     # Get the parent directory (e.g., ~/.daydream-scope) and create assets directory there
     assets_dir = models_dir.parent / "assets"
     return assets_dir
+
+
+def get_lora_dir() -> Path:
+    """
+    Get the LoRA directory path.
+
+    Priority order:
+    1. DAYDREAM_SCOPE_LORA_DIR environment variable
+    2. Subdirectory of models directory (e.g., ~/.daydream-scope/models/lora)
+
+    Returns:
+        Path: Absolute path to the LoRA directory
+    """
+    # Check environment variable first
+    env_dir = os.environ.get(LORA_DIR_ENV_VAR)
+    if env_dir:
+        lora_dir = Path(env_dir).expanduser().resolve()
+        return lora_dir
+
+    # Default: subdirectory of models directory
+    models_dir = get_models_dir()
+    lora_dir = models_dir / "lora"
+    return lora_dir
+
+
+def ensure_lora_dir() -> Path:
+    """
+    Get the LoRA directory path and ensure it exists.
+
+    Returns:
+        Path: Absolute path to the LoRA directory
+    """
+    lora_dir = get_lora_dir()
+    lora_dir.mkdir(parents=True, exist_ok=True)
+    return lora_dir
 
 
 def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
@@ -185,3 +229,71 @@ def models_are_downloaded(pipeline_id: str) -> bool:
                 return False
 
     return True
+
+
+# CivitAI token file location
+CIVITAI_TOKEN_FILE = "~/.daydream-scope/civitai_token"
+
+
+def _get_civitai_token_file() -> Path:
+    """Get the path to the CivitAI token file."""
+    return Path(CIVITAI_TOKEN_FILE).expanduser().resolve()
+
+
+def _read_civitai_token_file() -> str | None:
+    """Read the CivitAI token from the token file."""
+    token_file = _get_civitai_token_file()
+    if token_file.exists():
+        try:
+            token = token_file.read_text().strip()
+            if token:
+                return token
+        except Exception as e:
+            logger.warning(f"Failed to read CivitAI token file: {e}")
+    return None
+
+
+def get_civitai_token() -> str | None:
+    """
+    Get the CivitAI API token.
+
+    Priority:
+    1. CIVITAI_API_TOKEN environment variable
+    2. Stored token file (~/.daydream-scope/civitai_token)
+
+    Returns:
+        str | None: The CivitAI API token, or None if not set
+    """
+    return os.environ.get(CIVITAI_TOKEN_ENV_VAR) or _read_civitai_token_file()
+
+
+def get_civitai_token_source() -> str | None:
+    """
+    Get the source of the CivitAI token.
+
+    Returns:
+        "env_var" if from environment, "stored" if from file, None if not set
+    """
+    if os.environ.get(CIVITAI_TOKEN_ENV_VAR):
+        return "env_var"
+    if _read_civitai_token_file():
+        return "stored"
+    return None
+
+
+def set_civitai_token(token: str) -> None:
+    """Save the CivitAI token to the token file."""
+    token_file = _get_civitai_token_file()
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(token)
+    # Set restrictive permissions (owner read/write only)
+    token_file.chmod(0o600)
+    logger.info("CivitAI token saved to file")
+
+
+def clear_civitai_token() -> None:
+    """Delete the CivitAI token file."""
+    token_file = _get_civitai_token_file()
+    if token_file.exists():
+        token_file.unlink()
+        logger.info("CivitAI token file deleted")

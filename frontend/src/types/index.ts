@@ -1,3 +1,17 @@
+// Electron preload exposes scope API on window
+interface ScopeAPI {
+  browseDirectory?: (title: string) => Promise<string | null>;
+  onDeepLinkAction?: (
+    callback: (data: { action: string; package: string }) => void
+  ) => () => void;
+}
+
+declare global {
+  interface Window {
+    scope?: ScopeAPI;
+  }
+}
+
 // Pipeline IDs are dynamic - any string returned from backend is valid
 export type PipelineId = string;
 
@@ -62,11 +76,8 @@ export interface SettingsState {
   loraMergeStrategy?: LoraMergeStrategy;
   // Track current input mode (text vs video)
   inputMode?: InputMode;
-  // Spout settings
-  spoutSender?: {
-    enabled: boolean;
-    name: string;
-  };
+  // Output sinks
+  outputSinks?: Record<string, { enabled: boolean; name: string }>;
   // VACE-specific settings
   vaceEnabled?: boolean;
   vaceUseInputVideo?: boolean;
@@ -80,7 +91,7 @@ export interface SettingsState {
   preprocessorIds?: string[];
   // Postprocessors
   postprocessorIds?: string[];
-  // Generic input source (NDI, Spout via new input source system, etc.)
+  // Generic input source (e.g., NDI, Spout)
   inputSource?: {
     enabled: boolean;
     source_type: string;
@@ -89,8 +100,9 @@ export interface SettingsState {
   // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
   schemaFieldOverrides?: Record<string, unknown>;
   // Schema-driven overrides for preprocessor/postprocessor plugin configs
-  preprocessorSchemaFieldOverrides?: Record<string, unknown>;
-  postprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  // Outer key = pipeline ID, inner = field overrides for that processor
+  preprocessorSchemaFieldOverrides?: Record<string, Record<string, unknown>>;
+  postprocessorSchemaFieldOverrides?: Record<string, Record<string, unknown>>;
 }
 
 export interface PipelineInfo {

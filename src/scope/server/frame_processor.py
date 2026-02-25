@@ -38,7 +38,7 @@ class FrameProcessor:
     1. Local mode: Frames processed through local GPU pipelines
     2. Cloud mode: Frames sent to cloud for processing
 
-    Output sink integration (Spout, NDI, etc.) works in both modes.
+    Output sink integration (NDI, Spout, etc.) works in both modes.
     """
 
     def __init__(
@@ -86,12 +86,8 @@ class FrameProcessor:
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
 
-        # Output sink (Spout, NDI output, etc.)
-        self.output_sink: OutputSink | None = None
-        self.output_sink_enabled = False
-        self.output_sink_name = ""
-        self.output_sink_queue: queue.Queue = queue.Queue(maxsize=30)
-        self.output_sink_thread: threading.Thread | None = None
+        # Output sinks keyed by type
+        self.output_sinks: dict[str, dict] = {}
 
         self.input_source: InputSource | None = None
         self.input_source_enabled = False
@@ -125,9 +121,9 @@ class FrameProcessor:
         self.running = True
 
         # Process output sink settings from initial parameters
-        if "spout_sender" in self.parameters:
-            spout_config = self.parameters.pop("spout_sender")
-            self._update_output_sink_from_spout_config(spout_config)
+        if "output_sinks" in self.parameters:
+            sinks_config = self.parameters.pop("output_sinks")
+            self._update_output_sinks_from_config(sinks_config)
 
         # Process generic input source settings
         if "input_source" in self.parameters:
@@ -238,20 +234,28 @@ class FrameProcessor:
         # Clear pipeline processors
         self.pipeline_processors.clear()
 
-        # Clean up output sink
-        self.output_sink_enabled = False
-        if self.output_sink_thread and self.output_sink_thread.is_alive():
+        # Clean up all output sinks
+        for sink_type, entry in list(self.output_sinks.items()):
+            q = entry["queue"]
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+            q.put_nowait(None)
+
+            thread = entry.get("thread")
+            if thread and thread.is_alive():
+                thread.join(timeout=2.0)
+                if thread.is_alive():
+                    logger.warning(
+                        f"Output sink thread '{sink_type}' did not stop within 2s"
+                    )
             try:
-                self.output_sink_queue.put_nowait(None)
-            except queue.Full:
-                pass
-            self.output_sink_thread.join(timeout=2.0)
-        if self.output_sink is not None:
-            try:
-                self.output_sink.close()
+                entry["sink"].close()
             except Exception as e:
-                logger.error(f"Error closing output sink: {e}")
-            self.output_sink = None
+                logger.error(f"Error closing output sink '{sink_type}': {e}")
+        self.output_sinks.clear()
 
         # Clean up generic input source
         self.input_source_enabled = False
@@ -456,13 +460,15 @@ class FrameProcessor:
                 f"ttff={time_to_first_frame_ms}ms)"
             )
 
-        # Enqueue frame for async output sink
-        if self.output_sink_enabled and self.output_sink is not None:
+        # Fan out frame to all active output sinks
+        if self.output_sinks:
             try:
                 frame_np = frame.numpy()
-                self.output_sink_queue.put_nowait(frame_np)
-            except queue.Full:
-                logger.debug("Output sink queue full, dropping frame")
+                for _sink_type, entry in self.output_sinks.items():
+                    try:
+                        entry["queue"].put_nowait(frame_np)
+                    except queue.Full:
+                        pass
             except Exception as e:
                 logger.error(f"Error enqueueing output sink frame: {e}")
 
@@ -566,8 +572,9 @@ class FrameProcessor:
             "fps_in": self._frames_in / elapsed if elapsed > 0 else 0,
             "fps_out": self._frames_out / elapsed if elapsed > 0 else 0,
             "pipeline_fps": self.get_fps(),
-            "output_sink_enabled": self.output_sink_enabled,
-            "output_sink_name": self.output_sink_name,
+            "output_sinks": {
+                k: {"name": v["name"]} for k, v in self.output_sinks.items()
+            },
             "input_source_enabled": self.input_source_enabled,
             "input_source_type": self.input_source_type,
             "relay_mode": self._cloud_mode,
@@ -593,10 +600,10 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
-        # Handle Spout output settings
-        if "spout_sender" in parameters:
-            spout_config = parameters.pop("spout_sender")
-            self._update_output_sink_from_spout_config(spout_config)
+        # Handle generic output sinks config
+        if "output_sinks" in parameters:
+            sinks_config = parameters.pop("output_sinks")
+            self._update_output_sinks_from_config(sinks_config)
 
         # Handle generic input source settings
         if "input_source" in parameters:
@@ -612,148 +619,154 @@ class FrameProcessor:
 
         return True
 
-    def _update_output_sink_from_spout_config(self, config: dict):
-        """Translate legacy spout_sender config into the generic output sink system."""
+    def _update_output_sinks_from_config(self, config: dict):
+        """Handle the generic output_sinks config dict.
+
+        Config format: {"spout": {"enabled": True, "name": "ScopeOut"}, "ndi": {...}}
+        """
         from scope.core.outputs import get_output_sink_classes
 
-        enabled = config.get("enabled", False)
-        sender_name = config.get("name", "ScopeSyphonSpoutOut")
-
         sink_classes = get_output_sink_classes()
-        spout_cls = sink_classes.get("spout")
-        if spout_cls is None:
-            if enabled:
-                logger.warning("Spout output sink not available on this platform")
-            return
-
-        self._update_output_sink(
-            enabled=enabled,
-            sink_type="spout",
-            sink_name=sender_name,
-            sink_class=spout_cls,
-        )
+        for sink_type, sink_config in config.items():
+            enabled = sink_config.get("enabled", False)
+            name = sink_config.get("name", "")
+            sink_cls = sink_classes.get(sink_type)
+            if sink_cls is None:
+                if enabled:
+                    logger.warning(f"Output sink '{sink_type}' not available")
+                continue
+            self._update_output_sink(
+                sink_type=sink_type,
+                enabled=enabled,
+                sink_name=name,
+                sink_class=sink_cls,
+            )
 
     def _update_output_sink(
         self,
-        enabled: bool,
         sink_type: str,
+        enabled: bool,
         sink_name: str,
         sink_class: "type[OutputSink] | None" = None,
     ):
-        """Update the generic output sink configuration."""
+        """Create, update, or destroy a single output sink entry."""
         width, height = self._get_pipeline_dimensions()
+        existing = self.output_sinks.get(sink_type)
 
         logger.info(
-            f"Output sink config: enabled={enabled}, type={sink_type}, "
+            f"Output sink config: type={sink_type}, enabled={enabled}, "
             f"name={sink_name}, size={width}x{height}"
         )
 
-        if enabled and not self.output_sink_enabled:
-            # Resolve class if not provided
+        if enabled and existing is None:
+            # Create new sink
             if sink_class is None:
                 from scope.core.outputs import get_output_sink_classes
 
                 sink_class = get_output_sink_classes().get(sink_type)
-                if sink_class is None:
-                    logger.error(f"Unknown output sink type: {sink_type}")
-                    return
-
+            if sink_class is None:
+                logger.error(f"Unknown output sink type: {sink_type}")
+                return
             try:
                 sink = sink_class()
                 if sink.create(sink_name, width, height):
-                    self.output_sink = sink
-                    self.output_sink_enabled = True
-                    self.output_sink_name = sink_name
-                    self._ensure_output_sink_thread()
+                    q: queue.Queue = queue.Queue(maxsize=30)
+                    t = threading.Thread(
+                        target=self._output_sink_loop,
+                        args=(sink_type,),
+                        daemon=True,
+                    )
+                    self.output_sinks[sink_type] = {
+                        "sink": sink,
+                        "queue": q,
+                        "thread": t,
+                        "name": sink_name,
+                    }
+                    t.start()
                     logger.info(f"Output sink enabled: {sink_type} '{sink_name}'")
                 else:
                     logger.error(f"Failed to create output sink: {sink_type}")
             except Exception as e:
                 logger.error(f"Error creating output sink '{sink_type}': {e}")
 
-        elif not enabled and self.output_sink_enabled:
-            if self.output_sink is not None:
-                self.output_sink.close()
-                self.output_sink = None
-            self.output_sink_enabled = False
-            self.output_sink_name = ""
-            logger.info("Output sink disabled")
+        elif not enabled and existing is not None:
+            # Destroy existing sink
+            self._close_output_sink(sink_type)
+            logger.info(f"Output sink disabled: {sink_type}")
 
-        elif enabled and self.output_sink is not None:
+        elif enabled and existing is not None:
             # Recreate if name or dimensions changed
-            needs_recreate = sink_name != self.output_sink_name
-            if hasattr(self.output_sink, "width") and hasattr(
-                self.output_sink, "height"
-            ):
-                if self.output_sink.width != width or self.output_sink.height != height:
+            old_sink = existing["sink"]
+            needs_recreate = sink_name != existing["name"]
+            if hasattr(old_sink, "width") and hasattr(old_sink, "height"):
+                if old_sink.width != width or old_sink.height != height:
                     needs_recreate = True
 
             if needs_recreate:
-                self.output_sink.close()
-                try:
-                    if sink_class is None:
-                        from scope.core.outputs import get_output_sink_classes
+                self._close_output_sink(sink_type)
+                self._update_output_sink(
+                    sink_type=sink_type,
+                    enabled=True,
+                    sink_name=sink_name,
+                    sink_class=sink_class,
+                )
 
-                        sink_class = get_output_sink_classes().get(sink_type)
-                    if sink_class is None:
-                        logger.error(f"Unknown output sink type: {sink_type}")
-                        self.output_sink = None
-                        self.output_sink_enabled = False
-                        return
-                    sink = sink_class()
-                    if sink.create(sink_name, width, height):
-                        self.output_sink = sink
-                        self.output_sink_name = sink_name
-                        self._ensure_output_sink_thread()
-                        logger.info(
-                            f"Output sink updated: {sink_type} '{sink_name}' ({width}x{height})"
-                        )
-                    else:
-                        logger.error(f"Failed to recreate output sink: {sink_type}")
-                        self.output_sink = None
-                        self.output_sink_enabled = False
-                except Exception as e:
-                    logger.error(f"Error recreating output sink: {e}")
-                    self.output_sink = None
-                    self.output_sink_enabled = False
+    def _close_output_sink(self, sink_type: str):
+        """Stop and remove a single output sink."""
+        entry = self.output_sinks.pop(sink_type, None)
+        if entry is None:
+            return
 
-    def _ensure_output_sink_thread(self):
-        """Start the output sink sender thread if not already running."""
-        if self.output_sink_thread is None or not self.output_sink_thread.is_alive():
-            self.output_sink_thread = threading.Thread(
-                target=self._output_sink_loop, daemon=True
-            )
-            self.output_sink_thread.start()
+        q = entry["queue"]
+        while not q.empty():
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+        q.put_nowait(None)
 
-    def _output_sink_loop(self):
-        """Background thread that sends frames to the output sink."""
-        logger.info("Output sink thread started")
+        thread = entry.get("thread")
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                logger.warning(
+                    f"Output sink thread '{sink_type}' did not stop within 2s"
+                )
+        try:
+            entry["sink"].close()
+        except Exception as e:
+            logger.error(f"Error closing output sink '{sink_type}': {e}")
+
+    def _output_sink_loop(self, sink_type: str):
+        """Background thread that sends frames for a single output sink."""
+        logger.info(f"Output sink thread started: {sink_type}")
         frame_count = 0
 
-        while (
-            self.running and self.output_sink_enabled and self.output_sink is not None
-        ):
+        while self.running and sink_type in self.output_sinks:
+            entry = self.output_sinks.get(sink_type)
+            if entry is None:
+                break
             try:
                 try:
-                    frame_np = self.output_sink_queue.get(timeout=0.1)
+                    frame_np = entry["queue"].get(timeout=0.1)
                     if frame_np is None:
                         break
                 except queue.Empty:
                     continue
 
-                success = self.output_sink.send_frame(frame_np)
+                success = entry["sink"].send_frame(frame_np)
                 frame_count += 1
                 if frame_count % 100 == 0:
                     logger.info(
-                        f"Output sink sent frame {frame_count}, "
+                        f"Output sink '{sink_type}' sent frame {frame_count}, "
                         f"shape={frame_np.shape}, success={success}"
                     )
 
             except Exception as e:
-                logger.error(f"Error in output sink loop: {e}")
+                logger.error(f"Error in output sink loop '{sink_type}': {e}")
                 time.sleep(0.01)
 
-        logger.info(f"Output sink thread stopped after {frame_count} frames")
+        logger.info(f"Output sink thread stopped: {sink_type} ({frame_count} frames)")
 
     def _update_input_source(self, config: dict):
         """Update generic input source configuration."""

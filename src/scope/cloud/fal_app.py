@@ -22,46 +22,16 @@ import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
 
-# Daydream API configuration
-DAYDREAM_API_BASE = os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
-
 
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
     """
     Validate that a user has access to cloud mode.
 
     Returns (is_valid, reason) tuple.
-    Access is granted if user is a cohort participant OR has @livepeer.org email.
     """
-    import urllib.error
-    import urllib.request
-
     if not user_id:
         return False, "No user ID provided"
-
-    url = f"{DAYDREAM_API_BASE}/v1/users/{user_id}"
-
-    def fetch_user():
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read().decode())
-
-    try:
-        # Run synchronous urllib in thread pool to not block event loop
-        user = await asyncio.get_event_loop().run_in_executor(None, fetch_user)
-        email = user.get("email", "")
-        is_cohort = user.get("cohortParticipant", False)
-        is_livepeer = email.endswith("@livepeer.org")
-
-        if is_cohort or is_livepeer:
-            return True, "Access granted"
-        return False, "User is not a cohort participant"
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return False, "User not found"
-        return False, f"Failed to fetch user: {e.code}"
-    except Exception as e:
-        return False, f"Error validating user: {e}"
+    return True, "Access granted"
 
 
 class KafkaPublisher:
@@ -219,7 +189,13 @@ def cleanup_session_data():
 
 
 def _get_git_sha() -> str:
-    """Get the short git SHA of the current checkout."""
+    """Get the deploy tag from env var SCOPE_DEPLOY_TAG, or fall back to git SHA."""
+    # Check for explicit deploy tag first
+    deploy_tag = os.environ.get("SCOPE_DEPLOY_TAG")
+    if deploy_tag:
+        return deploy_tag
+
+    # Fall back to git SHA
     try:
         result = _subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -308,6 +284,7 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
+        scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
 
         # Install kafka extra dependencies
         print("Installing daydream-scope[kafka]...")
@@ -389,7 +366,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
         This keeps a persistent connection to prevent fal from spawning new runners.
         """
-        import asyncio
         import json
         import uuid
 
@@ -607,6 +583,15 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
+            # Block plugin installation in cloud mode (security: prevent arbitrary code execution)
+            if method == "POST" and path == "/api/v1/plugins":
+                return {
+                    "type": "api_response",
+                    "request_id": request_id,
+                    "status": 403,
+                    "error": "Plugin installation is not available in cloud mode",
+                }
+
             # Inject connection_id into pipeline load requests for event correlation
             if (
                 method == "POST"
@@ -644,8 +629,12 @@ class ScopeApp(fal.App, keep_alive=300):
                                 timeout=60.0,  # Longer timeout for uploads
                             )
                         else:
+                            # Use longer timeout for LoRA installs
+                            post_timeout = 300.0 if path == "/api/v1/loras" else 30.0
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}", json=body, timeout=30.0
+                                f"{SCOPE_BASE_URL}{path}",
+                                json=body,
+                                timeout=post_timeout,
                             )
                     elif method == "PATCH":
                         response = await client.patch(
@@ -731,9 +720,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
             if msg_type == "set_user_id":
                 requested_user_id = payload.get("user_id")
-                print(
-                    f"[{log_prefix()}] Validating user access for {requested_user_id}"
-                )
 
                 # Validate user has access to cloud mode
                 is_valid, reason = await validate_user_access(requested_user_id)

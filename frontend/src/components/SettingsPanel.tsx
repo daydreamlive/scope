@@ -22,7 +22,16 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 import { SliderWithInput } from "./ui/slider-with-input";
-import { Hammer, Info, Minus, Plus, RotateCcw } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Hammer,
+  Info,
+  Minus,
+  Plus,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
 import {
@@ -117,6 +126,160 @@ function PluginConfigFields({
   );
 }
 
+/** Reusable list UI for selecting, reordering, and configuring multiple pre/postprocessors. */
+function ProcessorListSection({
+  label,
+  tooltip,
+  selectedIds,
+  onIdsChange,
+  availablePipelines,
+  allPipelines,
+  overrides,
+  onOverrideChange,
+  inputMode,
+  isStreaming = false,
+  isLoading = false,
+}: {
+  label: string;
+  tooltip: string;
+  selectedIds: string[];
+  onIdsChange?: (ids: string[]) => void;
+  availablePipelines: string[];
+  allPipelines: Record<string, PipelineInfo> | null;
+  overrides?: Record<string, Record<string, unknown>>;
+  onOverrideChange?: (
+    processorId: string,
+    key: string,
+    value: unknown,
+    isRuntimeParam?: boolean
+  ) => void;
+  inputMode?: InputMode;
+  isStreaming?: boolean;
+  isLoading?: boolean;
+}) {
+  const disabled = isStreaming || isLoading;
+  const unselected = availablePipelines.filter(
+    pid => !selectedIds.includes(pid)
+  );
+
+  const moveUp = (index: number) => {
+    if (index <= 0) return;
+    const next = [...selectedIds];
+    [next[index - 1], next[index]] = [next[index], next[index - 1]];
+    onIdsChange?.(next);
+  };
+
+  const moveDown = (index: number) => {
+    if (index >= selectedIds.length - 1) return;
+    const next = [...selectedIds];
+    [next[index], next[index + 1]] = [next[index + 1], next[index]];
+    onIdsChange?.(next);
+  };
+
+  const remove = (index: number) => {
+    const next = selectedIds.filter((_, i) => i !== index);
+    onIdsChange?.(next);
+  };
+
+  const add = (pid: string) => {
+    onIdsChange?.([...selectedIds, pid]);
+  };
+
+  return (
+    <div className="space-y-2">
+      <LabelWithTooltip
+        label={label}
+        tooltip={tooltip}
+        className="text-sm font-medium"
+      />
+
+      {selectedIds.map((pid, index) => {
+        const configSchema = allPipelines?.[pid]?.configSchema as
+          | import("../lib/schemaSettings").ConfigSchemaLike
+          | undefined;
+        const processorOverrides = overrides?.[pid];
+
+        return (
+          <div key={pid} className="rounded-lg border bg-card p-2 space-y-2">
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-medium flex-1 truncate">{pid}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 shrink-0"
+                onClick={() => moveUp(index)}
+                disabled={disabled || index === 0}
+              >
+                <ChevronUp className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 shrink-0"
+                onClick={() => moveDown(index)}
+                disabled={disabled || index === selectedIds.length - 1}
+              >
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 shrink-0"
+                onClick={() => remove(index)}
+                disabled={disabled}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+            {configSchema && (
+              <PluginConfigFields
+                configSchema={configSchema}
+                inputMode={inputMode}
+                overrides={processorOverrides}
+                onChange={
+                  onOverrideChange
+                    ? (key, value, isRuntimeParam) =>
+                        onOverrideChange(pid, key, value, isRuntimeParam)
+                    : undefined
+                }
+                isStreaming={isStreaming}
+                isLoading={isLoading}
+              />
+            )}
+          </div>
+        );
+      })}
+
+      {unselected.length > 0 ? (
+        <Select value="" onValueChange={add} disabled={disabled}>
+          <SelectTrigger className="w-full h-7">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Plus className="h-3 w-3" />
+              <span>Add</span>
+            </div>
+          </SelectTrigger>
+          <SelectContent>
+            {unselected.map(pid => (
+              <SelectItem key={pid} value={pid}>
+                {pid}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <Select value="none" disabled>
+          <SelectTrigger className="w-full h-7">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">None</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
+
 interface SettingsPanelProps {
   className?: string;
   pipelines: Record<string, PipelineInfo> | null;
@@ -152,11 +315,14 @@ interface SettingsPanelProps {
   inputMode?: InputMode;
   // Whether this pipeline supports noise controls in video mode (schema-derived)
   supportsNoiseControls?: boolean;
-  // Spout settings
-  spoutSender?: SettingsState["spoutSender"];
-  onSpoutSenderChange?: (spoutSender: SettingsState["spoutSender"]) => void;
-  // Whether Spout is available (server-side detection for native Windows, not WSL)
+  // Output sinks
+  outputSinks?: SettingsState["outputSinks"];
+  onOutputSinkChange?: (
+    sinkType: string,
+    config: { enabled: boolean; name: string }
+  ) => void;
   spoutAvailable?: boolean;
+  ndiAvailable?: boolean;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -177,20 +343,23 @@ interface SettingsPanelProps {
     value: unknown,
     isRuntimeParam?: boolean
   ) => void;
-  // Preprocessor/postprocessor config schemas and overrides
-  preprocessorConfigSchema?: import("../lib/schemaSettings").ConfigSchemaLike;
-  postprocessorConfigSchema?: import("../lib/schemaSettings").ConfigSchemaLike;
-  preprocessorSchemaFieldOverrides?: Record<string, unknown>;
-  postprocessorSchemaFieldOverrides?: Record<string, unknown>;
+  // Per-processor schema overrides (outer key = pipeline ID, inner = field overrides)
+  preprocessorSchemaFieldOverrides?: Record<string, Record<string, unknown>>;
+  postprocessorSchemaFieldOverrides?: Record<string, Record<string, unknown>>;
   onPreprocessorSchemaFieldOverrideChange?: (
+    processorId: string,
     key: string,
-    value: unknown
+    value: unknown,
+    isRuntimeParam?: boolean
   ) => void;
   onPostprocessorSchemaFieldOverrideChange?: (
+    processorId: string,
     key: string,
-    value: unknown
+    value: unknown,
+    isRuntimeParam?: boolean
   ) => void;
   isCloudMode?: boolean;
+  onOpenLoRAsSettings?: () => void;
 }
 
 export function SettingsPanel({
@@ -221,9 +390,10 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
-  spoutSender,
-  onSpoutSenderChange,
+  outputSinks,
+  onOutputSinkChange,
   spoutAvailable = false,
+  ndiAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -236,13 +406,12 @@ export function SettingsPanel({
   onPostprocessorIdsChange,
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
-  preprocessorConfigSchema,
-  postprocessorConfigSchema,
   preprocessorSchemaFieldOverrides,
   postprocessorSchemaFieldOverrides,
   onPreprocessorSchemaFieldOverrideChange,
   onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
+  onOpenLoRAsSettings,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -467,110 +636,52 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {/* Preprocessor Selector */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <LabelWithTooltip
-              label={PARAMETER_METADATA.preprocessor.label}
-              tooltip={PARAMETER_METADATA.preprocessor.tooltip}
-              className="text-sm font-medium"
-            />
-            <Select
-              value={preprocessorIds.length > 0 ? preprocessorIds[0] : "none"}
-              onValueChange={value => {
-                if (value === "none") {
-                  onPreprocessorIdsChange?.([]);
-                } else {
-                  onPreprocessorIdsChange?.([value]);
-                }
-              }}
-              disabled={isStreaming || isLoading}
-            >
-              <SelectTrigger className="w-[140px] h-7">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {Object.entries(pipelines || {})
-                  .filter(([, info]) => {
-                    const isPreprocessor =
-                      info.usage?.includes("preprocessor") ?? false;
-                    if (!isPreprocessor) return false;
-                    if (inputMode) {
-                      return info.supportedModes?.includes(inputMode) ?? false;
-                    }
-                    return true;
-                  })
-                  .map(([pid]) => (
-                    <SelectItem key={pid} value={pid}>
-                      {pid}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {preprocessorConfigSchema && (
-            <PluginConfigFields
-              configSchema={preprocessorConfigSchema}
-              inputMode={inputMode}
-              overrides={preprocessorSchemaFieldOverrides}
-              onChange={onPreprocessorSchemaFieldOverrideChange}
-              isStreaming={isStreaming}
-              isLoading={isLoading}
-            />
-          )}
-        </div>
+        {/* Preprocessor List */}
+        <ProcessorListSection
+          label={PARAMETER_METADATA.preprocessor.label}
+          tooltip={PARAMETER_METADATA.preprocessor.tooltip}
+          selectedIds={preprocessorIds}
+          onIdsChange={onPreprocessorIdsChange}
+          availablePipelines={Object.entries(pipelines || {})
+            .filter(([, info]) => {
+              const isPreprocessor =
+                info.usage?.includes("preprocessor") ?? false;
+              if (!isPreprocessor) return false;
+              if (inputMode) {
+                return info.supportedModes?.includes(inputMode) ?? false;
+              }
+              return true;
+            })
+            .map(([pid]) => pid)}
+          allPipelines={pipelines}
+          overrides={preprocessorSchemaFieldOverrides}
+          onOverrideChange={onPreprocessorSchemaFieldOverrideChange}
+          inputMode={inputMode}
+          isStreaming={isStreaming}
+          isLoading={isLoading}
+        />
 
-        {/* Postprocessor Selector - fixed, always shown */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <LabelWithTooltip
-              label={PARAMETER_METADATA.postprocessor.label}
-              tooltip={PARAMETER_METADATA.postprocessor.tooltip}
-              className="text-sm font-medium"
-            />
-            <Select
-              value={postprocessorIds.length > 0 ? postprocessorIds[0] : "none"}
-              onValueChange={value => {
-                if (value === "none") {
-                  onPostprocessorIdsChange?.([]);
-                } else {
-                  onPostprocessorIdsChange?.([value]);
-                }
-              }}
-              disabled={isStreaming || isLoading}
-            >
-              <SelectTrigger className="w-[140px] h-7">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {Object.entries(pipelines || {})
-                  .filter(([, info]) => {
-                    const isPostprocessor =
-                      info.usage?.includes("postprocessor") ?? false;
-                    if (!isPostprocessor) return false;
-                    return info.supportedModes?.includes("video") ?? false;
-                  })
-                  .map(([pid]) => (
-                    <SelectItem key={pid} value={pid}>
-                      {pid}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {postprocessorConfigSchema && (
-            <PluginConfigFields
-              configSchema={postprocessorConfigSchema}
-              inputMode={inputMode}
-              overrides={postprocessorSchemaFieldOverrides}
-              onChange={onPostprocessorSchemaFieldOverrideChange}
-              isStreaming={isStreaming}
-              isLoading={isLoading}
-            />
-          )}
-        </div>
+        {/* Postprocessor List */}
+        <ProcessorListSection
+          label={PARAMETER_METADATA.postprocessor.label}
+          tooltip={PARAMETER_METADATA.postprocessor.tooltip}
+          selectedIds={postprocessorIds}
+          onIdsChange={onPostprocessorIdsChange}
+          availablePipelines={Object.entries(pipelines || {})
+            .filter(([, info]) => {
+              const isPostprocessor =
+                info.usage?.includes("postprocessor") ?? false;
+              if (!isPostprocessor) return false;
+              return info.supportedModes?.includes("video") ?? false;
+            })
+            .map(([pid]) => pid)}
+          allPipelines={pipelines}
+          overrides={postprocessorSchemaFieldOverrides}
+          onOverrideChange={onPostprocessorSchemaFieldOverrideChange}
+          inputMode={inputMode}
+          isStreaming={isStreaming}
+          isLoading={isLoading}
+        />
 
         {/* Schema-driven configuration (when configSchema has ui.category===configuration) or legacy */}
         {(() => {
@@ -637,6 +748,7 @@ export function SettingsPanel({
               isCloudMode,
               schemaFieldOverrides,
               onSchemaFieldOverrideChange,
+              onOpenLoRAsSettings,
             };
             return (
               <>
@@ -778,7 +890,7 @@ export function SettingsPanel({
                 </div>
               )}
 
-              {currentPipeline?.supportsLoRA && !isCloudMode && (
+              {currentPipeline?.supportsLoRA && (
                 <div className="space-y-4">
                   <LoRAManager
                     loras={loras}
@@ -786,6 +898,7 @@ export function SettingsPanel({
                     disabled={isLoading}
                     isStreaming={isStreaming}
                     loraMergeStrategy={loraMergeStrategy}
+                    onOpenLoRAsSettings={onOpenLoRAsSettings}
                   />
                 </div>
               )}
@@ -1086,50 +1199,100 @@ export function SettingsPanel({
           );
         })()}
 
-        {/* Spout Sender Settings (available on native Windows only) */}
+        {/* Spout Output */}
         {spoutAvailable && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <LabelWithTooltip
-                label={PARAMETER_METADATA.spoutSender.label}
-                tooltip={PARAMETER_METADATA.spoutSender.tooltip}
+                label="Spout Output"
+                tooltip="Send video to Spout-compatible apps (Windows) like TouchDesigner, Resolume, OBS."
                 className="text-sm font-medium"
               />
               <Toggle
-                pressed={spoutSender?.enabled ?? false}
+                pressed={outputSinks?.spout?.enabled ?? false}
                 onPressedChange={enabled => {
-                  onSpoutSenderChange?.({
+                  onOutputSinkChange?.("spout", {
                     enabled,
-                    name: spoutSender?.name ?? "ScopeOut",
+                    name: outputSinks?.spout?.name ?? "ScopeOut",
                   });
                 }}
                 variant="outline"
                 size="sm"
                 className="h-7"
               >
-                {spoutSender?.enabled ? "ON" : "OFF"}
+                {outputSinks?.spout?.enabled ? "ON" : "OFF"}
               </Toggle>
             </div>
 
-            {spoutSender?.enabled && (
+            {outputSinks?.spout?.enabled && (
               <div className="flex items-center gap-3">
                 <LabelWithTooltip
                   label="Sender Name"
-                  tooltip="The name of the sender that will send video to Spout-compatible apps like TouchDesigner, Resolume, OBS."
+                  tooltip="The name visible to Spout receivers."
                   className="text-xs text-muted-foreground whitespace-nowrap"
                 />
                 <Input
                   type="text"
-                  value={spoutSender?.name ?? "ScopeOut"}
+                  value={outputSinks?.spout?.name ?? "ScopeOut"}
                   onChange={e => {
-                    onSpoutSenderChange?.({
-                      enabled: spoutSender?.enabled ?? false,
+                    onOutputSinkChange?.("spout", {
+                      enabled: outputSinks?.spout?.enabled ?? false,
                       name: e.target.value,
                     });
                   }}
                   disabled={isStreaming}
                   className="h-8 text-sm flex-1"
                   placeholder="ScopeOut"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* NDI Output */}
+        {ndiAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.ndiSender.label}
+                tooltip={PARAMETER_METADATA.ndiSender.tooltip}
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={outputSinks?.ndi?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onOutputSinkChange?.("ndi", {
+                    enabled,
+                    name: outputSinks?.ndi?.name ?? "Scope",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {outputSinks?.ndi?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {outputSinks?.ndi?.enabled && (
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name"
+                  tooltip="The name visible to NDI receivers on the network."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={outputSinks?.ndi?.name ?? "Scope"}
+                  onChange={e => {
+                    onOutputSinkChange?.("ndi", {
+                      enabled: outputSinks?.ndi?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="Scope"
                 />
               </div>
             )}

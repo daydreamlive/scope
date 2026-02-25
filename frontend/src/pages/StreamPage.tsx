@@ -18,7 +18,11 @@ import { useApi } from "../hooks/useApi";
 import { useCloudContext } from "../lib/cloudContext";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { getDefaultPromptForMode } from "../data/pipelines";
-import { adjustResolutionForPipeline } from "../lib/utils";
+import {
+  adjustResolutionForPipeline,
+  fitResolutionToPixelBudget,
+  getResolutionScaleFactor,
+} from "../lib/utils";
 import type {
   ExtensionMode,
   InputMode,
@@ -105,12 +109,13 @@ export function StreamPage() {
     getDefaults,
     supportsNoiseControls,
     spoutAvailable,
+    ndiOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   } = useStreamState();
 
-  // Derive NDI availability from dynamic input sources list
+  // Derive NDI input availability from dynamic input sources list
   const ndiAvailable = availableInputSources.some(
     s => s.source_id === "ndi" && s.available
   );
@@ -146,6 +151,26 @@ export function StreamPage() {
     width: number;
     height: number;
   } | null>(null);
+
+  // Cap an input resolution to fit within a pipeline's default pixel budget
+  const capResolution = useCallback(
+    (
+      input: { width: number; height: number },
+      pipelineId: PipelineId,
+      mode?: InputMode
+    ) => {
+      const defaults = getDefaults(pipelineId, mode);
+      const scaleFactor = getResolutionScaleFactor(pipelineId) ?? 1;
+      const maxPixels = defaults.width * defaults.height;
+      return fitResolutionToPixelBudget(
+        input.width,
+        input.height,
+        maxPixels,
+        scaleFactor
+      );
+    },
+    [getDefaults]
+  );
 
   const [isLive, setIsLive] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
@@ -278,7 +303,11 @@ export function StreamPage() {
     onCustomVideoResolution: resolution => {
       setCustomVideoResolution(resolution);
       updateSettings({
-        resolution: { height: resolution.height, width: resolution.width },
+        resolution: capResolution(
+          resolution,
+          settings.pipelineId,
+          settings.inputMode
+        ),
       });
     },
   });
@@ -311,11 +340,11 @@ export function StreamPage() {
     // Get mode-specific defaults from backend schema
     const modeDefaults = getDefaults(settings.pipelineId, newMode);
 
-    // Use custom video resolution if switching to video mode and one exists
-    // This preserves the user's uploaded video resolution across mode switches
+    // Use custom video resolution (capped to pixel budget) if switching to video mode
+    // This preserves the user's uploaded video aspect ratio across mode switches
     const resolution =
       newMode === "video" && customVideoResolution
-        ? customVideoResolution
+        ? capResolution(customVideoResolution, settings.pipelineId, newMode)
         : { height: modeDefaults.height, width: modeDefaults.width };
 
     // Clear pre/postprocessors that don't support the new mode
@@ -398,11 +427,11 @@ export function StreamPage() {
     // Update prompts to mode-specific defaults (unified per mode, not per pipeline)
     setPromptItems([{ text: getDefaultPromptForMode(modeToUse), weight: 100 }]);
 
-    // Use custom video resolution if mode is video and one exists
-    // This preserves the user's uploaded video resolution across pipeline switches
+    // Use custom video resolution (capped to pixel budget) if mode is video
+    // This preserves the user's uploaded video aspect ratio across pipeline switches
     const resolution =
       modeToUse === "video" && customVideoResolution
-        ? customVideoResolution
+        ? capResolution(customVideoResolution, pipelineId, modeToUse)
         : { height: defaults.height, width: defaults.width };
 
     // Update the pipeline in settings with the appropriate mode and defaults
@@ -482,10 +511,14 @@ export function StreamPage() {
                 currentMode
               );
 
-              // Use custom video resolution if mode is video and one exists
+              // Use custom video resolution (capped to pixel budget) if mode is video
               const resolution =
                 currentMode === "video" && customVideoResolution
-                  ? customVideoResolution
+                  ? capResolution(
+                      customVideoResolution,
+                      pipelineId as PipelineId,
+                      currentMode
+                    )
                   : { height: defaults.height, width: defaults.width };
 
               // Only update pipeline-related settings, preserving current input mode and prompts
@@ -696,16 +729,40 @@ export function StreamPage() {
 
   const makePipelineIdsHandler = (kind: PipelineKind) => (ids: string[]) => {
     const k = pipelineSettingsKeys[kind];
-    updateSettings({ [k.ids]: ids, [k.overrides]: {} });
+    // Preserve overrides for processors that remain in the list
+    const currentOverrides =
+      (settings[k.overrides] as
+        | Record<string, Record<string, unknown>>
+        | undefined) ?? {};
+    const kept: Record<string, Record<string, unknown>> = {};
+    for (const id of ids) {
+      if (currentOverrides[id]) {
+        kept[id] = currentOverrides[id];
+      }
+    }
+    updateSettings({ [k.ids]: ids, [k.overrides]: kept });
   };
 
   const makePipelineOverrideHandler =
     (kind: PipelineKind) =>
-    (key: string, value: unknown, isRuntimeParam?: boolean) => {
+    (
+      processorId: string,
+      key: string,
+      value: unknown,
+      isRuntimeParam?: boolean
+    ) => {
       const k = pipelineSettingsKeys[kind];
       const currentOverrides =
-        (settings[k.overrides] as Record<string, unknown> | undefined) ?? {};
-      updateSettings({ [k.overrides]: { ...currentOverrides, [key]: value } });
+        (settings[k.overrides] as
+          | Record<string, Record<string, unknown>>
+          | undefined) ?? {};
+      const processorOverrides = currentOverrides[processorId] ?? {};
+      updateSettings({
+        [k.overrides]: {
+          ...currentOverrides,
+          [processorId]: { ...processorOverrides, [key]: value },
+        },
+      });
       if (isRuntimeParam && isStreaming) {
         sendParameterUpdate({ [key]: value });
       }
@@ -786,14 +843,15 @@ export function StreamPage() {
     });
   };
 
-  const handleSpoutSenderChange = (
-    spoutSender: { enabled: boolean; name: string } | undefined
+  const handleOutputSinkChange = (
+    sinkType: string,
+    config: { enabled: boolean; name: string }
   ) => {
-    updateSettings({ spoutSender });
-    // Send Spout output settings to backend
+    const updated = { ...settings.outputSinks, [sinkType]: config };
+    updateSettings({ outputSinks: updated });
     if (isStreaming) {
       sendParameterUpdate({
-        spout_sender: spoutSender,
+        output_sinks: updated,
       });
     }
   };
@@ -845,13 +903,19 @@ export function StreamPage() {
       },
     });
 
-    // Probe the source's native resolution so the pipeline loads at the right aspect ratio
+    // Probe the source's native resolution and scale it to fit the pipeline's pixel budget
     try {
       const { width, height } = await getInputSourceResolution(
         "ndi",
         identifier
       );
-      updateSettings({ resolution: { width, height } });
+      updateSettings({
+        resolution: capResolution(
+          { width, height },
+          settings.pipelineId,
+          settings.inputMode
+        ),
+      });
     } catch (e) {
       console.warn("Could not probe NDI source resolution:", e);
     }
@@ -1141,15 +1205,23 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
         }
 
-        // Include pre/postprocessor schema overrides as flat params
+        // Include per-processor schema overrides as flat params
         for (const kind of ["preprocessor", "postprocessor"] as const) {
           const k = pipelineSettingsKeys[kind];
           const ids = settings[k.ids] as string[] | undefined;
           const overrides = settings[k.overrides] as
-            | Record<string, unknown>
+            | Record<string, Record<string, unknown>>
             | undefined;
-          if (ids?.length && overrides && Object.keys(overrides).length > 0) {
-            Object.assign(loadParams, overrides);
+          if (ids?.length && overrides) {
+            for (const id of ids) {
+              const processorOverrides = overrides[id];
+              if (
+                processorOverrides &&
+                Object.keys(processorOverrides).length > 0
+              ) {
+                Object.assign(loadParams, processorOverrides);
+              }
+            }
           }
         }
 
@@ -1197,7 +1269,7 @@ export function StreamPage() {
         noise_controller?: boolean;
         manage_cache?: boolean;
         kv_cache_attention_bias?: number;
-        spout_sender?: { enabled: boolean; name: string };
+        output_sinks?: Record<string, { enabled: boolean; name: string }>;
         vace_ref_images?: string[];
         vace_use_input_video?: boolean;
         vace_context_scale?: number;
@@ -1279,9 +1351,14 @@ export function StreamPage() {
         initialParameters.noise_controller = settings.noiseController ?? true;
       }
 
-      // Spout output settings - send if enabled
-      if (settings.spoutSender?.enabled) {
-        initialParameters.spout_sender = settings.spoutSender;
+      // Output sinks - send if any are enabled
+      if (settings.outputSinks) {
+        const enabledSinks = Object.fromEntries(
+          Object.entries(settings.outputSinks).filter(([, v]) => v.enabled)
+        );
+        if (Object.keys(enabledSinks).length > 0) {
+          initialParameters.output_sinks = enabledSinks;
+        }
       }
 
       // Generic input source (NDI, Spout, etc.) - send if enabled
@@ -1643,9 +1720,10 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            spoutSender={settings.spoutSender}
-            onSpoutSenderChange={handleSpoutSenderChange}
+            outputSinks={settings.outputSinks}
+            onOutputSinkChange={handleOutputSinkChange}
             spoutAvailable={spoutAvailable}
+            ndiAvailable={ndiOutputAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
@@ -1660,20 +1738,6 @@ export function StreamPage() {
             onPreprocessorIdsChange={handlePreprocessorIdsChange}
             postprocessorIds={settings.postprocessorIds ?? []}
             onPostprocessorIdsChange={handlePostprocessorIdsChange}
-            preprocessorConfigSchema={
-              settings.preprocessorIds?.[0]
-                ? (pipelines?.[settings.preprocessorIds[0]]?.configSchema as
-                    | import("../lib/schemaSettings").ConfigSchemaLike
-                    | undefined)
-                : undefined
-            }
-            postprocessorConfigSchema={
-              settings.postprocessorIds?.[0]
-                ? (pipelines?.[settings.postprocessorIds[0]]?.configSchema as
-                    | import("../lib/schemaSettings").ConfigSchemaLike
-                    | undefined)
-                : undefined
-            }
             preprocessorSchemaFieldOverrides={
               settings.preprocessorSchemaFieldOverrides ?? {}
             }
@@ -1699,6 +1763,7 @@ export function StreamPage() {
               }
             }}
             isCloudMode={isCloudMode}
+            onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
           />
         </div>
       </div>

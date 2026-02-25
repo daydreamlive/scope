@@ -1,7 +1,7 @@
 {
   "name": "daydream-scope-desktop",
   "productName": "Daydream Scope",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Daydream Scope",
   "main": ".vite/build/main.js",
   "scripts": {
