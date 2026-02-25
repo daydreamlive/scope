@@ -59,7 +59,9 @@ export class ScopeElectronAppService {
     if (isWindows) {
       return this.getIconPath('icon.ico');
     }
-    const trayIconPath = this.getIconPath('tray-icon.png');
+    // Use Template naming convention for macOS - this enables automatic light/dark mode handling
+    // macOS will automatically use trayIconTemplate@2x.png for Retina displays
+    const trayIconPath = this.getIconPath('trayIconTemplate.png');
     const fallbackIconPath = this.getIconPath('icon.png');
     return fs.existsSync(trayIconPath) ? trayIconPath : fallbackIconPath;
   }
