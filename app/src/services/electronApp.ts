@@ -286,6 +286,7 @@ export class ScopeElectronAppService {
 
   private setupWindowContextMenu(_window: BrowserWindow): void {
     // Set up the application menu with context menu items (including keyboard shortcuts)
+    // Edit menu is required for copy/paste/cut to work in Electron input fields
     const menu = Menu.buildFromTemplate([
       {
         label: 'File',
@@ -305,6 +306,20 @@ export class ScopeElectronAppService {
               app.quit();
             },
           },
+        ],
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'pasteAndMatchStyle' },
+          { role: 'delete' },
+          { role: 'selectAll' },
         ],
       },
     ]);
