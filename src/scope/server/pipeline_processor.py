@@ -120,15 +120,16 @@ class PipelineProcessor:
         # the next pipeline in the chain can consume them
         self.throttler = PipelineThrottler()
 
-    def _resize_output_queue(self, target_size: int):
-        """Resize the primary video output queue, transferring existing frames."""
-        video_queues = self.output_queues.get("video")
-        if not video_queues:
+    def _resize_output_queue(self, port: str, target_size: int):
+        """Resize the primary output queue for a given port, transferring existing frames."""
+        port_queues = self.output_queues.get(port)
+        if not port_queues:
             return
-        primary = video_queues[0]
+        primary = port_queues[0]
         if primary.maxsize < target_size:
             logger.info(
-                f"Increasing output queue size to {target_size}, current size {primary.maxsize}"
+                f"Increasing output queue size for port '{port}' to {target_size}, "
+                f"current size {primary.maxsize}"
             )
             new_queue = queue.Queue(maxsize=target_size)
             while not primary.empty():
@@ -137,10 +138,10 @@ class PipelineProcessor:
                     new_queue.put_nowait(frame)
                 except queue.Empty:
                     break
-            self.output_queues["video"] = [new_queue] + video_queues[1:]
+            self.output_queues[port] = [new_queue] + port_queues[1:]
             if self.next_processor is not None:
                 with self.next_processor.input_queue_lock:
-                    self.next_processor.input_queues["video"] = new_queue
+                    self.next_processor.input_queues[port] = new_queue
 
     def set_next_processor(self, next_processor: "PipelineProcessor"):
         """Set the next processor in the chain and update output queue size accordingly.
@@ -159,7 +160,7 @@ class PipelineProcessor:
             requirements = next_pipeline.prepare(video=True)
             input_size = requirements.input_size
             target_size = max(8, input_size * OUTPUT_QUEUE_MAX_SIZE_FACTOR)
-            self._resize_output_queue(target_size)
+            self._resize_output_queue("video", target_size)
 
         # Update next processor's input_queue to point to this output_queue
         # Use lock to ensure thread-safe reference swapping
@@ -505,13 +506,6 @@ class PipelineProcessor:
                 .detach()
             )
 
-            # Resize primary video output queue to meet target max size.
-            # Skip for the sink (no next_processor): keep the graph-wired queue so
-            # frame_processor.get() always reads from the same queue we write to.
-            if self.next_processor is not None:
-                target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
-                self._resize_output_queue(target_output_queue_max_size)
-
             # Put each output port's frames to its queues (all frame ports are streamed)
             for port, value in output_dict.items():
                 if value is None or not isinstance(value, torch.Tensor):
@@ -519,6 +513,12 @@ class PipelineProcessor:
                 queues = self.output_queues.get(port)
                 if not queues:
                     continue
+                # Resize output queue to meet target max size.
+                # Skip for the sink (no next_processor): keep the graph-wired
+                # queue so frame_processor.get() reads from the same queue.
+                if self.next_processor is not None:
+                    target_size = value.shape[0] * OUTPUT_QUEUE_MAX_SIZE_FACTOR
+                    self._resize_output_queue(port, target_size)
                 if value.dtype != torch.uint8:
                     value = (
                         (value * 255.0)
