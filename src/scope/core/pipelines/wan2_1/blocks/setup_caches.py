@@ -188,6 +188,11 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 components.generator,
                 components.config.local_attn_size * frame_seq_length,
             )
+            set_all_modules_cache_sink_tokens(
+                components.generator,
+                frame_seq_length * (components.config.local_attn_size - components.config.num_frame_per_block),
+                frame_seq_length * components.generator.model.sink_size,
+            )
 
             block_state.kv_cache = initialize_kv_cache(
                 generator=components.generator,
@@ -252,3 +257,15 @@ def set_all_modules_frame_seq_length(generator, frame_seq_length: int):
     for _, module in generator.model.named_modules():
         if hasattr(module, "frame_seq_length"):
             module.frame_seq_length = frame_seq_length
+
+def set_all_modules_cache_sink_tokens(generator, cache_tokens: int, sink_tokens: int):
+    if hasattr(generator.model, "cache_tokens"):
+        generator.model.cache_tokens = cache_tokens
+    if hasattr(generator.model, "sink_tokens"):
+        generator.model.sink_tokens = sink_tokens
+
+    for _, module in generator.model.named_modules():
+        if hasattr(module, "cache_tokens"):
+            module.cache_tokens = cache_tokens
+        if hasattr(module, "sink_tokens"):
+            module.sink_tokens = sink_tokens

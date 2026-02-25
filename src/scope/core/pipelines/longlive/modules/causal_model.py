@@ -89,7 +89,6 @@ class CausalWanSelfAttention(nn.Module):
         self.sink_size = sink_size
         self.qk_norm = qk_norm
         self.eps = eps
-        self.frame_seq_length = 0  # Set by SetupCachesBlock at runtime
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -314,7 +313,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         self.frame_seq_length = 0
         # Tracks how many valid tokens are in the cache (0 = empty, cache_size = full)
         self.fill_level = 0
-        self._blocks_compiled = False
+        self.cache_tokens = 0
+        self.sink_tokens = 0
 
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size
@@ -360,36 +360,32 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         )
 
     def _roll_update_cache(self, kv_cache, new_kvs):
-        """Roll the KV cache and insert new KVs.
+        """Update the KV cache with new key-value pairs.
 
-        During the filling phase (sink not yet active), the entire cache is rolled.
-        Once the cache is full (sink active), only the non-sink portion is rolled,
-        preserving the first sink_size frames as attention anchors.
+        During filling: appends new KVs at fill_level.
+        Once full: rolls the non-sink portion and overwrites the tail.
+        In both cases, if the incoming KVs exceed available capacity,
+        only the last-fitting tokens are kept.
         """
-        cache_tokens = kv_cache[0]["k"].shape[1]
-        sink_tokens = self.sink_size * self.frame_seq_length
-        sink_active = self.fill_level >= cache_tokens
         num_new = new_kvs[0][0].shape[1]
+        can_fit = self.cache_tokens - self.sink_tokens
+        take = min(num_new, can_fit)
 
         for i, (new_k, new_v) in enumerate(new_kvs):
-            if sink_active:
-                # Roll only the non-sink portion, keep sink pinned
-                kv_cache[i]["k"][:, sink_tokens:] = torch.roll(
-                    kv_cache[i]["k"][:, sink_tokens:], -num_new, dims=1
+            if self.fill_level >= self.cache_tokens:
+                kv_cache[i]["k"][:, self.sink_tokens:] = torch.roll(
+                    kv_cache[i]["k"][:, self.sink_tokens:], -take, dims=1
                 )
-                kv_cache[i]["v"][:, sink_tokens:] = torch.roll(
-                    kv_cache[i]["v"][:, sink_tokens:], -num_new, dims=1
+                kv_cache[i]["v"][:, self.sink_tokens:] = torch.roll(
+                    kv_cache[i]["v"][:, self.sink_tokens:], -take, dims=1
                 )
+                kv_cache[i]["k"][:, -take:] = new_k[:, -take:]
+                kv_cache[i]["v"][:, -take:] = new_v[:, -take:]
             else:
-                # Full roll during filling phase
-                kv_cache[i]["k"] = torch.roll(kv_cache[i]["k"], -num_new, dims=1)
-                kv_cache[i]["v"] = torch.roll(kv_cache[i]["v"], -num_new, dims=1)
-            # Overwrite the wrapped-around junk at the end with new values
-            kv_cache[i]["k"][:, -num_new:] = new_k
-            kv_cache[i]["v"][:, -num_new:] = new_v
+                kv_cache[i]["k"][:, self.fill_level:self.fill_level + take] = new_k[:, -take:]
+                kv_cache[i]["v"][:, self.fill_level:self.fill_level + take] = new_v[:, -take:]
 
-        # Advance fill_level, capped at cache size
-        self.fill_level = min(self.fill_level + num_new, cache_tokens)
+        self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
 
     def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs):
         """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
@@ -465,43 +461,27 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context = padded_context
         context = self.text_embedding(context)
 
-        fill_level = self.fill_level
-
-        # Extract valid cache slices (outside compiled region)
-        if kv_cache is not None and fill_level > 0:
-            cache_ks = [kv_cache[i]["k"][:, -fill_level:] for i in range(len(self.blocks))]
-            cache_vs = [kv_cache[i]["v"][:, -fill_level:] for i in range(len(self.blocks))]
+        if self.fill_level > 0:
+            cache_ks = [kv_cache[i]["k"][:, :self.fill_level] for i in range(len(self.blocks))]
+            cache_vs = [kv_cache[i]["v"][:, :self.fill_level] for i in range(len(self.blocks))]
         else:
-            # No valid cache: use empty tensors so the inner function always gets tensors
             empty_k = torch.empty(1, 0, self.num_heads, self.dim // self.num_heads,
                                   dtype=x.dtype, device=x.device)
             cache_ks = [empty_k] * len(self.blocks)
             cache_vs = [empty_k] * len(self.blocks)
 
-        # Compile the inner forward once the cache is full (all shapes are fixed).
-        # With SDPA (no graph breaks), reduce-overhead mode can use CUDA graphs
-        # across the entire 30-block loop for maximum performance.
-        if not self._blocks_compiled and kv_cache is not None:
-            cache_tokens = kv_cache[0]["k"].shape[1]
-            if fill_level >= cache_tokens:
-                self._compiled_inner = torch.compile(self._inner_forward, dynamic=False, mode="max-autotune-no-cudagraphs")
-                self._blocks_compiled = True
-
-        # Run the block loop (compiled when ready, eager otherwise)
-        if self._blocks_compiled:
-            x, new_kvs = self._compiled_inner(
-                x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
-            )
+        if self.fill_level >= self.cache_tokens:
+            self._forward = self._inner_forward
         else:
-            x, new_kvs = self._inner_forward(
-                x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
-            )
+            self._forward = self._inner_forward
 
-        # Cache update (outside compiled region)
-        if update_cache and kv_cache is not None:
+        x, new_kvs = self._forward(
+            x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
+        )
+
+        if update_cache:
             self._roll_update_cache(kv_cache, new_kvs)
 
-        # Head and unpatchify
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
         x = self.unpatchify(x, f, h, w)
         return x
