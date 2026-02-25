@@ -571,6 +571,25 @@ class PipelineProcessor:
                                 )
                             break
 
+            # Forward extra params (non-video outputs without queues) to downstream
+            # pipelines. Preprocessors may return e.g. {"video": frames,
+            # "vace_input_frames": ..., "vace_input_masks": ...} and the extra
+            # entries need to reach the consuming pipeline as parameters.
+            extra_params = {k: v for k, v in output_dict.items() if k != "video"}
+            if extra_params:
+                if self.next_processor is not None:
+                    # Chain mode: forward to the next processor
+                    self.next_processor.update_parameters(extra_params)
+                elif self.output_consumers:
+                    # Graph mode: forward to all downstream consumers
+                    seen: set[int] = set()
+                    for consumers in self.output_consumers.values():
+                        for consumer_proc, _ in consumers:
+                            proc_id = id(consumer_proc)
+                            if proc_id not in seen:
+                                seen.add(proc_id)
+                                consumer_proc.update_parameters(extra_params)
+
             if chunks and self.next_processor is not None:
                 self.throttler.throttle()
 
