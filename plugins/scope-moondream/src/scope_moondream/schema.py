@@ -56,24 +56,24 @@ class MoondreamConfig(BasePipelineConfig):
 
     caption_length: CaptionLength = Field(
         default=CaptionLength.NORMAL,
-        description="Caption detail level (caption mode only)",
-        json_schema_extra=ui_field_config(order=2, label="Caption Length"),
+        description="Detail level for generated captions. Only used when Feature is set to 'caption'",
+        json_schema_extra=ui_field_config(order=2, label="Caption Length (caption)"),
     )
 
     temperature: float = Field(
         default=0.5,
         ge=0.0,
         le=1.0,
-        description="Sampling temperature for text generation",
-        json_schema_extra=ui_field_config(order=3, label="Temperature"),
+        description="Sampling temperature for caption and query text generation",
+        json_schema_extra=ui_field_config(order=3, label="Temperature (caption/query)"),
     )
 
     max_objects: int = Field(
         default=10,
         ge=1,
         le=50,
-        description="Maximum number of objects to detect (detect/point modes)",
-        json_schema_extra=ui_field_config(order=4, label="Max Objects"),
+        description="Maximum number of objects to find. Only used when Feature is set to 'detect' or 'point'",
+        json_schema_extra=ui_field_config(order=4, label="Max Objects (detect/point)"),
     )
 
     inference_interval: int = Field(
@@ -110,16 +110,16 @@ class MoondreamConfig(BasePipelineConfig):
 
     question: str = Field(
         default="What is in this image?",
-        description="Question to ask about the video frame (query mode)",
+        description="Question to ask about the video frame. Only used when Feature is set to 'query'",
         json_schema_extra=ui_field_config(
-            order=1, label="Question", category="input"
+            order=1, label="Question (query)", category="input"
         ),
     )
 
     detect_object: str = Field(
         default="person",
-        description="Object to find in the frame (detect/point modes)",
+        description="Object to find in the frame. Only used when Feature is set to 'detect' or 'point'",
         json_schema_extra=ui_field_config(
-            order=2, label="Detect Object", category="input"
+            order=2, label="Object (detect/point)", category="input"
         ),
     )
