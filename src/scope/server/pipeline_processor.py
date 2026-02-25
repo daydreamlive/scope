@@ -98,8 +98,13 @@ class PipelineProcessor:
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
         # Reference to next processor in chain (if chained)
-        # Used to update next processor's input_queues["video"] when output_queue is reassigned
         self.next_processor: PipelineProcessor | None = None
+
+        # Maps output port -> list of (consumer_processor, consumer_input_port).
+        # Used by _resize_output_queue to update all downstream consumers when
+        # a queue is replaced.  Populated by set_next_processor (chain mode) and
+        # by graph_executor.build_graph (graph mode, supports port remapping).
+        self.output_consumers: dict[str, list[tuple[PipelineProcessor, str]]] = {}
 
         # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
         # This fixes the chicken-and-egg problem where VACE isn't enabled until vace_input_frames arrives
@@ -121,27 +126,48 @@ class PipelineProcessor:
         self.throttler = PipelineThrottler()
 
     def _resize_output_queue(self, port: str, target_size: int):
-        """Resize the primary output queue for a given port, transferring existing frames."""
+        """Resize output queues for a given port, transferring existing frames.
+
+        Handles fan-out (multiple queues per port) and port name remapping
+        (output port name may differ from consumer's input port name).
+        Consumer references are updated via output_consumers which is populated
+        by set_next_processor (chain mode) or graph_executor (graph mode).
+        """
         port_queues = self.output_queues.get(port)
         if not port_queues:
             return
-        primary = port_queues[0]
-        if primary.maxsize < target_size:
+
+        consumers = self.output_consumers.get(port, [])
+        new_list = []
+        resized = False
+
+        for old_q in port_queues:
+            if old_q.maxsize >= target_size:
+                new_list.append(old_q)
+                continue
+
             logger.info(
                 f"Increasing output queue size for port '{port}' to {target_size}, "
-                f"current size {primary.maxsize}"
+                f"current size {old_q.maxsize}"
             )
-            new_queue = queue.Queue(maxsize=target_size)
-            while not primary.empty():
+            new_q = queue.Queue(maxsize=target_size)
+            while not old_q.empty():
                 try:
-                    frame = primary.get_nowait()
-                    new_queue.put_nowait(frame)
+                    frame = old_q.get_nowait()
+                    new_q.put_nowait(frame)
                 except queue.Empty:
                     break
-            self.output_queues[port] = [new_queue] + port_queues[1:]
-            if self.next_processor is not None:
-                with self.next_processor.input_queue_lock:
-                    self.next_processor.input_queues[port] = new_queue
+            new_list.append(new_q)
+            resized = True
+
+            # Update every consumer whose input queue is the old queue object
+            for consumer, consumer_port in consumers:
+                with consumer.input_queue_lock:
+                    if consumer.input_queues.get(consumer_port) is old_q:
+                        consumer.input_queues[consumer_port] = new_q
+
+        if resized:
+            self.output_queues[port] = new_list
 
     def set_next_processor(self, next_processor: "PipelineProcessor"):
         """Set the next processor in the chain and update output queue size accordingly.
@@ -150,6 +176,9 @@ class PipelineProcessor:
             next_processor: The next pipeline processor in the chain
         """
         self.next_processor = next_processor
+
+        # Register as output consumer for queue resize updates
+        self.output_consumers.setdefault("video", []).append((next_processor, "video"))
 
         # Set throttler's reference to next processor for throttling decisions
         self.throttler.set_next_processor(next_processor)
@@ -513,10 +542,11 @@ class PipelineProcessor:
                 queues = self.output_queues.get(port)
                 if not queues:
                     continue
-                # Resize output queue to meet target max size.
-                # Skip for the sink (no next_processor): keep the graph-wired
-                # queue so frame_processor.get() reads from the same queue.
-                if self.next_processor is not None:
+                # Resize output queues to meet target max size.
+                # Only resize when there are downstream pipeline consumers;
+                # the sink has no consumers so its queues stay fixed for
+                # frame_processor.get().
+                if self.output_consumers.get(port):
                     target_size = value.shape[0] * OUTPUT_QUEUE_MAX_SIZE_FACTOR
                     self._resize_output_queue(port, target_size)
                 if value.dtype != torch.uint8:

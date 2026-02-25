@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Default queue sizes (match pipeline_processor)
 # Use larger size for inter-pipeline queues so downstream can accumulate a full chunk
-DEFAULT_INPUT_QUEUE_MAXSIZE = 64
+DEFAULT_INPUT_QUEUE_MAXSIZE = 30
 DEFAULT_OUTPUT_QUEUE_MAXSIZE = 8
 
 
@@ -139,8 +139,32 @@ def build_graph(
                 port: q for port, q in proc.input_queues.items() if port in wired_ports
             }
 
-    # 4c) Resize inter-pipeline queues based on downstream pipeline requirements
+    # 4c) Populate output_consumers so processors can update downstream
+    # input queue references at runtime when output queues are resized.
+    for e in graph.edges:
+        if e.kind != "stream":
+            continue
+        producer = node_processors.get(e.from_node)
+        consumer = node_processors.get(e.to_node)
+        if producer is not None and consumer is not None:
+            producer.output_consumers.setdefault(e.from_port, []).append(
+                (consumer, e.to_port)
+            )
+
+    # 4d) Resize inter-pipeline queues based on downstream pipeline requirements
     _resize_graph_queues(graph, node_processors)
+
+    # 4e) Re-derive source_queues from processor input_queues (post-resize).
+    # _resize_graph_queues may have replaced queue objects, so the references
+    # captured in step 2 can be stale.
+    source_queues = []
+    for node_id in graph.get_source_node_ids():
+        for e in graph.stream_edges_from(node_id):
+            consumer = node_processors.get(e.to_node)
+            if consumer is not None:
+                q = consumer.input_queues.get(e.to_port)
+                if q is not None and q not in source_queues:
+                    source_queues.append(q)
 
     # 5) Identify sink: node that has an edge to "output" (or type sink)
     sink_node_id: str | None = None
