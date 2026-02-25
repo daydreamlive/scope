@@ -231,7 +231,7 @@ def _get_git_sha() -> str:
             text=True,
             check=True,
         )
-        return result.stdout.strip()
+        return result.stdout.strip() + "-cloud"
     except Exception as e:
         print(f"Warning: Could not get git SHA: {e}")
         return "unknown"
@@ -240,7 +240,7 @@ def _get_git_sha() -> str:
 GIT_SHA = _get_git_sha()
 
 # Configuration - uses git SHA from current checkout with cloud suffix (includes plugins)
-DOCKER_IMAGE = f"daydreamlive/scope:{GIT_SHA}-cloud"
+DOCKER_IMAGE = f"daydreamlive/scope:{GIT_SHA}"
 
 # Create a Dockerfile that uses your existing image as base
 dockerfile_str = f"""

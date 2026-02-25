@@ -10,8 +10,9 @@ ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-  # System dependencies
+# Install system dependencies
+# Note: build-essential and python3-dev needed for some pip packages with C extensions
+RUN apt-get update && apt-get install -y --no-install-recommends \
   curl \
   git \
   build-essential \
@@ -29,7 +30,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-  && apt-get install -y nodejs
+  && apt-get install -y --no-install-recommends nodejs \
+  && rm -rf /var/lib/apt/lists/*
 
 # Install uv (Python package manager)
 RUN curl -LsSf https://astral.sh/uv/0.9.11/install.sh | sh
@@ -41,7 +43,11 @@ RUN uv sync --frozen
 
 # Build frontend
 COPY frontend/ ./frontend/
-RUN cd frontend && npm install && npm run build
+RUN cd frontend \
+  && npm install \
+  && npm run build \
+  && rm -rf node_modules \
+  && npm cache clean --force
 
 # Copy project files
 COPY src/ /app/src/

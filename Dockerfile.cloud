@@ -25,5 +25,8 @@ RUN echo "Installing cloud plugins..." && \
         fi; \
       fi; \
     done && \
-    rm -rf /root/.cache/uv /root/.cache/pip && \
+    rm -rf /root/.cache/uv /root/.cache/pip /tmp/* && \
     echo "Cloud plugins installation complete"
+
+# Remove frontend - not needed in cloud mode (served separately)
+RUN rm -rf /app/frontend
