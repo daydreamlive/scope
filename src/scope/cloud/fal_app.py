@@ -170,7 +170,7 @@ class KafkaPublisher:
 kafka_publisher: KafkaPublisher | None = None
 
 
-ASSETS_DIR_PATH = "~/.daydream-scope/assets"
+ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
     3600  # Close connection after 60 minutes regardless of activity
@@ -332,10 +332,11 @@ class ScopeApp(fal.App, keep_alive=300):
 
         # Add scope-specific environment variables
         scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
-        # scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
+        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = ASSETS_DIR_PATH + "/logs"
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
         scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
+        scope_env["UV_CACHE_DIR"] = "/tmp/uv-cache"
 
         # Set up non-root user for running scope server (security)
         scope_user = None
@@ -368,17 +369,17 @@ class ScopeApp(fal.App, keep_alive=300):
                 os.setuid(scope_user.pw_uid)
 
         # Install kafka extra dependencies
-        print("Installing daydream-scope[kafka]...")
-        try:
-            subprocess.run(
-                ["uv", "pip", "install", "daydream-scope[kafka]"],
-                check=True,
-                env=scope_env,
-                preexec_fn=demote_to_scope_user if scope_user else None,
-            )
-            print("✅ daydream-scope[kafka] installed")
-        except Exception as e:
-            print(f"Failed to install daydream-scope[kafka]: {e}")
+        # print("Installing daydream-scope[kafka]...")
+        # try:
+        #     subprocess.run(
+        #         ["uv", "pip", "install", "--system", "daydream-scope[kafka]"],
+        #         check=True,
+        #         env=scope_env,
+        #         preexec_fn=demote_to_scope_user if scope_user else None,
+        #     )
+        #     print("✅ daydream-scope[kafka] installed")
+        # except Exception as e:
+        #     print(f"Failed to install daydream-scope[kafka]: {e}")
 
         # Start the scope server in a background thread
         def start_server():
@@ -388,7 +389,7 @@ class ScopeApp(fal.App, keep_alive=300):
                     [
                         "uv",
                         "run",
-                        "daydream-scope",
+                        "daydream-scope[kafka]",
                         "--no-browser",
                         "--host",
                         "0.0.0.0",
