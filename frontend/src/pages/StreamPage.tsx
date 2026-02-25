@@ -300,12 +300,37 @@ export function StreamPage() {
         settingsUpdate.vaceContextScale = params.vace_context_scale as number;
       }
 
+      // Sync any remaining params to schemaFieldOverrides (for plugin parameters)
+      const knownKeys = new Set([
+        "noise_scale",
+        "noise_controller",
+        "manage_cache",
+        "kv_cache_attention_bias",
+        "vace_context_scale",
+        "denoising_step_list",
+        "reset_cache",
+        "paused",
+        "prompts",
+      ]);
+      const overrideUpdates: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (!knownKeys.has(k)) {
+          overrideUpdates[k] = v;
+        }
+      }
+      if (Object.keys(overrideUpdates).length > 0) {
+        settingsUpdate.schemaFieldOverrides = {
+          ...(settings.schemaFieldOverrides ?? {}),
+          ...overrideUpdates,
+        };
+      }
+
       // Update settings if any mappings were found
       if (Object.keys(settingsUpdate).length > 0) {
         updateSettings(settingsUpdate);
       }
     },
-    [sendParameterUpdateWebRTC, updateSettings]
+    [sendParameterUpdateWebRTC, updateSettings, settings]
   );
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud

@@ -820,14 +820,3 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
-
-
-class OSCConfigResponse(BaseModel):
-    enabled: bool
-    port: int
-    available: bool
-
-
-class OSCConfigRequest(BaseModel):
-    enabled: bool
-    port: int = Field(default=8000, ge=1024, le=65535)

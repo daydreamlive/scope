@@ -564,9 +564,6 @@ dependencies = [
 kafka = [
     { name = "aiokafka" },
 ]
-osc = [
-    { name = "python-osc" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -601,7 +598,6 @@ requires-dist = [
     { name = "peft", specifier = ">=0.17.1" },
     { name = "pluggy", specifier = ">=1.5.0" },
     { name = "pyopengl", marker = "sys_platform == 'win32'", specifier = ">=3.1.10" },
-    { name = "python-osc", marker = "extra == 'osc'", specifier = ">=1.8.1" },
     { name = "safetensors", specifier = ">=0.6.2" },
     { name = "sageattention", marker = "sys_platform == 'linux'", url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" },
     { name = "sageattention", marker = "sys_platform == 'win32'", url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" },
@@ -618,7 +614,7 @@ requires-dist = [
     { name = "twilio", specifier = ">=9.8.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]
-provides-extras = ["kafka", "osc"]
+provides-extras = ["kafka"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2158,15 +2154,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
-]
-
-[[package]]
-name = "python-osc"
-version = "1.9.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1e/6e/770a91c92e4e8db6213764fb78531dd26a4982000d9b325881f3599835e2/python_osc-1.9.3.tar.gz", hash = "sha256:bd0fa40def43ce509894709feb0e18f02192aca192c5e6c8fe2ba69e58f21794", size = 33328, upload-time = "2024-12-23T20:24:50.939Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/04/01b3de6a7565cfc20f3bf4fce959b099ad30a08157865436d48cc02f6c08/python_osc-1.9.3-py3-none-any.whl", hash = "sha256:7def2075be72f07bae5a4c1a55cc7d907b247f4a5d910f3159ed30ac2b1f17cc", size = 43808, upload-time = "2024-12-23T20:24:48.358Z" },
 ]
 
 [[package]]

@@ -49,7 +49,7 @@ interface MIDIContextValue {
   setMappingMode: (enabled: boolean) => void;
   learningParameter: string | null;
   error: string | null;
-  startLearning: (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger") => void;
+  startLearning: (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]) => void;
   cancelLearning: () => void;
   getMappedSource: (parameterId: string, arrayIndex?: number, actionId?: string) => string | null;
 }
@@ -93,7 +93,7 @@ export function MIDIProvider({
   );
 
   const findOrCreateMapping = useCallback(
-    (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger"): { mapping: MIDIMapping; index: number } => {
+    (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]): { mapping: MIDIMapping; index: number } => {
       let mappingIndex = mappingProfile.mappings.findIndex((m) => {
         if (actionId) return m.target.action === actionId;
         if (arrayIndex !== undefined) return m.target.parameter === parameterId && m.target.arrayIndex === arrayIndex;
@@ -103,14 +103,17 @@ export function MIDIProvider({
       if (mappingIndex === -1) {
         let inferredType: MIDIMappingType = mappingType || (actionId ? "trigger" : "continuous");
 
+        const baseTarget = actionId
+          ? { action: actionId as any }
+          : arrayIndex !== undefined
+            ? { parameter: parameterId, arrayIndex }
+            : { parameter: parameterId };
+
         const newMapping: MIDIMapping = {
           type: inferredType,
           source: { channel: 0 },
-          target: actionId
-            ? { action: actionId as any }
-            : arrayIndex !== undefined
-              ? { parameter: parameterId, arrayIndex }
-              : { parameter: parameterId },
+          target: enumValues ? { ...baseTarget, values: enumValues } : baseTarget,
+          ...(range && { range }),
         };
         const updatedProfile = { ...mappingProfile, mappings: [...mappingProfile.mappings, newMapping] };
         const updatedProfiles = [...mappingProfiles];
@@ -121,16 +124,32 @@ export function MIDIProvider({
       }
 
       const existing = mappingProfile.mappings[mappingIndex];
+      let updated = false;
+      const updatedMapping = { ...existing };
+
       if (mappingType && existing.type !== mappingType) {
+        updatedMapping.type = mappingType;
+        updated = true;
+      }
+      if (range && (!existing.range || existing.range.min !== range.min || existing.range.max !== range.max)) {
+        updatedMapping.range = range;
+        updated = true;
+      }
+      if (enumValues && (!existing.target.values || JSON.stringify(existing.target.values) !== JSON.stringify(enumValues))) {
+        updatedMapping.target = { ...existing.target, values: enumValues };
+        updated = true;
+      }
+
+      if (updated) {
         const updatedProfile = {
           ...mappingProfile,
-          mappings: mappingProfile.mappings.map((m, i) => i === mappingIndex ? { ...m, type: mappingType } : m),
+          mappings: mappingProfile.mappings.map((m, i) => i === mappingIndex ? updatedMapping : m),
         };
         const updatedProfiles = [...mappingProfiles];
         updatedProfiles[selectedProfileIndex] = updatedProfile;
         setMappingProfiles(updatedProfiles);
         saveMappingProfiles(updatedProfiles);
-        return { mapping: { ...existing, type: mappingType }, index: mappingIndex };
+        return { mapping: updatedMapping, index: mappingIndex };
       }
 
       return { mapping: existing, index: mappingIndex };
@@ -158,12 +177,12 @@ export function MIDIProvider({
   );
 
   const startLearning = useCallback(
-    (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger") => {
+    (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]) => {
       if (!midiEnabled || !selectedDeviceId) {
         toast.error("Please enable MIDI and select a device first");
         return;
       }
-      const { index } = findOrCreateMapping(parameterId, arrayIndex, actionId, mappingType);
+      const { index } = findOrCreateMapping(parameterId, arrayIndex, actionId, mappingType, range, enumValues);
       setLearningParameter(`${parameterId}${arrayIndex !== undefined ? `[${arrayIndex}]` : ""}${actionId || ""}`);
       learningMappingIndexRef.current = index;
 
