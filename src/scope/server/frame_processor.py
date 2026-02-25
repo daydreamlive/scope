@@ -624,10 +624,13 @@ class FrameProcessor:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
 
-        # Broadcast to all pipeline processors
-        parameters.pop("node_id", None)  # strip so not passed to processors
-        for processor in self.pipeline_processors:
-            processor.update_parameters(parameters)
+        # Route to specific node or broadcast to all pipeline processors
+        node_id = parameters.pop("node_id", None)
+        if node_id and node_id in self._processors_by_node_id:
+            self._processors_by_node_id[node_id].update_parameters(parameters)
+        else:
+            for processor in self.pipeline_processors:
+                processor.update_parameters(parameters)
 
         # Update local parameters
         self.parameters = {**self.parameters, **parameters}
