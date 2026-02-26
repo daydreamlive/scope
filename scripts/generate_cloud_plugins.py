@@ -29,10 +29,7 @@ def main():
     plugins = fetch_discover_plugins()
 
     # Filter to plugins with repository URLs (installable via git)
-    installable = [
-        p for p in plugins
-        if p.get("repositoryUrl")
-    ]
+    installable = [p for p in plugins if p.get("repositoryUrl")]
 
     print(f"Found {len(plugins)} plugins, {len(installable)} installable via git")
 
@@ -46,14 +43,14 @@ def main():
     for plugin in installable:
         repo_url = plugin["repositoryUrl"]
         name = plugin.get("name", "unknown")
-        
+
         # Clean the URL: remove fragments (#...) and trailing slashes
         repo_url = repo_url.split("#")[0].rstrip("/")
-        
+
         # Ensure .git suffix for GitHub repos (helps with caching)
         if "github.com" in repo_url and not repo_url.endswith(".git"):
             repo_url = repo_url + ".git"
-        
+
         # Format: git+https://github.com/user/repo.git
         spec = f"git+{repo_url}" if not repo_url.startswith("git+") else repo_url
         lines.append(f"{spec}  # {name}")

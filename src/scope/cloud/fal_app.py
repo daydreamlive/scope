@@ -341,7 +341,6 @@ class ScopeApp(fal.App, keep_alive=300):
         # Set up non-root user for running scope server (security)
         scope_user = None
         try:
-            import grp
             import pwd
 
             scope_user = pwd.getpwnam("scope")
@@ -672,14 +671,43 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
-            # Block plugin installation in cloud mode (security: prevent arbitrary code execution)
+            # Block plugin installation unless plugin is in the whitelist (cloud-plugins.txt)
             if method == "POST" and path == "/api/v1/plugins":
-                return {
-                    "type": "api_response",
-                    "request_id": request_id,
-                    "status": 403,
-                    "error": "Plugin installation is not available in cloud mode",
-                }
+                requested_package = (
+                    body.get("package", "") if isinstance(body, dict) else ""
+                )
+
+                # Check if the requested package is in the cloud plugins whitelist
+                def is_plugin_whitelisted(package: str) -> bool:
+                    from pathlib import Path
+
+                    plugins_file = Path("/app/cloud-plugins.txt")
+                    if not plugins_file.exists():
+                        return False
+
+                    # Normalize package name for comparison
+                    package_lower = package.lower().strip()
+
+                    for line in plugins_file.read_text().splitlines():
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        # Remove inline comments and normalize
+                        whitelist_entry = line.split("#")[0].strip().lower()
+                        if not whitelist_entry:
+                            continue
+                        # Check if the requested package matches (could be full URL or just name)
+                        if package_lower == whitelist_entry:
+                            return True
+                    return False
+
+                if not is_plugin_whitelisted(requested_package):
+                    return {
+                        "type": "api_response",
+                        "request_id": request_id,
+                        "status": 403,
+                        "error": f"Plugin '{requested_package}' is not in the allowed list for cloud mode",
+                    }
 
             # Inject connection_id into pipeline load requests for event correlation
             if (

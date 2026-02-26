@@ -371,7 +371,11 @@ app.add_middleware(
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health_check():
+@cloud_proxy()
+async def health_check(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Health check endpoint."""
     return HealthResponse(
         status="healthy",
@@ -383,7 +387,11 @@ async def health_check():
 
 
 @app.post("/api/v1/restart")
-async def restart_server():
+@cloud_proxy(timeout=30.0)
+async def restart_server(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Restart the server process.
 
     This endpoint is called after plugin install/uninstall to ensure
