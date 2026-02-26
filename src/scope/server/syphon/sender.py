@@ -22,14 +22,16 @@ class SyphonSender:
         self.height = height
         self.server = None
         self._texture = None
-        self._frame_count = 0
+        self._copy_image_to_mtl_texture = None
 
     def create(self) -> bool:
         """Create and initialize the Syphon sender."""
         try:
             import syphon
+            from syphon.utils.numpy import copy_image_to_mtl_texture
 
             self.server = syphon.SyphonMetalServer(self.name)
+            self._copy_image_to_mtl_texture = copy_image_to_mtl_texture
             self._texture = self._create_texture(self.width, self.height)
             if self._texture is None:
                 logger.error("Failed to create Syphon texture")
@@ -54,8 +56,6 @@ class SyphonSender:
             return False
 
         try:
-            from syphon.utils.numpy import copy_image_to_mtl_texture
-
             image = self._prepare_frame(frame)
             if image is None:
                 return False
@@ -66,13 +66,12 @@ class SyphonSender:
                 if self._texture is None:
                     return False
 
-            copy_image_to_mtl_texture(image, self._texture)
+            self._copy_image_to_mtl_texture(image, self._texture)
             self.server.publish_frame_texture(
                 self._texture,
                 size=(self.width, self.height),
                 is_flipped=True,
             )
-            self._frame_count += 1
             return True
         except Exception as e:
             logger.error(f"Error sending Syphon frame: {e}")
@@ -104,6 +103,7 @@ class SyphonSender:
             finally:
                 self.server = None
                 self._texture = None
+                self._copy_image_to_mtl_texture = None
 
     def _create_texture(self, width: int, height: int):
         """Create an RGBA Metal texture used as the publish buffer."""
@@ -138,8 +138,8 @@ class SyphonSender:
             return None
 
         h, w, c = frame.shape
-        if c not in (1, 3, 4):
-            logger.error(f"Expected 1, 3, or 4 channels, got {c}")
+        if c not in (3, 4):
+            logger.error(f"Expected 3 or 4 channels, got {c}")
             return None
 
         frame = frame.detach()
@@ -148,11 +148,7 @@ class SyphonSender:
         elif frame.dtype != torch.uint8:
             frame = frame.clamp(0, 255).to(torch.uint8)
 
-        if c == 1:
-            gray = frame[:, :, 0:1]
-            alpha = torch.full((h, w, 1), 255, dtype=torch.uint8, device=frame.device)
-            frame = torch.cat([gray, gray, gray, alpha], dim=-1)
-        elif c == 3:
+        if c == 3:
             alpha = torch.full((h, w, 1), 255, dtype=torch.uint8, device=frame.device)
             frame = torch.cat([frame, alpha], dim=-1)
 
@@ -164,8 +160,8 @@ class SyphonSender:
             return None
 
         h, w, c = frame.shape
-        if c not in (1, 3, 4):
-            logger.error(f"Expected 1, 3, or 4 channels, got {c}")
+        if c not in (3, 4):
+            logger.error(f"Expected 3 or 4 channels, got {c}")
             return None
 
         if frame.dtype in (np.float16, np.float32, np.float64):
@@ -173,11 +169,7 @@ class SyphonSender:
         elif frame.dtype != np.uint8:
             frame = frame.clip(0, 255).astype(np.uint8)
 
-        if c == 1:
-            gray = frame[:, :, 0:1]
-            alpha = np.full((h, w, 1), 255, dtype=np.uint8)
-            frame = np.concatenate([gray, gray, gray, alpha], axis=2)
-        elif c == 3:
+        if c == 3:
             alpha = np.full((h, w, 1), 255, dtype=np.uint8)
             frame = np.concatenate([frame, alpha], axis=2)
 
