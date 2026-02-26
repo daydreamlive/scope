@@ -546,6 +546,7 @@ dependencies = [
     { name = "sageattention", version = "2.2.0", source = { url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
     { name = "sageattention", version = "2.2.0+cu128torch2.9.0andhigher.post4", source = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "spoutgl", marker = "sys_platform == 'win32'" },
+    { name = "syphon-python", marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "torchao" },
@@ -601,6 +602,7 @@ requires-dist = [
     { name = "sageattention", marker = "sys_platform == 'linux'", url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" },
     { name = "sageattention", marker = "sys_platform == 'win32'", url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" },
     { name = "spoutgl", marker = "sys_platform == 'win32'", specifier = ">=0.1.1" },
+    { name = "syphon-python", marker = "sys_platform == 'darwin'", specifier = ">=0.1.1" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==2.9.1" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.9.1", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchao", specifier = "==0.15.0" },
@@ -2063,6 +2065,48 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-core"
+version = "10.3.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/07/2b3d63c0349fe4cf34d787a52a22faa156225808db2d1531fe58fabd779d/pyobjc_core-10.3.2.tar.gz", hash = "sha256:dbf1475d864ce594288ce03e94e3a98dc7f0e4639971eb1e312bdf6661c21e0e", size = 935182, upload-time = "2024-11-30T15:24:44.294Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/89/8808fe75efb03b29e082f9d12da31d55d5be3f55260c7b4e4cde7ebf81af/pyobjc_core-10.3.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:16644a92fb9661de841ba6115e5354db06a1d193a5e239046e840013c7b3874d", size = 826024, upload-time = "2024-11-30T12:50:14.048Z" },
+    { url = "https://files.pythonhosted.org/packages/08/27/e7b8240c116cd8231ac33daaf982e36f77be33cf5448bbc568ce17371a79/pyobjc_core-10.3.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:76b8b911d94501dac89821df349b1860bb770dce102a1a293f524b5b09dd9462", size = 827885, upload-time = "2024-11-30T12:50:41.942Z" },
+    { url = "https://files.pythonhosted.org/packages/de/a3/897cc31fca822a4df4ece31e4369dd9eae35bcb0b535fc9c7c21924268ba/pyobjc_core-10.3.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:8c6288fdb210b64115760a4504efbc4daffdc390d309e9318eb0e3e3b78d2828", size = 837794, upload-time = "2024-11-30T12:51:05.748Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-cocoa"
+version = "10.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/39/41/4f09a5e9a6769b4dafb293ea597ed693cc0def0e07867ad0a42664f530b6/pyobjc_framework_cocoa-10.3.2.tar.gz", hash = "sha256:673968e5435845bef969bfe374f31a1a6dc660c98608d2b84d5cae6eafa5c39d", size = 4942530, upload-time = "2024-11-30T15:30:27.244Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/fc/496c6ce1386f93d22d9a1ee1889215ed69989d976efa27e46b37b95a4f2d/pyobjc_framework_Cocoa-10.3.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:c49e99fc4b9e613fb308651b99d52a8a9ae9916c8ef27aa2f5d585b6678a59bf", size = 381866, upload-time = "2024-11-30T13:18:08.83Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/c4/bccb4c05422170c0afccf6ebbdcc7551f7ddd03d2f7a65498d02cb179993/pyobjc_framework_Cocoa-10.3.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:f1161b5713f9b9934c12649d73a6749617172e240f9431eff9e22175262fdfda", size = 381878, upload-time = "2024-11-30T13:18:26.24Z" },
+    { url = "https://files.pythonhosted.org/packages/25/ec/68657a633512edb84ecb1ff47a067a81028d6f027aa923e806400d2f8a26/pyobjc_framework_Cocoa-10.3.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:08e48b9ee4eb393447b2b781d16663b954bd10a26927df74f92e924c05568d89", size = 384925, upload-time = "2024-11-30T13:18:28.171Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-metal"
+version = "10.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/12/a7695cab9ee18c2500ada306b283fc80f6628cb5fc396ee19fcc470bf186/pyobjc_framework_metal-10.3.2.tar.gz", hash = "sha256:59246982eab788b955f6d45dfb8c80e8f97bd1b56e1d678c90e91ad4a9376e35", size = 300113, upload-time = "2024-11-30T17:10:18.588Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/7c/921983793d8b3e7fc233bf9bc70f18ddde0f0d5ec9b80ef5e3203125b81b/pyobjc_framework_Metal-10.3.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:b2b1b4027ff4c3aba7b05173503e88d4136f49b8378461d4d6e070be6cf504db", size = 55200, upload-time = "2024-11-30T14:22:05.641Z" },
+    { url = "https://files.pythonhosted.org/packages/28/8c/b3eea5f2137694d107ffa276621d4e7b79fc2584f2144d27ee68eec85239/pyobjc_framework_Metal-10.3.2-cp36-abi3-macosx_10_13_universal2.whl", hash = "sha256:3ba684bac796177c1646bf4da8d4acaa747f2598ca369eb8df8012db660e3cd5", size = 54712, upload-time = "2024-11-30T14:22:31.058Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/3f/d6013e14be2217dc86d2be68421fbab832e4630c2196265db4670d635316/pyobjc_framework_Metal-10.3.2-cp36-abi3-macosx_10_9_universal2.whl", hash = "sha256:b83a72464df9e533e739fbc2a576a4d2c78bfedc826dcd4c821be9e08569bb44", size = 54843, upload-time = "2024-11-30T14:22:33.949Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/21/88549e155912110d8fff35856d4ecb034b5ad5c56ae52836f5db92beec86/pyobjc_framework_Metal-10.3.2-cp36-abi3-macosx_10_9_x86_64.whl", hash = "sha256:17b22be2a312ee6512c9118a5b18c4eeed264a796de39af81677e0e198c79066", size = 37366, upload-time = "2024-11-30T14:23:02.103Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/79/adbaf11e2cdb0b82a73f6d6d28a13bb553751314a503a16b6edc99968929/pyobjc_framework_Metal-10.3.2-cp36-abi3-macosx_11_0_universal2.whl", hash = "sha256:34817e32470c4acdeb89b3fd8815c4e42ac27bcb034aa6d25b7855d97d48c15a", size = 54802, upload-time = "2024-11-30T14:23:05.033Z" },
+]
+
+[[package]]
 name = "pyopengl"
 version = "3.1.10"
 source = { registry = "https://pypi.org/simple" }
@@ -2445,6 +2489,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
+]
+
+[[package]]
+name = "syphon-python"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "pyobjc-framework-metal", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "pyopengl", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/94/ccc2749af546a080f3ce96e344c01591dd0758bd9edcf19de0c92b37b591/syphon_python-0.1.1-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:07e47ce5380de1832c30c21e460209db0c4d5771d27cb42912eff4ab431b12e1", size = 459778, upload-time = "2023-12-28T15:36:03.728Z" },
 ]
 
 [[package]]
