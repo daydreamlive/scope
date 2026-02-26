@@ -37,8 +37,9 @@ class SyphonInputSource(InputSource):
     def is_available(cls) -> bool:
         """Check if Syphon is available (macOS only, syphon-python installed).
 
-        Also initializes the Syphon shared directory on the main thread so
-        that worker threads can discover servers later.
+        Also ensures the SyphonServerDirectory ObjC singleton is created.
+        The main thread's NSRunLoop must be pumped separately for server
+        discovery to work (handled by the server lifespan in app.py).
         """
         if sys.platform != "darwin":
             return False

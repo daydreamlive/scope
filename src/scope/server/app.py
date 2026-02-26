@@ -313,7 +313,42 @@ async def lifespan(app: FastAPI):
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
 
+    # Syphon server discovery (macOS only): initialise the ObjC singleton and
+    # start a periodic NSRunLoop pump so that server announcements (delivered
+    # via NSDistributedNotificationCenter on the main thread) are received.
+    _syphon_pump_task: asyncio.Task | None = None
+    if sys.platform == "darwin":
+        try:
+            from .syphon.receiver import ensure_directory_initialized, pump_run_loop
+
+            ensure_directory_initialized()
+            pump_run_loop(1.0)
+            logger.info(
+                "Syphon directory initialized with %d server(s)",
+                len(
+                    __import__("objc")
+                    .lookUpClass("SyphonServerDirectory")
+                    .sharedDirectory()
+                    .servers()
+                    or []
+                ),
+            )
+
+            async def _periodic_syphon_pump():
+                while True:
+                    await asyncio.sleep(2)
+                    pump_run_loop(0.01)
+
+            _syphon_pump_task = asyncio.create_task(_periodic_syphon_pump())
+        except Exception:
+            logger.debug("Syphon not available, skipping directory init")
+
     yield
+
+    if _syphon_pump_task is not None:
+        _syphon_pump_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _syphon_pump_task
 
     # Shutdown
     if webrtc_manager:

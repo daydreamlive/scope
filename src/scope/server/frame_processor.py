@@ -92,6 +92,7 @@ class FrameProcessor:
         self.input_source: InputSource | None = None
         self.input_source_enabled = False
         self.input_source_type = ""
+        self.input_source_name = ""
         self.input_source_thread = None
 
         # Input mode: video waits for frames, text generates immediately
@@ -790,7 +791,9 @@ class FrameProcessor:
             logger.info("Input source disabled")
 
         elif enabled and (
-            source_type != self.input_source_type or config.get("reconnect", False)
+            source_type != self.input_source_type
+            or source_name != self.input_source_name
+            or config.get("reconnect", False)
         ):
             self.input_source_enabled = False
             if self.input_source is not None:
@@ -823,6 +826,7 @@ class FrameProcessor:
             if self.input_source.connect(source_name):
                 self.input_source_enabled = True
                 self.input_source_type = source_type
+                self.input_source_name = source_name
                 self.input_source_thread = threading.Thread(
                     target=self._input_source_receiver_loop, daemon=True
                 )
