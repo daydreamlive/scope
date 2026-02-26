@@ -171,6 +171,19 @@ kafka_publisher: KafkaPublisher | None = None
 
 
 ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
+
+# Gates the "ready" WebSocket message until the previous session's cleanup completes.
+# Initialized lazily to ensure an event loop is available.
+_cleanup_event: asyncio.Event | None = None
+
+
+def _get_cleanup_event() -> asyncio.Event:
+    global _cleanup_event
+    if _cleanup_event is None:
+        _cleanup_event = asyncio.Event()
+        _cleanup_event.set()
+    return _cleanup_event
+
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
     3600  # Close connection after 60 minutes regardless of activity
@@ -203,6 +216,42 @@ def cleanup_session_data():
 
     except Exception as e:
         print(f"Warning: Session cleanup failed: {e}")
+
+
+async def cleanup_installed_plugins():
+    """Uninstall all plugins installed during the session via the Scope API."""
+    import httpx
+
+    scope_url = "http://localhost:8000"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{scope_url}/api/v1/plugins", timeout=10.0
+            )
+            if response.status_code != 200:
+                print(f"Warning: Failed to list plugins for cleanup: {response.status_code}")
+                return
+
+            plugins = response.json().get("plugins", [])
+            if not plugins:
+                return
+
+            for plugin in plugins:
+                name = plugin.get("name")
+                if not name:
+                    continue
+                try:
+                    resp = await client.delete(
+                        f"{scope_url}/api/v1/plugins/{name}", timeout=60.0
+                    )
+                    if resp.status_code == 200:
+                        print(f"Cleanup: uninstalled plugin '{name}'")
+                    else:
+                        print(f"Warning: Failed to uninstall plugin '{name}': {resp.status_code}")
+                except Exception as e:
+                    print(f"Warning: Failed to uninstall plugin '{name}': {e}")
+    except Exception as e:
+        print(f"Warning: Plugin cleanup failed: {e}")
 
 
 # To deploy:
@@ -482,6 +531,9 @@ class ScopeApp(fal.App, keep_alive=300):
             return connection_id
 
         print(f"[{log_prefix()}] ✅ WebSocket connection accepted")
+
+        # Wait for any in-progress cleanup from the previous session before signaling ready
+        await _get_cleanup_event().wait()
 
         # Send ready message with connection_id
         await ws.send_json({"type": "ready", "connection_id": connection_id})
@@ -950,8 +1002,15 @@ class ScopeApp(fal.App, keep_alive=300):
                         "session_end_time_ms": int(end_time * 1000),
                     },
                 )
-            # Clean up session data to prevent data leakage between users
-            cleanup_session_data()
+            # Clean up session data to prevent data leakage between users.
+            # Block the next connection's "ready" message until cleanup finishes.
+            event = _get_cleanup_event()
+            event.clear()
+            try:
+                await cleanup_installed_plugins()
+                cleanup_session_data()
+            finally:
+                event.set()
             print(
                 f"[{log_prefix()}] WebSocket connection closed, session data cleaned up"
             )
