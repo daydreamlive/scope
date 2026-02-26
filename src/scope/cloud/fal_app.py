@@ -362,6 +362,9 @@ class ScopeApp(fal.App, keep_alive=300):
         except Exception as e:
             print(f"Warning: Failed to set up scope user: {e}, will run as root")
 
+        # DISABLE FOR NOW
+        scope_user = None
+
         # Function to drop privileges before exec
         def demote_to_scope_user():
             if scope_user:
@@ -382,6 +385,7 @@ class ScopeApp(fal.App, keep_alive=300):
         #     print(f"Failed to install daydream-scope[kafka]: {e}")
 
         # Start the scope server in a background thread
+        # TODO kafka
         def start_server():
             print("Starting Scope server...")
             try:
@@ -389,7 +393,7 @@ class ScopeApp(fal.App, keep_alive=300):
                     [
                         "uv",
                         "run",
-                        "daydream-scope[kafka]",
+                        "daydream-scope",
                         "--no-browser",
                         "--host",
                         "0.0.0.0",
