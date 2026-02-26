@@ -7,6 +7,7 @@ import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
+import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
@@ -17,6 +18,7 @@ import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useApi } from "../hooks/useApi";
 import { useCloudContext } from "../lib/cloudContext";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useLogStream } from "../hooks/useLogStream";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import {
   adjustResolutionForPipeline,
@@ -86,6 +88,15 @@ export function StreamPage() {
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // Log stream for the log panel
+  const {
+    logs,
+    isOpen: isLogPanelOpen,
+    toggle: toggleLogPanel,
+    clearLogs,
+    unreadCount: logUnreadCount,
+  } = useLogStream();
 
   // Show loading state while connecting to cloud
   useEffect(() => {
@@ -1768,8 +1779,22 @@ export function StreamPage() {
         </div>
       </div>
 
+      {/* Log Panel */}
+      <LogPanel
+        logs={logs}
+        isOpen={isLogPanelOpen}
+        onClose={toggleLogPanel}
+        onClear={clearLogs}
+      />
+
       {/* Status Bar */}
-      <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
+      <StatusBar
+        fps={webrtcStats.fps}
+        bitrate={webrtcStats.bitrate}
+        onLogToggle={toggleLogPanel}
+        isLogOpen={isLogPanelOpen}
+        logUnreadCount={logUnreadCount}
+      />
 
       {/* Download Dialog */}
       {pipelinesNeedingModels.length > 0 && (

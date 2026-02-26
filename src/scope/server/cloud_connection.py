@@ -342,7 +342,26 @@ class CloudConnectionManager:
         else:
             # Unsolicited message (e.g., notifications)
             msg_type = data.get("type")
-            logger.debug(f"Received unsolicited message: {msg_type}")
+            if msg_type == "logs":
+                self._handle_cloud_logs(data)
+            else:
+                logger.debug(f"Received unsolicited message: {msg_type}")
+
+    def _handle_cloud_logs(self, data: dict) -> None:
+        """Re-emit cloud server log lines into local Python logging with [CLOUD] tag."""
+        cloud_logger = logging.getLogger("scope.cloud")
+        lines = data.get("lines", [])
+        for line in lines:
+            # Parse log level from the formatted line
+            # Format: "YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message"
+            level = logging.INFO
+            if " - ERROR - " in line:
+                level = logging.ERROR
+            elif " - WARNING - " in line:
+                level = logging.WARNING
+            elif " - DEBUG - " in line:
+                level = logging.DEBUG
+            cloud_logger.log(level, "[CLOUD] %s", line)
 
     async def send_and_wait(
         self,
