@@ -17,7 +17,9 @@ import torch
 import torch.nn as nn
 
 from ..utils import (
+    find_lora_pair,
     load_lora_weights,
+    normalize_lora_key,
     parse_lora_weights,
     sanitize_adapter_name,
     standardize_lora_for_peft,
@@ -434,8 +436,6 @@ class PeftLoRAStrategy:
         if not lora_mapping:
             logger.warning("load_adapter: No LoRA layers matched model parameters")
             # Get sample normalized LoRA keys
-            from pipelines.wan2_1.lora.utils import find_lora_pair, normalize_lora_key
-
             sample_normalized = []
             for lora_key in list(lora_state.keys())[:5]:
                 pair_result = find_lora_pair(lora_key, lora_state)
