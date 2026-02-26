@@ -1459,7 +1459,7 @@ async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
 
             pump_run_loop(0.1)
         except Exception:
-            pass
+            logger.debug("Failed to pump Syphon run loop", exc_info=True)
 
     loop = asyncio.get_event_loop()
 
