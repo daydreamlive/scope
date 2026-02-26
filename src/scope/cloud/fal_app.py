@@ -723,7 +723,6 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
-            # Block plugin installation unless plugin is in the whitelist (cloud-plugins.txt)
             if method == "POST" and path == "/api/v1/plugins":
                 requested_package = (
                     body.get("package", "") if isinstance(body, dict) else ""
@@ -745,26 +744,20 @@ class ScopeApp(fal.App, keep_alive=300):
                     return normalized
 
                 def is_plugin_whitelisted(package: str) -> bool:
-                    from pathlib import Path
-
-                    plugins_file = Path("/app/cloud-plugins.txt")
-                    if not plugins_file.exists():
+                    raw = os.getenv("CLOUD_PLUGINS_WHITELIST", "")
+                    if not raw:
                         return False
 
-                    # Normalize requested package for comparison
                     normalized_package = normalize_plugin_url(package)
 
-                    for line in plugins_file.read_text().splitlines():
+                    for line in raw.splitlines():
                         line = line.strip()
                         if not line or line.startswith("#"):
                             continue
-                        # Remove inline comments and normalize
                         whitelist_entry = line.split("#")[0].strip()
                         if not whitelist_entry:
                             continue
-                        normalized_entry = normalize_plugin_url(whitelist_entry)
-                        # Check if the requested package matches
-                        if normalized_package == normalized_entry:
+                        if normalized_package == normalize_plugin_url(whitelist_entry):
                             return True
                     return False
 
