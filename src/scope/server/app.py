@@ -240,71 +240,6 @@ cloud_connection_manager = None
 kafka_publisher = None
 
 
-async def install_cloud_plugins_background():
-    """Background task to install cloud plugins from cloud-plugins.txt without blocking startup."""
-    from pathlib import Path
-
-    from scope.core.pipelines.registry import PipelineRegistry
-    from scope.core.plugins import get_plugin_manager, load_plugins, register_plugin_pipelines
-
-    plugins_file = Path("/app/cloud-plugins.txt")
-    if not plugins_file.exists():
-        logger.debug("No cloud-plugins.txt found, skipping cloud plugin installation")
-        return
-
-    logger.info("Starting background cloud plugin installation...")
-    installed = []
-    failed = []
-
-    for line in plugins_file.read_text().splitlines():
-        # Skip comments and empty lines
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-
-        # Remove inline comments
-        plugin = line.split("#")[0].strip()
-        if not plugin:
-            continue
-
-        logger.info(f"Installing cloud plugin: {plugin}")
-        try:
-            plugin_manager = get_plugin_manager()
-            result = await plugin_manager.install_plugin_async(
-                package=plugin,
-                upgrade=False,
-                force=False,
-            )
-            if result.get("success"):
-                installed.append(plugin)
-                logger.info(f"  ✓ Installed: {plugin}")
-            else:
-                failed.append(plugin)
-                logger.warning(f"  ✗ Failed: {plugin} - {result.get('message', 'unknown error')}")
-        except Exception as e:
-            failed.append(plugin)
-            logger.error(f"  ✗ Error installing {plugin}: {e}")
-
-    logger.info(f"Cloud plugin installation complete: {len(installed)} installed, {len(failed)} failed")
-    if failed:
-        logger.warning(f"Failed plugins: {failed}")
-
-    # Reload plugins and register pipelines so newly installed plugins are available
-    # (load_plugins discovers entry points, register_plugin_pipelines adds their pipelines)
-    if installed:
-        logger.info("Reloading plugins to register newly installed pipelines...")
-        try:
-            load_plugins()
-        except Exception as e:
-            logger.warning(f"Error during load_plugins (some plugins may have issues): {e}")
-        
-        try:
-            register_plugin_pipelines(PipelineRegistry)
-            logger.info("Plugin pipelines registered successfully")
-        except Exception as e:
-            logger.warning(f"Error during register_plugin_pipelines (some pipelines may be unavailable): {e}")
-
-
 async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
@@ -357,9 +292,6 @@ async def lifespan(app: FastAPI):
     # Initialize pipeline manager (but don't load pipeline yet)
     pipeline_manager = PipelineManager()
     logger.info("Pipeline manager initialized")
-
-    # Install cloud plugins in background (if cloud-plugins.txt exists)
-    asyncio.create_task(install_cloud_plugins_background())
 
     # Pre-warm the default pipeline
     if PIPELINE is not None:
