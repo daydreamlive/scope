@@ -223,9 +223,10 @@ export function InputAndControlsPanel({
   }, []);
 
   // Live MJPEG preview URL for Syphon (always shown when a source is selected)
+  // Use higher FPS for Syphon since it's local GPU sharing with minimal overhead
   const syphonStreamUrl =
     mode === "syphon" && selectedSyphonSource
-      ? getInputSourceStreamUrl("syphon", selectedSyphonSource)
+      ? getInputSourceStreamUrl("syphon", selectedSyphonSource, 15)
       : null;
   const [isSyphonStreamLoaded, setIsSyphonStreamLoaded] = useState(false);
 

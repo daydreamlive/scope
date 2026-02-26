@@ -1493,7 +1493,7 @@ def get_input_source_resolution(
 
 @app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/stream")
 async def stream_input_source_preview(
-    source_type: str, identifier: str, fps: int = Query(15, ge=1, le=30)
+    source_type: str, identifier: str, fps: int = Query(2, ge=1, le=30)
 ):
     """MJPEG stream of an input source for live preview."""
     source_class = _resolve_input_source_class(source_type)
