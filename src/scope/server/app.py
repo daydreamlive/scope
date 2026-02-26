@@ -321,7 +321,7 @@ async def lifespan(app: FastAPI):
             from .syphon.receiver import ensure_directory_initialized, pump_run_loop
 
             ensure_directory_initialized()
-            pump_run_loop(1.0)
+            pump_run_loop(0.1)
             logger.info("Syphon directory initialized")
         except Exception:
             logger.debug("Syphon not available, skipping directory init")
