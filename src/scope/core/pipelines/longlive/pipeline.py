@@ -33,16 +33,6 @@ DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
 class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
-    events = frozenset({
-        "video",
-        "vace_ref_images",
-        "vace_input_frames",
-        "vace_input_masks",
-        "first_frame_image",
-        "last_frame_image",
-        "lora_scales",
-    })
-
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return LongLiveConfig
@@ -223,8 +213,18 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         for k, v in kwargs.items():
             self.state.set(k, v)
 
-        # Clear transient event keys not provided in this call
-        self._clear_events(self.state, kwargs)
+        # Explicitly clear transient keys not provided in this chunk
+        transient_keys = [
+            "video",
+            "vace_ref_images",
+            "first_frame_image",
+            "last_frame_image",
+            "vace_input_frames",
+            "vace_input_masks",
+        ]
+        for key in transient_keys:
+            if key not in kwargs:
+                self.state.set(key, None)
 
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
