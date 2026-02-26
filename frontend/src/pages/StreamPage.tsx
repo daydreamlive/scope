@@ -110,6 +110,7 @@ export function StreamPage() {
     supportsNoiseControls,
     spoutAvailable,
     ndiOutputAvailable,
+    syphonOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
@@ -1771,6 +1772,7 @@ export function StreamPage() {
             onOutputSinkChange={handleOutputSinkChange}
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiOutputAvailable}
+            syphonAvailable={syphonOutputAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&

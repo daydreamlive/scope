@@ -1383,6 +1383,18 @@ def is_ndi_output_available() -> bool:
     return is_available()
 
 
+def is_syphon_output_available() -> bool:
+    """Check if Syphon is available for output."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import syphon  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
 _SOURCE_DISCOVERY_TTL = 10  # seconds
 
@@ -1569,6 +1581,7 @@ async def get_hardware_info(
                 cloud_manager,
                 is_spout_available(),
                 is_ndi_output_available(),
+                is_syphon_output_available(),
             )
 
         # Local mode: get local hardware info
@@ -1585,6 +1598,7 @@ async def get_hardware_info(
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
             ndi_available=is_ndi_output_available(),
+            syphon_available=is_syphon_output_available(),
         )
     except HTTPException:
         raise
