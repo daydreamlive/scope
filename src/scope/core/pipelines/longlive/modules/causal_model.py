@@ -7,7 +7,7 @@ import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
-from scope.core.pipelines.wan2_1.modules.attention import attention, flash_attention
+from scope.core.pipelines.wan2_1.modules.attention import flash_attention
 
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
@@ -98,14 +98,15 @@ class CausalWanSelfAttention(nn.Module):
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-    def forward(self, x, freqs_cos, freqs_sin, cache_k, cache_v):
+    def forward(self, x, freqs_cos, freqs_sin, cache_k, cache_v, mask):
         r"""
         Args:
             x(Tensor): Shape [B, L, C] (pre-norm'd and modulated input)
             freqs_cos(Tensor): RoPE cosines, shape [1, L, 1, head_dim // 2]
             freqs_sin(Tensor): RoPE sines, shape [1, L, 1, head_dim // 2]
-            cache_k(Tensor): Valid cache keys, shape [B, valid_tokens, num_heads, head_dim]
-            cache_v(Tensor): Valid cache values, shape [B, valid_tokens, num_heads, head_dim]
+            cache_k(Tensor): Full static cache keys, shape [B, CACHE_SIZE, num_heads, head_dim]
+            cache_v(Tensor): Full static cache values, shape [B, CACHE_SIZE, num_heads, head_dim]
+            mask(Tensor): Attention mask, shape [1, 1, 1, CACHE_SIZE + L], 0=attend, -inf=ignore
         Returns:
             Tuple of (output, (new_roped_k, new_v))
         """
@@ -121,9 +122,13 @@ class CausalWanSelfAttention(nn.Module):
         attn_k = torch.cat([cache_k, roped_k], dim=1)
         attn_v = torch.cat([cache_v, v], dim=1)
 
-        x = attention(roped_q, attn_k, attn_v)
+        x = torch.nn.functional.scaled_dot_product_attention(
+            roped_q.transpose(1, 2),
+            attn_k.transpose(1, 2),
+            attn_v.transpose(1, 2),
+            attn_mask=mask,
+        ).transpose(1, 2)
 
-        # output
         x = x.flatten(2)
         x = self.o(x)
 
@@ -175,7 +180,7 @@ class CausalWanAttentionBlock(nn.Module):
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
-    def forward(self, x, e, freqs_cos, freqs_sin, context, cache_k, cache_v):
+    def forward(self, x, e, freqs_cos, freqs_sin, context, cache_k, cache_v, mask):
         r"""
         Args:
             x(Tensor): Shape [B, L, C]
@@ -183,8 +188,9 @@ class CausalWanAttentionBlock(nn.Module):
             freqs_cos(Tensor): RoPE cosines
             freqs_sin(Tensor): RoPE sines
             context(Tensor): Text embeddings
-            cache_k(Tensor): Valid cache keys
-            cache_v(Tensor): Valid cache values
+            cache_k(Tensor): Full static cache keys
+            cache_v(Tensor): Full static cache values
+            mask(Tensor): Attention mask for SDPA, shape [1, 1, 1, CACHE_SIZE + L]
         Returns:
             Tuple of (output, (new_roped_k, new_v))
         """
@@ -202,6 +208,7 @@ class CausalWanAttentionBlock(nn.Module):
             freqs_sin,
             cache_k,
             cache_v,
+            mask,
         )
 
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(
@@ -387,7 +394,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
 
-    def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs):
+    def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs, mask):
         """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
         when cache is full. With SDPA (no graph breaks), the entire 30-block loop
         is captured as a single CUDA graph for maximum performance.
@@ -403,6 +410,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 context=context,
                 cache_k=cache_ks[block_index],
                 cache_v=cache_vs[block_index],
+                mask=mask,
             )
             new_ks.append(new_k)
             new_vs.append(new_v)
@@ -461,14 +469,14 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context = padded_context
         context = self.text_embedding(context)
 
-        if self.fill_level > 0:
-            cache_ks = [kv_cache[i]["k"][:, :self.fill_level] for i in range(len(self.blocks))]
-            cache_vs = [kv_cache[i]["v"][:, :self.fill_level] for i in range(len(self.blocks))]
-        else:
-            empty_k = torch.empty(1, 0, self.num_heads, self.dim // self.num_heads,
-                                  dtype=x.dtype, device=x.device)
-            cache_ks = [empty_k] * len(self.blocks)
-            cache_vs = [empty_k] * len(self.blocks)
+        cache_size = kv_cache[0]["k"].shape[1]
+        s = x.shape[1]
+        mask = torch.zeros(1, 1, 1, cache_size + s, dtype=x.dtype, device=x.device)
+        if self.fill_level < cache_size:
+            mask[:, :, :, self.fill_level:cache_size] = float('-inf')
+
+        cache_ks = [kv_cache[i]["k"] for i in range(len(self.blocks))]
+        cache_vs = [kv_cache[i]["v"] for i in range(len(self.blocks))]
 
         if self.fill_level >= self.cache_tokens:
             self._forward = self._inner_forward
@@ -476,7 +484,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             self._forward = self._inner_forward
 
         x, new_kvs = self._forward(
-            x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
+            x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs, mask
         )
 
         if update_cache:
