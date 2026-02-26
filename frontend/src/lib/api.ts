@@ -207,7 +207,38 @@ export interface HardwareInfoResponse {
   vram_gb: number | null;
   spout_available: boolean;
   ndi_available: boolean;
+  osc_enabled: boolean;
+  osc_port: number;
 }
+
+export interface OSCStatusResponse {
+  available: boolean;
+  enabled: boolean;
+  port: number;
+  listening: boolean;
+}
+
+export const getOSCStatus = async (): Promise<OSCStatusResponse> => {
+  const response = await fetch("/api/v1/osc/status", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error("Failed to get OSC status");
+  return response.json();
+};
+
+export const configureOSC = async (
+  enabled: boolean,
+  port?: number
+): Promise<OSCStatusResponse> => {
+  const response = await fetch("/api/v1/osc/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled, ...(port !== undefined && { port }) }),
+  });
+  if (!response.ok) throw new Error("Failed to configure OSC");
+  return response.json();
+};
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
   const response = await fetch("/api/v1/hardware/info", {

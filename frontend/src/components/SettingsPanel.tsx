@@ -323,6 +323,9 @@ interface SettingsPanelProps {
   ) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
+  // OSC
+  oscEnabled?: boolean;
+  oscPort?: number;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -394,6 +397,8 @@ export function SettingsPanel({
   onOutputSinkChange,
   spoutAvailable = false,
   ndiAvailable = false,
+  oscEnabled = false,
+  oscPort = 9000,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -1296,6 +1301,24 @@ export function SettingsPanel({
                 />
               </div>
             )}
+          </div>
+        )}
+
+        {/* OSC Status */}
+        {oscEnabled && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label="OSC Control"
+                tooltip="Open Sound Control server for external parameter control from TouchDesigner, Resolume, Max/MSP, etc."
+                className="text-sm font-medium"
+              />
+              <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500 font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                Listening
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">UDP port {oscPort}</p>
           </div>
         )}
       </CardContent>

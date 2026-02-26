@@ -251,6 +251,14 @@ class HardwareInfoResponse(BaseModel):
         default=False,
         description="Whether NDI SDK is available for output",
     )
+    osc_enabled: bool = Field(
+        default=False,
+        description="Whether the OSC server is currently running",
+    )
+    osc_port: int = Field(
+        default=9000,
+        description="UDP port the OSC server is listening on",
+    )
 
 
 class PipelineStatusEnum(str, Enum):
@@ -816,3 +824,31 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
+
+
+# OSC (Open Sound Control) schemas
+
+
+class OSCStatusResponse(BaseModel):
+    """Response containing OSC server status."""
+
+    available: bool = Field(..., description="Whether python-osc is installed")
+    enabled: bool = Field(
+        ..., description="Whether the OSC server is currently running"
+    )
+    port: int = Field(..., description="UDP port the OSC server is listening on")
+    listening: bool = Field(
+        ..., description="Whether the server is actively listening for messages"
+    )
+
+
+class OSCConfigRequest(BaseModel):
+    """Request to configure the OSC server."""
+
+    enabled: bool = Field(..., description="Enable or disable the OSC server")
+    port: int | None = Field(
+        default=None,
+        description="UDP port to listen on (only used when enabling)",
+        ge=1024,
+        le=65535,
+    )

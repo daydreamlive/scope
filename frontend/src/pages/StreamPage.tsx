@@ -110,6 +110,8 @@ export function StreamPage() {
     supportsNoiseControls,
     spoutAvailable,
     ndiOutputAvailable,
+    oscEnabled,
+    oscPort,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
@@ -1724,6 +1726,8 @@ export function StreamPage() {
             onOutputSinkChange={handleOutputSinkChange}
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiOutputAvailable}
+            oscEnabled={oscEnabled}
+            oscPort={oscPort}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
