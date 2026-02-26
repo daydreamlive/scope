@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -10,15 +10,14 @@ ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 
 WORKDIR /app
 
-# Install system dependencies
-# Note: build-essential and python3-dev needed for some pip packages with C extensions
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y \
+  # System dependencies
   curl \
   git \
   build-essential \
   software-properties-common \
   # Dependencies required for OpenCV
-  libgl1 \
+  libgl1-mesa-glx \
   libglib2.0-0 \
   libsm6 \
   libxext6 \
@@ -30,26 +29,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-  && apt-get install -y --no-install-recommends nodejs \
-  && rm -rf /var/lib/apt/lists/*
+  && apt-get install -y nodejs
 
-# Install uv (Python package manager) to system-wide location
-ENV UV_INSTALL_DIR="/usr/local/bin"
+# Install uv (Python package manager)
 RUN curl -LsSf https://astral.sh/uv/0.9.11/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 # Install Python dependencies
-# UV_PYTHON_INSTALL_DIR ensures Python is installed to a shared location accessible by all users
-ENV UV_PYTHON_INSTALL_DIR="/opt/uv/python"
 COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
-RUN uv sync --frozen && chmod -R a+rX /opt/uv
+RUN uv sync --frozen
 
 # Build frontend
 COPY frontend/ ./frontend/
-RUN cd frontend \
-  && npm install \
-  && npm run build \
-  && rm -rf node_modules \
-  && npm cache clean --force
+RUN cd frontend && npm install && npm run build
 
 # Copy project files
 COPY src/ /app/src/

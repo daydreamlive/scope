@@ -10,9 +10,8 @@ ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 
 WORKDIR /app
 
-# Install system dependencies
-# Note: build-essential and python3-dev needed for some pip packages with C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
+  # System dependencies
   curl \
   git \
   build-essential \
@@ -42,14 +41,6 @@ COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
 # Pre-install Python to uv's default location and make it world-readable
 RUN uv python install && \
     chmod -R a+rX /root/.local/share/uv
-
-# Install cloud plugins
-COPY cloud-plugins.txt ./
-
-# Create non-root user for running scope server (security)
-# The fal_app.py setup() will run the scope subprocess as this user
-RUN useradd -m -s /bin/bash scope \
-    && chown -R scope:scope /app
 
 # Copy project files
 COPY src/ /app/src/

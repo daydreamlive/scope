@@ -288,7 +288,7 @@ def _get_git_sha() -> str:
 
 GIT_SHA = _get_git_sha()
 
-# Configuration - uses git SHA from current checkout with cloud suffix (includes plugins)
+# Configuration - uses git SHA from current checkout
 DOCKER_IMAGE = f"daydreamlive/scope:{GIT_SHA}"
 
 # Create a Dockerfile that uses your existing image as base
@@ -387,53 +387,9 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
         scope_env["UV_CACHE_DIR"] = "/tmp/uv-cache"
 
-        # Set up non-root user for running scope server (security)
-        scope_user = None
-        try:
-            import pwd
-
-            scope_user = pwd.getpwnam("scope")
-            print(f"Will run scope server as user: scope (uid={scope_user.pw_uid})")
-
-            # Ensure directories are writable by scope user
-            from pathlib import Path
-
-            for dir_path in [
-                "/data/models",
-                "/data/logs",
-                Path(ASSETS_DIR_PATH).expanduser(),
-            ]:
-                Path(dir_path).mkdir(parents=True, exist_ok=True)
-                os.chown(dir_path, scope_user.pw_uid, scope_user.pw_gid)
-        except KeyError:
-            print("Warning: 'scope' user not found, will run as root")
-        except Exception as e:
-            print(f"Warning: Failed to set up scope user: {e}, will run as root")
-
-        # DISABLE FOR NOW
-        scope_user = None
-
-        # Function to drop privileges before exec
-        def demote_to_scope_user():
-            if scope_user:
-                os.setgid(scope_user.pw_gid)
-                os.setuid(scope_user.pw_uid)
-
-        # Install kafka extra dependencies
-        # print("Installing daydream-scope[kafka]...")
-        # try:
-        #     subprocess.run(
-        #         ["uv", "pip", "install", "--system", "daydream-scope[kafka]"],
-        #         check=True,
-        #         env=scope_env,
-        #         preexec_fn=demote_to_scope_user if scope_user else None,
-        #     )
-        #     print("✅ daydream-scope[kafka] installed")
-        # except Exception as e:
-        #     print(f"Failed to install daydream-scope[kafka]: {e}")
-
         # Start the scope server in a background thread
-        # TODO kafka
+        # TODO disable plugin install while stream running?
+
         def start_server():
             print("Starting Scope server...")
             try:
@@ -441,6 +397,8 @@ class ScopeApp(fal.App, keep_alive=300):
                     [
                         "uv",
                         "run",
+                        "--extra",
+                        "kafka",
                         "daydream-scope",
                         "--no-browser",
                         "--host",
@@ -449,7 +407,6 @@ class ScopeApp(fal.App, keep_alive=300):
                         "8000",
                     ],
                     env=scope_env,
-                    preexec_fn=demote_to_scope_user if scope_user else None,
                 )
                 # Log when process exits (regardless of exit code)
                 if result.returncode == 0:
