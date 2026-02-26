@@ -678,6 +678,20 @@ class ScopeApp(fal.App, keep_alive=300):
                 )
 
                 # Check if the requested package is in the cloud plugins whitelist
+                def normalize_plugin_url(url: str) -> str:
+                    """Normalize a plugin URL for comparison."""
+                    import re
+                    normalized = url.lower().strip()
+                    # Remove URL protocols
+                    normalized = re.sub(r"^git\+https?://", "", normalized)
+                    normalized = re.sub(r"^https?://", "", normalized)
+                    # Remove .git suffix
+                    if normalized.endswith(".git"):
+                        normalized = normalized[:-4]
+                    # Remove trailing slashes
+                    normalized = normalized.rstrip("/")
+                    return normalized
+
                 def is_plugin_whitelisted(package: str) -> bool:
                     from pathlib import Path
 
@@ -685,19 +699,20 @@ class ScopeApp(fal.App, keep_alive=300):
                     if not plugins_file.exists():
                         return False
 
-                    # Normalize package name for comparison
-                    package_lower = package.lower().strip()
+                    # Normalize requested package for comparison
+                    normalized_package = normalize_plugin_url(package)
 
                     for line in plugins_file.read_text().splitlines():
                         line = line.strip()
                         if not line or line.startswith("#"):
                             continue
                         # Remove inline comments and normalize
-                        whitelist_entry = line.split("#")[0].strip().lower()
+                        whitelist_entry = line.split("#")[0].strip()
                         if not whitelist_entry:
                             continue
-                        # Check if the requested package matches (could be full URL or just name)
-                        if package_lower == whitelist_entry:
+                        normalized_entry = normalize_plugin_url(whitelist_entry)
+                        # Check if the requested package matches
+                        if normalized_package == normalized_entry:
                             return True
                     return False
 
