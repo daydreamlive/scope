@@ -17,7 +17,6 @@ import base64
 import logging
 import os
 import time
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from functools import wraps
