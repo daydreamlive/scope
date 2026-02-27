@@ -332,8 +332,19 @@ class CloudConnectionManager:
 
     async def _handle_message(self, data: dict) -> None:
         """Handle incoming WebSocket message."""
-        request_id = data.get("request_id")
+        msg_type = data.get("type")
 
+        # Capture error messages (often sent right before connection close)
+        # The close frame's reason field is unreliable through proxies, so we
+        # store the error from the message to have it when the close event fires
+        if msg_type == "error":
+            error_msg = data.get("error", "Unknown error")
+            error_code = data.get("code")
+            logger.warning(f"Cloud error message: {error_msg} (code={error_code})")
+            self._last_close_reason = error_msg
+            return
+
+        request_id = data.get("request_id")
         if request_id and request_id in self._pending_requests:
             # This is a response to a pending request
             future = self._pending_requests.pop(request_id)
@@ -341,7 +352,6 @@ class CloudConnectionManager:
                 future.set_result(data)
         else:
             # Unsolicited message (e.g., notifications)
-            msg_type = data.get("type")
             logger.debug(f"Received unsolicited message: {msg_type}")
 
     async def send_and_wait(

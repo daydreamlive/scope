@@ -732,6 +732,9 @@ class ScopeApp(fal.App, keep_alive=300):
                             "code": "ACCESS_DENIED",
                         }
                     )
+                    # Small delay to let error message reach client before close
+                    # (close frame often gets lost through proxies)
+                    await asyncio.sleep(0.1)
                     await ws.close(code=4003, reason="Access denied")
                     return None
 
