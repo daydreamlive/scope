@@ -43,6 +43,8 @@ class LongLiveConfig(BasePipelineConfig):
     supports_quantization = True
     min_dimension = 16
     modified = True
+    num_frame_per_block = 3
+    vae_temporal_downsample_factor = 4
 
     # Configuration fields with UI metadata (order, component, modes)
     vace_context_scale: float = Field(

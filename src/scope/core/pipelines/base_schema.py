@@ -245,6 +245,11 @@ class BasePipelineConfig(BaseModel):
     # to appear in the preprocessor dropdown.
     usage: ClassVar[list[UsageType]] = []
 
+    # Frame chunk configuration — exposed via get_schema_with_metadata() so
+    # external clients can discover frames_per_chunk without hardcoding.
+    num_frame_per_block: ClassVar[int | None] = None
+    vae_temporal_downsample_factor: ClassVar[int | None] = None
+
     # Mode configuration - keys are mode names, values are ModeDefaults with field overrides
     # Use default=True to mark the default mode. Only include fields that differ from base.
     modes: ClassVar[dict[str, ModeDefaults]] = {"text": ModeDefaults(default=True)}
@@ -383,6 +388,21 @@ class BasePipelineConfig(BaseModel):
         # Convert UsageType enum values to strings for JSON serialization
         metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
         metadata["config_schema"] = cls.model_json_schema()
+
+        # Expose frame chunk metadata for external clients (e.g. ComfyUI)
+        if (
+            cls.num_frame_per_block is not None
+            and cls.vae_temporal_downsample_factor is not None
+        ):
+            metadata["frames_per_chunk"] = (
+                cls.num_frame_per_block * cls.vae_temporal_downsample_factor
+            )
+            metadata["temporal_downsample_factor"] = (
+                cls.vae_temporal_downsample_factor
+            )
+        else:
+            metadata["frames_per_chunk"] = None
+            metadata["temporal_downsample_factor"] = None
 
         # Include mode-specific defaults (excluding None values and the "default" flag)
         mode_defaults = {}

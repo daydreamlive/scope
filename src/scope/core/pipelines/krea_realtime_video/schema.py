@@ -48,6 +48,8 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
     min_dimension = 16
     modified = True
     recommended_quantization_vram_threshold = 40.0
+    num_frame_per_block = 3
+    vae_temporal_downsample_factor = 4
 
     default_temporal_interpolation_method = "linear"
     default_temporal_interpolation_steps = 4
