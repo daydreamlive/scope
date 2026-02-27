@@ -29,9 +29,30 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
 
     Returns (is_valid, reason) tuple.
     """
+    import urllib.error
+    import urllib.request
+
     if not user_id:
         return False, "No user ID provided"
-    return True, "Access granted"
+
+    url = f"{os.getenv('DAYDREAM_API_BASE', 'https://api.daydream.live')}/v1/users/{user_id}"
+    print(f"Validating user access for {user_id} via {url}")
+
+    def fetch_user():
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode())
+
+    try:
+        # Run synchronous urllib in thread pool to not block event loop
+        await asyncio.get_event_loop().run_in_executor(None, fetch_user)
+        return True, "Access granted"
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False, "User not found"
+        return False, f"Failed to fetch user: {e.code}"
+    except Exception as e:
+        return False, f"Error validating user: {e}"
 
 
 class KafkaPublisher:
@@ -425,9 +446,9 @@ class ScopeApp(fal.App, keep_alive=300):
                 )
                 await safe_send_json(
                     {
-                        "type": "closing",
-                        "reason": "max_duration",
-                        "elapsed_seconds": elapsed_seconds,
+                        "type": "error",
+                        "error": "Max duration exceeded",
+                        "code": "MAX_DURATION_EXCEEDED",
                     }
                 )
                 return True
@@ -728,13 +749,12 @@ class ScopeApp(fal.App, keep_alive=300):
                     await safe_send_json(
                         {
                             "type": "error",
-                            "error": f"Access denied: {reason}",
+                            "error": "Access denied",
                             "code": "ACCESS_DENIED",
                         }
                     )
                     # Small delay to let error message reach client before close
                     # (close frame often gets lost through proxies)
-                    await asyncio.sleep(0.1)
                     await ws.close(code=4003, reason="Access denied")
                     return None
 
