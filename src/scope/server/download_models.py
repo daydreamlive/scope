@@ -129,11 +129,13 @@ def http_get(
         )
 
     headers = {}
-    from huggingface_hub import get_token as _get_hf_token
+    # Only attach HuggingFace token for HF URLs to avoid confusing other hosts
+    if "huggingface.co" in url or "hf.co" in url:
+        from huggingface_hub import get_token as _get_hf_token
 
-    token = _get_hf_token()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+        token = _get_hf_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
     # Add Range header for resuming
     if resume_from > 0:
