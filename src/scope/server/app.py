@@ -2257,6 +2257,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
         server = uvicorn.Server(config)
 
@@ -2284,6 +2285,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
 
 
