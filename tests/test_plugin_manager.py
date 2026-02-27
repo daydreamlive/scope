@@ -155,7 +155,7 @@ class TestListPlugins:
 
         with patch("importlib.metadata.distributions", return_value=[mock_dist]):
             with pm._lock:
-                plugins = pm._list_plugins_sync()
+                plugins = pm.list_plugins_sync()
 
         assert plugins == []
 
@@ -173,7 +173,7 @@ class TestListPlugins:
         mock_dist._path = None  # PyPI source
 
         with patch("importlib.metadata.distributions", return_value=[mock_dist]):
-            plugins = pm._list_plugins_sync()
+            plugins = pm.list_plugins_sync()
 
         assert len(plugins) == 1
         assert plugins[0]["name"] == "test-plugin"
@@ -189,7 +189,7 @@ class TestListPlugins:
         mock_dist.entry_points = MagicMock(side_effect=Exception("Test error"))
 
         with patch("importlib.metadata.distributions", return_value=[mock_dist]):
-            plugins = pm._list_plugins_sync()
+            plugins = pm.list_plugins_sync()
 
         # Should return empty list without crashing
         assert plugins == []
@@ -205,7 +205,7 @@ class TestCheckUpdates:
         # Mock a local plugin
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[
                 {
                     "name": "local-plugin",
@@ -229,7 +229,7 @@ class TestCheckUpdates:
         # Mock a PyPI plugin
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[
                 {"name": "pypi-plugin", "version": "1.0.0", "source": "pypi"}
             ],
@@ -251,7 +251,7 @@ class TestCheckUpdates:
         # Mock a PyPI plugin
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[
                 {"name": "pypi-plugin", "version": "1.0.0", "source": "pypi"}
             ],
@@ -526,7 +526,7 @@ class TestUninstallPlugin:
         # Mock list_plugins to find the plugin
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[{"name": "test-plugin", "pipelines": []}],
         ):
             with patch.object(pm, "_read_plugins_file", return_value=[]):
@@ -559,7 +559,7 @@ class TestUninstallPlugin:
         """Unknown plugin should raise PluginNotFoundError."""
         pm = PluginManager()
 
-        with patch.object(pm, "_list_plugins_sync", return_value=[]):
+        with patch.object(pm, "list_plugins_sync", return_value=[]):
             with pytest.raises(PluginNotFoundError):
                 pm._uninstall_plugin_sync("nonexistent-plugin")
 
@@ -569,7 +569,7 @@ class TestUninstallPlugin:
 
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[
                 {
                     "name": "test-plugin",
@@ -597,7 +597,7 @@ class TestUninstallPlugin:
 
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[{"name": "test-plugin", "pipelines": []}],
         ):
             with patch.object(
@@ -620,7 +620,7 @@ class TestUninstallPlugin:
 
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[{"name": "test-plugin", "pipelines": []}],
         ):
             with patch.object(pm, "_read_plugins_file", return_value=["test-plugin"]):
@@ -642,7 +642,7 @@ class TestReloadPlugin:
         """PluginNotFoundError should be raised for unknown plugin."""
         pm = PluginManager()
 
-        with patch.object(pm, "_list_plugins_sync", return_value=[]):
+        with patch.object(pm, "list_plugins_sync", return_value=[]):
             with pytest.raises(PluginNotFoundError):
                 pm._reload_plugin_sync("nonexistent-plugin")
 
@@ -652,7 +652,7 @@ class TestReloadPlugin:
 
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[{"name": "test-plugin", "editable": False, "pipelines": []}],
         ):
             with pytest.raises(PluginNotEditableError):
@@ -668,7 +668,7 @@ class TestReloadPlugin:
 
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[
                 {
                     "name": "test-plugin",
@@ -694,7 +694,7 @@ class TestReloadPlugin:
 
         with patch.object(
             pm,
-            "_list_plugins_sync",
+            "list_plugins_sync",
             return_value=[
                 {
                     "name": "test-plugin",
@@ -752,7 +752,7 @@ class TestReloadPlugin:
                     }
                 ]
 
-        with patch.object(pm, "_list_plugins_sync", side_effect=mock_list_plugins):
+        with patch.object(pm, "list_plugins_sync", side_effect=mock_list_plugins):
             with patch("scope.core.pipelines.registry.PipelineRegistry.unregister"):
                 with patch.object(pm, "_reload_module_tree"):
                     with patch.object(pm._pm, "unregister"):
@@ -1137,7 +1137,7 @@ class TestEditableVenvRollback:
 
 
 class TestListPluginsDeduplication:
-    """Tests for plugin deduplication in _list_plugins_sync."""
+    """Tests for plugin deduplication in list_plugins_sync."""
 
     def _make_mock_dist(self, name, source="pypi", editable=False):
         """Helper to create a mock distribution with scope entry points."""
@@ -1164,7 +1164,7 @@ class TestListPluginsDeduplication:
         dist2 = self._make_mock_dist("test-plugin")
 
         with patch("importlib.metadata.distributions", return_value=[dist1, dist2]):
-            plugins = pm._list_plugins_sync()
+            plugins = pm.list_plugins_sync()
 
         assert len(plugins) == 1
         assert plugins[0]["name"] == "test-plugin"
@@ -1186,7 +1186,7 @@ class TestListPluginsDeduplication:
             "importlib.metadata.distributions", return_value=[dist_git, dist_editable]
         ):
             with patch.object(pm, "_get_plugin_source", side_effect=git_source):
-                plugins = pm._list_plugins_sync()
+                plugins = pm.list_plugins_sync()
 
         assert len(plugins) == 1
         assert plugins[0]["editable"] is True

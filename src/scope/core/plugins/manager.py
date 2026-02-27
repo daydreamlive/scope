@@ -620,9 +620,9 @@ class PluginManager:
             List of plugin info dictionaries
         """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._list_plugins_sync)
+        return await loop.run_in_executor(None, self.list_plugins_sync)
 
-    def _list_plugins_sync(self) -> list[dict[str, Any]]:
+    def list_plugins_sync(self) -> list[dict[str, Any]]:
         """Synchronous implementation of list_plugins."""
         from importlib.metadata import distributions
 
@@ -886,7 +886,7 @@ class PluginManager:
         """Synchronous implementation of check_updates."""
         import urllib.request
 
-        plugins = self._list_plugins_sync()
+        plugins = self.list_plugins_sync()
         updates = []
 
         for plugin in plugins:
@@ -1248,7 +1248,7 @@ class PluginManager:
 
         # Check if plugin exists
         plugin_info = None
-        plugins_list = self._list_plugins_sync()
+        plugins_list = self.list_plugins_sync()
         logger.debug(f"Found {len(plugins_list)} installed plugins")
         for plugin in plugins_list:
             if plugin["name"] == name:
@@ -1378,7 +1378,7 @@ class PluginManager:
 
         # Get plugin info
         plugin_info = None
-        plugins = self._list_plugins_sync()
+        plugins = self.list_plugins_sync()
         for plugin in plugins:
             if plugin["name"] == name:
                 plugin_info = plugin
@@ -1455,7 +1455,7 @@ class PluginManager:
 
         # Get new pipeline IDs
         new_plugin_info = None
-        for plugin in self._list_plugins_sync():
+        for plugin in self.list_plugins_sync():
             if plugin["name"] == name:
                 new_plugin_info = plugin
                 break

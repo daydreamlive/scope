@@ -364,6 +364,19 @@ class PipelineManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.get_status_info)
 
+    def get_load_snapshot(self) -> dict[str, dict[str, Any]]:
+        """Return a thread-safe snapshot of loaded pipeline IDs and their load params.
+
+        Returns:
+            dict mapping pipeline_id to a *copy* of its load params.
+        """
+        with self._lock:
+            return {
+                pid: dict(params)
+                for pid, params in self._pipeline_load_params.items()
+                if pid in self._pipelines
+            }
+
     async def load_pipelines(
         self,
         pipeline_ids: list[str],

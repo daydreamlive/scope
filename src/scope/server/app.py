@@ -1181,6 +1181,49 @@ async def tag_lora_provenance(
     return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
 
 
+# ---------------------------------------------------------------------------
+# Workflow export
+# ---------------------------------------------------------------------------
+
+
+class ExportLoRAInput(BaseModel):
+    path: str
+    scale: float = 1.0
+    merge_mode: str | None = None
+
+
+class ExportPipelineInput(BaseModel):
+    pipeline_id: str
+    params: dict = {}
+    loras: list[ExportLoRAInput] = []
+
+
+class WorkflowExportRequest(BaseModel):
+    name: str = "Untitled Workflow"
+    pipelines: list[ExportPipelineInput]
+    lora_merge_mode: str = "permanent_merge"
+
+
+@app.post("/api/v1/workflow/export")
+def export_workflow(request: WorkflowExportRequest):
+    """Export the current session as a shareable .scope-workflow.json."""
+    from scope.core.plugins import get_plugin_manager
+    from scope.core.workflows.export import build_workflow
+    from scope.server.models_config import get_models_dir
+
+    lora_dir = get_models_dir() / "lora"
+    plugin_manager = get_plugin_manager()
+
+    workflow = build_workflow(
+        name=request.name,
+        pipelines_input=[p.model_dump() for p in request.pipelines],
+        plugin_manager=plugin_manager,
+        lora_dir=lora_dir,
+        lora_merge_mode=request.lora_merge_mode,
+    )
+    return workflow.model_dump(mode="json", exclude_none=True)
+
+
 @app.get("/api/v1/assets", response_model=AssetsResponse)
 @cloud_proxy()
 async def list_assets(
