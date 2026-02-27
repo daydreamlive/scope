@@ -604,9 +604,12 @@ class ScopeApp(fal.App, keep_alive=300):
 
             async with httpx.AsyncClient() as client:
                 try:
-                    # Check if this is a base64-encoded file upload
-                    is_binary_upload = (
+                    # Check if this is a file upload (base64 or CDN URL)
+                    is_base64_upload = (
                         body and isinstance(body, dict) and "_base64_content" in body
+                    )
+                    is_cdn_upload = (
+                        body and isinstance(body, dict) and "_cdn_url" in body
                     )
 
                     if method == "GET":
@@ -616,8 +619,46 @@ class ScopeApp(fal.App, keep_alive=300):
                             f"{SCOPE_BASE_URL}{path}", timeout=timeout
                         )
                     elif method == "POST":
-                        if is_binary_upload:
-                            # Decode base64 and send as binary
+                        if is_cdn_upload:
+                            # Download from CDN URL and forward as binary
+                            # This handles large files that were uploaded directly to fal CDN
+                            cdn_url = body["_cdn_url"]
+                            content_type = body.get(
+                                "_content_type", "application/octet-stream"
+                            )
+                            print(f"[{log_prefix()}] Downloading from CDN: {cdn_url}")
+                            try:
+                                cdn_response = await client.get(
+                                    cdn_url, timeout=120.0, follow_redirects=True
+                                )
+                                if cdn_response.status_code != 200:
+                                    return {
+                                        "type": "api_response",
+                                        "request_id": request_id,
+                                        "status": 502,
+                                        "error": f"CDN download failed: {cdn_response.status_code}",
+                                    }
+                                binary_content = cdn_response.content
+                                print(
+                                    f"[{log_prefix()}] Downloaded {len(binary_content)} bytes from CDN"
+                                )
+                            except Exception as e:
+                                print(f"[{log_prefix()}] CDN download error: {e}")
+                                return {
+                                    "type": "api_response",
+                                    "request_id": request_id,
+                                    "status": 502,
+                                    "error": f"CDN download error: {e}",
+                                }
+
+                            response = await client.post(
+                                f"{SCOPE_BASE_URL}{path}",
+                                content=binary_content,
+                                headers={"Content-Type": content_type},
+                                timeout=60.0,
+                            )
+                        elif is_base64_upload:
+                            # Decode base64 and send as binary (for small files)
                             binary_content = base64.b64decode(body["_base64_content"])
                             content_type = body.get(
                                 "_content_type", "application/octet-stream"
