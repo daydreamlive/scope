@@ -1041,7 +1041,21 @@ async def install_lora_file(
         else:
             source = "url"
 
-        provenance = LoRAProvenance(source=source, url=url)
+        # Strip sensitive query params (e.g. CivitAI API token) before persisting
+        from urllib.parse import urlencode, urlunparse
+        from urllib.parse import urlparse as _urlparse
+
+        _parsed = _urlparse(url)
+        clean_params = {
+            k: v for k, v in parse_qs(_parsed.query).items() if k.lower() != "token"
+        }
+        clean_url = urlunparse(
+            _parsed._replace(
+                query=urlencode(clean_params, doseq=True) if clean_params else ""
+            )
+        )
+
+        provenance = LoRAProvenance(source=source, url=clean_url)
         entry = add_manifest_entry(
             lora_dir, relative_key, provenance, sha256, size_bytes
         )
