@@ -294,7 +294,8 @@ export function StreamPage() {
         settingsUpdate.manageCache = params.manage_cache as boolean;
       }
       if (params.kv_cache_attention_bias !== undefined) {
-        settingsUpdate.kvCacheAttentionBias = params.kv_cache_attention_bias as number;
+        settingsUpdate.kvCacheAttentionBias =
+          params.kv_cache_attention_bias as number;
       }
       if (params.vace_context_scale !== undefined) {
         settingsUpdate.vaceContextScale = params.vace_context_scale as number;
@@ -1530,7 +1531,7 @@ export function StreamPage() {
       onDenoisingStepsChange={handleDenoisingStepsChange}
       currentNoiseController={settings.noiseController}
       currentManageCache={settings.manageCache}
-      onSwitchPrompt={(index) => {
+      onSwitchPrompt={index => {
         if (index >= 0 && index < promptSlots.length) {
           setActivePromptSlotIndex(index);
           // Update promptItems to reflect the active slot
@@ -1553,403 +1554,415 @@ export function StreamPage() {
           onSettingsTabOpened={() => setOpenSettingsTab(null)}
         />
 
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
-        {/* Left Panel - Input & Controls */}
-        <div className="w-1/5">
-          <InputAndControlsPanel
-            className="h-full"
-            pipelines={pipelines}
-            localStream={localStream}
-            isInitializing={isInitializing}
-            error={videoSourceError}
-            mode={mode}
-            onModeChange={handleModeChange}
-            isStreaming={isStreaming}
-            isConnecting={isConnecting || isCloudConnecting}
-            isPipelineLoading={isPipelineLoading}
-            canStartStream={
-              settings.inputMode === "text"
-                ? !isInitializing
-                : mode === "spout" || mode === "ndi" || mode === "syphon"
-                  ? !isInitializing
-                  : !!localStream && !isInitializing
-            }
-            onStartStream={handleStartStream}
-            onStopStream={stopStream}
-            onVideoFileUpload={handleVideoFileUpload}
-            pipelineId={settings.pipelineId}
-            prompts={promptItems}
-            onPromptsChange={setPromptItems}
-            onPromptsSubmit={handlePromptsSubmit}
-            onTransitionSubmit={handleTransitionSubmit}
-            promptSlots={promptSlots}
-            activePromptSlotIndex={activePromptSlotIndex}
-            onPromptSlotsChange={(slots) => {
-              setPromptSlots(slots);
-              // Sync active slot to promptItems
-              if (slots[activePromptSlotIndex]?.text) {
-                setPromptItems([{ text: slots[activePromptSlotIndex].text, weight: 100 }]);
-              }
-            }}
-            onActivePromptSlotChange={(index) => {
-              setActivePromptSlotIndex(index);
-              // Update promptItems to reflect the active slot
-              if (promptSlots[index]?.text) {
-                const newPromptItems = [{ text: promptSlots[index].text, weight: 100 }];
-                setPromptItems(newPromptItems);
-                // Update timeline and backend if streaming
-                if (isStreaming) {
-                  handleLivePromptSubmit(newPromptItems);
-                }
-              }
-            }}
-            interpolationMethod={interpolationMethod}
-            onInterpolationMethodChange={setInterpolationMethod}
-            temporalInterpolationMethod={temporalInterpolationMethod}
-            onTemporalInterpolationMethodChange={setTemporalInterpolationMethod}
-            isLive={isLive}
-            onLivePromptSubmit={handleLivePromptSubmit}
-            selectedTimelinePrompt={selectedTimelinePrompt}
-            onTimelinePromptUpdate={handleTimelinePromptUpdate}
-            isVideoPaused={settings.paused}
-            isTimelinePlaying={isTimelinePlaying}
-            currentTime={timelineCurrentTime}
-            timelinePrompts={timelinePrompts}
-            transitionSteps={transitionSteps}
-            onTransitionStepsChange={setTransitionSteps}
-            spoutReceiverName={
-              settings.inputSource?.source_type === "spout"
-                ? (settings.inputSource?.source_name ?? "")
-                : ""
-            }
-            onSpoutReceiverChange={handleSpoutSourceChange}
-            inputMode={
-              settings.inputMode || getPipelineDefaultMode(settings.pipelineId)
-            }
-            onInputModeChange={handleInputModeChange}
-            spoutAvailable={spoutAvailable}
-            ndiAvailable={ndiAvailable}
-            syphonAvailable={syphonAvailable}
-            selectedNdiSource={settings.inputSource?.source_name ?? ""}
-            onNdiSourceChange={handleNdiSourceChange}
-            selectedSyphonSource={
-              settings.inputSource?.source_type === "syphon"
-                ? (settings.inputSource?.source_name ?? "")
-                : ""
-            }
-            onSyphonSourceChange={handleSyphonSourceChange}
-            vaceEnabled={
-              settings.vaceEnabled ??
-              (pipelines?.[settings.pipelineId]?.supportsVACE &&
-                settings.inputMode !== "video")
-            }
-            refImages={settings.refImages || []}
-            onRefImagesChange={handleRefImagesChange}
-            onSendHints={handleSendHints}
-            isDownloading={isDownloading}
-            supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
-            firstFrameImage={settings.firstFrameImage}
-            onFirstFrameImageChange={handleFirstFrameImageChange}
-            lastFrameImage={settings.lastFrameImage}
-            onLastFrameImageChange={handleLastFrameImageChange}
-            extensionMode={settings.extensionMode || "firstframe"}
-            onExtensionModeChange={handleExtensionModeChange}
-            onSendExtensionFrames={handleSendExtensionFrames}
-            configSchema={
-              pipelines?.[settings.pipelineId]?.configSchema as
-                | import("../lib/schemaSettings").ConfigSchemaLike
-                | undefined
-            }
-            schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
-            onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
-              updateSettings({
-                schemaFieldOverrides: {
-                  ...(settings.schemaFieldOverrides ?? {}),
-                  [key]: value,
-                },
-              });
-              if (isRuntimeParam && isStreaming) {
-                sendParameterUpdate({ [key]: value });
-              }
-            }}
-          />
-        </div>
-
-        {/* Center Panel - Video Output + Timeline */}
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Video area - takes remaining space but can shrink */}
-          <div className="flex-1 min-h-0">
-            <VideoOutput
+        {/* Main Content Area */}
+        <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
+          {/* Left Panel - Input & Controls */}
+          <div className="w-1/5">
+            <InputAndControlsPanel
               className="h-full"
-              remoteStream={remoteStream}
-              isPipelineLoading={isPipelineLoading}
-              isCloudConnecting={isCloudConnecting}
-              isConnecting={isConnecting}
-              pipelineError={pipelineError}
-              isPlaying={!settings.paused}
-              isDownloading={isDownloading}
-              onPlayPauseToggle={() => {
-                // Use timeline's play/pause handler instead of direct video toggle
-                if (timelinePlayPauseRef.current) {
-                  timelinePlayPauseRef.current();
-                }
-              }}
-              onStartStream={() => {
-                // Use timeline's play/pause handler to start stream
-                if (timelinePlayPauseRef.current) {
-                  timelinePlayPauseRef.current();
-                }
-              }}
-              onVideoPlaying={() => {
-                // Execute callback when video starts playing
-                if (onVideoPlayingCallbackRef.current) {
-                  onVideoPlayingCallbackRef.current();
-                  onVideoPlayingCallbackRef.current = null; // Clear after execution
-                }
-              }}
-              // Controller input props
-              supportsControllerInput={currentPipelineSupportsController}
-              isPointerLocked={isPointerLocked}
-              onRequestPointerLock={requestPointerLock}
-              videoContainerRef={videoContainerRef}
-              // Video scale mode
-              videoScaleMode={videoScaleMode}
-            />
-          </div>
-          {/* Timeline area - compact, always visible */}
-          <div className="flex-shrink-0 mt-2">
-            <PromptInputWithTimeline
-              currentPrompt={promptItems[0]?.text || ""}
-              currentPromptItems={promptItems}
-              transitionSteps={transitionSteps}
-              temporalInterpolationMethod={temporalInterpolationMethod}
-              onPromptSubmit={text => {
-                // Update the left panel's prompt state to reflect current timeline prompt
-                const prompts = [{ text, weight: 100 }];
-                setPromptItems(prompts);
-
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && transitionSteps > 0) {
-                  sendParameterUpdate({
-                    transition: {
-                      target_prompts: prompts,
-                      num_steps: transitionSteps,
-                      temporal_interpolation_method:
-                        temporalInterpolationMethod,
-                    },
-                  });
-                } else {
-                  // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
-                }
-              }}
-              onPromptItemsSubmit={(
-                prompts,
-                blockTransitionSteps,
-                blockTemporalInterpolationMethod
-              ) => {
-                // Update the left panel's prompt state to reflect current timeline prompt blend
-                setPromptItems(prompts);
-
-                // Use transition params from block if provided, otherwise use global settings
-                const effectiveTransitionSteps =
-                  blockTransitionSteps ?? transitionSteps;
-                const effectiveTemporalInterpolationMethod =
-                  blockTemporalInterpolationMethod ??
-                  temporalInterpolationMethod;
-
-                // Update the left panel's transition settings to reflect current block's values
-                if (blockTransitionSteps !== undefined) {
-                  setTransitionSteps(blockTransitionSteps);
-                }
-                if (blockTemporalInterpolationMethod !== undefined) {
-                  setTemporalInterpolationMethod(
-                    blockTemporalInterpolationMethod
-                  );
-                }
-
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && effectiveTransitionSteps > 0) {
-                  sendParameterUpdate({
-                    transition: {
-                      target_prompts: prompts,
-                      num_steps: effectiveTransitionSteps,
-                      temporal_interpolation_method:
-                        effectiveTemporalInterpolationMethod,
-                    },
-                  });
-                } else {
-                  // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
-                }
-              }}
-              disabled={
-                isPipelineLoading ||
-                isConnecting ||
-                isCloudConnecting ||
-                showDownloadDialog
-              }
+              pipelines={pipelines}
+              localStream={localStream}
+              isInitializing={isInitializing}
+              error={videoSourceError}
+              mode={mode}
+              onModeChange={handleModeChange}
               isStreaming={isStreaming}
-              isVideoPaused={settings.paused}
-              timelineRef={timelineRef}
-              onLiveStateChange={setIsLive}
-              onLivePromptSubmit={handleLivePromptSubmit}
-              onDisconnect={stopStream}
-              onStartStream={handleStartStream}
-              onVideoPlayPauseToggle={handlePlayPauseToggle}
-              onPromptEdit={handleTimelinePromptEdit}
-              isCollapsed={isTimelineCollapsed}
-              onCollapseToggle={setIsTimelineCollapsed}
-              externalSelectedPromptId={externalSelectedPromptId}
-              settings={settings}
-              onSettingsImport={updateSettings}
-              onPlayPauseRef={timelinePlayPauseRef}
-              onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
-              onResetCache={handleResetCache}
-              onTimelinePromptsChange={handleTimelinePromptsChange}
-              onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
-              onTimelinePlayingChange={handleTimelinePlayingChange}
-              isLoading={isLoading}
-              videoScaleMode={videoScaleMode}
-              onVideoScaleModeToggle={() =>
-                setVideoScaleMode(prev => (prev === "fit" ? "native" : "fit"))
+              isConnecting={isConnecting || isCloudConnecting}
+              isPipelineLoading={isPipelineLoading}
+              canStartStream={
+                settings.inputMode === "text"
+                  ? !isInitializing
+                  : mode === "spout" || mode === "ndi" || mode === "syphon"
+                    ? !isInitializing
+                    : !!localStream && !isInitializing
               }
+              onStartStream={handleStartStream}
+              onStopStream={stopStream}
+              onVideoFileUpload={handleVideoFileUpload}
+              pipelineId={settings.pipelineId}
+              prompts={promptItems}
+              onPromptsChange={setPromptItems}
+              onPromptsSubmit={handlePromptsSubmit}
+              onTransitionSubmit={handleTransitionSubmit}
+              promptSlots={promptSlots}
+              activePromptSlotIndex={activePromptSlotIndex}
+              onPromptSlotsChange={slots => {
+                setPromptSlots(slots);
+                // Sync active slot to promptItems
+                if (slots[activePromptSlotIndex]?.text) {
+                  setPromptItems([
+                    { text: slots[activePromptSlotIndex].text, weight: 100 },
+                  ]);
+                }
+              }}
+              onActivePromptSlotChange={index => {
+                setActivePromptSlotIndex(index);
+                // Update promptItems to reflect the active slot
+                if (promptSlots[index]?.text) {
+                  const newPromptItems = [
+                    { text: promptSlots[index].text, weight: 100 },
+                  ];
+                  setPromptItems(newPromptItems);
+                  // Update timeline and backend if streaming
+                  if (isStreaming) {
+                    handleLivePromptSubmit(newPromptItems);
+                  }
+                }
+              }}
+              interpolationMethod={interpolationMethod}
+              onInterpolationMethodChange={setInterpolationMethod}
+              temporalInterpolationMethod={temporalInterpolationMethod}
+              onTemporalInterpolationMethodChange={
+                setTemporalInterpolationMethod
+              }
+              isLive={isLive}
+              onLivePromptSubmit={handleLivePromptSubmit}
+              selectedTimelinePrompt={selectedTimelinePrompt}
+              onTimelinePromptUpdate={handleTimelinePromptUpdate}
+              isVideoPaused={settings.paused}
+              isTimelinePlaying={isTimelinePlaying}
+              currentTime={timelineCurrentTime}
+              timelinePrompts={timelinePrompts}
+              transitionSteps={transitionSteps}
+              onTransitionStepsChange={setTransitionSteps}
+              spoutReceiverName={
+                settings.inputSource?.source_type === "spout"
+                  ? (settings.inputSource?.source_name ?? "")
+                  : ""
+              }
+              onSpoutReceiverChange={handleSpoutSourceChange}
+              inputMode={
+                settings.inputMode ||
+                getPipelineDefaultMode(settings.pipelineId)
+              }
+              onInputModeChange={handleInputModeChange}
+              spoutAvailable={spoutAvailable}
+              ndiAvailable={ndiAvailable}
+              syphonAvailable={syphonAvailable}
+              selectedNdiSource={settings.inputSource?.source_name ?? ""}
+              onNdiSourceChange={handleNdiSourceChange}
+              selectedSyphonSource={
+                settings.inputSource?.source_type === "syphon"
+                  ? (settings.inputSource?.source_name ?? "")
+                  : ""
+              }
+              onSyphonSourceChange={handleSyphonSourceChange}
+              vaceEnabled={
+                settings.vaceEnabled ??
+                (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                  settings.inputMode !== "video")
+              }
+              refImages={settings.refImages || []}
+              onRefImagesChange={handleRefImagesChange}
+              onSendHints={handleSendHints}
               isDownloading={isDownloading}
-              onSaveGeneration={handleSaveGeneration}
-              isRecording={isRecording}
-              onRecordingToggle={() => setIsRecording(prev => !prev)}
+              supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
+              firstFrameImage={settings.firstFrameImage}
+              onFirstFrameImageChange={handleFirstFrameImageChange}
+              lastFrameImage={settings.lastFrameImage}
+              onLastFrameImageChange={handleLastFrameImageChange}
+              extensionMode={settings.extensionMode || "firstframe"}
+              onExtensionModeChange={handleExtensionModeChange}
+              onSendExtensionFrames={handleSendExtensionFrames}
+              configSchema={
+                pipelines?.[settings.pipelineId]?.configSchema as
+                  | import("../lib/schemaSettings").ConfigSchemaLike
+                  | undefined
+              }
+              schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
+              onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
+                updateSettings({
+                  schemaFieldOverrides: {
+                    ...(settings.schemaFieldOverrides ?? {}),
+                    [key]: value,
+                  },
+                });
+                if (isRuntimeParam && isStreaming) {
+                  sendParameterUpdate({ [key]: value });
+                }
+              }}
+            />
+          </div>
+
+          {/* Center Panel - Video Output + Timeline */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Video area - takes remaining space but can shrink */}
+            <div className="flex-1 min-h-0">
+              <VideoOutput
+                className="h-full"
+                remoteStream={remoteStream}
+                isPipelineLoading={isPipelineLoading}
+                isCloudConnecting={isCloudConnecting}
+                isConnecting={isConnecting}
+                pipelineError={pipelineError}
+                isPlaying={!settings.paused}
+                isDownloading={isDownloading}
+                onPlayPauseToggle={() => {
+                  // Use timeline's play/pause handler instead of direct video toggle
+                  if (timelinePlayPauseRef.current) {
+                    timelinePlayPauseRef.current();
+                  }
+                }}
+                onStartStream={() => {
+                  // Use timeline's play/pause handler to start stream
+                  if (timelinePlayPauseRef.current) {
+                    timelinePlayPauseRef.current();
+                  }
+                }}
+                onVideoPlaying={() => {
+                  // Execute callback when video starts playing
+                  if (onVideoPlayingCallbackRef.current) {
+                    onVideoPlayingCallbackRef.current();
+                    onVideoPlayingCallbackRef.current = null; // Clear after execution
+                  }
+                }}
+                // Controller input props
+                supportsControllerInput={currentPipelineSupportsController}
+                isPointerLocked={isPointerLocked}
+                onRequestPointerLock={requestPointerLock}
+                videoContainerRef={videoContainerRef}
+                // Video scale mode
+                videoScaleMode={videoScaleMode}
+              />
+            </div>
+            {/* Timeline area - compact, always visible */}
+            <div className="flex-shrink-0 mt-2">
+              <PromptInputWithTimeline
+                currentPrompt={promptItems[0]?.text || ""}
+                currentPromptItems={promptItems}
+                transitionSteps={transitionSteps}
+                temporalInterpolationMethod={temporalInterpolationMethod}
+                onPromptSubmit={text => {
+                  // Update the left panel's prompt state to reflect current timeline prompt
+                  const prompts = [{ text, weight: 100 }];
+                  setPromptItems(prompts);
+
+                  // Send to backend - use transition if streaming and transition steps > 0
+                  if (isStreaming && transitionSteps > 0) {
+                    sendParameterUpdate({
+                      transition: {
+                        target_prompts: prompts,
+                        num_steps: transitionSteps,
+                        temporal_interpolation_method:
+                          temporalInterpolationMethod,
+                      },
+                    });
+                  } else {
+                    // Send direct prompts without transition
+                    sendParameterUpdate({
+                      prompts,
+                      prompt_interpolation_method: interpolationMethod,
+                      denoising_step_list: settings.denoisingSteps || [
+                        700, 500,
+                      ],
+                    });
+                  }
+                }}
+                onPromptItemsSubmit={(
+                  prompts,
+                  blockTransitionSteps,
+                  blockTemporalInterpolationMethod
+                ) => {
+                  // Update the left panel's prompt state to reflect current timeline prompt blend
+                  setPromptItems(prompts);
+
+                  // Use transition params from block if provided, otherwise use global settings
+                  const effectiveTransitionSteps =
+                    blockTransitionSteps ?? transitionSteps;
+                  const effectiveTemporalInterpolationMethod =
+                    blockTemporalInterpolationMethod ??
+                    temporalInterpolationMethod;
+
+                  // Update the left panel's transition settings to reflect current block's values
+                  if (blockTransitionSteps !== undefined) {
+                    setTransitionSteps(blockTransitionSteps);
+                  }
+                  if (blockTemporalInterpolationMethod !== undefined) {
+                    setTemporalInterpolationMethod(
+                      blockTemporalInterpolationMethod
+                    );
+                  }
+
+                  // Send to backend - use transition if streaming and transition steps > 0
+                  if (isStreaming && effectiveTransitionSteps > 0) {
+                    sendParameterUpdate({
+                      transition: {
+                        target_prompts: prompts,
+                        num_steps: effectiveTransitionSteps,
+                        temporal_interpolation_method:
+                          effectiveTemporalInterpolationMethod,
+                      },
+                    });
+                  } else {
+                    // Send direct prompts without transition
+                    sendParameterUpdate({
+                      prompts,
+                      prompt_interpolation_method: interpolationMethod,
+                      denoising_step_list: settings.denoisingSteps || [
+                        700, 500,
+                      ],
+                    });
+                  }
+                }}
+                disabled={
+                  isPipelineLoading ||
+                  isConnecting ||
+                  isCloudConnecting ||
+                  showDownloadDialog
+                }
+                isStreaming={isStreaming}
+                isVideoPaused={settings.paused}
+                timelineRef={timelineRef}
+                onLiveStateChange={setIsLive}
+                onLivePromptSubmit={handleLivePromptSubmit}
+                onDisconnect={stopStream}
+                onStartStream={handleStartStream}
+                onVideoPlayPauseToggle={handlePlayPauseToggle}
+                onPromptEdit={handleTimelinePromptEdit}
+                isCollapsed={isTimelineCollapsed}
+                onCollapseToggle={setIsTimelineCollapsed}
+                externalSelectedPromptId={externalSelectedPromptId}
+                settings={settings}
+                onSettingsImport={updateSettings}
+                onPlayPauseRef={timelinePlayPauseRef}
+                onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
+                onResetCache={handleResetCache}
+                onTimelinePromptsChange={handleTimelinePromptsChange}
+                onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
+                onTimelinePlayingChange={handleTimelinePlayingChange}
+                isLoading={isLoading}
+                videoScaleMode={videoScaleMode}
+                onVideoScaleModeToggle={() =>
+                  setVideoScaleMode(prev => (prev === "fit" ? "native" : "fit"))
+                }
+                isDownloading={isDownloading}
+                onSaveGeneration={handleSaveGeneration}
+                isRecording={isRecording}
+                onRecordingToggle={() => setIsRecording(prev => !prev)}
+              />
+            </div>
+          </div>
+
+          {/* Right Panel - Settings */}
+          <div className="w-1/5 flex flex-col gap-3">
+            <SettingsPanel
+              className="flex-1 min-h-0 overflow-auto"
+              pipelines={pipelines}
+              pipelineId={settings.pipelineId}
+              onPipelineIdChange={handlePipelineIdChange}
+              isStreaming={isStreaming}
+              isLoading={isLoading}
+              resolution={
+                settings.resolution || {
+                  height: getDefaults(settings.pipelineId, settings.inputMode)
+                    .height,
+                  width: getDefaults(settings.pipelineId, settings.inputMode)
+                    .width,
+                }
+              }
+              onResolutionChange={handleResolutionChange}
+              denoisingSteps={
+                settings.denoisingSteps ||
+                getDefaults(settings.pipelineId, settings.inputMode)
+                  .denoisingSteps || [750, 250]
+              }
+              onDenoisingStepsChange={handleDenoisingStepsChange}
+              defaultDenoisingSteps={
+                getDefaults(settings.pipelineId, settings.inputMode)
+                  .denoisingSteps || [750, 250]
+              }
+              noiseScale={settings.noiseScale ?? 0.7}
+              onNoiseScaleChange={handleNoiseScaleChange}
+              noiseController={settings.noiseController ?? true}
+              onNoiseControllerChange={handleNoiseControllerChange}
+              manageCache={settings.manageCache ?? true}
+              onManageCacheChange={handleManageCacheChange}
+              quantization={
+                settings.quantization !== undefined
+                  ? settings.quantization
+                  : "fp8_e4m3fn"
+              }
+              onQuantizationChange={handleQuantizationChange}
+              kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
+              onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
+              onResetCache={handleResetCache}
+              loras={settings.loras || []}
+              onLorasChange={handleLorasChange}
+              loraMergeStrategy={
+                settings.loraMergeStrategy ?? "permanent_merge"
+              }
+              inputMode={settings.inputMode}
+              supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
+              outputSinks={settings.outputSinks}
+              onOutputSinkChange={handleOutputSinkChange}
+              spoutAvailable={spoutAvailable}
+              ndiAvailable={ndiOutputAvailable}
+              syphonAvailable={syphonOutputAvailable}
+              vaceEnabled={
+                settings.vaceEnabled ??
+                (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                  settings.inputMode !== "video")
+              }
+              onVaceEnabledChange={handleVaceEnabledChange}
+              vaceUseInputVideo={settings.vaceUseInputVideo ?? false}
+              onVaceUseInputVideoChange={handleVaceUseInputVideoChange}
+              vaceContextScale={settings.vaceContextScale ?? 1.0}
+              onVaceContextScaleChange={handleVaceContextScaleChange}
+              preprocessorIds={settings.preprocessorIds ?? []}
+              onPreprocessorIdsChange={handlePreprocessorIdsChange}
+              postprocessorIds={settings.postprocessorIds ?? []}
+              onPostprocessorIdsChange={handlePostprocessorIdsChange}
+              preprocessorSchemaFieldOverrides={
+                settings.preprocessorSchemaFieldOverrides ?? {}
+              }
+              postprocessorSchemaFieldOverrides={
+                settings.postprocessorSchemaFieldOverrides ?? {}
+              }
+              onPreprocessorSchemaFieldOverrideChange={
+                handlePreprocessorSchemaFieldOverrideChange
+              }
+              onPostprocessorSchemaFieldOverrideChange={
+                handlePostprocessorSchemaFieldOverrideChange
+              }
+              schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
+              onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
+                updateSettings({
+                  schemaFieldOverrides: {
+                    ...(settings.schemaFieldOverrides ?? {}),
+                    [key]: value,
+                  },
+                });
+                if (isRuntimeParam && isStreaming) {
+                  sendParameterUpdate({ [key]: value });
+                }
+              }}
+              isCloudMode={isCloudMode}
+              onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
             />
           </div>
         </div>
 
-        {/* Right Panel - Settings */}
-        <div className="w-1/5 flex flex-col gap-3">
-          <SettingsPanel
-            className="flex-1 min-h-0 overflow-auto"
+        {/* Status Bar */}
+        <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
+
+        {/* Download Dialog */}
+        {pipelinesNeedingModels.length > 0 && (
+          <DownloadDialog
+            open={showDownloadDialog}
             pipelines={pipelines}
-            pipelineId={settings.pipelineId}
-            onPipelineIdChange={handlePipelineIdChange}
-            isStreaming={isStreaming}
-            isLoading={isLoading}
-            resolution={
-              settings.resolution || {
-                height: getDefaults(settings.pipelineId, settings.inputMode)
-                  .height,
-                width: getDefaults(settings.pipelineId, settings.inputMode)
-                  .width,
-              }
-            }
-            onResolutionChange={handleResolutionChange}
-            denoisingSteps={
-              settings.denoisingSteps ||
-              getDefaults(settings.pipelineId, settings.inputMode)
-                .denoisingSteps || [750, 250]
-            }
-            onDenoisingStepsChange={handleDenoisingStepsChange}
-            defaultDenoisingSteps={
-              getDefaults(settings.pipelineId, settings.inputMode)
-                .denoisingSteps || [750, 250]
-            }
-            noiseScale={settings.noiseScale ?? 0.7}
-            onNoiseScaleChange={handleNoiseScaleChange}
-            noiseController={settings.noiseController ?? true}
-            onNoiseControllerChange={handleNoiseControllerChange}
-            manageCache={settings.manageCache ?? true}
-            onManageCacheChange={handleManageCacheChange}
-            quantization={
-              settings.quantization !== undefined
-                ? settings.quantization
-                : "fp8_e4m3fn"
-            }
-            onQuantizationChange={handleQuantizationChange}
-            kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
-            onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
-            onResetCache={handleResetCache}
-            loras={settings.loras || []}
-            onLorasChange={handleLorasChange}
-            loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
-            inputMode={settings.inputMode}
-            supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            outputSinks={settings.outputSinks}
-            onOutputSinkChange={handleOutputSinkChange}
-            spoutAvailable={spoutAvailable}
-            ndiAvailable={ndiOutputAvailable}
-            syphonAvailable={syphonOutputAvailable}
-            vaceEnabled={
-              settings.vaceEnabled ??
-              (pipelines?.[settings.pipelineId]?.supportsVACE &&
-                settings.inputMode !== "video")
-            }
-            onVaceEnabledChange={handleVaceEnabledChange}
-            vaceUseInputVideo={settings.vaceUseInputVideo ?? false}
-            onVaceUseInputVideoChange={handleVaceUseInputVideoChange}
-            vaceContextScale={settings.vaceContextScale ?? 1.0}
-            onVaceContextScaleChange={handleVaceContextScaleChange}
-            preprocessorIds={settings.preprocessorIds ?? []}
-            onPreprocessorIdsChange={handlePreprocessorIdsChange}
-            postprocessorIds={settings.postprocessorIds ?? []}
-            onPostprocessorIdsChange={handlePostprocessorIdsChange}
-            preprocessorSchemaFieldOverrides={
-              settings.preprocessorSchemaFieldOverrides ?? {}
-            }
-            postprocessorSchemaFieldOverrides={
-              settings.postprocessorSchemaFieldOverrides ?? {}
-            }
-            onPreprocessorSchemaFieldOverrideChange={
-              handlePreprocessorSchemaFieldOverrideChange
-            }
-            onPostprocessorSchemaFieldOverrideChange={
-              handlePostprocessorSchemaFieldOverrideChange
-            }
-            schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
-            onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
-              updateSettings({
-                schemaFieldOverrides: {
-                  ...(settings.schemaFieldOverrides ?? {}),
-                  [key]: value,
-                },
-              });
-              if (isRuntimeParam && isStreaming) {
-                sendParameterUpdate({ [key]: value });
-              }
+            pipelineIds={pipelinesNeedingModels}
+            currentDownloadPipeline={currentDownloadPipeline}
+            onClose={handleDialogClose}
+            onDownload={handleDownloadModels}
+            isDownloading={isDownloading}
+            progress={downloadProgress}
+            error={downloadError}
+            onOpenSettings={tab => {
+              setShowDownloadDialog(false);
+              setOpenSettingsTab(tab);
             }}
-            isCloudMode={isCloudMode}
-            onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
           />
-        </div>
-      </div>
-
-      {/* Status Bar */}
-      <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
-
-      {/* Download Dialog */}
-      {pipelinesNeedingModels.length > 0 && (
-        <DownloadDialog
-          open={showDownloadDialog}
-          pipelines={pipelines}
-          pipelineIds={pipelinesNeedingModels}
-          currentDownloadPipeline={currentDownloadPipeline}
-          onClose={handleDialogClose}
-          onDownload={handleDownloadModels}
-          isDownloading={isDownloading}
-          progress={downloadProgress}
-          error={downloadError}
-          onOpenSettings={tab => {
-            setShowDownloadDialog(false);
-            setOpenSettingsTab(tab);
-          }}
-        />
-      )}
+        )}
       </div>
     </MIDIProvider>
   );

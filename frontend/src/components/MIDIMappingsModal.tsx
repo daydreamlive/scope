@@ -55,7 +55,10 @@ function formatMappingType(type: string): string {
   return type.charAt(0).toUpperCase() + type.slice(1);
 }
 
-export function MIDIMappingsModal({ open, onOpenChange }: MIDIMappingsModalProps) {
+export function MIDIMappingsModal({
+  open,
+  onOpenChange,
+}: MIDIMappingsModalProps) {
   const { mappingProfile, deleteMapping, clearAllMappings } = useMIDI();
   const mappings = mappingProfile.mappings;
 
@@ -76,7 +79,8 @@ export function MIDIMappingsModal({ open, onOpenChange }: MIDIMappingsModalProps
         <DialogHeader>
           <DialogTitle>MIDI Mappings</DialogTitle>
           <DialogDescription>
-            View and manage your MIDI controller mappings. Delete individual mappings or clear all at once.
+            View and manage your MIDI controller mappings. Delete individual
+            mappings or clear all at once.
           </DialogDescription>
         </DialogHeader>
 
@@ -126,17 +130,11 @@ export function MIDIMappingsModal({ open, onOpenChange }: MIDIMappingsModalProps
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           {mappings.length > 0 && (
-            <Button
-              variant="destructive"
-              onClick={handleClearAll}
-            >
+            <Button variant="destructive" onClick={handleClearAll}>
               Clear All Mappings
             </Button>
           )}

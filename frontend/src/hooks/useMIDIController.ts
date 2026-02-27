@@ -7,7 +7,10 @@ export interface MIDIControllerConfig {
   deviceId?: string;
   currentDenoisingSteps?: number[];
   onDenoisingStepsChange?: (steps: number[]) => void;
-  onLearnComplete?: (mappingIndex: number, source: import("../types/midi").MIDISource) => void;
+  onLearnComplete?: (
+    mappingIndex: number,
+    source: import("../types/midi").MIDISource
+  ) => void;
   currentNoiseController?: boolean;
   currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
@@ -68,7 +71,7 @@ export function useMIDIController(
 
   const updateDeviceList = useCallback((access: MIDIAccess) => {
     const inputs: MIDIInput[] = [];
-    access.inputs.forEach((input) => inputs.push(input));
+    access.inputs.forEach(input => inputs.push(input));
     setDevices(inputs);
   }, []);
 
@@ -89,12 +92,12 @@ export function useMIDIController(
 
     navigator
       .requestMIDIAccess({ sysex: false })
-      .then((access) => {
+      .then(access => {
         setMidiAccess(access);
         updateDeviceList(access);
         access.addEventListener("statechange", () => updateDeviceList(access));
       })
-      .catch((err) => {
+      .catch(err => {
         setError(`Failed to access MIDI: ${err.message}`);
       });
   }, [enabled, updateDeviceList]);
@@ -178,7 +181,10 @@ export function useMIDIController(
         }
 
         // Array parameter (denoising steps)
-        if (mapping.target.parameter === "denoising_step_list" && mapping.target.arrayIndex !== undefined) {
+        if (
+          mapping.target.parameter === "denoising_step_list" &&
+          mapping.target.arrayIndex !== undefined
+        ) {
           if (!currentDenoisingSteps || !onDenoisingStepsChange) continue;
           const idx = mapping.target.arrayIndex;
           if (idx < 0 || idx >= currentDenoisingSteps.length) continue;
@@ -193,10 +199,12 @@ export function useMIDIController(
 
           // Push outward from changed index to maintain descending order
           for (let i = idx + 1; i < steps.length; i++) {
-            if (steps[i] >= steps[i - 1]) steps[i] = Math.max(0, steps[i - 1] - 1);
+            if (steps[i] >= steps[i - 1])
+              steps[i] = Math.max(0, steps[i - 1] - 1);
           }
           for (let i = idx - 1; i >= 0; i--) {
-            if (steps[i] <= steps[i + 1]) steps[i] = Math.min(1000, steps[i + 1] + 1);
+            if (steps[i] <= steps[i + 1])
+              steps[i] = Math.min(1000, steps[i + 1] + 1);
           }
 
           onDenoisingStepsChange(steps);
@@ -208,15 +216,31 @@ export function useMIDIController(
         const normalized = value / 127.0;
         const min = mapping.range?.min ?? 0;
         const max = mapping.range?.max ?? 1;
-        sendParameterUpdate({ [mapping.target.parameter]: min + normalized * (max - min) });
+        sendParameterUpdate({
+          [mapping.target.parameter]: min + normalized * (max - min),
+        });
         continue;
       }
 
       // --- Toggle / Trigger / Enum cycle (Note On or CC press) ---
-      if (mapping.type === "toggle" || mapping.type === "trigger" || mapping.type === "enum_cycle") {
-        const isNoteOn = command === 0x90 && source.midi_note !== undefined && noteOrCC === source.midi_note && value > 0;
-        const isCCMatch = command === 0xb0 && source.midi_cc !== undefined && noteOrCC === source.midi_cc;
-        const ccKey = source.midi_cc !== undefined ? `cc_${source.midi_cc}_ch${source.channel}` : null;
+      if (
+        mapping.type === "toggle" ||
+        mapping.type === "trigger" ||
+        mapping.type === "enum_cycle"
+      ) {
+        const isNoteOn =
+          command === 0x90 &&
+          source.midi_note !== undefined &&
+          noteOrCC === source.midi_note &&
+          value > 0;
+        const isCCMatch =
+          command === 0xb0 &&
+          source.midi_cc !== undefined &&
+          noteOrCC === source.midi_cc;
+        const ccKey =
+          source.midi_cc !== undefined
+            ? `cc_${source.midi_cc}_ch${source.channel}`
+            : null;
 
         // CC release — update state, skip
         if (isCCMatch && value <= 0 && ccKey) {
@@ -242,10 +266,16 @@ export function useMIDIController(
         } else if (mapping.type === "trigger") {
           const target = mapping.target;
 
-          if (target.action === "switch_prompt" && target.prompt_index !== undefined) {
+          if (
+            target.action === "switch_prompt" &&
+            target.prompt_index !== undefined
+          ) {
             onSwitchPrompt?.(target.prompt_index);
           } else if (target.action?.startsWith("switch_prompt_")) {
-            const idx = parseInt(target.action.replace("switch_prompt_", ""), 10);
+            const idx = parseInt(
+              target.action.replace("switch_prompt_", ""),
+              10
+            );
             if (!isNaN(idx) && idx >= 0 && idx < 4) onSwitchPrompt?.(idx);
           } else if (target.action === "reset_cache") {
             sendParameterUpdate({ reset_cache: true });
@@ -254,7 +284,8 @@ export function useMIDIController(
           } else if (target.action === "add_denoising_step") {
             if (!currentDenoisingSteps || !onDenoisingStepsChange) continue;
             if (currentDenoisingSteps.length >= 10) continue;
-            const last = currentDenoisingSteps[currentDenoisingSteps.length - 1];
+            const last =
+              currentDenoisingSteps[currentDenoisingSteps.length - 1];
             const steps = [...currentDenoisingSteps, Math.max(0, last - 100)];
             onDenoisingStepsChange(steps);
             sendParameterUpdate({ denoising_step_list: steps });
@@ -269,7 +300,8 @@ export function useMIDIController(
           if (!mapping.target.parameter || !mapping.target.values) continue;
           const key = mapping.target.parameter;
           const values = mapping.target.values;
-          const nextIdx = ((enumStatesRef.current.get(key) ?? 0) + 1) % values.length;
+          const nextIdx =
+            ((enumStatesRef.current.get(key) ?? 0) + 1) % values.length;
           enumStatesRef.current.set(key, nextIdx);
           sendParameterUpdate({ [key]: values[nextIdx] });
         }
@@ -279,7 +311,9 @@ export function useMIDIController(
 
   useEffect(() => {
     if (!selectedInput) return;
-    const handler = (event: MIDIMessageEvent) => { if (event.data) handleMIDIMessage(event); };
+    const handler = (event: MIDIMessageEvent) => {
+      if (event.data) handleMIDIMessage(event);
+    };
     selectedInput.addEventListener("midimessage", handler);
     return () => selectedInput.removeEventListener("midimessage", handler);
   }, [selectedInput, handleMIDIMessage]);
@@ -292,5 +326,12 @@ export function useMIDIController(
     learningMappingIndexRef.current = null;
   }, []);
 
-  return { devices, selectedInput, error, isEnabled: enabled && selectedInput !== null, startLearn, cancelLearn };
+  return {
+    devices,
+    selectedInput,
+    error,
+    isEnabled: enabled && selectedInput !== null,
+    startLearn,
+    cancelLearn,
+  };
 }

@@ -1,6 +1,19 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useMIDIController } from "../hooks/useMIDIController";
-import type { MIDIMappingProfile, MIDISource, MIDIMapping, MIDIMappingType } from "../types/midi";
+import type {
+  MIDIMappingProfile,
+  MIDISource,
+  MIDIMapping,
+  MIDIMappingType,
+} from "../types/midi";
 import { toast } from "sonner";
 
 const MAPPING_PROFILES_KEY = "scope_midi_mapping_profiles";
@@ -26,8 +39,11 @@ function loadMIDIEnabled(): boolean {
 }
 
 function loadMIDIDeviceId(): string {
-  try { return localStorage.getItem(MIDI_DEVICE_KEY) || ""; }
-  catch { return ""; }
+  try {
+    return localStorage.getItem(MIDI_DEVICE_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 
 function saveMappingProfiles(profiles: MIDIMappingProfile[]) {
@@ -50,9 +66,20 @@ interface MIDIContextValue {
   setMappingMode: (enabled: boolean) => void;
   learningParameter: string | null;
   error: string | null;
-  startLearning: (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]) => void;
+  startLearning: (
+    parameterId: string,
+    arrayIndex?: number,
+    actionId?: string,
+    mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle",
+    range?: { min: number; max: number },
+    enumValues?: string[]
+  ) => void;
   cancelLearning: () => void;
-  getMappedSource: (parameterId: string, arrayIndex?: number, actionId?: string) => string | null;
+  getMappedSource: (
+    parameterId: string,
+    arrayIndex?: number,
+    actionId?: string
+  ) => string | null;
   deleteMapping: (index: number) => void;
   clearAllMappings: () => void;
 }
@@ -79,35 +106,62 @@ export function MIDIProvider({
   onSwitchPrompt,
 }: MIDIProviderProps) {
   const [midiEnabled, setMidiEnabledState] = useState(loadMIDIEnabled);
-  const [selectedDeviceId, setSelectedDeviceIdState] = useState(loadMIDIDeviceId);
-  const [mappingProfiles, setMappingProfiles] = useState<MIDIMappingProfile[]>(loadMappingProfiles);
+  const [selectedDeviceId, setSelectedDeviceIdState] =
+    useState(loadMIDIDeviceId);
+  const [mappingProfiles, setMappingProfiles] =
+    useState<MIDIMappingProfile[]>(loadMappingProfiles);
   const [selectedProfileIndex] = useState(0);
   const [isMappingMode, setMappingMode] = useState(false);
-  const [learningParameter, setLearningParameter] = useState<string | null>(null);
+  const [learningParameter, setLearningParameter] = useState<string | null>(
+    null
+  );
   const learningTimeoutRef = useRef<number | null>(null);
   const learningMappingIndexRef = useRef<number | null>(null);
 
-  useEffect(() => { localStorage.setItem(MIDI_ENABLED_KEY, midiEnabled.toString()); }, [midiEnabled]);
-  useEffect(() => { if (selectedDeviceId) localStorage.setItem(MIDI_DEVICE_KEY, selectedDeviceId); }, [selectedDeviceId]);
+  useEffect(() => {
+    localStorage.setItem(MIDI_ENABLED_KEY, midiEnabled.toString());
+  }, [midiEnabled]);
+  useEffect(() => {
+    if (selectedDeviceId)
+      localStorage.setItem(MIDI_DEVICE_KEY, selectedDeviceId);
+  }, [selectedDeviceId]);
 
   const mappingProfile = useMemo(
-    () => mappingProfiles[selectedProfileIndex] || mappingProfiles[0] || EMPTY_PROFILE,
+    () =>
+      mappingProfiles[selectedProfileIndex] ||
+      mappingProfiles[0] ||
+      EMPTY_PROFILE,
     [mappingProfiles, selectedProfileIndex]
   );
 
   const findOrCreateMapping = useCallback(
-    (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]): { mapping: MIDIMapping; index: number } => {
-      const mappingIndex = mappingProfile.mappings.findIndex((m) => {
+    (
+      parameterId: string,
+      arrayIndex?: number,
+      actionId?: string,
+      mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle",
+      range?: { min: number; max: number },
+      enumValues?: string[]
+    ): { mapping: MIDIMapping; index: number } => {
+      const mappingIndex = mappingProfile.mappings.findIndex(m => {
         if (actionId) return m.target.action === actionId;
-        if (arrayIndex !== undefined) return m.target.parameter === parameterId && m.target.arrayIndex === arrayIndex;
-        return m.target.parameter === parameterId && m.target.arrayIndex === undefined;
+        if (arrayIndex !== undefined)
+          return (
+            m.target.parameter === parameterId &&
+            m.target.arrayIndex === arrayIndex
+          );
+        return (
+          m.target.parameter === parameterId &&
+          m.target.arrayIndex === undefined
+        );
       });
 
       if (mappingIndex === -1) {
-        const inferredType: MIDIMappingType = mappingType || (actionId ? "trigger" : "continuous");
+        const inferredType: MIDIMappingType =
+          mappingType || (actionId ? "trigger" : "continuous");
 
         const baseTarget = actionId
-            ? { action: actionId as MIDIMapping["target"]["action"] }
+          ? { action: actionId as MIDIMapping["target"]["action"] }
           : arrayIndex !== undefined
             ? { parameter: parameterId, arrayIndex }
             : { parameter: parameterId };
@@ -115,15 +169,23 @@ export function MIDIProvider({
         const newMapping: MIDIMapping = {
           type: inferredType,
           source: { channel: 0 },
-          target: enumValues ? { ...baseTarget, values: enumValues } : baseTarget,
+          target: enumValues
+            ? { ...baseTarget, values: enumValues }
+            : baseTarget,
           ...(range && { range }),
         };
-        const updatedProfile = { ...mappingProfile, mappings: [...mappingProfile.mappings, newMapping] };
+        const updatedProfile = {
+          ...mappingProfile,
+          mappings: [...mappingProfile.mappings, newMapping],
+        };
         const updatedProfiles = [...mappingProfiles];
         updatedProfiles[selectedProfileIndex] = updatedProfile;
         setMappingProfiles(updatedProfiles);
         saveMappingProfiles(updatedProfiles);
-        return { mapping: newMapping, index: updatedProfile.mappings.length - 1 };
+        return {
+          mapping: newMapping,
+          index: updatedProfile.mappings.length - 1,
+        };
       }
 
       const existing = mappingProfile.mappings[mappingIndex];
@@ -134,11 +196,20 @@ export function MIDIProvider({
         updatedMapping.type = mappingType;
         updated = true;
       }
-      if (range && (!existing.range || existing.range.min !== range.min || existing.range.max !== range.max)) {
+      if (
+        range &&
+        (!existing.range ||
+          existing.range.min !== range.min ||
+          existing.range.max !== range.max)
+      ) {
         updatedMapping.range = range;
         updated = true;
       }
-      if (enumValues && (!existing.target.values || JSON.stringify(existing.target.values) !== JSON.stringify(enumValues))) {
+      if (
+        enumValues &&
+        (!existing.target.values ||
+          JSON.stringify(existing.target.values) !== JSON.stringify(enumValues))
+      ) {
         updatedMapping.target = { ...existing.target, values: enumValues };
         updated = true;
       }
@@ -146,7 +217,9 @@ export function MIDIProvider({
       if (updated) {
         const updatedProfile = {
           ...mappingProfile,
-          mappings: mappingProfile.mappings.map((m, i) => i === mappingIndex ? updatedMapping : m),
+          mappings: mappingProfile.mappings.map((m, i) =>
+            i === mappingIndex ? updatedMapping : m
+          ),
         };
         const updatedProfiles = [...mappingProfiles];
         updatedProfiles[selectedProfileIndex] = updatedProfile;
@@ -180,20 +253,38 @@ export function MIDIProvider({
   );
 
   const startLearning = useCallback(
-    (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]) => {
+    (
+      parameterId: string,
+      arrayIndex?: number,
+      actionId?: string,
+      mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle",
+      range?: { min: number; max: number },
+      enumValues?: string[]
+    ) => {
       if (!midiEnabled || !selectedDeviceId) {
         toast.error("Please enable MIDI and select a device first");
         return;
       }
-      const { index } = findOrCreateMapping(parameterId, arrayIndex, actionId, mappingType, range, enumValues);
-      setLearningParameter(`${parameterId}${arrayIndex !== undefined ? `[${arrayIndex}]` : ""}${actionId || ""}`);
+      const { index } = findOrCreateMapping(
+        parameterId,
+        arrayIndex,
+        actionId,
+        mappingType,
+        range,
+        enumValues
+      );
+      setLearningParameter(
+        `${parameterId}${arrayIndex !== undefined ? `[${arrayIndex}]` : ""}${actionId || ""}`
+      );
       learningMappingIndexRef.current = index;
 
       if (learningTimeoutRef.current) clearTimeout(learningTimeoutRef.current);
       learningTimeoutRef.current = window.setTimeout(() => {
         setLearningParameter(null);
         learningMappingIndexRef.current = null;
-        toast.warning("No MIDI input detected. Try moving a knob or pressing a pad.");
+        toast.warning(
+          "No MIDI input detected. Try moving a knob or pressing a pad."
+        );
       }, 10000);
     },
     [midiEnabled, selectedDeviceId, findOrCreateMapping]
@@ -209,16 +300,30 @@ export function MIDIProvider({
   }, []);
 
   const getMappedSource = useCallback(
-    (parameterId: string, arrayIndex?: number, actionId?: string): string | null => {
-      const mapping = mappingProfile.mappings.find((m) => {
+    (
+      parameterId: string,
+      arrayIndex?: number,
+      actionId?: string
+    ): string | null => {
+      const mapping = mappingProfile.mappings.find(m => {
         if (actionId) return m.target.action === actionId;
-        if (arrayIndex !== undefined) return m.target.parameter === parameterId && m.target.arrayIndex === arrayIndex;
-        return m.target.parameter === parameterId && m.target.arrayIndex === undefined;
+        if (arrayIndex !== undefined)
+          return (
+            m.target.parameter === parameterId &&
+            m.target.arrayIndex === arrayIndex
+          );
+        return (
+          m.target.parameter === parameterId &&
+          m.target.arrayIndex === undefined
+        );
       });
 
-      if (!mapping || (!mapping.source.midi_cc && !mapping.source.midi_note)) return null;
-      if (mapping.source.midi_cc !== undefined) return `CC ${mapping.source.midi_cc} (Ch ${mapping.source.channel})`;
-      if (mapping.source.midi_note !== undefined) return `Note ${mapping.source.midi_note} (Ch ${mapping.source.channel})`;
+      if (!mapping || (!mapping.source.midi_cc && !mapping.source.midi_note))
+        return null;
+      if (mapping.source.midi_cc !== undefined)
+        return `CC ${mapping.source.midi_cc} (Ch ${mapping.source.channel})`;
+      if (mapping.source.midi_note !== undefined)
+        return `Note ${mapping.source.midi_note} (Ch ${mapping.source.channel})`;
       return null;
     },
     [mappingProfile]
@@ -261,35 +366,46 @@ export function MIDIProvider({
     toast.success("All mappings cleared");
   }, [mappingProfile, mappingProfiles, selectedProfileIndex]);
 
-  const { devices, error, startLearn, cancelLearn: cancelLearnHook } = useMIDIController(
-    sendParameterUpdate,
-    {
-      enabled: midiEnabled,
-      deviceId: selectedDeviceId,
-      mappingProfile,
-      currentDenoisingSteps,
-      onDenoisingStepsChange,
-      onLearnComplete: handleLearnComplete,
-      currentNoiseController,
-      currentManageCache,
-      onSwitchPrompt,
-    }
-  );
+  const {
+    devices,
+    error,
+    startLearn,
+    cancelLearn: cancelLearnHook,
+  } = useMIDIController(sendParameterUpdate, {
+    enabled: midiEnabled,
+    deviceId: selectedDeviceId,
+    mappingProfile,
+    currentDenoisingSteps,
+    onDenoisingStepsChange,
+    onLearnComplete: handleLearnComplete,
+    currentNoiseController,
+    currentManageCache,
+    onSwitchPrompt,
+  });
 
   useEffect(() => {
-    if (devices.length > 0 && !selectedDeviceId) setSelectedDeviceIdState(devices[0].id);
+    if (devices.length > 0 && !selectedDeviceId)
+      setSelectedDeviceIdState(devices[0].id);
   }, [devices, selectedDeviceId]);
 
   useEffect(() => {
-    if (learningMappingIndexRef.current !== null && learningParameter !== null) {
+    if (
+      learningMappingIndexRef.current !== null &&
+      learningParameter !== null
+    ) {
       startLearn(learningMappingIndexRef.current);
-    } else if (learningParameter === null && learningMappingIndexRef.current === null) {
+    } else if (
+      learningParameter === null &&
+      learningMappingIndexRef.current === null
+    ) {
       cancelLearnHook();
     }
   }, [learningParameter, startLearn, cancelLearnHook]);
 
   useEffect(() => {
-    return () => { if (learningTimeoutRef.current) clearTimeout(learningTimeoutRef.current); };
+    return () => {
+      if (learningTimeoutRef.current) clearTimeout(learningTimeoutRef.current);
+    };
   }, []);
 
   const value: MIDIContextValue = {

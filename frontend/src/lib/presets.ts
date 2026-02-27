@@ -144,7 +144,7 @@ export function applyPresetToState(
  */
 export function savePreset(preset: Preset): void {
   const presets = loadPresets();
-  const index = presets.findIndex((p) => p.id === preset.id);
+  const index = presets.findIndex(p => p.id === preset.id);
   if (index >= 0) {
     presets[index] = { ...preset, updatedAt: Date.now() };
   } else {
@@ -158,7 +158,7 @@ export function savePreset(preset: Preset): void {
  */
 export function deletePreset(presetId: string): void {
   const presets = loadPresets();
-  const filtered = presets.filter((p) => p.id !== presetId);
+  const filtered = presets.filter(p => p.id !== presetId);
   savePresets(filtered);
 }
 
@@ -167,5 +167,5 @@ export function deletePreset(presetId: string): void {
  */
 export function getPreset(presetId: string): Preset | undefined {
   const presets = loadPresets();
-  return presets.find((p) => p.id === presetId);
+  return presets.find(p => p.id === presetId);
 }

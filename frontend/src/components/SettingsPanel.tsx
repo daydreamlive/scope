@@ -889,7 +889,9 @@ export function SettingsPanel({
                               max={2}
                               step={0.1}
                               incrementAmount={0.1}
-                              valueFormatter={vaceContextScaleSlider.formatValue}
+                              valueFormatter={
+                                vaceContextScaleSlider.formatValue
+                              }
                               inputParser={v => parseFloat(v) || 1.0}
                             />
                           </MIDIMappable>
@@ -1047,7 +1049,9 @@ export function SettingsPanel({
                       {pipelines?.[pipelineId]?.supportsKvCacheBias && (
                         <MIDIMappable parameterId="kv_cache_attention_bias">
                           <SliderWithInput
-                            label={PARAMETER_METADATA.kvCacheAttentionBias.label}
+                            label={
+                              PARAMETER_METADATA.kvCacheAttentionBias.label
+                            }
                             tooltip={
                               PARAMETER_METADATA.kvCacheAttentionBias.tooltip
                             }
@@ -1071,7 +1075,10 @@ export function SettingsPanel({
                         </MIDIMappable>
                       )}
 
-                      <MIDIMappable parameterId="manage_cache" mappingType="toggle">
+                      <MIDIMappable
+                        parameterId="manage_cache"
+                        mappingType="toggle"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <LabelWithTooltip
                             label={PARAMETER_METADATA.manageCache.label}
@@ -1128,29 +1135,32 @@ export function SettingsPanel({
               {inputMode === "video" && supportsNoiseControls && (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                      <div className="space-y-2 pt-2">
-                        <MIDIMappable parameterId="noise_controller" mappingType="toggle">
-                          <div className="flex items-center justify-between gap-2">
-                            <LabelWithTooltip
-                              label={PARAMETER_METADATA.noiseController.label}
-                              tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                              className="text-sm font-medium"
-                            />
-                            <Toggle
-                              pressed={noiseController}
-                              onPressedChange={
-                                onNoiseControllerChange || (() => {})
-                              }
-                              disabled={isStreaming}
-                              variant="outline"
-                              size="sm"
-                              className="h-7"
-                            >
-                              {noiseController ? "ON" : "OFF"}
-                            </Toggle>
-                          </div>
-                        </MIDIMappable>
-                      </div>
+                    <div className="space-y-2 pt-2">
+                      <MIDIMappable
+                        parameterId="noise_controller"
+                        mappingType="toggle"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <LabelWithTooltip
+                            label={PARAMETER_METADATA.noiseController.label}
+                            tooltip={PARAMETER_METADATA.noiseController.tooltip}
+                            className="text-sm font-medium"
+                          />
+                          <Toggle
+                            pressed={noiseController}
+                            onPressedChange={
+                              onNoiseControllerChange || (() => {})
+                            }
+                            disabled={isStreaming}
+                            variant="outline"
+                            size="sm"
+                            className="h-7"
+                          >
+                            {noiseController ? "ON" : "OFF"}
+                          </Toggle>
+                        </div>
+                      </MIDIMappable>
+                    </div>
 
                     <MIDIMappable parameterId="noise_scale">
                       <SliderWithInput
@@ -1407,15 +1417,14 @@ function MIDIToggle() {
 
 // MIDI Device Selector Component
 function MIDIDeviceSelector() {
-  const { midiEnabled, selectedDeviceId, setSelectedDeviceId, devices, error } = useMIDI();
+  const { midiEnabled, selectedDeviceId, setSelectedDeviceId, devices, error } =
+    useMIDI();
 
   if (!midiEnabled) return null;
 
   return (
     <>
-      {error && (
-        <div className="text-xs text-destructive">{error}</div>
-      )}
+      {error && <div className="text-xs text-destructive">{error}</div>}
       <div className="flex items-center gap-3">
         <LabelWithTooltip
           label="Device"
@@ -1427,17 +1436,15 @@ function MIDIDeviceSelector() {
             No devices found
           </div>
         ) : (
-          <Select
-            value={selectedDeviceId}
-            onValueChange={setSelectedDeviceId}
-          >
+          <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId}>
             <SelectTrigger className="h-8 text-sm flex-1">
               <SelectValue placeholder="Select MIDI device" />
             </SelectTrigger>
             <SelectContent>
-              {devices.map((device) => (
+              {devices.map(device => (
                 <SelectItem key={device.id} value={device.id}>
-                  {device.name} {device.manufacturer ? `(${device.manufacturer})` : ""}
+                  {device.name}{" "}
+                  {device.manufacturer ? `(${device.manufacturer})` : ""}
                 </SelectItem>
               ))}
             </SelectContent>

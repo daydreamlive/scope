@@ -61,9 +61,7 @@ export function PromptSlots({
               disabled={disabled}
               title={`Select prompt ${index + 1}`}
             >
-              {activeSlotIndex === index && (
-                <Check className="h-3.5 w-3.5" />
-              )}
+              {activeSlotIndex === index && <Check className="h-3.5 w-3.5" />}
             </Button>
             <MIDIMappable
               actionId={`switch_prompt_${index}`}
@@ -71,7 +69,7 @@ export function PromptSlots({
             >
               <Input
                 value={slot.text}
-                onChange={(e) => handleSlotTextChange(index, e.target.value)}
+                onChange={e => handleSlotTextChange(index, e.target.value)}
                 placeholder={`Prompt ${index + 1}`}
                 disabled={disabled}
                 className="w-full"

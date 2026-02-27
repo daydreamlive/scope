@@ -1,4 +1,8 @@
-export type MIDIMappingType = "continuous" | "toggle" | "trigger" | "enum_cycle";
+export type MIDIMappingType =
+  | "continuous"
+  | "toggle"
+  | "trigger"
+  | "enum_cycle";
 
 export interface MIDISource {
   midi_cc?: number;
@@ -8,7 +12,17 @@ export interface MIDISource {
 
 export interface MIDITarget {
   parameter?: string;
-  action?: "load_preset" | "switch_prompt" | "switch_prompt_0" | "switch_prompt_1" | "switch_prompt_2" | "switch_prompt_3" | "reset_cache" | "toggle_pause" | "add_denoising_step" | "remove_denoising_step";
+  action?:
+    | "load_preset"
+    | "switch_prompt"
+    | "switch_prompt_0"
+    | "switch_prompt_1"
+    | "switch_prompt_2"
+    | "switch_prompt_3"
+    | "reset_cache"
+    | "toggle_pause"
+    | "add_denoising_step"
+    | "remove_denoising_step";
   preset_index?: number;
   prompt_index?: number;
   values?: string[];

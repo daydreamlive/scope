@@ -43,9 +43,10 @@ export function MIDIMappable({
 
   const isLearning = learningParameter === paramId;
 
-  const mappedSource = parameterId || actionId
-    ? getMappedSource(parameterId || "", arrayIndex, actionId)
-    : null;
+  const mappedSource =
+    parameterId || actionId
+      ? getMappedSource(parameterId || "", arrayIndex, actionId)
+      : null;
 
   const isMapped = mappedSource !== null;
 
@@ -55,7 +56,14 @@ export function MIDIMappable({
       e.preventDefault();
       e.stopPropagation();
       if (parameterId || actionId) {
-        startLearning(parameterId || "", arrayIndex, actionId, mappingType, range, enumValues);
+        startLearning(
+          parameterId || "",
+          arrayIndex,
+          actionId,
+          mappingType,
+          range,
+          enumValues
+        );
       }
     }
   };
@@ -69,14 +77,20 @@ export function MIDIMappable({
   }, [isMapped, isLearning, learningParameter]);
 
   useEffect(() => {
-    return () => { if (isLearning) cancelLearning(); };
+    return () => {
+      if (isLearning) cancelLearning();
+    };
   }, [isLearning, cancelLearning]);
 
   if (!parameterId && !actionId) return <>{children}</>;
 
   return (
     <div
-      className={cn("relative", isMappingMode && !disabled && "cursor-pointer", className)}
+      className={cn(
+        "relative",
+        isMappingMode && !disabled && "cursor-pointer",
+        className
+      )}
       onClick={handleClick}
     >
       {isMappingMode && !disabled && (
