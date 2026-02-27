@@ -32,8 +32,6 @@ class WorkflowMetadata(BaseModel, extra="ignore"):
     """Authorship and tooling metadata."""
 
     name: str
-    description: str = ""
-    author: str = ""
     created_at: datetime
     scope_version: str
 
@@ -55,14 +53,14 @@ class WorkflowLoRA(BaseModel, extra="ignore"):
     weight: float = 1.0
     merge_mode: str = "permanent_merge"
     provenance: WorkflowLoRAProvenance | None = None
-    expected_sha256: str | None = None
+    sha256: str | None = None
 
 
 class WorkflowPipeline(BaseModel, extra="ignore"):
     """A single pipeline within the workflow."""
 
     pipeline_id: str
-    pipeline_version: str
+    pipeline_version: str | None = None
     source: WorkflowPipelineSource
     loras: list[WorkflowLoRA] = []
     params: dict[str, Any] = {}

@@ -1186,19 +1186,26 @@ async def tag_lora_provenance(
 # ---------------------------------------------------------------------------
 
 
+class ExportLoRAInput(BaseModel):
+    path: str
+    scale: float = 1.0
+    merge_mode: str | None = None
+
+
+class ExportPipelineInput(BaseModel):
+    pipeline_id: str
+    params: dict = {}
+    loras: list[ExportLoRAInput] = []
+
+
 class WorkflowExportRequest(BaseModel):
-    name: str
-    description: str = ""
-    author: str = ""
-    frontend_params: dict[str, dict] | None = None
-    """Per-pipeline frontend params, keyed by pipeline_id."""
+    name: str = "Untitled Workflow"
+    pipelines: list[ExportPipelineInput]
+    lora_merge_mode: str = "permanent_merge"
 
 
 @app.post("/api/v1/workflow/export")
-async def export_workflow(
-    request: WorkflowExportRequest,
-    pm: "PipelineManager" = Depends(get_pipeline_manager),
-):
+def export_workflow(request: WorkflowExportRequest):
     """Export the current session as a shareable .scope-workflow.json."""
     from scope.core.plugins import get_plugin_manager
     from scope.core.workflows.export import build_workflow
@@ -1209,14 +1216,12 @@ async def export_workflow(
 
     workflow = build_workflow(
         name=request.name,
-        description=request.description,
-        author=request.author,
-        pipeline_manager=pm,
+        pipelines_input=[p.model_dump() for p in request.pipelines],
         plugin_manager=plugin_manager,
         lora_dir=lora_dir,
-        frontend_params=request.frontend_params,
+        lora_merge_mode=request.lora_merge_mode,
     )
-    return workflow
+    return workflow.model_dump(mode="json", exclude_none=True)
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
