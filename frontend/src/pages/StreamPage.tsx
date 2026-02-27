@@ -1810,12 +1810,11 @@ export function StreamPage() {
           setActivePromptSlotIndex(index);
           // Update promptItems to reflect the active slot
           const activePrompt = promptSlots[index];
-          setPromptItems([{ text: activePrompt.text, weight: 100 }]);
-          // Send to backend if streaming
+          const newPromptItems = [{ text: activePrompt.text, weight: 100 }];
+          setPromptItems(newPromptItems);
+          // Update timeline and backend if streaming
           if (isStreaming) {
-            sendParameterUpdate({
-              prompts: [{ text: activePrompt.text, weight: 100 }],
-            });
+            handleLivePromptSubmit(newPromptItems);
           }
         }
       }}
@@ -1873,12 +1872,11 @@ export function StreamPage() {
               setActivePromptSlotIndex(index);
               // Update promptItems to reflect the active slot
               if (promptSlots[index]?.text) {
-                setPromptItems([{ text: promptSlots[index].text, weight: 100 }]);
-                // Send to backend if streaming
+                const newPromptItems = [{ text: promptSlots[index].text, weight: 100 }];
+                setPromptItems(newPromptItems);
+                // Update timeline and backend if streaming
                 if (isStreaming) {
-                  sendParameterUpdate({
-                    prompts: [{ text: promptSlots[index].text, weight: 100 }],
-                  });
+                  handleLivePromptSubmit(newPromptItems);
                 }
               }
             }}
