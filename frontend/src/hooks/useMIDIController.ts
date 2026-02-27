@@ -66,7 +66,22 @@ export function useMIDIController(
   onLearnCompleteRef.current = onLearnComplete;
   onSwitchPromptRef.current = onSwitchPrompt;
 
+  const updateDeviceList = useCallback((access: MIDIAccess) => {
+    const inputs: MIDIInput[] = [];
+    access.inputs.forEach((input) => inputs.push(input));
+    setDevices(inputs);
+  }, []);
+
   useEffect(() => {
+    if (!enabled) {
+      // Clear MIDI access and devices when disabled
+      setMidiAccess(null);
+      setDevices([]);
+      setSelectedInput(null);
+      setError(null);
+      return;
+    }
+
     if (typeof navigator === "undefined" || !navigator.requestMIDIAccess) {
       setError("Web MIDI API not available in this browser");
       return;
@@ -82,13 +97,7 @@ export function useMIDIController(
       .catch((err) => {
         setError(`Failed to access MIDI: ${err.message}`);
       });
-  }, []);
-
-  const updateDeviceList = useCallback((access: MIDIAccess) => {
-    const inputs: MIDIInput[] = [];
-    access.inputs.forEach((input) => inputs.push(input));
-    setDevices(inputs);
-  }, []);
+  }, [enabled, updateDeviceList]);
 
   useEffect(() => {
     if (!midiAccess || !deviceId) {

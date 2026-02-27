@@ -90,8 +90,8 @@ export function MIDIMappable({
           style={{ pointerEvents: "auto" }}
         >
           {isLearning && (
-            <div className="absolute inset-0 flex items-center justify-center bg-blue-500/20 rounded-md">
-              <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
+            <div className="absolute inset-0 flex items-center justify-center bg-blue-500/80 rounded-md">
+              <span className="text-xs font-semibold text-white">
                 Waiting for MIDI...
               </span>
             </div>

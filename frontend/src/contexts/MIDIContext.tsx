@@ -20,8 +20,9 @@ function loadMappingProfiles(): MIDIMappingProfile[] {
 }
 
 function loadMIDIEnabled(): boolean {
-  try { return localStorage.getItem(MIDI_ENABLED_KEY) === "true"; }
-  catch { return false; }
+  // Always start with MIDI disabled to prevent permission requests on page load
+  // User must explicitly enable it via the settings toggle
+  return false;
 }
 
 function loadMIDIDeviceId(): string {
@@ -52,6 +53,8 @@ interface MIDIContextValue {
   startLearning: (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]) => void;
   cancelLearning: () => void;
   getMappedSource: (parameterId: string, arrayIndex?: number, actionId?: string) => string | null;
+  deleteMapping: (index: number) => void;
+  clearAllMappings: () => void;
 }
 
 const MIDIContext = createContext<MIDIContextValue | null>(null);
@@ -231,6 +234,33 @@ export function MIDIProvider({
     [mappingProfiles, selectedProfileIndex]
   );
 
+  const deleteMapping = useCallback(
+    (index: number) => {
+      const updatedProfile = {
+        ...mappingProfile,
+        mappings: mappingProfile.mappings.filter((_, i) => i !== index),
+      };
+      const updatedProfiles = [...mappingProfiles];
+      updatedProfiles[selectedProfileIndex] = updatedProfile;
+      setMappingProfiles(updatedProfiles);
+      saveMappingProfiles(updatedProfiles);
+      toast.success("Mapping deleted");
+    },
+    [mappingProfile, mappingProfiles, selectedProfileIndex]
+  );
+
+  const clearAllMappings = useCallback(() => {
+    const updatedProfile = {
+      ...mappingProfile,
+      mappings: [],
+    };
+    const updatedProfiles = [...mappingProfiles];
+    updatedProfiles[selectedProfileIndex] = updatedProfile;
+    setMappingProfiles(updatedProfiles);
+    saveMappingProfiles(updatedProfiles);
+    toast.success("All mappings cleared");
+  }, [mappingProfile, mappingProfiles, selectedProfileIndex]);
+
   const { devices, error, startLearn, cancelLearn: cancelLearnHook } = useMIDIController(
     sendParameterUpdate,
     {
@@ -277,6 +307,8 @@ export function MIDIProvider({
     startLearning,
     cancelLearning,
     getMappedSource,
+    deleteMapping,
+    clearAllMappings,
   };
 
   return <MIDIContext.Provider value={value}>{children}</MIDIContext.Provider>;

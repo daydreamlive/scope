@@ -49,8 +49,9 @@ import type {
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
 import { useMIDI } from "../contexts/MIDIContext";
-import { Edit2, Save } from "lucide-react";
+import { Edit2, Save, List } from "lucide-react";
 import { MIDIMappable } from "./MIDIMappable";
+import { MIDIMappingsModal } from "./MIDIMappingsModal";
 import {
   parseConfigurationFields,
   COMPLEX_COMPONENTS,
@@ -1456,43 +1457,62 @@ function MIDIMappingButton() {
     setMappingMode,
     learningParameter,
   } = useMIDI();
+  const [showMappingsModal, setShowMappingsModal] = useState(false);
 
   if (!midiEnabled || !selectedDeviceId) return null;
 
   return (
-    <div className="space-y-2">
-      <Button
-        type="button"
-        variant={isMappingMode ? "default" : "outline"}
-        size="sm"
-        className="w-full h-8"
-        onClick={() => {
-          if (isMappingMode) {
-            setMappingMode(false);
-          } else {
-            setMappingMode(true);
-          }
-        }}
-      >
-        {isMappingMode ? (
-          <>
-            <Save className="h-3.5 w-3.5 mr-2" />
-            Save Mapping
-          </>
-        ) : (
-          <>
-            <Edit2 className="h-3.5 w-3.5 mr-2" />
-            Edit Mapping
-          </>
-        )}
-      </Button>
-      {isMappingMode && (
-        <div className="text-xs text-muted-foreground">
-          {learningParameter
-            ? `Learning: ${learningParameter}`
-            : "Click on any control to map it to a MIDI knob or pad"}
+    <>
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant={isMappingMode ? "default" : "outline"}
+            size="sm"
+            className="flex-1 h-8"
+            onClick={() => {
+              if (isMappingMode) {
+                setMappingMode(false);
+              } else {
+                setMappingMode(true);
+              }
+            }}
+          >
+            {isMappingMode ? (
+              <>
+                <Save className="h-3.5 w-3.5 mr-2" />
+                Save Mapping
+              </>
+            ) : (
+              <>
+                <Edit2 className="h-3.5 w-3.5 mr-2" />
+                Edit Mapping
+              </>
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => setShowMappingsModal(true)}
+            title="Show mappings"
+          >
+            <List className="h-3.5 w-3.5" />
+          </Button>
         </div>
-      )}
-    </div>
+        {isMappingMode && (
+          <div className="text-xs text-muted-foreground">
+            {learningParameter
+              ? `Learning: ${learningParameter}`
+              : "Click on any control to map it to a MIDI knob or pad"}
+          </div>
+        )}
+      </div>
+      <MIDIMappingsModal
+        open={showMappingsModal}
+        onOpenChange={setShowMappingsModal}
+      />
+    </>
   );
 }
