@@ -78,6 +78,7 @@ from .schema import (
     AssetsResponse,
     CloudConnectRequest,
     CloudStatusResponse,
+    GenerateRequest,
     HardwareInfoResponse,
     HealthResponse,
     IceCandidateRequest,
@@ -1384,6 +1385,233 @@ async def download_pipeline_models(
         raise
     except Exception as e:
         logger.error(f"Error starting model download: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/batch")
+async def batch_video(
+    request: "GenerateRequest",
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Generate video frames in batch mode with SSE progress streaming."""
+    from .batch import batch_video_stream, is_batch_active
+
+    if is_batch_active():
+        raise HTTPException(
+            status_code=409,
+            detail="A generation is already in progress. Cancel it first or wait for completion.",
+        )
+
+    status_info = await pipeline_manager.get_status_info_async()
+    if status_info["status"] != "loaded":
+        raise HTTPException(
+            status_code=400,
+            detail="Pipeline not loaded. Please load pipeline first.",
+        )
+
+    return StreamingResponse(
+        batch_video_stream(request, pipeline_manager, status_info, logger),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/v1/batch/cancel")
+async def cancel_batch():
+    """Cancel the current video generation after the current chunk completes."""
+    from .batch import cancel_batch as _cancel_batch
+
+    _cancel_batch()
+    return {"status": "cancelling"}
+
+
+@app.post("/api/v1/batch/upload")
+async def upload_video_for_batch(request: Request):
+    """Upload a video for batch generation (file-based transfer for large videos).
+
+    Accepts raw binary video data with metadata headers:
+    - X-Video-Frames: number of frames (T)
+    - X-Video-Height: frame height (H)
+    - X-Video-Width: frame width (W)
+    - X-Video-Channels: number of channels (C), typically 3 for RGB
+
+    Video data should be raw uint8 bytes in THWC order.
+
+    Returns input_path to use in the batch request.
+    """
+    from .recording import TEMP_FILE_PREFIXES, RecordingManager
+    from .schema import VideoUploadResponse
+
+    try:
+        # Get video dimensions from headers
+        num_frames = int(request.headers.get("X-Video-Frames", 0))
+        height = int(request.headers.get("X-Video-Height", 0))
+        width = int(request.headers.get("X-Video-Width", 0))
+        channels = int(request.headers.get("X-Video-Channels", 3))
+
+        if not all([num_frames, height, width]):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required headers: X-Video-Frames, X-Video-Height, X-Video-Width",
+            )
+
+        expected_size = num_frames * height * width * channels
+        shape = (num_frames, height, width, channels)
+
+        # Create temp file (reuse recording pattern)
+        file_path = RecordingManager._create_temp_file(
+            ".bin", TEMP_FILE_PREFIXES["batch_input"]
+        )
+
+        # Stream body to file
+        with open(file_path, "wb") as f:
+            # Write header: ndim (4 bytes) + shape (ndim * 4 bytes)
+            f.write(len(shape).to_bytes(4, "little"))
+            for dim in shape:
+                f.write(dim.to_bytes(4, "little"))
+
+            # Stream video data
+            bytes_written = 0
+            async for chunk in request.stream():
+                f.write(chunk)
+                bytes_written += len(chunk)
+
+        if bytes_written != expected_size:
+            Path(file_path).unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video data size mismatch: expected {expected_size}, got {bytes_written}",
+            )
+
+        logger.info(f"Uploaded video: {file_path} (shape: {shape})")
+
+        return VideoUploadResponse(
+            input_path=file_path,
+            num_frames=num_frames,
+            shape=list(shape),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading video: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/batch/upload-data")
+async def upload_data_blob(request: Request):
+    """Upload binary data blob for batch generation.
+
+    Accepts raw binary data containing VACE frames/masks, input video, or other
+    array data referenced by ChunkSpec offsets in the generate request.
+
+    Returns data_blob_path to use in the batch request.
+    """
+
+    from .recording import TEMP_FILE_PREFIXES, RecordingManager
+    from .schema import DataUploadResponse
+
+    try:
+        # Create temp file
+        file_path = RecordingManager._create_temp_file(
+            ".bin", TEMP_FILE_PREFIXES["batch_data"]
+        )
+
+        from .batch import MAX_DATA_BLOB_BYTES
+
+        # Stream body to file with size limit
+        bytes_written = 0
+        with open(file_path, "wb") as f:
+            async for chunk in request.stream():
+                bytes_written += len(chunk)
+                if bytes_written > MAX_DATA_BLOB_BYTES:
+                    f.close()
+                    Path(file_path).unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Data blob exceeds maximum size of {MAX_DATA_BLOB_BYTES} bytes",
+                    )
+                f.write(chunk)
+
+        if bytes_written == 0:
+            Path(file_path).unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="Empty request body")
+
+        logger.info(f"Uploaded data blob: {file_path} ({bytes_written} bytes)")
+
+        return DataUploadResponse(
+            data_blob_path=file_path,
+            size_bytes=bytes_written,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading data blob: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/batch/download")
+async def download_generated_video(
+    path: str = Query(..., description="Path to output video file"),
+    background_tasks: BackgroundTasks = None,
+):
+    """Download a generated video by path.
+
+    Returns raw binary video data with metadata headers:
+    - X-Video-Frames: number of frames (T)
+    - X-Video-Height: frame height (H)
+    - X-Video-Width: frame width (W)
+    - X-Video-Channels: number of channels (C)
+
+    Video data is raw uint8 bytes in THWC order.
+    """
+    import tempfile
+
+    from .recording import TEMP_FILE_PREFIXES, cleanup_temp_file
+
+    try:
+        file_path = Path(path)
+
+        # Security: only allow files in temp dir with our prefix
+        temp_dir = Path(tempfile.gettempdir())
+        if not file_path.is_relative_to(temp_dir):
+            raise HTTPException(status_code=403, detail="Invalid file path")
+        if not file_path.name.startswith(TEMP_FILE_PREFIXES["batch_output"]):
+            raise HTTPException(status_code=403, detail="Invalid file path")
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Output video not found")
+
+        # Read header to get shape
+        with open(file_path, "rb") as f:
+            ndim = int.from_bytes(f.read(4), "little")
+            shape = tuple(int.from_bytes(f.read(4), "little") for _ in range(ndim))
+
+        # Schedule cleanup after download
+        if background_tasks:
+            background_tasks.add_task(cleanup_temp_file, str(file_path))
+
+        # Return file with metadata headers
+        return FileResponse(
+            file_path,
+            media_type="application/octet-stream",
+            headers={
+                "X-Video-Frames": str(shape[0]),
+                "X-Video-Height": str(shape[1]),
+                "X-Video-Width": str(shape[2]),
+                "X-Video-Channels": str(shape[3]) if len(shape) > 3 else "3",
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading generated video: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

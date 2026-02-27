@@ -820,3 +820,234 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
+
+
+class ChunkSpec(BaseModel):
+    """Unified per-chunk specification. All fields optional — only set what changes."""
+
+    chunk: int = Field(..., ge=0, description="Chunk index (required)")
+
+    # Prompt
+    text: str | None = Field(
+        default=None,
+        description="Simple prompt text (mutually exclusive with prompts)",
+    )
+    prompts: list[PromptItem] | None = Field(
+        default=None,
+        description="Weighted prompt list for spatial blending (mutually exclusive with text)",
+    )
+    prompt_interpolation_method: Literal["linear", "slerp"] | None = Field(
+        default=None,
+        description="Spatial interpolation method override for this chunk",
+    )
+
+    # Temporal transition
+    transition_target_prompts: list[PromptItem] | None = Field(
+        default=None,
+        description="Target prompt blend to interpolate to",
+    )
+    transition_num_steps: int | None = Field(
+        default=None,
+        ge=0,
+        description="Number of generation calls to transition over (0 = instant)",
+    )
+    transition_method: Literal["linear", "slerp"] | None = Field(
+        default=None,
+        description="Method for temporal interpolation between blends",
+    )
+
+    # Keyframe images (paths)
+    first_frame_image: str | None = Field(
+        default=None, description="Path to first frame reference image"
+    )
+    last_frame_image: str | None = Field(
+        default=None, description="Path to last frame reference image"
+    )
+    vace_ref_images: list[str] | None = Field(
+        default=None, description="List of reference image paths for VACE conditioning"
+    )
+
+    # Generation parameters
+    seed: int | None = Field(default=None, description="Random seed override")
+    noise_scale: float | None = Field(default=None, description="Noise scale override")
+    kv_cache_attention_bias: float | None = Field(
+        default=None, description="KV cache attention bias override"
+    )
+    reset_cache: bool = Field(
+        default=False, description="Force cache reset at this chunk"
+    )
+    noise_controller: bool | None = Field(
+        default=None, description="Noise controller override"
+    )
+    manage_cache: bool | None = Field(
+        default=None, description="Cache management override"
+    )
+
+    # LoRA scales: {path: scale}
+    lora_scales: dict[str, float] | None = Field(
+        default=None, description="LoRA scales by path for this chunk"
+    )
+
+    # VACE conditioning (offsets into binary blob)
+    vace_context_scale: float | None = Field(
+        default=None, description="VACE context scale override"
+    )
+    vace_temporally_locked: bool = Field(
+        default=True,
+        description="When True, frames/masks are sliced temporally. When False, used as-is.",
+    )
+    vace_frames_shape: list[int] | None = Field(
+        default=None, description="Shape of VACE frames ([1, C, T, H, W] float32)"
+    )
+    vace_frames_offset: int | None = Field(
+        default=None, description="Byte offset into blob for VACE frames"
+    )
+    vace_masks_shape: list[int] | None = Field(
+        default=None, description="Shape of VACE masks ([1, 1, T, H, W] float32)"
+    )
+    vace_masks_offset: int | None = Field(
+        default=None, description="Byte offset into blob for VACE masks"
+    )
+
+    # Input video for this chunk (offset into binary blob)
+    input_video_shape: list[int] | None = Field(
+        default=None, description="Shape of per-chunk input video [T, H, W, C] uint8"
+    )
+    input_video_offset: int | None = Field(
+        default=None, description="Byte offset into blob for per-chunk input video"
+    )
+
+
+class VideoUploadResponse(BaseModel):
+    """Response after uploading a video for generation."""
+
+    input_path: str = Field(
+        ..., description="Path to uploaded video file for generate request"
+    )
+    num_frames: int = Field(..., description="Number of frames in uploaded video")
+    shape: list[int] = Field(..., description="Video shape [T, H, W, C]")
+
+
+class GenerateRequest(BaseModel):
+    """Request for batch video generation."""
+
+    pipeline_id: str = Field(..., description="Pipeline ID to use for generation")
+    prompt: str | list[PromptItem] = Field(
+        ...,
+        description="Text prompt for generation (sent on chunk 0). Can be a simple string or a list of weighted prompts for spatial blending.",
+    )
+    num_frames: int = Field(
+        default=64,
+        ge=1,
+        le=10000,
+        description="Total number of frames to generate",
+    )
+    height: int | None = Field(
+        default=None,
+        ge=64,
+        le=2048,
+        description="Output height (defaults to pipeline's native resolution)",
+    )
+    width: int | None = Field(
+        default=None,
+        ge=64,
+        le=2048,
+        description="Output width (defaults to pipeline's native resolution)",
+    )
+
+    # Per-chunk specs (replaces all scattered per-chunk lists)
+    chunk_specs: list[ChunkSpec] | None = Field(
+        default=None,
+        description="Unified per-chunk specifications. Each entry can override prompt, transition, "
+        "keyframes, generation parameters, LoRA scales, and VACE conditioning for a specific chunk.",
+    )
+
+    # Binary blob path (from /generate/upload-data)
+    data_blob_path: str | None = Field(
+        default=None,
+        description="Path to uploaded binary data blob (from /generate/upload-data). "
+        "Contains raw arrays referenced by chunk_specs offsets (VACE frames/masks, input video).",
+    )
+
+    # Global defaults (applied to chunks without per-chunk override)
+    seed: int = Field(
+        default=42,
+        description="Random seed (default for all chunks).",
+    )
+    noise_scale: float = Field(
+        default=0.7,
+        description="Noise scale for video-to-video mode (default for all chunks).",
+    )
+    manage_cache: bool = Field(
+        default=True,
+        description="Enable automatic cache management.",
+    )
+    noise_controller: bool | None = Field(
+        default=None,
+        description="Enable automatic noise scale adjustment based on motion detection.",
+    )
+    kv_cache_attention_bias: float | None = Field(
+        default=None,
+        description="Controls reliance on past frames in cache. Lower values mitigate error accumulation.",
+    )
+    prompt_interpolation_method: Literal["linear", "slerp"] = Field(
+        default="linear",
+        description="Spatial interpolation method for blending multiple prompts.",
+    )
+    vace_context_scale: float = Field(
+        default=1.0,
+        description="VACE context scale (default for all chunks).",
+    )
+    vace_use_input_video: bool | None = Field(
+        default=None,
+        description="When enabled in video-to-video mode, input video is used for VACE conditioning.",
+    )
+    denoising_steps: list[int] | None = Field(
+        default=None,
+        description="Denoising timesteps (e.g., [1000, 750, 500, 250])",
+    )
+    lora_scales: dict[str, float] | None = Field(
+        default=None,
+        description="Global LoRA scales by path (default for all chunks).",
+    )
+
+    # Video-to-video input (file-based upload)
+    input_path: str | None = Field(
+        default=None,
+        description="Path to uploaded video file (from /generate/upload).",
+    )
+
+    # Processors
+    pre_processor_id: str | None = Field(
+        default=None,
+        description="Pipeline ID for pre-processing each chunk before the main pipeline.",
+    )
+    post_processor_id: str | None = Field(
+        default=None,
+        description="Pipeline ID for post-processing each chunk after the main pipeline.",
+    )
+
+
+class DataUploadResponse(BaseModel):
+    """Response after uploading binary data blob for generate request."""
+
+    data_blob_path: str = Field(
+        ..., description="Path to uploaded data blob file for generate request"
+    )
+    size_bytes: int = Field(..., description="Size of the uploaded blob in bytes")
+
+
+class GenerateResponse(BaseModel):
+    """Response from batch video generation."""
+
+    output_path: str = Field(
+        ...,
+        description="Path to output video file for download via /generate/download.",
+    )
+    video_shape: list[int] = Field(
+        ...,
+        description="Shape of output video [T, H, W, C]",
+    )
+    num_frames: int = Field(..., description="Number of frames generated")
+    num_chunks: int = Field(..., description="Number of chunks processed")
+    chunk_size: int = Field(..., description="Frames per chunk")
