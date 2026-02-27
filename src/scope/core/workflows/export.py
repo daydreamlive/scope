@@ -1,4 +1,4 @@
-"""Build a ScopeWorkflow from the current server state."""
+"""Build a ScopeWorkflow from frontend-supplied pipeline configuration."""
 
 from __future__ import annotations
 
@@ -31,32 +31,27 @@ _SOURCE_TYPE_MAP: dict[str, str] = {
 def build_workflow(
     *,
     name: str,
-    description: str,
-    author: str,
-    pipeline_manager: Any,
+    pipelines_input: list[dict[str, Any]],
     plugin_manager: Any,
     lora_dir: Path,
-    frontend_params: dict[str, dict[str, Any]] | None = None,
+    lora_merge_mode: str = "permanent_merge",
 ) -> ScopeWorkflow:
-    """Snapshot the currently-loaded pipelines into a :class:`ScopeWorkflow`.
+    """Build a :class:`ScopeWorkflow` from frontend-supplied pipeline data.
 
     Parameters
     ----------
-    name, description, author:
-        User-supplied metadata for the workflow.
-    pipeline_manager:
-        The running ``PipelineManager`` instance.
+    name:
+        User-supplied name for the workflow.
+    pipelines_input:
+        List of dicts, each with ``pipeline_id``, ``params``, and ``loras``.
+        The frontend is the source of truth for what the user configured.
     plugin_manager:
-        The running ``PluginManager`` instance.
+        The running ``PluginManager`` instance (for source enrichment).
     lora_dir:
         Absolute path to the LoRA directory (used to relativise LoRA paths
         and to load the manifest for provenance data).
-    frontend_params:
-        Optional dict keyed by pipeline_id mapping to that pipeline's
-        frontend-supplied runtime parameters.  Each pipeline's params are
-        merged into its ``params`` dict.  The ``"loras"`` and
-        ``"lora_merge_mode"`` keys are stripped (they are promoted to the
-        top-level ``WorkflowLoRA`` list).
+    lora_merge_mode:
+        LoRA merge strategy applied to all pipelines.
     """
     from scope.core.lora.manifest import load_manifest
     from scope.core.pipelines.registry import PipelineRegistry
@@ -65,21 +60,28 @@ def build_workflow(
 
     plugins = get_plugin_list(plugin_manager)
 
-    snapshot = pipeline_manager.get_load_snapshot()
-
-    # If no pipelines are loaded, seed from frontend_params keys so
-    # the export still captures the user's selected pipeline/settings.
-    if not snapshot and frontend_params:
-        snapshot = {pid: {} for pid in frontend_params}
-
     pipelines: list[WorkflowPipeline] = []
 
-    for pipeline_id, load_params in snapshot.items():
-        load_params = dict(load_params)  # work on a copy
+    for pipeline_input in pipelines_input:
+        pipeline_id = pipeline_input["pipeline_id"]
+        params = dict(pipeline_input.get("params", {}))
+        raw_loras: list[dict[str, Any]] = pipeline_input.get("loras", [])
 
         # --- pipeline version ---
         config_class = PipelineRegistry.get_config_class(pipeline_id)
-        pipeline_version = config_class.pipeline_version if config_class else "unknown"
+        if config_class is None:
+            logger.warning("Unknown pipeline %r; cannot validate params", pipeline_id)
+        pipeline_version = config_class.pipeline_version if config_class else None
+
+        # --- filter params against pipeline config schema ---
+        if config_class is not None and hasattr(config_class, "model_fields"):
+            known_keys = set(config_class.model_fields)
+            unknown_keys = set(params) - known_keys
+            if unknown_keys:
+                logger.debug(
+                    "Dropping unknown params for %s: %s", pipeline_id, unknown_keys
+                )
+                params = {k: v for k, v in params.items() if k in known_keys}
 
         # --- source ---
         package_name = plugin_manager.get_plugin_for_pipeline(pipeline_id)
@@ -95,14 +97,7 @@ def build_workflow(
                 package_spec=info.get("package_spec") if info else None,
             )
 
-        # --- params (merge frontend_params first so LoRAs are available) ---
-        params = dict(load_params)
-        if frontend_params and pipeline_id in frontend_params:
-            params.update(frontend_params[pipeline_id])
-
-        # --- LoRAs (extract from merged params) ---
-        raw_loras: list[dict[str, Any]] = params.pop("loras", None) or []
-        lora_merge_mode: str = params.pop("lora_merge_mode", "permanent_merge")
+        # --- LoRAs ---
         workflow_loras: list[WorkflowLoRA] = []
 
         for lora in raw_loras:
@@ -119,14 +114,14 @@ def build_workflow(
             entry = manifest.entries.get(filename)
             wl = WorkflowLoRA(
                 filename=filename,
-                weight=lora.get("weight", 1.0),
-                merge_mode=lora_merge_mode,
+                weight=lora.get("scale", 1.0),
+                merge_mode=lora.get("merge_mode") or lora_merge_mode,
                 provenance=(
                     WorkflowLoRAProvenance.model_validate(entry.provenance.model_dump())
                     if entry
                     else None
                 ),
-                expected_sha256=entry.sha256 if entry else None,
+                sha256=entry.sha256 if entry else None,
             )
             workflow_loras.append(wl)
 
@@ -145,8 +140,6 @@ def build_workflow(
     return ScopeWorkflow(
         metadata=WorkflowMetadata(
             name=name,
-            description=description,
-            author=author,
             created_at=datetime.now(UTC),
             scope_version=scope_version,
         ),
