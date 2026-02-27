@@ -18,10 +18,24 @@ on:
 
 jobs:
   build-and-push:
+    name: build ${{ matrix.variant }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standard
+            suffix: ''
+            dockerfile: Dockerfile
+            description: Daydream Scope
+          - variant: cloud
+            suffix: '-cloud'
+            dockerfile: Dockerfile.cloud
+            description: Daydream Scope (Cloud)
 
     steps:
       - name: Checkout code
@@ -64,46 +78,48 @@ jobs:
         run: |
           DOCKERHUB="daydreamlive/scope"
           GHCR="ghcr.io/daydreamlive/scope"
+          SUFFIX="${{ matrix.suffix }}"
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # Manual dispatch: use provided version + latest
             VERSION="${{ github.event.inputs.version }}"
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
+            TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
+            TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
             VERSION_TAG="${{ github.ref_name }}"
             VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
+            TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
+            TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             # Main branch
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:main,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:main,$GHCR:$SHORT_SHA"
+            TAGS="$DOCKERHUB:main$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
+            TAGS="$TAGS,$GHCR:main$SUFFIX,$GHCR:$SHORT_SHA$SUFFIX"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
             # Runpod serverless branch
-            TAGS="$DOCKERHUB:runpod-serverless"
-            TAGS="$TAGS,$GHCR:runpod-serverless"
+            TAGS="$DOCKERHUB:runpod-serverless$SUFFIX"
+            TAGS="$TAGS,$GHCR:runpod-serverless$SUFFIX"
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
             # Pull request: use sanitized branch name + short SHA
             BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:$BRANCH_TAG,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:$BRANCH_TAG,$GHCR:$SHORT_SHA"
+            TAGS="$DOCKERHUB:$BRANCH_TAG$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
+            TAGS="$TAGS,$GHCR:$BRANCH_TAG$SUFFIX,$GHCR:$SHORT_SHA$SUFFIX"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      - name: Build and push Docker image
+      - name: Build and push ${{ matrix.variant }} image
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/daydreamlive/scope
-            org.opencontainers.image.description=Daydream Scope
+            org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.licenses=MIT
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}

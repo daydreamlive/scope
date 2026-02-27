@@ -22,6 +22,8 @@ interface PluginsTabProps {
   onReload: (pluginName: string) => void;
   isLoading?: boolean;
   isInstalling?: boolean;
+  disabled?: boolean;
+  hideInstall?: boolean;
 }
 
 // Check if running in Electron (file browsing supported)
@@ -62,6 +64,8 @@ export function PluginsTab({
   onReload,
   isLoading = false,
   isInstalling = false,
+  disabled = false,
+  hideInstall = false,
 }: PluginsTabProps) {
   const handleInstall = () => {
     if (installPath.trim()) {
@@ -72,35 +76,37 @@ export function PluginsTab({
   return (
     <div className="space-y-4">
       {/* Install & Updates Section */}
-      <div className="rounded-lg bg-muted/50 p-4 space-y-4">
-        {/* Install Plugin */}
-        <div className="flex items-center gap-2">
-          <Input
-            value={installPath}
-            onChange={e => onInstallPathChange(e.target.value)}
-            placeholder="PyPI package name, Git URL or local path"
-            className="flex-1"
-          />
-          {isElectron && (
+      {!hideInstall && (
+        <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+          {/* Install Plugin */}
+          <div className="flex items-center gap-2">
+            <Input
+              value={installPath}
+              onChange={e => onInstallPathChange(e.target.value)}
+              placeholder="PyPI package name, Git URL or local path"
+              className="flex-1"
+            />
+            {isElectron && (
+              <Button
+                onClick={onBrowse}
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+              >
+                <FolderOpen className="h-4 w-4" />
+              </Button>
+            )}
             <Button
-              onClick={onBrowse}
+              onClick={handleInstall}
               variant="outline"
-              size="icon"
-              className="h-8 w-8"
+              size="sm"
+              disabled={disabled || isInstalling || !installPath.trim()}
             >
-              <FolderOpen className="h-4 w-4" />
+              {isInstalling ? "Installing..." : "Install"}
             </Button>
-          )}
-          <Button
-            onClick={handleInstall}
-            variant="outline"
-            size="sm"
-            disabled={isInstalling || !installPath.trim()}
-          >
-            {isInstalling ? "Installing..." : "Install"}
-          </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Failed plugins warning */}
       {failedPlugins.length > 0 && (
@@ -177,7 +183,7 @@ export function PluginsTab({
                         }
                         variant="ghost"
                         size="icon"
-                        disabled={isInstalling}
+                        disabled={disabled || isInstalling}
                         title={
                           plugin.latest_version
                             ? `Update to ${plugin.latest_version}`
@@ -192,7 +198,7 @@ export function PluginsTab({
                         onClick={() => onReload(plugin.name)}
                         variant="ghost"
                         size="icon"
-                        disabled={isInstalling}
+                        disabled={disabled || isInstalling}
                         title="Reload plugin (restarts server)"
                       >
                         <RefreshCw className="h-4 w-4" />
@@ -202,6 +208,7 @@ export function PluginsTab({
                       onClick={() => onDelete(plugin.name)}
                       variant="ghost"
                       size="icon"
+                      disabled={disabled || isInstalling}
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-4 w-4" />

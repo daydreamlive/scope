@@ -163,7 +163,21 @@ class KafkaPublisher:
 kafka_publisher: KafkaPublisher | None = None
 
 
-ASSETS_DIR_PATH = "~/.daydream-scope/assets"
+ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
+
+# Gates the "ready" WebSocket message until the previous session's cleanup completes.
+# Initialized lazily to ensure an event loop is available.
+_cleanup_event: asyncio.Event | None = None
+
+
+def _get_cleanup_event() -> asyncio.Event:
+    global _cleanup_event
+    if _cleanup_event is None:
+        _cleanup_event = asyncio.Event()
+        _cleanup_event.set()
+    return _cleanup_event
+
+
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
     3600  # Close connection after 60 minutes regardless of activity
@@ -198,6 +212,44 @@ def cleanup_session_data():
         print(f"Warning: Session cleanup failed: {e}")
 
 
+async def cleanup_installed_plugins():
+    """Uninstall all plugins installed during the session via the Scope API."""
+    import httpx
+
+    scope_url = "http://localhost:8000"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{scope_url}/api/v1/plugins", timeout=10.0)
+            if response.status_code != 200:
+                print(
+                    f"Warning: Failed to list plugins for cleanup: {response.status_code}"
+                )
+                return
+
+            plugins = response.json().get("plugins", [])
+            if not plugins:
+                return
+
+            for plugin in plugins:
+                name = plugin.get("name")
+                if not name:
+                    continue
+                try:
+                    resp = await client.delete(
+                        f"{scope_url}/api/v1/plugins/{name}", timeout=60.0
+                    )
+                    if resp.status_code == 200:
+                        print(f"Cleanup: uninstalled plugin '{name}'")
+                    else:
+                        print(
+                            f"Warning: Failed to uninstall plugin '{name}': {resp.status_code}"
+                        )
+                except Exception as e:
+                    print(f"Warning: Failed to uninstall plugin '{name}': {e}")
+    except Exception as e:
+        print(f"Warning: Plugin cleanup failed: {e}")
+
+
 # To deploy:
 # 1. Ensure the docker image for your current git SHA has been built
 #    (check https://github.com/daydreamlive/scope/actions for the docker-build workflow)
@@ -224,7 +276,7 @@ def _get_git_sha() -> str:
             text=True,
             check=True,
         )
-        return result.stdout.strip()[:7]
+        return result.stdout.strip()[:7] + "-cloud"
     except Exception as e:
         print(f"Warning: Could not get git SHA: {e}")
         return "unknown"
@@ -296,30 +348,43 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"GPU check failed: {e}")
             raise
 
-        # Environment for scope
-        scope_env = os.environ.copy()
-        # Add any scope-specific environment variables here
-        # scope_env["PIPELINE"] = "some-default-pipeline"
-        # Use fal's /data directory for persistent storage
+        # Environment for scope - whitelist only necessary variables (security)
+        ENV_WHITELIST = [
+            # Required for process execution
+            "PATH",
+            "HOME",
+            "USER",
+            "LANG",
+            "LC_ALL",
+            # CUDA/GPU
+            "CUDA_VISIBLE_DEVICES",
+            "NVIDIA_VISIBLE_DEVICES",
+            "NVIDIA_DRIVER_CAPABILITIES",
+            "LD_LIBRARY_PATH",
+            # Daydream API
+            "DAYDREAM_API_BASE",
+            # Kafka
+            "KAFKA_BOOTSTRAP_SERVERS",
+            "KAFKA_TOPIC",
+            "KAFKA_SASL_USERNAME",
+            "KAFKA_SASL_PASSWORD",
+            # HuggingFace (for model downloads)
+            "HF_TOKEN",
+            "HF_HOME",
+            "HUGGINGFACE_HUB_CACHE",
+        ]
+        scope_env = {k: os.environ[k] for k in ENV_WHITELIST if k in os.environ}
+
+        # Add scope-specific environment variables
         scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
-        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
+        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = ASSETS_DIR_PATH + "/logs"
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
         scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
-
-        # Install kafka extra dependencies
-        print("Installing daydream-scope[kafka]...")
-        try:
-            subprocess.run(
-                ["uv", "pip", "install", "daydream-scope[kafka]"],
-                check=True,
-                env=scope_env,
-            )
-            print("✅ daydream-scope[kafka] installed")
-        except Exception as e:
-            print(f"Failed to install daydream-scope[kafka]: {e}")
+        scope_env["UV_CACHE_DIR"] = "/tmp/uv-cache"
 
         # Start the scope server in a background thread
+
         def start_server():
             print("Starting Scope server...")
             try:
@@ -327,6 +392,8 @@ class ScopeApp(fal.App, keep_alive=300):
                     [
                         "uv",
                         "run",
+                        "--extra",
+                        "kafka",
                         "daydream-scope",
                         "--no-browser",
                         "--host",
@@ -415,6 +482,9 @@ class ScopeApp(fal.App, keep_alive=300):
             return connection_id
 
         print(f"[{log_prefix()}] ✅ WebSocket connection accepted")
+
+        # Wait for any in-progress cleanup from the previous session before signaling ready
+        await _get_cleanup_event().wait()
 
         # Send ready message with connection_id
         await ws.send_json({"type": "ready", "connection_id": connection_id})
@@ -604,14 +674,52 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
-            # Block plugin installation in cloud mode (security: prevent arbitrary code execution)
             if method == "POST" and path == "/api/v1/plugins":
-                return {
-                    "type": "api_response",
-                    "request_id": request_id,
-                    "status": 403,
-                    "error": "Plugin installation is not available in cloud mode",
-                }
+                requested_package = (
+                    body.get("package", "") if isinstance(body, dict) else ""
+                )
+
+                # Check if the requested package is in the cloud plugins whitelist
+                def normalize_plugin_url(url: str) -> str:
+                    """Normalize a plugin URL for comparison."""
+                    import re
+
+                    normalized = url.lower().strip()
+                    # Remove URL protocols
+                    normalized = re.sub(r"^git\+https?://", "", normalized)
+                    normalized = re.sub(r"^https?://", "", normalized)
+                    # Remove .git suffix
+                    if normalized.endswith(".git"):
+                        normalized = normalized[:-4]
+                    # Remove trailing slashes
+                    normalized = normalized.rstrip("/")
+                    return normalized
+
+                def is_plugin_whitelisted(package: str) -> bool:
+                    raw = os.getenv("CLOUD_PLUGINS_WHITELIST", "")
+                    if not raw:
+                        return False
+
+                    normalized_package = normalize_plugin_url(package)
+
+                    for line in raw.splitlines():
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        whitelist_entry = line.split("#")[0].strip()
+                        if not whitelist_entry:
+                            continue
+                        if normalized_package == normalize_plugin_url(whitelist_entry):
+                            return True
+                    return False
+
+                if not is_plugin_whitelisted(requested_package):
+                    return {
+                        "type": "api_response",
+                        "request_id": request_id,
+                        "status": 403,
+                        "error": f"Plugin '{requested_package}' is not in the allowed list for cloud mode",
+                    }
 
             # Inject connection_id into pipeline load requests for event correlation
             if (
@@ -841,8 +949,15 @@ class ScopeApp(fal.App, keep_alive=300):
                         "session_end_time_ms": int(end_time * 1000),
                     },
                 )
-            # Clean up session data to prevent data leakage between users
-            cleanup_session_data()
+            # Clean up session data to prevent data leakage between users.
+            # Block the next connection's "ready" message until cleanup finishes.
+            event = _get_cleanup_event()
+            event.clear()
+            try:
+                await cleanup_installed_plugins()
+                cleanup_session_data()
+            finally:
+                event.set()
             print(
                 f"[{log_prefix()}] WebSocket connection closed, session data cleaned up"
             )
