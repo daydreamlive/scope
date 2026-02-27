@@ -195,7 +195,9 @@ async def _upload_to_fal_cdn(
             ) as token_response:
                 if token_response.status != 200:
                     error_text = await token_response.text()
-                    logger.error(f"upload_to_fal_cdn: Token request failed: {error_text}")
+                    logger.error(
+                        f"upload_to_fal_cdn: Token request failed: {error_text}"
+                    )
                     raise HTTPException(
                         status_code=502,
                         detail=f"CDN token request failed: {token_response.status}",
@@ -233,7 +235,9 @@ async def _upload_to_fal_cdn(
                 cdn_url = upload_result.get("access_url") or upload_result.get("url")
 
                 if not cdn_url:
-                    logger.error(f"upload_to_fal_cdn: No URL in response: {upload_result}")
+                    logger.error(
+                        f"upload_to_fal_cdn: No URL in response: {upload_result}"
+                    )
                     raise HTTPException(
                         status_code=502,
                         detail="CDN upload succeeded but no URL returned",
