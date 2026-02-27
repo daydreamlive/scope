@@ -608,6 +608,21 @@ class WebRTCManager:
             ]
         )
 
+    def get_active_frame_processor(self):
+        """Get the FrameProcessor from the first active session.
+
+        Returns:
+            FrameProcessor instance if available, None otherwise
+        """
+        for session in self.sessions.values():
+            if (
+                session.video_track
+                and hasattr(session.video_track, "frame_processor")
+                and session.video_track.frame_processor
+            ):
+                return session.video_track.frame_processor
+        return None
+
     async def add_ice_candidate(
         self,
         session_id: str,
