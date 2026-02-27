@@ -1,7 +1,7 @@
 """Base interface for all pipelines."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import BaseModel
 
@@ -28,7 +28,19 @@ class Pipeline(ABC):
     See schema.py for the BasePipelineConfig model and pipeline-specific configs.
     For multi-mode pipeline support (text/video), pipelines use helper functions
     from defaults.py (resolve_input_mode, apply_mode_defaults_to_state, etc.).
+
+    Subclasses declare transient event keys via the ``events`` class variable.
+    Event keys are consumed once per ``__call__()`` and auto-cleared from
+    ``PipelineState`` via ``_clear_events()``.  Persistent parameters (prompts,
+    noise_scale, height, …) are unaffected.
     """
+
+    # Keys that are transient events — consumed once per __call__() and
+    # auto-cleared from PipelineState afterwards.  Subclasses extend this set.
+    # NOTE: ``transition`` is intentionally excluded because transitions span
+    # multiple chunks and are managed by PipelineProcessor with state-aware
+    # clearing logic.
+    events: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
@@ -59,6 +71,20 @@ class Pipeline(ABC):
 
         return BasePipelineConfig
 
+    def _clear_events(self, state, provided_kwargs: dict) -> None:
+        """Clear event keys from state that were not provided in this call.
+
+        This prevents stale transient values (e.g. video frames, VACE
+        conditioning, lora_scales) from leaking into subsequent chunks.
+
+        Args:
+            state: The PipelineState instance to clear events from.
+            provided_kwargs: The kwargs dict passed to the current __call__().
+        """
+        for key in self.events:
+            if key not in provided_kwargs:
+                state.set(key, None)
+
     @abstractmethod
     def __call__(self, **kwargs) -> dict:
         """
@@ -76,3 +102,4 @@ class Pipeline(ABC):
             The video tensor is in THWC format and [0, 1] range.
         """
         pass
+

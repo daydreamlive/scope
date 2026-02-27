@@ -213,23 +213,22 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         for k, v in kwargs.items():
             self.state.set(k, v)
 
+        # Explicitly clear transient keys not provided in this chunk
+        transient_keys = [
+            "video",
+            "vace_ref_images",
+            "first_frame_image",
+            "last_frame_image",
+            "vace_input_frames",
+            "vace_input_masks",
+        ]
+        for key in transient_keys:
+            if key not in kwargs:
+                self.state.set(key, None)
+
         # Clear transition from state if not provided to prevent stale transitions
         if "transition" not in kwargs:
             self.state.set("transition", None)
-
-        # Clear video from state if not provided to prevent stale video data
-        if "video" not in kwargs:
-            self.state.set("video", None)
-
-        # Clear vace_ref_images from state if not provided to prevent encoding on chunks where they weren't sent
-        if "vace_ref_images" not in kwargs:
-            self.state.set("vace_ref_images", None)
-
-        # Clear extension mode frame images from state if not provided to prevent reuse on non-extension chunks
-        if "first_frame_image" not in kwargs:
-            self.state.set("first_frame_image", None)
-        if "last_frame_image" not in kwargs:
-            self.state.set("last_frame_image", None)
 
         if self.state.get("denoising_step_list") is None:
             self.state.set("denoising_step_list", DEFAULT_DENOISING_STEP_LIST)
