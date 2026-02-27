@@ -1237,7 +1237,7 @@ class WorkflowApplyRequest(BaseModel):
 
 
 @app.post("/api/v1/workflow/validate")
-async def validate_workflow(
+def validate_workflow(
     workflow: ScopeWorkflow,
 ):
     """Validate a workflow and return a dependency resolution plan.

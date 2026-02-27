@@ -135,7 +135,10 @@ async def apply_workflow(
         for lora in wp.loras:
             lora_path = lora_dir / lora.filename
             if lora_path.exists():
-                # Verify SHA256 if the workflow specifies an expected hash
+                # Verify SHA256 if the workflow specifies an expected hash.
+                # Warn-only: the LoRA may have been legitimately updated
+                # since the workflow was exported.  A strict gate would
+                # prevent loading workflows after routine model updates.
                 if lora.sha256:
                     from scope.core.lora.manifest import compute_sha256
 
