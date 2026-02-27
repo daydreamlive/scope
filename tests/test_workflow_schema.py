@@ -15,30 +15,7 @@ from scope.core.workflows.schema import (
     WorkflowPipelineSource,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_workflow(**overrides) -> ScopeWorkflow:
-    defaults = {
-        "metadata": WorkflowMetadata(
-            name="test",
-            created_at=datetime(2025, 1, 1, tzinfo=UTC),
-            scope_version="0.1.0",
-        ),
-        "pipelines": [
-            WorkflowPipeline(
-                pipeline_id="test_pipe",
-                pipeline_version="1.0.0",
-                source=WorkflowPipelineSource(type="builtin"),
-                params={"height": 480, "width": 640},
-            )
-        ],
-    }
-    defaults.update(overrides)
-    return ScopeWorkflow(**defaults)
-
+from .workflow_helpers import make_workflow as _make_workflow
 
 # ---------------------------------------------------------------------------
 # Schema tests
