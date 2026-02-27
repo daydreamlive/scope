@@ -313,6 +313,22 @@ async def lifespan(app: FastAPI):
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
 
+    # Syphon server discovery (macOS only): create the ObjC singleton and do
+    # an initial NSRunLoop pump so servers are available when the UI first loads.
+    # Subsequent refreshes pump on demand in the list_input_sources endpoint.
+    if sys.platform == "darwin":
+        try:
+            from .syphon.receiver import (
+                drain_notifications,
+                ensure_directory_initialized,
+            )
+
+            ensure_directory_initialized()
+            drain_notifications(0.1)
+            logger.info("Syphon directory initialized")
+        except Exception:
+            logger.debug("Syphon not available, skipping directory init")
+
     yield
 
     # Shutdown
@@ -1427,7 +1443,7 @@ async def list_input_source_types():
 
 
 @app.get("/api/v1/input-sources/{source_type}/sources")
-def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
+async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
     """List discovered sources for a given input source type."""
     source_class = _resolve_input_source_class(source_type)
 
@@ -1438,11 +1454,23 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
         if time.monotonic() - ts < _SOURCE_DISCOVERY_TTL:
             return {"source_type": source_type, "sources": sources}
 
-    try:
+    # Syphon discovery requires pumping NSRunLoop on the main thread.
+    # async handlers run on the event-loop (main) thread, so pump here.
+    if source_type == "syphon" and sys.platform == "darwin":
+        try:
+            from .syphon.receiver import drain_notifications
+
+            drain_notifications(0.1)
+        except Exception:
+            logger.debug("Failed to pump Syphon run loop", exc_info=True)
+
+    event_loop = asyncio.get_event_loop()
+
+    def _discover():
         instance = source_class()
         try:
             discovered = instance.list_sources(timeout_ms=timeout_ms)
-            sources = [
+            return [
                 {
                     "name": s.name,
                     "identifier": s.identifier,
@@ -1450,10 +1478,13 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
                 }
                 for s in discovered
             ]
-            _source_discovery_cache[source_type] = (time.monotonic(), sources)
-            return {"source_type": source_type, "sources": sources}
         finally:
             instance.close()
+
+    try:
+        sources = await event_loop.run_in_executor(None, _discover)
+        _source_discovery_cache[source_type] = (time.monotonic(), sources)
+        return {"source_type": source_type, "sources": sources}
     except HTTPException:
         raise
     except Exception as e:
