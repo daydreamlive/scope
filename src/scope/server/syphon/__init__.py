@@ -8,6 +8,6 @@ Resolume, and Python-based processing pipelines.
 Requires: syphon-python (pip install syphon-python)
 Platform: macOS only (requires macOS 11+)
 
-Note: The receiver module imports macOS-only dependencies (Metal, syphon)
-at module level. Import SyphonReceiver only on macOS or inside try/except.
+Note: The receiver and sender modules import macOS-only dependencies (Metal, syphon)
+at module level. Import SyphonReceiver/SyphonSender only on macOS or inside try/except.
 """

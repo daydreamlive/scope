@@ -872,9 +872,9 @@ app.on('ready', async () => {
   if (process.platform === 'darwin') {
     let iconPath: string;
     if (app.isPackaged) {
-      iconPath = path.join(process.resourcesPath, 'app', 'assets', 'icon.png');
+      iconPath = path.join(process.resourcesPath, 'app', 'assets', 'icon.icns');
     } else {
-      iconPath = path.join(__dirname, '../../assets/icon.png');
+      iconPath = path.join(__dirname, '../../assets/icon.icns');
     }
     const icon = nativeImage.createFromPath(iconPath);
     if (!icon.isEmpty()) {
