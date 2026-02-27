@@ -39,7 +39,7 @@ from scope.core.lora.manifest import (
     load_manifest,
     save_manifest,
 )
-from scope.core.workflows.schema import ScopeWorkflow
+from scope.core.workflows.schema import ScopeWorkflow, WorkflowTimeline
 
 from .cloud_proxy import (
     cloud_proxy,
@@ -1203,6 +1203,8 @@ class WorkflowExportRequest(BaseModel):
     name: str = "Untitled Workflow"
     pipelines: list[ExportPipelineInput]
     lora_merge_mode: str = "permanent_merge"
+    timeline: WorkflowTimeline | None = None
+    """Optional timeline data to include in the exported workflow."""
 
 
 @app.post("/api/v1/workflow/export")
@@ -1221,6 +1223,7 @@ def export_workflow(request: WorkflowExportRequest):
         plugin_manager=plugin_manager,
         lora_dir=lora_dir,
         lora_merge_mode=request.lora_merge_mode,
+        timeline=request.timeline,
     )
     return workflow.model_dump(mode="json", exclude_none=True)
 
@@ -1242,11 +1245,17 @@ def validate_workflow(
 ):
     """Validate a workflow and return a dependency resolution plan.
 
-    This is side-effect-free: no installs, no downloads.
+    This is side-effect-free: no installs, no downloads.  The incoming
+    workflow is migrated to the current format version before validation.
     """
     from scope.core.plugins import get_plugin_manager
+    from scope.core.workflows.migrate import migrate_workflow
     from scope.core.workflows.resolve import resolve_workflow
     from scope.server.models_config import get_models_dir
+
+    # Re-validate after migration in case migration changed fields.
+    migrated = migrate_workflow(workflow.model_dump())
+    workflow = ScopeWorkflow.model_validate(migrated)
 
     plugin_manager = get_plugin_manager()
     models_dir = get_models_dir()

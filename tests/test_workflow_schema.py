@@ -10,8 +10,6 @@ from scope.core.workflows.schema import (
     WORKFLOW_FORMAT_VERSION,
     ScopeWorkflow,
     WorkflowLoRA,
-    WorkflowMetadata,
-    WorkflowPipeline,
     WorkflowPipelineSource,
 )
 
@@ -1777,6 +1775,8 @@ class TestSerializationStability:
             "format_version",
             "metadata",
             "pipelines",
+            "timeline",
+            "min_scope_version",
         }
 
     def test_format_survives_round_trip(self):
