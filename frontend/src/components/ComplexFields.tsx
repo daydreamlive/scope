@@ -358,8 +358,12 @@ export function SchemaComplexField({
                   label={PARAMETER_METADATA.kvCacheAttentionBias.label}
                   tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
                   value={ctx.kvCacheAttentionBiasSlider.localValue}
-                  onValueChange={ctx.kvCacheAttentionBiasSlider.handleValueChange}
-                  onValueCommit={ctx.kvCacheAttentionBiasSlider.handleValueCommit}
+                  onValueChange={
+                    ctx.kvCacheAttentionBiasSlider.handleValueChange
+                  }
+                  onValueCommit={
+                    ctx.kvCacheAttentionBiasSlider.handleValueCommit
+                  }
                   min={0.01}
                   max={1.0}
                   step={0.01}

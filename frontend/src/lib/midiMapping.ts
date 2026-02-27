@@ -24,9 +24,15 @@ export function getMappableParameters(
 
     if (schemaProp.ui?.component && schemaProp.ui.component !== "image") {
       if (
-        !["vace", "lora", "resolution", "cache", "denoising_steps", "noise", "quantization"].includes(
-          schemaProp.ui.component
-        )
+        ![
+          "vace",
+          "lora",
+          "resolution",
+          "cache",
+          "denoising_steps",
+          "noise",
+          "quantization",
+        ].includes(schemaProp.ui.component)
       ) {
         continue;
       }
@@ -118,25 +124,40 @@ export function validateMapping(
     if (!mapping.target.parameter) {
       return { valid: false, error: "Missing parameter target" };
     }
-    const param = mappableParams.find((p) => p.key === mapping.target.parameter);
+    const param = mappableParams.find(p => p.key === mapping.target.parameter);
     if (!param) {
-      return { valid: false, error: `Parameter not found: ${mapping.target.parameter}` };
+      return {
+        valid: false,
+        error: `Parameter not found: ${mapping.target.parameter}`,
+      };
     }
     if (mapping.type === "continuous" && param.type !== "number") {
-      return { valid: false, error: `Parameter ${mapping.target.parameter} is not numeric` };
+      return {
+        valid: false,
+        error: `Parameter ${mapping.target.parameter} is not numeric`,
+      };
     }
     if (mapping.type === "toggle" && param.type !== "boolean") {
-      return { valid: false, error: `Parameter ${mapping.target.parameter} is not boolean` };
+      return {
+        valid: false,
+        error: `Parameter ${mapping.target.parameter} is not boolean`,
+      };
     }
   }
 
   if (mapping.type === "enum_cycle") {
     if (!mapping.target.parameter || !mapping.target.values) {
-      return { valid: false, error: "Missing parameter or values for enum_cycle" };
+      return {
+        valid: false,
+        error: "Missing parameter or values for enum_cycle",
+      };
     }
-    const param = mappableParams.find((p) => p.key === mapping.target.parameter);
+    const param = mappableParams.find(p => p.key === mapping.target.parameter);
     if (!param || param.type !== "enum") {
-      return { valid: false, error: `Parameter ${mapping.target.parameter} is not an enum` };
+      return {
+        valid: false,
+        error: `Parameter ${mapping.target.parameter} is not an enum`,
+      };
     }
   }
 

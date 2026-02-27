@@ -820,58 +820,59 @@ export function InputAndControlsPanel({
                       pipeline?.defaultSpatialInterpolationMethod
                     }
                   />
+                ) : // Show PromptSlots if promptSlots prop is provided, otherwise show PromptInput
+                promptSlots &&
+                  activePromptSlotIndex !== undefined &&
+                  onPromptSlotsChange &&
+                  onActivePromptSlotChange ? (
+                  <PromptSlots
+                    slots={promptSlots}
+                    activeSlotIndex={activePromptSlotIndex}
+                    onSlotsChange={onPromptSlotsChange}
+                    onActiveSlotChange={onActivePromptSlotChange}
+                    disabled={
+                      (_isTimelinePlaying &&
+                        !isVideoPaused &&
+                        !isAtEndOfTimeline()) ||
+                      (!selectedTimelinePrompt &&
+                        isVideoPaused &&
+                        !isAtEndOfTimeline())
+                    }
+                  />
                 ) : (
-                  // Show PromptSlots if promptSlots prop is provided, otherwise show PromptInput
-                  promptSlots && activePromptSlotIndex !== undefined && onPromptSlotsChange && onActivePromptSlotChange ? (
-                    <PromptSlots
-                      slots={promptSlots}
-                      activeSlotIndex={activePromptSlotIndex}
-                      onSlotsChange={onPromptSlotsChange}
-                      onActiveSlotChange={onActivePromptSlotChange}
-                      disabled={
-                        (_isTimelinePlaying &&
-                          !isVideoPaused &&
-                          !isAtEndOfTimeline()) ||
-                        (!selectedTimelinePrompt &&
-                          isVideoPaused &&
-                          !isAtEndOfTimeline())
-                      }
-                    />
-                  ) : (
-                    <PromptInput
-                      prompts={prompts}
-                      onPromptsChange={onPromptsChange}
-                      onPromptsSubmit={onPromptsSubmit}
-                      onTransitionSubmit={onTransitionSubmit}
-                      disabled={
-                        (_isTimelinePlaying &&
-                          !isVideoPaused &&
-                          !isAtEndOfTimeline()) ||
-                        // Disable in Append mode when paused and not at end
-                        (!selectedTimelinePrompt &&
-                          isVideoPaused &&
-                          !isAtEndOfTimeline())
-                      }
-                      interpolationMethod={interpolationMethod}
-                      onInterpolationMethodChange={onInterpolationMethodChange}
-                      temporalInterpolationMethod={temporalInterpolationMethod}
-                      onTemporalInterpolationMethodChange={
-                        onTemporalInterpolationMethodChange
-                      }
-                      isLive={isLive}
-                      onLivePromptSubmit={onLivePromptSubmit}
-                      isStreaming={isStreaming}
-                      transitionSteps={transitionSteps}
-                      onTransitionStepsChange={onTransitionStepsChange}
-                      timelinePrompts={_timelinePrompts}
-                      defaultTemporalInterpolationMethod={
-                        pipeline?.defaultTemporalInterpolationMethod
-                      }
-                      defaultSpatialInterpolationMethod={
-                        pipeline?.defaultSpatialInterpolationMethod
-                      }
-                    />
-                  )
+                  <PromptInput
+                    prompts={prompts}
+                    onPromptsChange={onPromptsChange}
+                    onPromptsSubmit={onPromptsSubmit}
+                    onTransitionSubmit={onTransitionSubmit}
+                    disabled={
+                      (_isTimelinePlaying &&
+                        !isVideoPaused &&
+                        !isAtEndOfTimeline()) ||
+                      // Disable in Append mode when paused and not at end
+                      (!selectedTimelinePrompt &&
+                        isVideoPaused &&
+                        !isAtEndOfTimeline())
+                    }
+                    interpolationMethod={interpolationMethod}
+                    onInterpolationMethodChange={onInterpolationMethodChange}
+                    temporalInterpolationMethod={temporalInterpolationMethod}
+                    onTemporalInterpolationMethodChange={
+                      onTemporalInterpolationMethodChange
+                    }
+                    isLive={isLive}
+                    onLivePromptSubmit={onLivePromptSubmit}
+                    isStreaming={isStreaming}
+                    transitionSteps={transitionSteps}
+                    onTransitionStepsChange={onTransitionStepsChange}
+                    timelinePrompts={_timelinePrompts}
+                    defaultTemporalInterpolationMethod={
+                      pipeline?.defaultTemporalInterpolationMethod
+                    }
+                    defaultSpatialInterpolationMethod={
+                      pipeline?.defaultSpatialInterpolationMethod
+                    }
+                  />
                 )}
               </div>
             );
