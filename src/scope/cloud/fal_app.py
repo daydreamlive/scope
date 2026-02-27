@@ -203,7 +203,7 @@ def _get_git_sha() -> str:
             text=True,
             check=True,
         )
-        return result.stdout.strip()
+        return result.stdout.strip()[:7]
     except Exception as e:
         print(f"Warning: Could not get git SHA: {e}")
         return "unknown"
