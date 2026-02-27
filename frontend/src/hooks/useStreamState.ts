@@ -415,6 +415,8 @@ export function useStreamState() {
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
   const ndiOutputAvailable = hardwareInfo?.ndi_available ?? false;
   const syphonOutputAvailable = hardwareInfo?.syphon_available ?? false;
+  const oscEnabled = hardwareInfo?.osc_enabled ?? false;
+  const oscPort = hardwareInfo?.osc_port ?? 9000;
 
   return {
     systemMetrics,
@@ -432,6 +434,8 @@ export function useStreamState() {
     spoutAvailable,
     ndiOutputAvailable,
     syphonOutputAvailable,
+    oscEnabled,
+    oscPort,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
