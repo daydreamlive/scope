@@ -273,17 +273,24 @@ class PipelineProcessor:
         """
         Sample frames uniformly from the queue, convert them to tensors, and remove processed frames.
 
-        This function implements uniform sampling across the entire queue to ensure
-        temporal coverage of input frames. It samples frames at evenly distributed
-        indices and removes all frames up to the last sampled frame to prevent
-        queue buildup.
+        For chunk_size=1, drains the entire queue and returns only the newest frame to
+        minimise input-to-output latency. The uniform-sampling formula reduces to
+        indices=[0] for chunk_size=1, which would always pick the oldest frame and
+        leave the rest in the queue, causing unbounded latency when the pipeline is
+        slower than the input rate.
+
+        For chunk_size>1, implements uniform sampling across the entire queue to ensure
+        temporal coverage of input frames. Samples frames at evenly distributed indices
+        and removes all frames up to the last sampled frame to prevent queue buildup.
 
         Note:
             This function must be called with a queue reference obtained while holding
             input_queue_lock. The caller is responsible for thread safety.
 
-        Example:
-            With queue_size=8 and chunk_size=4:
+        Example (chunk_size=1, queue_size=30):
+            - Drains all 30 frames, returns the last (newest) one.
+
+        Example (chunk_size=4, queue_size=8):
             - step = 8/4 = 2.0
             - indices = [0, 2, 4, 6] (uniformly distributed)
             - Returns frames at positions 0, 2, 4, 6
@@ -297,6 +304,16 @@ class PipelineProcessor:
         Returns:
             List of tensor frames, each (1, H, W, C) for downstream preprocess_chunk
         """
+
+        if chunk_size == 1:
+            # Drain the queue and keep only the newest frame to avoid latency buildup.
+            frame = None
+            while not input_queue_ref.empty():
+                try:
+                    frame = input_queue_ref.get_nowait()
+                except queue.Empty:
+                    break
+            return [frame] if frame is not None else []
 
         # Calculate uniform sampling step
         step = input_queue_ref.qsize() / chunk_size
@@ -481,6 +498,10 @@ class PipelineProcessor:
 
                 transition = call_params.get("transition")
                 if not transition_active or transition is None:
+                    # Update prompts to target_prompts so subsequent frames don't
+                    # snap back to the pre-transition prompt
+                    if transition and "target_prompts" in transition:
+                        self.parameters["prompts"] = transition["target_prompts"]
                     self.parameters.pop("transition", None)
 
             num_frames = output.shape[0]
