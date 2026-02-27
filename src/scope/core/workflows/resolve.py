@@ -37,7 +37,6 @@ class WorkflowResolutionPlan(BaseModel):
 
     can_apply: bool
     items: list[ResolutionItem]
-    settings_warnings: list[str] = []
 
 
 def is_load_param(config_class: type, field_name: str) -> bool:
@@ -52,21 +51,6 @@ def is_load_param(config_class: type, field_name: str) -> bool:
         ui = extra.get("ui", {})
         return ui.get("is_load_param", False)
     return False
-
-
-def _check_settings(
-    config_class: type,
-    params: dict[str, Any],
-) -> list[str]:
-    """Validate *params* against *config_class* fields, return warnings.
-
-    Parameters not present in the pipeline config schema are silently
-    ignored — they are frontend runtime params that get returned via
-    ``runtime_params`` on apply.
-    """
-    warnings: list[str] = []
-    # Future: validate known fields have compatible types, etc.
-    return warnings
 
 
 def resolve_workflow(
@@ -91,7 +75,6 @@ def resolve_workflow(
     from ._utils import find_plugin_info, get_plugin_list
 
     items: list[ResolutionItem] = []
-    settings_warnings: list[str] = []
     all_pipelines_ok = True
 
     plugins = get_plugin_list(plugin_manager)
@@ -247,13 +230,7 @@ def resolve_workflow(
                     )
                 )
 
-        # --- Settings validation ---
-        config_class = PipelineRegistry.get_config_class(wp.pipeline_id)
-        if config_class is not None:
-            settings_warnings.extend(_check_settings(config_class, wp.params))
-
     return WorkflowResolutionPlan(
         can_apply=all_pipelines_ok,
         items=items,
-        settings_warnings=settings_warnings,
     )
