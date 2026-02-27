@@ -83,6 +83,8 @@ from .schema import (
     IceCandidateRequest,
     IceServerConfig,
     IceServersResponse,
+    OSCConfigRequest,
+    OSCConfigResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
@@ -352,6 +354,11 @@ async def lifespan(app: FastAPI):
         await kafka_publisher.stop()
         set_kafka_publisher(None)
         logger.info("Kafka publisher shutdown complete")
+
+    # Stop OSC server if running
+    from .osc_server import stop_osc_server
+
+    stop_osc_server()
 
 
 def get_webrtc_manager() -> "WebRTCManager":
@@ -2045,6 +2052,64 @@ async def reload_plugin(
             status_code=500,
             detail=f"Failed to reload {name}. Check server logs for details.",
         ) from e
+
+
+# =============================================================================
+# OSC (Open Sound Control) Endpoints
+# =============================================================================
+
+
+@app.get("/api/v1/osc/config", response_model=OSCConfigResponse)
+async def get_osc_config(
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Get current OSC server configuration."""
+    from .osc_server import get_osc_server, _osc_available
+
+    osc_server = get_osc_server()
+    return OSCConfigResponse(
+        enabled=osc_server.is_running() if osc_server else False,
+        port=osc_server.port if osc_server else 8000,
+        available=_osc_available,
+    )
+
+
+@app.post("/api/v1/osc/config", response_model=OSCConfigResponse)
+async def set_osc_config(
+    request: OSCConfigRequest,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Configure and start/stop OSC server."""
+    from .osc_server import start_osc_server, stop_osc_server, _osc_available
+
+    if not _osc_available:
+        raise HTTPException(
+            status_code=503,
+            detail="OSC server not available. Install python-osc: pip install python-osc",
+        )
+
+    if request.enabled:
+        # Start OSC server with callback to get active FrameProcessor
+        def get_frame_processor():
+            return webrtc_manager.get_active_frame_processor()
+
+        try:
+            start_osc_server(port=request.port, get_frame_processor=get_frame_processor)
+            logger.info(f"OSC server started on port {request.port}")
+        except Exception as e:
+            logger.error(f"Failed to start OSC server: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to start OSC server: {e}"
+            ) from e
+    else:
+        stop_osc_server()
+        logger.info("OSC server stopped")
+
+    return OSCConfigResponse(
+        enabled=request.enabled,
+        port=request.port,
+        available=True,
+    )
 
 
 # =============================================================================

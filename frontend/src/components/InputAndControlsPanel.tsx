@@ -22,6 +22,7 @@ import type {
 import { getInputSourceSources, getInputSourceStreamUrl } from "../lib/api";
 import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
+import { PromptSlots } from "./PromptSlots";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 import { ImageManager } from "./ImageManager";
@@ -55,6 +56,11 @@ interface InputAndControlsPanelProps {
   onPromptsChange: (prompts: PromptItem[]) => void;
   onPromptsSubmit: (prompts: PromptItem[]) => void;
   onTransitionSubmit: (transition: PromptTransition) => void;
+  // Prompt slots (alternative to single prompt input)
+  promptSlots?: Array<{ text: string }>;
+  activePromptSlotIndex?: number;
+  onPromptSlotsChange?: (slots: Array<{ text: string }>) => void;
+  onActivePromptSlotChange?: (index: number) => void;
   interpolationMethod: "linear" | "slerp";
   onInterpolationMethodChange: (method: "linear" | "slerp") => void;
   temporalInterpolationMethod: "linear" | "slerp";
@@ -133,6 +139,10 @@ export function InputAndControlsPanel({
   onPromptsChange,
   onPromptsSubmit,
   onTransitionSubmit,
+  promptSlots,
+  activePromptSlotIndex,
+  onPromptSlotsChange,
+  onActivePromptSlotChange,
   interpolationMethod,
   onInterpolationMethodChange,
   temporalInterpolationMethod,
@@ -811,39 +821,57 @@ export function InputAndControlsPanel({
                     }
                   />
                 ) : (
-                  <PromptInput
-                    prompts={prompts}
-                    onPromptsChange={onPromptsChange}
-                    onPromptsSubmit={onPromptsSubmit}
-                    onTransitionSubmit={onTransitionSubmit}
-                    disabled={
-                      (_isTimelinePlaying &&
-                        !isVideoPaused &&
-                        !isAtEndOfTimeline()) ||
-                      // Disable in Append mode when paused and not at end
-                      (!selectedTimelinePrompt &&
-                        isVideoPaused &&
-                        !isAtEndOfTimeline())
-                    }
-                    interpolationMethod={interpolationMethod}
-                    onInterpolationMethodChange={onInterpolationMethodChange}
-                    temporalInterpolationMethod={temporalInterpolationMethod}
-                    onTemporalInterpolationMethodChange={
-                      onTemporalInterpolationMethodChange
-                    }
-                    isLive={isLive}
-                    onLivePromptSubmit={onLivePromptSubmit}
-                    isStreaming={isStreaming}
-                    transitionSteps={transitionSteps}
-                    onTransitionStepsChange={onTransitionStepsChange}
-                    timelinePrompts={_timelinePrompts}
-                    defaultTemporalInterpolationMethod={
-                      pipeline?.defaultTemporalInterpolationMethod
-                    }
-                    defaultSpatialInterpolationMethod={
-                      pipeline?.defaultSpatialInterpolationMethod
-                    }
-                  />
+                  // Show PromptSlots if promptSlots prop is provided, otherwise show PromptInput
+                  promptSlots && activePromptSlotIndex !== undefined && onPromptSlotsChange && onActivePromptSlotChange ? (
+                    <PromptSlots
+                      slots={promptSlots}
+                      activeSlotIndex={activePromptSlotIndex}
+                      onSlotsChange={onPromptSlotsChange}
+                      onActiveSlotChange={onActivePromptSlotChange}
+                      disabled={
+                        (_isTimelinePlaying &&
+                          !isVideoPaused &&
+                          !isAtEndOfTimeline()) ||
+                        (!selectedTimelinePrompt &&
+                          isVideoPaused &&
+                          !isAtEndOfTimeline())
+                      }
+                    />
+                  ) : (
+                    <PromptInput
+                      prompts={prompts}
+                      onPromptsChange={onPromptsChange}
+                      onPromptsSubmit={onPromptsSubmit}
+                      onTransitionSubmit={onTransitionSubmit}
+                      disabled={
+                        (_isTimelinePlaying &&
+                          !isVideoPaused &&
+                          !isAtEndOfTimeline()) ||
+                        // Disable in Append mode when paused and not at end
+                        (!selectedTimelinePrompt &&
+                          isVideoPaused &&
+                          !isAtEndOfTimeline())
+                      }
+                      interpolationMethod={interpolationMethod}
+                      onInterpolationMethodChange={onInterpolationMethodChange}
+                      temporalInterpolationMethod={temporalInterpolationMethod}
+                      onTemporalInterpolationMethodChange={
+                        onTemporalInterpolationMethodChange
+                      }
+                      isLive={isLive}
+                      onLivePromptSubmit={onLivePromptSubmit}
+                      isStreaming={isStreaming}
+                      transitionSteps={transitionSteps}
+                      onTransitionStepsChange={onTransitionStepsChange}
+                      timelinePrompts={_timelinePrompts}
+                      defaultTemporalInterpolationMethod={
+                        pipeline?.defaultTemporalInterpolationMethod
+                      }
+                      defaultSpatialInterpolationMethod={
+                        pipeline?.defaultSpatialInterpolationMethod
+                      }
+                    />
+                  )
                 )}
               </div>
             );

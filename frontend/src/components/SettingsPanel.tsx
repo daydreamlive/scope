@@ -48,6 +48,9 @@ import type {
   PipelineInfo,
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
+import { useMIDI } from "../contexts/MIDIContext";
+import { Edit2, Save } from "lucide-react";
+import { MIDIMappable } from "./MIDIMappable";
 import {
   parseConfigurationFields,
   COMPLEX_COMPONENTS,
@@ -870,21 +873,23 @@ export function SettingsPanel({
                           className="text-xs text-muted-foreground w-16"
                         />
                         <div className="flex-1 min-w-0">
-                          <SliderWithInput
-                            value={vaceContextScaleSlider.localValue}
-                            onValueChange={
-                              vaceContextScaleSlider.handleValueChange
-                            }
-                            onValueCommit={
-                              vaceContextScaleSlider.handleValueCommit
-                            }
-                            min={0}
-                            max={2}
-                            step={0.1}
-                            incrementAmount={0.1}
-                            valueFormatter={vaceContextScaleSlider.formatValue}
-                            inputParser={v => parseFloat(v) || 1.0}
-                          />
+                          <MIDIMappable parameterId="vace_context_scale">
+                            <SliderWithInput
+                              value={vaceContextScaleSlider.localValue}
+                              onValueChange={
+                                vaceContextScaleSlider.handleValueChange
+                              }
+                              onValueCommit={
+                                vaceContextScaleSlider.handleValueCommit
+                              }
+                              min={0}
+                              max={2}
+                              step={0.1}
+                              incrementAmount={0.1}
+                              valueFormatter={vaceContextScaleSlider.formatValue}
+                              inputParser={v => parseFloat(v) || 1.0}
+                            />
+                          </MIDIMappable>
                         </div>
                       </div>
                     </div>
@@ -1037,64 +1042,70 @@ export function SettingsPanel({
                     <div className="space-y-2 pt-2">
                       {/* KV Cache bias control - shown for pipelines that support it */}
                       {pipelines?.[pipelineId]?.supportsKvCacheBias && (
-                        <SliderWithInput
-                          label={PARAMETER_METADATA.kvCacheAttentionBias.label}
-                          tooltip={
-                            PARAMETER_METADATA.kvCacheAttentionBias.tooltip
-                          }
-                          value={kvCacheAttentionBiasSlider.localValue}
-                          onValueChange={
-                            kvCacheAttentionBiasSlider.handleValueChange
-                          }
-                          onValueCommit={
-                            kvCacheAttentionBiasSlider.handleValueCommit
-                          }
-                          min={0.01}
-                          max={1.0}
-                          step={0.01}
-                          incrementAmount={0.01}
-                          labelClassName="text-sm font-medium w-20"
-                          valueFormatter={
-                            kvCacheAttentionBiasSlider.formatValue
-                          }
-                          inputParser={v => parseFloat(v) || 1.0}
-                        />
+                        <MIDIMappable parameterId="kv_cache_attention_bias">
+                          <SliderWithInput
+                            label={PARAMETER_METADATA.kvCacheAttentionBias.label}
+                            tooltip={
+                              PARAMETER_METADATA.kvCacheAttentionBias.tooltip
+                            }
+                            value={kvCacheAttentionBiasSlider.localValue}
+                            onValueChange={
+                              kvCacheAttentionBiasSlider.handleValueChange
+                            }
+                            onValueCommit={
+                              kvCacheAttentionBiasSlider.handleValueCommit
+                            }
+                            min={0.01}
+                            max={1.0}
+                            step={0.01}
+                            incrementAmount={0.01}
+                            labelClassName="text-sm font-medium w-20"
+                            valueFormatter={
+                              kvCacheAttentionBiasSlider.formatValue
+                            }
+                            inputParser={v => parseFloat(v) || 1.0}
+                          />
+                        </MIDIMappable>
                       )}
 
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.manageCache.label}
-                          tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Toggle
-                          pressed={manageCache}
-                          onPressedChange={onManageCacheChange || (() => {})}
-                          variant="outline"
-                          size="sm"
-                          className="h-7"
-                        >
-                          {manageCache ? "ON" : "OFF"}
-                        </Toggle>
-                      </div>
+                      <MIDIMappable parameterId="manage_cache" mappingType="toggle">
+                        <div className="flex items-center justify-between gap-2">
+                          <LabelWithTooltip
+                            label={PARAMETER_METADATA.manageCache.label}
+                            tooltip={PARAMETER_METADATA.manageCache.tooltip}
+                            className="text-sm font-medium"
+                          />
+                          <Toggle
+                            pressed={manageCache}
+                            onPressedChange={onManageCacheChange || (() => {})}
+                            variant="outline"
+                            size="sm"
+                            className="h-7"
+                          >
+                            {manageCache ? "ON" : "OFF"}
+                          </Toggle>
+                        </div>
+                      </MIDIMappable>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.resetCache.label}
-                          tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Button
-                          type="button"
-                          onClick={onResetCache || (() => {})}
-                          disabled={manageCache}
-                          variant="outline"
-                          size="sm"
-                          className="h-7 w-7 p-0"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                      <MIDIMappable actionId="reset_cache">
+                        <div className="flex items-center justify-between gap-2">
+                          <LabelWithTooltip
+                            label={PARAMETER_METADATA.resetCache.label}
+                            tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                            className="text-sm font-medium"
+                          />
+                          <Button
+                            type="button"
+                            onClick={onResetCache || (() => {})}
+                            disabled={manageCache}
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </MIDIMappable>
                     </div>
                   </div>
                 </div>
@@ -1114,43 +1125,47 @@ export function SettingsPanel({
               {inputMode === "video" && supportsNoiseControls && (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <div className="space-y-2 pt-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.noiseController.label}
-                          tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Toggle
-                          pressed={noiseController}
-                          onPressedChange={
-                            onNoiseControllerChange || (() => {})
-                          }
-                          disabled={isStreaming}
-                          variant="outline"
-                          size="sm"
-                          className="h-7"
-                        >
-                          {noiseController ? "ON" : "OFF"}
-                        </Toggle>
+                      <div className="space-y-2 pt-2">
+                        <MIDIMappable parameterId="noise_controller" mappingType="toggle">
+                          <div className="flex items-center justify-between gap-2">
+                            <LabelWithTooltip
+                              label={PARAMETER_METADATA.noiseController.label}
+                              tooltip={PARAMETER_METADATA.noiseController.tooltip}
+                              className="text-sm font-medium"
+                            />
+                            <Toggle
+                              pressed={noiseController}
+                              onPressedChange={
+                                onNoiseControllerChange || (() => {})
+                              }
+                              disabled={isStreaming}
+                              variant="outline"
+                              size="sm"
+                              className="h-7"
+                            >
+                              {noiseController ? "ON" : "OFF"}
+                            </Toggle>
+                          </div>
+                        </MIDIMappable>
                       </div>
-                    </div>
 
-                    <SliderWithInput
-                      label={PARAMETER_METADATA.noiseScale.label}
-                      tooltip={PARAMETER_METADATA.noiseScale.tooltip}
-                      value={noiseScaleSlider.localValue}
-                      onValueChange={noiseScaleSlider.handleValueChange}
-                      onValueCommit={noiseScaleSlider.handleValueCommit}
-                      min={0.0}
-                      max={1.0}
-                      step={0.01}
-                      incrementAmount={0.01}
-                      disabled={noiseController}
-                      labelClassName="text-sm font-medium w-20"
-                      valueFormatter={noiseScaleSlider.formatValue}
-                      inputParser={v => parseFloat(v) || 0.0}
-                    />
+                    <MIDIMappable parameterId="noise_scale">
+                      <SliderWithInput
+                        label={PARAMETER_METADATA.noiseScale.label}
+                        tooltip={PARAMETER_METADATA.noiseScale.tooltip}
+                        value={noiseScaleSlider.localValue}
+                        onValueChange={noiseScaleSlider.handleValueChange}
+                        onValueCommit={noiseScaleSlider.handleValueCommit}
+                        min={0.0}
+                        max={1.0}
+                        step={0.01}
+                        incrementAmount={0.01}
+                        disabled={noiseController}
+                        labelClassName="text-sm font-medium w-20"
+                        valueFormatter={noiseScaleSlider.formatValue}
+                        inputParser={v => parseFloat(v) || 0.0}
+                      />
+                    </MIDIMappable>
                   </div>
                 </div>
               )}
@@ -1350,7 +1365,132 @@ export function SettingsPanel({
             )}
           </div>
         )}
+
+        {/* MIDI Input */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label="MIDI Input"
+              tooltip="Enable MIDI controller input to map knobs and pads to parameters."
+              className="text-sm font-medium"
+            />
+            <MIDIToggle />
+          </div>
+
+          <MIDIDeviceSelector />
+
+          <MIDIMappingButton />
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+// MIDI Toggle Component
+function MIDIToggle() {
+  const { midiEnabled, setMidiEnabled } = useMIDI();
+  return (
+    <Toggle
+      pressed={midiEnabled}
+      onPressedChange={setMidiEnabled}
+      variant="outline"
+      size="sm"
+      className="h-7"
+    >
+      {midiEnabled ? "ON" : "OFF"}
+    </Toggle>
+  );
+}
+
+// MIDI Device Selector Component
+function MIDIDeviceSelector() {
+  const { midiEnabled, selectedDeviceId, setSelectedDeviceId, devices, error } = useMIDI();
+
+  if (!midiEnabled) return null;
+
+  return (
+    <>
+      {error && (
+        <div className="text-xs text-destructive">{error}</div>
+      )}
+      <div className="flex items-center gap-3">
+        <LabelWithTooltip
+          label="Device"
+          tooltip="Select your MIDI controller device."
+          className="text-xs text-muted-foreground whitespace-nowrap"
+        />
+        {devices.length === 0 ? (
+          <div className="text-xs text-muted-foreground flex-1">
+            No devices found
+          </div>
+        ) : (
+          <Select
+            value={selectedDeviceId}
+            onValueChange={setSelectedDeviceId}
+          >
+            <SelectTrigger className="h-8 text-sm flex-1">
+              <SelectValue placeholder="Select MIDI device" />
+            </SelectTrigger>
+            <SelectContent>
+              {devices.map((device) => (
+                <SelectItem key={device.id} value={device.id}>
+                  {device.name} {device.manufacturer ? `(${device.manufacturer})` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+    </>
+  );
+}
+
+// MIDI Mapping Button Component
+function MIDIMappingButton() {
+  const {
+    midiEnabled,
+    selectedDeviceId,
+    isMappingMode,
+    setMappingMode,
+    learningParameter,
+  } = useMIDI();
+
+  if (!midiEnabled || !selectedDeviceId) return null;
+
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant={isMappingMode ? "default" : "outline"}
+        size="sm"
+        className="w-full h-8"
+        onClick={() => {
+          if (isMappingMode) {
+            setMappingMode(false);
+          } else {
+            setMappingMode(true);
+          }
+        }}
+      >
+        {isMappingMode ? (
+          <>
+            <Save className="h-3.5 w-3.5 mr-2" />
+            Save Mapping
+          </>
+        ) : (
+          <>
+            <Edit2 className="h-3.5 w-3.5 mr-2" />
+            Edit Mapping
+          </>
+        )}
+      </Button>
+      {isMappingMode && (
+        <div className="text-xs text-muted-foreground">
+          {learningParameter
+            ? `Learning: ${learningParameter}`
+            : "Click on any control to map it to a MIDI knob or pad"}
+        </div>
+      )}
+    </div>
   );
 }

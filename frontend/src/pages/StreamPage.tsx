@@ -8,6 +8,7 @@ import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
+import { MIDIProvider } from "../contexts/MIDIContext";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
@@ -30,6 +31,7 @@ import type {
   LoRAConfig,
   LoraMergeStrategy,
   DownloadProgress,
+  SettingsState,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { getInputSourceResolution } from "../lib/api";
@@ -137,6 +139,16 @@ export function StreamPage() {
   // Prompt state - use unified default prompts based on mode
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
+  // Prompt slots: up to 4 prompts that can be switched between
+  const [promptSlots, setPromptSlots] = useState<Array<{ text: string }>>([
+    { text: getDefaultPromptForMode(initialMode) },
+    { text: "" },
+    { text: "" },
+    { text: "" },
+  ]);
+  const [activePromptSlotIndex, setActivePromptSlotIndex] = useState(0);
+
+  // Legacy promptItems for compatibility with existing components
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
     { text: getDefaultPromptForMode(initialMode), weight: 100 },
   ]);
@@ -259,9 +271,42 @@ export function StreamPage() {
     startStream,
     stopStream,
     updateVideoTrack,
-    sendParameterUpdate,
+    sendParameterUpdate: sendParameterUpdateWebRTC,
     sessionId,
   } = useUnifiedWebRTC();
+
+  // Wrapper for sendParameterUpdate that also syncs frontend state
+  const sendParameterUpdate = useCallback(
+    (params: Record<string, unknown>) => {
+      // Send to backend via WebRTC
+      sendParameterUpdateWebRTC(params);
+
+      // Also update frontend state for known parameters
+      const settingsUpdate: Partial<SettingsState> = {};
+
+      if (params.noise_scale !== undefined) {
+        settingsUpdate.noiseScale = params.noise_scale as number;
+      }
+      if (params.noise_controller !== undefined) {
+        settingsUpdate.noiseController = params.noise_controller as boolean;
+      }
+      if (params.manage_cache !== undefined) {
+        settingsUpdate.manageCache = params.manage_cache as boolean;
+      }
+      if (params.kv_cache_attention_bias !== undefined) {
+        settingsUpdate.kvCacheAttentionBias = params.kv_cache_attention_bias as number;
+      }
+      if (params.vace_context_scale !== undefined) {
+        settingsUpdate.vaceContextScale = params.vace_context_scale as number;
+      }
+
+      // Update settings if any mappings were found
+      if (Object.keys(settingsUpdate).length > 0) {
+        updateSettings(settingsUpdate);
+      }
+    },
+    [sendParameterUpdateWebRTC, updateSettings]
+  );
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
@@ -1454,14 +1499,36 @@ export function StreamPage() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
-      {/* Header */}
-      <Header
-        onPipelinesRefresh={handlePipelinesRefresh}
-        cloudDisabled={isStreaming}
-        openSettingsTab={openSettingsTab}
-        onSettingsTabOpened={() => setOpenSettingsTab(null)}
-      />
+    <MIDIProvider
+      sendParameterUpdate={sendParameterUpdate}
+      currentDenoisingSteps={settings.denoisingSteps}
+      onDenoisingStepsChange={handleDenoisingStepsChange}
+      currentNoiseController={settings.noiseController}
+      currentManageCache={settings.manageCache}
+      onSwitchPrompt={(index) => {
+        if (index >= 0 && index < promptSlots.length) {
+          setActivePromptSlotIndex(index);
+          // Update promptItems to reflect the active slot
+          const activePrompt = promptSlots[index];
+          setPromptItems([{ text: activePrompt.text, weight: 100 }]);
+          // Send to backend if streaming
+          if (isStreaming) {
+            sendParameterUpdate({
+              prompts: [{ text: activePrompt.text, weight: 100 }],
+            });
+          }
+        }
+      }}
+    >
+      <div className="h-screen flex flex-col bg-background">
+        {/* Header */}
+        <Header
+          onPipelinesRefresh={handlePipelinesRefresh}
+          cloudDisabled={isStreaming}
+          openSettingsTab={openSettingsTab}
+          onSettingsTabOpened={() => setOpenSettingsTab(null)}
+        />
+
 
       {/* Main Content Area */}
       <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
@@ -1493,6 +1560,28 @@ export function StreamPage() {
             onPromptsChange={setPromptItems}
             onPromptsSubmit={handlePromptsSubmit}
             onTransitionSubmit={handleTransitionSubmit}
+            promptSlots={promptSlots}
+            activePromptSlotIndex={activePromptSlotIndex}
+            onPromptSlotsChange={(slots) => {
+              setPromptSlots(slots);
+              // Sync active slot to promptItems
+              if (slots[activePromptSlotIndex]?.text) {
+                setPromptItems([{ text: slots[activePromptSlotIndex].text, weight: 100 }]);
+              }
+            }}
+            onActivePromptSlotChange={(index) => {
+              setActivePromptSlotIndex(index);
+              // Update promptItems to reflect the active slot
+              if (promptSlots[index]?.text) {
+                setPromptItems([{ text: promptSlots[index].text, weight: 100 }]);
+                // Send to backend if streaming
+                if (isStreaming) {
+                  sendParameterUpdate({
+                    prompts: [{ text: promptSlots[index].text, weight: 100 }],
+                  });
+                }
+              }
+            }}
             interpolationMethod={interpolationMethod}
             onInterpolationMethodChange={setInterpolationMethod}
             temporalInterpolationMethod={temporalInterpolationMethod}
@@ -1838,6 +1927,7 @@ export function StreamPage() {
           }}
         />
       )}
-    </div>
+      </div>
+    </MIDIProvider>
   );
 }
