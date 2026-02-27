@@ -22,10 +22,11 @@ from aiortc.sdp import candidate_from_sdp
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
 from .kafka_publisher import publish_event
+from .media_clock import MediaClock
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
-from .tracks import VideoProcessingTrack
+from .tracks import AudioProcessingTrack, VideoProcessingTrack
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -48,12 +49,14 @@ vpx.MAX_BITRATE = 10000000
 
 
 class Session:
-    """WebRTC Session containing peer connection and associated video track."""
+    """WebRTC Session containing peer connection and associated tracks."""
 
     def __init__(
         self,
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
+        audio_track: "AudioProcessingTrack | None" = None,
+        media_clock: "MediaClock | None" = None,
         data_channel: RTCDataChannel | None = None,
         relay: MediaRelay | None = None,
         recording_manager: RecordingManager | None = None,
@@ -64,6 +67,8 @@ class Session:
         self.id = str(uuid.uuid4())
         self.pc = pc
         self.video_track = video_track
+        self.audio_track = audio_track
+        self.media_clock = media_clock
         self.data_channel = data_channel
         self.relay = relay
         self.recording_manager = recording_manager
@@ -226,16 +231,31 @@ class WebRTCManager:
             # Create NotificationSender for this session to send notifications to the frontend
             notification_sender = NotificationSender()
 
+            # Create shared media clock for A/V synchronization
+            media_clock = MediaClock()
+
             video_track = VideoProcessingTrack(
                 pipeline_manager,
                 initial_parameters=initial_parameters,
                 notification_callback=notification_sender.call,
+                media_clock=media_clock,
                 session_id=session.id,
                 user_id=request.user_id,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
             )
             session.video_track = video_track
+            session.media_clock = media_clock
+
+            # Eagerly initialize the FrameProcessor so the AudioProcessingTrack
+            # can share it. VideoProcessingTrack.recv() normally does this lazily,
+            # but we need the reference now to wire audio.
+            video_track.initialize_output_processing()
+
+            audio_track = AudioProcessingTrack(
+                frame_processor=video_track.frame_processor,
+            )
+            session.audio_track = audio_track
 
             # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
             relay = MediaRelay()
@@ -260,7 +280,7 @@ class WebRTCManager:
             else:
                 session.recording_manager = None
 
-            # Add the relayed track to WebRTC connection
+            # Add the relayed video track to WebRTC connection
             pc.addTrack(relayed_track)
 
             # Store relay for cleanup
@@ -365,9 +385,22 @@ class WebRTCManager:
                     except Exception as e:
                         logger.error(f"Error handling parameter update: {e}")
 
-            # Set remote description (the offer)
+            # Set remote description (the offer).
+            # The browser's offer includes a recvonly audio m-line (from
+            # addTransceiver("audio", {direction: "recvonly"})). aiortc will
+            # create an audio transceiver for it during setRemoteDescription.
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
+
+            # Attach our audio track to the transceiver that aiortc created
+            # from the browser's recvonly audio m-line. We find it by kind,
+            # assign our track to its sender, and set direction to sendonly.
+            for t in pc.getTransceivers():
+                if t.kind == "audio":
+                    t.sender.replaceTrack(audio_track)
+                    t.direction = "sendonly"
+                    logger.info(f"Audio track attached to transceiver (mid={t.mid})")
+                    break
 
             # Create answer
             answer = await pc.createAnswer()
@@ -392,7 +425,7 @@ class WebRTCManager:
             }
 
         except Exception as e:
-            logger.error(f"Error handling WebRTC offer: {e}")
+            logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
             _publish_connection_error(
                 session.id if "session" in locals() else None,
                 request.connection_id,

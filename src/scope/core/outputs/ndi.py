@@ -1,6 +1,6 @@
 """NDI output sink implementation.
 
-Sends processed video frames over the network via NDI.
+Sends processed video frames and audio over the network via NDI.
 Uses the shared NDI ctypes bindings from scope.core.ndi.
 """
 
@@ -13,6 +13,7 @@ import torch
 
 from scope.core.ndi import (
     NDI_FOURCC_RGBA,
+    NDIlib_audio_frame_v2_t,
     NDIlib_send_create_t,
     NDIlib_video_frame_v2_t,
     load_library,
@@ -160,6 +161,61 @@ class NDIOutputSink(OutputSink):
 
         except Exception as e:
             logger.error(f"Error sending NDI frame: {e}")
+            return False
+
+    def send_audio(
+        self,
+        audio: np.ndarray | torch.Tensor,
+        sample_rate: int,
+        num_channels: int,
+    ) -> bool:
+        """Send audio samples over NDI.
+
+        Args:
+            audio: Float32 audio samples. Shape (S,) for mono or (C, S) for multi-channel.
+                   Values should be in [-1.0, 1.0] range.
+            sample_rate: Audio sample rate (e.g. 48000).
+            num_channels: Number of audio channels (e.g. 1 for mono).
+
+        Returns:
+            True if send was successful.
+        """
+        if self._send_instance is None or self._lib is None:
+            return False
+
+        try:
+            if isinstance(audio, torch.Tensor):
+                if audio.is_cuda:
+                    audio = audio.cpu()
+                audio = audio.numpy()
+
+            audio = np.asarray(audio, dtype=np.float32)
+
+            # Ensure contiguous
+            if not audio.flags["C_CONTIGUOUS"]:
+                audio = np.ascontiguousarray(audio)
+
+            # NDI expects interleaved float32 samples
+            # For mono: shape (S,), for multi-channel: shape (C*S,) interleaved
+            num_samples = audio.shape[-1] if audio.ndim > 1 else len(audio)
+
+            audio_frame = NDIlib_audio_frame_v2_t()
+            audio_frame.sample_rate = sample_rate
+            audio_frame.no_channels = num_channels
+            audio_frame.no_samples = num_samples
+            audio_frame.timecode = -1  # auto
+            audio_frame.p_data = audio.ctypes.data
+            audio_frame.channel_stride_in_bytes = num_samples * 4  # float32 = 4 bytes
+            audio_frame.p_metadata = None
+            audio_frame.timestamp = -1  # auto
+
+            self._lib.NDIlib_send_send_audio_v2(
+                self._send_instance, ctypes.byref(audio_frame)
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending NDI audio: {e}")
             return False
 
     def resize(self, width: int, height: int):

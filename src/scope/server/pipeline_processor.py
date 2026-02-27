@@ -38,6 +38,7 @@ class PipelineProcessor:
         pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
+        audio_callback: callable = None,
         session_id: str | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
@@ -49,6 +50,7 @@ class PipelineProcessor:
             pipeline: Pipeline instance to process frames with
             pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
+            audio_callback: Optional callback for audio output (audio_tensor, sample_rate)
             session_id: Session ID for event tracking
             user_id: User ID for event tracking
             connection_id: Connection ID from fal.ai WebSocket for event correlation
@@ -56,6 +58,7 @@ class PipelineProcessor:
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
+        self.audio_callback = audio_callback
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -112,6 +115,11 @@ class PipelineProcessor:
         # Throttling is applied when this pipeline produces frames faster than
         # the next pipeline in the chain can consume them
         self.throttler = PipelineThrottler()
+
+        # Native frame rate reported by the pipeline (e.g. 24fps for LTX-2).
+        # When set, get_fps() returns this instead of the measured production rate,
+        # giving the video track a stable playback speed for A/V sync.
+        self.native_fps: float | None = None
 
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
@@ -382,6 +390,7 @@ class PipelineProcessor:
                         self.output_queue.get_nowait()
                     except queue.Empty:
                         break
+
             self._pending_cache_init = True
 
         requirements = None
@@ -455,7 +464,11 @@ class PipelineProcessor:
 
             # Forward extra params to downstream pipeline (dual-output pattern)
             # Preprocessors return {"video": frames, "vace_input_frames": ..., "vace_input_masks": ...}
-            extra_params = {k: v for k, v in output_dict.items() if k != "video"}
+            # Audio keys are handled separately via audio_callback, not as pipeline params.
+            _non_param_keys = {"video", "audio", "audio_sample_rate", "frame_rate"}
+            extra_params = {
+                k: v for k, v in output_dict.items() if k not in _non_param_keys
+            }
             if extra_params and self.next_processor is not None:
                 self.next_processor.update_parameters(extra_params)
 
@@ -521,6 +534,28 @@ class PipelineProcessor:
                     )
                     continue
 
+            # Pass audio to callback if available
+            audio_output = output_dict.get("audio")
+            audio_sample_rate = output_dict.get("audio_sample_rate")
+            if (
+                audio_output is not None
+                and audio_sample_rate is not None
+                and self.audio_callback
+            ):
+                try:
+                    audio_cpu = audio_output.detach().cpu()
+                    self.audio_callback(audio_cpu, audio_sample_rate)
+                except Exception as e:
+                    logger.error(f"Error in audio callback: {e}")
+
+            # Latch native frame rate for stable playback speed.
+            # Check output dict first, then pipeline config as fallback.
+            frame_rate = output_dict.get("frame_rate")
+            if frame_rate is None and hasattr(self.pipeline, "config"):
+                frame_rate = getattr(self.pipeline.config, "frame_rate", None)
+            if frame_rate is not None and float(frame_rate) > 0:
+                self.native_fps = float(frame_rate)
+
             # Apply throttling if this pipeline is producing faster than next can consume
             # Only throttle if: (1) has video input, (2) has next processor
             if video_input is not None and self.next_processor is not None:
@@ -567,11 +602,14 @@ class PipelineProcessor:
                     self.current_output_fps = estimated_fps
 
     def get_fps(self) -> float:
-        """Get the current dynamically calculated pipeline FPS.
+        """Get the playback FPS for this pipeline's output.
 
-        Returns the FPS based on how fast frames are produced into the output queue,
-        adjusted for queue fill level to prevent buildup.
+        If the pipeline reports a native frame rate (e.g. 24fps for LTX-2),
+        that value is returned for stable playback. Otherwise falls back to
+        the measured production rate.
         """
+        if self.native_fps is not None:
+            return self.native_fps
         with self.output_fps_lock:
             output_fps = self.current_output_fps
         return min(MAX_FPS, output_fps)

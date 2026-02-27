@@ -109,6 +109,12 @@ class FrameProcessor:
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
 
+        # Audio output: raw (audio_tensor, sample_rate) tuples from the pipeline.
+        # AudioProcessingTrack consumes these, handles resampling and buffering.
+        self.audio_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
+            maxsize=30
+        )
+
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
         if pipeline_ids is not None:
@@ -233,6 +239,13 @@ class FrameProcessor:
 
         # Clear pipeline processors
         self.pipeline_processors.clear()
+
+        # Clear audio queue
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
 
         # Clean up all output sinks
         for sink_type, entry in list(self.output_sinks.items()):
@@ -474,6 +487,29 @@ class FrameProcessor:
 
         return frame
 
+    def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
+        """Get the next audio chunk and its sample rate.
+
+        Returns:
+            Tuple of (audio_tensor, sample_rate) or (None, None) if no audio available.
+            audio_tensor shape: (channels, samples) - typically (2, N) for stereo
+        """
+        if not self.running:
+            return None, None
+
+        try:
+            audio, sample_rate = self.audio_queue.get_nowait()
+            return audio, sample_rate
+        except queue.Empty:
+            return None, None
+
+    def _handle_audio_output(self, audio_tensor: torch.Tensor, sample_rate: int):
+        """Callback invoked by the last PipelineProcessor when audio is produced."""
+        try:
+            self.audio_queue.put_nowait((audio_tensor, sample_rate))
+        except queue.Full:
+            logger.warning("Audio queue full, dropping audio chunk")
+
     def _on_frame_from_cloud(self, frame: "VideoFrame") -> None:
         """Callback when a processed frame is received from cloud (cloud mode)."""
         self._frames_from_cloud += 1
@@ -494,17 +530,16 @@ class FrameProcessor:
             logger.error(f"[FRAME-PROCESSOR] Error processing frame from cloud: {e}")
 
     def get_fps(self) -> float:
-        """Get the current dynamically calculated pipeline FPS.
+        """Get the playback FPS for the video track.
 
-        Returns the FPS based on how fast frames are produced into the last processor's output queue,
-        adjusted for queue fill level to prevent buildup.
+        Delegates to the last pipeline processor which returns native_fps
+        (e.g. 24fps) when the pipeline reports it, or the measured production
+        rate otherwise.
         """
         if not self.pipeline_processors:
             return DEFAULT_FPS
 
-        # Get FPS from the last processor in the chain
-        last_processor = self.pipeline_processors[-1]
-        return last_processor.get_fps()
+        return self.pipeline_processors[-1].get_fps()
 
     def _log_frame_stats(self):
         """Log frame processing statistics and emit heartbeat event."""
@@ -927,15 +962,20 @@ class FrameProcessor:
             return
 
         # Create pipeline processors (each creates its own queues)
-        for pipeline_id in self.pipeline_ids:
+        for i, pipeline_id in enumerate(self.pipeline_ids):
             # Get pipeline instance from manager
             pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+
+            # Only the last processor gets the audio callback
+            is_last = i == len(self.pipeline_ids) - 1
+            audio_cb = self._handle_audio_output if is_last else None
 
             # Create processor with its own queues
             processor = PipelineProcessor(
                 pipeline=pipeline,
                 pipeline_id=pipeline_id,
                 initial_parameters=self.parameters.copy(),
+                audio_callback=audio_cb,
                 session_id=self.session_id,
                 user_id=self.user_id,
                 connection_id=self.connection_id,
