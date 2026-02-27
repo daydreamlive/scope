@@ -97,17 +97,17 @@ export function MIDIProvider({
 
   const findOrCreateMapping = useCallback(
     (parameterId: string, arrayIndex?: number, actionId?: string, mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle", range?: { min: number; max: number }, enumValues?: string[]): { mapping: MIDIMapping; index: number } => {
-      let mappingIndex = mappingProfile.mappings.findIndex((m) => {
+      const mappingIndex = mappingProfile.mappings.findIndex((m) => {
         if (actionId) return m.target.action === actionId;
         if (arrayIndex !== undefined) return m.target.parameter === parameterId && m.target.arrayIndex === arrayIndex;
         return m.target.parameter === parameterId && m.target.arrayIndex === undefined;
       });
 
       if (mappingIndex === -1) {
-        let inferredType: MIDIMappingType = mappingType || (actionId ? "trigger" : "continuous");
+        const inferredType: MIDIMappingType = mappingType || (actionId ? "trigger" : "continuous");
 
         const baseTarget = actionId
-          ? { action: actionId as any }
+            ? { action: actionId as MIDIMapping["target"]["action"] }
           : arrayIndex !== undefined
             ? { parameter: parameterId, arrayIndex }
             : { parameter: parameterId };

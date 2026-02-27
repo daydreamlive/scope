@@ -8,15 +8,15 @@ interface MIDIAccess extends EventTarget {
   inputs: MIDIInputMap;
   outputs: MIDIOutputMap;
   sysexEnabled: boolean;
-  onstatechange: ((this: MIDIAccess, ev: MIDIConnectionEvent) => any) | null;
+  onstatechange: ((this: MIDIAccess, ev: MIDIConnectionEvent) => void) | null;
 }
 
-interface MIDIInputMap extends Map<string, MIDIInput> {}
+type MIDIInputMap = Map<string, MIDIInput>;
 
-interface MIDIOutputMap extends Map<string, MIDIOutput> {}
+type MIDIOutputMap = Map<string, MIDIOutput>;
 
 interface MIDIInput extends MIDIPort {
-  onmidimessage: ((this: MIDIInput, ev: MIDIMessageEvent) => any) | null;
+  onmidimessage: ((this: MIDIInput, ev: MIDIMessageEvent) => void) | null;
 }
 
 interface MIDIOutput extends MIDIPort {
@@ -32,7 +32,7 @@ interface MIDIPort extends EventTarget {
   version: string | null;
   state: MIDIPortDeviceState;
   connection: MIDIPortConnectionState;
-  onstatechange: ((this: MIDIPort, ev: MIDIConnectionEvent) => any) | null;
+  onstatechange: ((this: MIDIPort, ev: MIDIConnectionEvent) => void) | null;
   open(): Promise<MIDIPort>;
   close(): Promise<MIDIPort>;
 }
